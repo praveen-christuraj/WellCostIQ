@@ -1,12 +1,16 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import {
-  AssessmentOutlined, ArrowForwardRounded, BuildOutlined, HistoryOutlined, Inventory2Outlined,
+  AssessmentOutlined, ArrowForwardRounded, BuildOutlined, HistoryOutlined, Inventory2Outlined, InsightsOutlined,
   PrecisionManufacturingOutlined, QueryStatsOutlined, ScheduleRounded, ScienceOutlined,
-  StorefrontOutlined, WaterDropOutlined,
+  StorefrontOutlined, TuneRounded, WaterDropOutlined,
 } from '@mui/icons-material'
-import { Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
+import { Box, Button, Typography } from '@mui/material'
+import type { SvgIconComponent } from '@mui/icons-material'
 import { Link as RouterLink } from 'react-router-dom'
-import { ErrorMessage, PageHeading } from '../components/Common'
+import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { DatasetState } from '../components/ui/DatasetState'
+import { SectionCard } from '../components/ui/SectionCard'
+import { StatCard } from '../components/ui/StatCard'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import type { AfeOverview } from '../lib/afe'
@@ -41,33 +45,24 @@ const USAGE_REPORT_CARDS = [
 ]
 
 function ReportCard({ path, title, description, icon: Icon }: {
-  path: string; title: string; description: string; icon: ComponentType
+  path: string; title: string; description: string; icon: SvgIconComponent
 }) {
-  return <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-    <Box display="flex" alignItems="center" gap={1.2} mb={1}>
-      <Box className="table-icon"><Icon /></Box>
-      <Typography fontWeight={800} fontSize={14}>{title}</Typography>
+  return <Box sx={{
+    p: 2, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', height: '100%',
+    display: 'flex', flexDirection: 'column', transition: 'border-color 120ms, box-shadow 120ms',
+    '&:hover': { borderColor: 'text.disabled', boxShadow: 1 },
+  }}>
+    <Box display="flex" alignItems="center" gap={1.2} mb={.9}>
+      <Box className="table-icon"><Icon sx={{ fontSize: 17 }}/></Box>
+      <Typography fontWeight={700} fontSize={13.5}>{title}</Typography>
     </Box>
-    <Typography color="text.secondary" fontSize={12} sx={{ flex: 1 }}>{description}</Typography>
-    <Button component={RouterLink} to={path} variant="contained" size="small" endIcon={<ArrowForwardRounded />} sx={{ mt: 1.7, alignSelf: 'flex-start' }}>
-      Open report
-    </Button>
-  </Paper>
+    <Typography color="text.secondary" fontSize={11.8} sx={{ flex: 1, lineHeight: 1.5 }}>{description}</Typography>
+    <Button component={RouterLink} to={path} size="small" endIcon={<ArrowForwardRounded sx={{ fontSize: 15 }}/>} sx={{ mt: 1.5, alignSelf: 'flex-start', minWidth: 0 }}>Open report</Button>
+  </Box>
 }
 
 type Activity = { id: string; action: string; entity_type: string; entity_label: string; summary: string; created_at: string }
 type Dashboard = { wells: RigWellOverview | null; afes: AfeOverview | null; daily: DailyCostOverview | null; activity: Activity[] }
-
-function StatCard({ label, value, note, icon }: { label: string; value: string | number; note: string; icon: ReactNode }) {
-  return <Paper variant="outlined" sx={{ p: 1.8, borderRadius: 2, minWidth: 0 }}>
-    <Box display="flex" alignItems="center" justifyContent="space-between" gap={1}>
-      <Typography color="text.secondary" fontSize={10.5} fontWeight={800} letterSpacing={.75} textTransform="uppercase">{label}</Typography>
-      <Box className="table-icon">{icon}</Box>
-    </Box>
-    <Typography sx={{ fontSize: 23, my: .8, fontWeight: 800 }}>{value}</Typography>
-    <Typography color="text.secondary" fontSize={11.2}>{note}</Typography>
-  </Paper>
-}
 
 export default function Reports() {
   const { can } = useAuth()
@@ -109,88 +104,94 @@ export default function Reports() {
 
   return <>
     <PageHeading
-      eyebrow="REPORTS / OVERVIEW"
+      eyebrow="REPORTS / ANALYTICS"
       title="Reports"
-      subtitle="Consolidated views of well plans, AFE budgets and actual costs across your workspace."
+      subtitle="Consolidated views of well plans, AFE budgets and recorded actual cost. Every report states its population, currency basis and date bounds, and exports the same rows it shows."
       action={<>
-        {can('report-builder:read') || can('report-builder:create') ? <Button component={RouterLink} to="/reports/builder" variant="outlined" endIcon={<ArrowForwardRounded/>}>Report Builder</Button> : null}
+        {can('report-builder:read') || can('report-builder:create') ? <Button component={RouterLink} to="/reports/builder" variant="outlined" startIcon={<TuneRounded/>}>Report Builder</Button> : null}
         {can('custom-reports:read') ? <Button component={RouterLink} to="/reports/custom" variant="contained" endIcon={<ArrowForwardRounded/>}>Custom Reports</Button> : null}
       </>}
     />
     <ErrorMessage message={error}/>
-    {busy ? <Box py={6} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={28}/></Box> : <>
-      <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' }} gap={1.5} mb={2}>
-        <StatCard label="Available reports" value={reportCount} note="Consolidated workspace reports" icon={<AssessmentOutlined/>}/>
-        {canReadRig && <StatCard
-          label="Active wells"
-          value={dashboard.wells?.active_wells ?? '—'}
-          note="Wells in the workspace register"
-          icon={<QueryStatsOutlined/>}
-        />}
-        {canReadAfe && <StatCard label="Active AFEs" value={dashboard.afes?.active_afes ?? '—'} note="Current AFE records" icon={<AssessmentOutlined/>}/>}
-        {canReadDaily && <StatCard label="Wells with actuals" value={dashboard.daily?.wells_tracked ?? '—'} note="Wells with daily cost entries" icon={<HistoryOutlined/>}/>}
+    {busy ? <DatasetState kind="loading" title="Loading the report catalogue…"/> : <>
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: 'repeat(4, minmax(0,1fr))' } }}>
+        <StatCard label="Available reports" value={reportCount} hint="Consolidated workspace reports" icon={<AssessmentOutlined fontSize="small"/>}/>
+        {canReadRig && <StatCard label="Active wells" value={dashboard.wells?.active_wells ?? '—'} hint="Wells in the workspace register" icon={<QueryStatsOutlined fontSize="small"/>}/>}
+        {canReadAfe && <StatCard label="Active AFEs" value={dashboard.afes?.active_afes ?? '—'} hint="Current AFE records" icon={<AssessmentOutlined fontSize="small"/>}/>}
+        {canReadDaily && <StatCard label="Wells with actuals" value={dashboard.daily?.wells_tracked ?? '—'} hint="Wells with daily cost entries" icon={<HistoryOutlined fontSize="small"/>}/>}
       </Box>
-      {!canReadAfe && <Typography color="text.secondary" fontSize={12} sx={{ mb: 1.5 }}>AFE figures are shown only to users with AFE read access.</Typography>}
-      {!canReadDaily && <Typography color="text.secondary" fontSize={12} sx={{ mb: 1.5 }}>Actual cost figures are shown only to users with daily cost read access.</Typography>}
-      {canReadRig && (canReadAfe || canReadDaily) && <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2 }}>
-        <Box display="flex" alignItems="flex-start" gap={2}>
-          <Box className="table-icon" sx={{ width: 42, height: 42, flex: '0 0 auto' }}><AssessmentOutlined/></Box>
-          <Box minWidth={0} flex={1}>
-            <Typography variant="overline" color="text.secondary">AVAILABLE REPORT</Typography>
-            <Typography variant="h5" sx={{ mt: .25 }}>Well-wise cost comparisons</Typography>
-            <Typography color="text.secondary" fontSize={13} sx={{ mt: .75, maxWidth: 760 }}>
-              Compare configured wells, AFE totals and daily actuals. Review planned versus actual days, remaining budget and cost utilisation, then open a well's detailed cost analysis.
+      {(!canReadAfe || !canReadDaily) && <Box display="flex" gap={2} flexWrap="wrap" sx={{ mt: 1.25 }}>
+        {!canReadAfe && <Typography color="text.secondary" fontSize={11.5}>AFE figures are shown only to users with AFE read access.</Typography>}
+        {!canReadDaily && <Typography color="text.secondary" fontSize={11.5}>Actual cost figures are shown only to users with daily cost read access.</Typography>}
+      </Box>}
+
+      {(canReadRig && (canReadAfe || canReadDaily)) || canReadDaily ? <Box display="flex" alignItems="center" gap={1} sx={{ mt: 2.75, mb: 1.2 }}>
+        <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.12em', textTransform: 'uppercase', color: 'text.secondary' }}>Featured reports</Typography>
+        <Box sx={{ flex: 1, height: '1px', bgcolor: 'divider' }}/>
+      </Box> : null}
+
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' } }}>
+        {canReadRig && (canReadAfe || canReadDaily) && <SectionCard
+          title="Well-wise cost comparisons"
+          subtitle="Configured wells, AFE totals and daily actuals side by side, with planned versus actual days, remaining budget and cost utilisation."
+          meta={<Tag tone="info">AFE ↔ actual</Tag>}
+        >
+          <Box display="flex" alignItems="flex-start" gap={2}>
+            <Box className="table-icon" sx={{ width: 38, height: 38 }}><InsightsOutlined sx={{ fontSize: 19 }}/></Box>
+            <Typography fontSize={12} color="text.secondary" sx={{ lineHeight: 1.55, flex: 1, minWidth: 0 }}>
+              Choose the wells and period, then read budget against actual in a single currency. Every row opens that well&apos;s cost analysis.
             </Typography>
-            <Button
-              component={RouterLink}
-              to="/reports/well-cost-comparison"
-              variant="contained"
-              endIcon={<ArrowForwardRounded/>}
-              sx={{ mt: 2 }}
-            >Open report</Button>
           </Box>
-        </Box>
-      </Paper>}
-      {canReadDaily && <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, mt: 2 }}>
-        <Box display="flex" alignItems="flex-start" gap={2}>
-          <Box className="table-icon" sx={{ width: 42, height: 42, flex: '0 0 auto' }}><WaterDropOutlined/></Box>
-          <Box minWidth={0} flex={1}>
-            <Typography variant="overline" color="text.secondary">AVAILABLE REPORT</Typography>
-            <Typography variant="h5" sx={{ mt: .25 }}>Consumption and losses</Typography>
-            <Typography color="text.secondary" fontSize={13} sx={{ mt: .75, maxWidth: 760 }}>
-              Review cumulative surface and other mud losses as a section-by-mud-type matrix, then drill through by date, month or a required date range and export the filtered detail.
+          <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" sx={{ mt: 1.75, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography fontSize={10.5} color="text.secondary" sx={{ flex: 1, minWidth: 0 }}>Requires well, AFE and daily cost read access.</Typography>
+            <Button component={RouterLink} to="/reports/well-cost-comparison" size="small" variant="contained" endIcon={<ArrowForwardRounded sx={{ fontSize: 15 }}/>}>Open report</Button>
+          </Box>
+        </SectionCard>}
+        {canReadDaily && <SectionCard
+          title="Consumption and losses"
+          subtitle="Cumulative surface and other mud losses as a section-by-mud-type matrix, with date or month drill-through and a filtered export."
+          meta={<Tag tone="info">Mud · losses</Tag>}
+        >
+          <Box display="flex" alignItems="flex-start" gap={2}>
+            <Box className="table-icon" sx={{ width: 38, height: 38 }}><WaterDropOutlined sx={{ fontSize: 19 }}/></Box>
+            <Typography fontSize={12} color="text.secondary" sx={{ lineHeight: 1.55, flex: 1, minWidth: 0 }}>
+              Losses are read from daily sheets and grouped by section and mud type; the export contains exactly the rows on screen.
             </Typography>
-            <Button component={RouterLink} to="/reports/consumption-losses" variant="contained" endIcon={<ArrowForwardRounded/>} sx={{ mt: 2 }}>Open report</Button>
           </Box>
-        </Box>
-      </Paper>}
+          <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" sx={{ mt: 1.75, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography fontSize={10.5} color="text.secondary" sx={{ flex: 1, minWidth: 0 }}>Reads daily cost sheets for the selected date range.</Typography>
+            <Button component={RouterLink} to="/reports/consumption-losses" size="small" variant="contained" endIcon={<ArrowForwardRounded sx={{ fontSize: 15 }}/>}>Open report</Button>
+          </Box>
+        </SectionCard>}
+      </Box>
+
       {canReadDaily && <>
-        <Box display="flex" alignItems="center" gap={1} mt={2.5} mb={1.2}>
-          <AssessmentOutlined sx={{ color: 'text.secondary', fontSize: 19 }}/>
-          <Typography variant="h5">Usage, cost and NPT/UPA reports</Typography>
+        <Box display="flex" alignItems="center" gap={1} sx={{ mt: 2.75, mb: 1.2 }}>
+          <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.12em', textTransform: 'uppercase', color: 'text.secondary' }}>Usage, cost and NPT/UPA</Typography>
+          <Box sx={{ flex: 1, height: '1px', bgcolor: 'divider' }}/>
+          <Typography sx={{ fontSize: 10.5, color: 'text.secondary' }}>Daily cost sources</Typography>
         </Box>
-        <Box display="grid" gap={1.6} gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(3, minmax(0, 1fr))' }}>
-          {USAGE_REPORT_CARDS.map(card => (
-            <ReportCard key={card.path} path={card.path} title={card.title} description={card.description} icon={card.icon}/>
-          ))}
+        <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(3, minmax(0, 1fr))' } }}>
+          {USAGE_REPORT_CARDS.map(card => <ReportCard key={card.path} path={card.path} title={card.title} description={card.description} icon={card.icon}/>)}
         </Box>
       </>}
-      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 2, mt: 2 }}>
-        <Box display="flex" alignItems="center" gap={1} mb={1.2}>
-          <HistoryOutlined sx={{ color: 'text.secondary', fontSize: 18 }}/>
-          <Box>
-            <Typography fontWeight={800} fontSize={14}>Recent source activity</Typography>
-            <Typography color="text.secondary" fontSize={11.5}>Latest updates from the modules contributing to reports.</Typography>
-          </Box>
-        </Box>
-        {dashboard.activity.length === 0
-          ? <Typography color="text.secondary" fontSize={12.5}>No recent source activity is available.</Typography>
-          : dashboard.activity.map(item => <Box key={`${item.entity_type}-${item.id}`} display="grid" gridTemplateColumns={{ xs: '1fr', md: '180px 1fr 180px' }} gap={1} alignItems="center" sx={{ borderTop: '1px solid', borderColor: 'divider', py: 1 }}>
+
+      <Box sx={{ mt: 2 }}>
+        <SectionCard
+          title="Recent source activity"
+          subtitle="Latest updates from the modules whose records these reports read."
+          meta={<Tag tone="success">Audit enabled</Tag>}
+          bodyPadding={0}
+        >
+          {dashboard.activity.length === 0
+            ? <Box sx={{ px: 2.25, py: 2.5 }}><Typography color="text.secondary" fontSize={12.5}>No recent source activity is available.</Typography></Box>
+            : dashboard.activity.map(item => <Box key={`${item.entity_type}-${item.id}`} display="grid" gridTemplateColumns={{ xs: '1fr', md: '180px 1fr 200px' }} gap={1} alignItems="center" sx={{ px: 2.25, py: 1, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}>
               <Typography fontSize={11.5} color="text.secondary" className="tnum">{new Date(item.created_at).toLocaleString()}</Typography>
               <Typography fontSize={12.5}>{item.summary || `${item.action} ${item.entity_type}`}</Typography>
               <Typography fontSize={11.5} color="text.secondary" noWrap>{item.entity_label || item.entity_type.replace(/_/g, ' ')}</Typography>
             </Box>)}
-      </Paper>
+        </SectionCard>
+      </Box>
     </>}
   </>
 }

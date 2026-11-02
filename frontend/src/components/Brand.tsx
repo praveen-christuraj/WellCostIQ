@@ -1,5 +1,5 @@
 import { Box, Typography } from '@mui/material'
-import { navy, surface } from '../designSystem'
+import { brand, surface } from '../designSystem'
 import { useColorMode } from '../context/ThemeContext'
 import { APP_NAME, APP_TAGLINE } from '../lib/appInfo'
 
@@ -20,8 +20,8 @@ export default function Brand({ light = false, rigMark = false }: { light?: bool
       ? <Box component="img" src="/favicon.svg" alt="" aria-hidden="true" sx={{ width: 46, height: 46, objectFit: 'contain', flex: 'none' }}/>
       : <Box className="brand-mark"><span className="brand-line"/><span className="brand-dot"/></Box>}
     <Box>
-      <Typography sx={{ display: 'block', fontFamily: '"Inter Variable", Inter, sans-serif', fontWeight: 750, letterSpacing: '-.55px', color: tone.text, lineHeight: 1.1, fontSize: { xs: 22, sm: 26, md: 28 } }}>
-        WellCost<span style={{ color: dark ? navy[400] : navy[600] }}>IQ</span>
+      <Typography sx={{ display: 'block', fontFamily: '"Inter Variable", Inter, sans-serif', fontWeight: 700, letterSpacing: '-.6px', color: tone.text, lineHeight: 1.1, fontSize: { xs: 21, sm: 23, md: 24 } }}>
+        WellCost<span style={{ color: dark ? brand[300] : brand[600] }}>IQ</span>
       </Typography>
       <Typography
         component="span"

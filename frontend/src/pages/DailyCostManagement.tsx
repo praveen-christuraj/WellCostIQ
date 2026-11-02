@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AddRounded, DeleteForeverOutlined, DeleteOutlineRounded, EventNoteOutlined,
-  FactCheckOutlined, FilterAltOffOutlined, InsightsOutlined, PlaylistAddCheckRounded,
+  FactCheckOutlined, FilterAltOffOutlined, FilterListRounded, InsightsOutlined, PlaceOutlined, PlaylistAddCheckRounded,
   RestoreRounded, RefreshRounded, PrintOutlined, WaterDropOutlined,
 } from '@mui/icons-material'
 import {
-  Alert, Box, Button, CircularProgress, Divider, MenuItem, Paper, Tab, Tabs, TextField, Typography,
+  Alert, Box, Button, CircularProgress, MenuItem, Paper, Tab, Tabs, TextField, Typography,
 } from '@mui/material'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
@@ -397,10 +397,10 @@ export default function DailyCostManagement() {
   return <>
     <PageHeading
       eyebrow={deletedView ? 'DAILY COST MANAGEMENT / DELETED ENTRIES' : 'DAILY COST MANAGEMENT / WELL DAY ACTUALS'}
-      title={deletedView ? 'Deleted daily sheets' : 'Daily Cost Management'}
+      title={deletedView ? 'Deleted daily sheets' : 'Daily cost'}
       subtitle={deletedView
-        ? 'Restore a recoverable sheet or permanently remove an obsolete record.'
-        : 'Capture well-day service, consumable and tangible actuals against locked AFE budgets and rate revisions.'}
+        ? 'Restore a recoverable sheet or permanently remove an obsolete record. Deleting a sheet never deletes the locked AFE baseline or rate revision it was costed against.'
+        : 'One sheet per well, AFE and cost date: the day’s services, consumables, tangibles and other expenses, costed against the AFE budget and rate revision locked when the sheet was started.'}
       action={<Box display="flex" gap={1} flexWrap="wrap">
         {!deletedView && can('daily-cost:read') && <Button
           variant="outlined" startIcon={<InsightsOutlined/>}
@@ -416,37 +416,34 @@ export default function DailyCostManagement() {
       </Box>}
     />
 
-    {!deletedView && <Paper variant="outlined" data-testid="daily-cost-working-scope" sx={{ p: 1.6, borderRadius: 2, mb: 1.8 }}>
-      <Box display="flex" gap={1.4} flexWrap="wrap" alignItems="flex-end">
-        <Box flex="1 1 260px" minWidth={230}>
-          <Typography fontWeight={800} fontSize={13}>Working scope · rig and well</Typography>
-          <Typography color="text.secondary" fontSize={11} mt={.25}>
-            The rig and well you are costing. New daily sheets and the shortcuts below load with this
-            scope; change it here or on the register you open.
-          </Typography>
+    {!deletedView && <Paper variant="outlined" data-testid="daily-cost-working-scope" sx={{ borderRadius: 2.5, mb: 2, overflow: 'hidden' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.4, flexWrap: 'wrap', px: 2, py: 1.25 }}>
+        <Box display="flex" alignItems="center" gap={.9} sx={{ mr: .5 }}>
+          <PlaceOutlined sx={{ fontSize: 17, color: 'text.secondary' }}/>
+          <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.11em', textTransform: 'uppercase', color: 'text.secondary' }}>Working scope</Typography>
         </Box>
         <TextField select size="small" label="Rig" value={scopeRigId} onChange={event => chooseScopeRig(event.target.value)}
-          helperText="Current rig" sx={{ minWidth: 200 }} disabled={!scopeRigs.length}>
+          sx={{ minWidth: 230 }} disabled={!scopeRigs.length}>
           {!scopeRigs.length && <MenuItem value="">No rig</MenuItem>}
           {scopeRigs.map(rig => <MenuItem key={rig.id} value={rig.id}>{rig.display_name}</MenuItem>)}
         </TextField>
         <TextField select size="small" label="Well" value={scopeWellId} onChange={event => chooseScopeWell(event.target.value)}
-          helperText="Current well" sx={{ minWidth: 250 }} disabled={!scopeWellOptions.length}>
+          sx={{ minWidth: 270 }} disabled={!scopeWellOptions.length}>
           {!scopeWellOptions.length && <MenuItem value="">No well</MenuItem>}
           {scopeWellOptions.map(well => <MenuItem key={well.id} value={well.id}>{well.well_code} · {well.well_name}</MenuItem>)}
         </TextField>
+        <Box display="flex" gap={.5} flexWrap="wrap" alignItems="center" ml="auto">
+          <Typography sx={{ fontSize: 10, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'text.secondary', mr: .75 }}>Detail registers</Typography>
+          {SCOPED_REGISTERS.map(register => <Button
+            key={register.path} size="small" color="inherit"
+            component={RouterLink} to={scopeLink(register.path, scopeLinks)}
+            startIcon={<register.icon sx={{ fontSize: 17 }}/>}
+          >{register.label}</Button>)}
+        </Box>
       </Box>
-      <Divider sx={{ my: 1.3 }} />
-      <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
-        <Typography fontSize={10.5} fontWeight={800} letterSpacing={.7} color="text.secondary" mr={.5}>SHORTCUTS</Typography>
-        {SCOPED_REGISTERS.map(register => <Button
-          key={register.path} size="small" variant="outlined"
-          component={RouterLink} to={scopeLink(register.path, scopeLinks)}
-          startIcon={<register.icon sx={{ fontSize: 18 }}/>}
-        >{register.label}</Button>)}
+      <Box sx={{ px: 2, py: .85, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.default', display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Typography fontSize={11} color="text.secondary">
-          Open on {scopeRig?.display_name ?? 'the selected rig'} · {scopeWell ? `${scopeWell.well_code} · ${scopeWell.well_name}` : 'the selected well'}.
-          Change the rig or well there at any time.
+          New sheets and the detail registers open on {scopeRig?.display_name ?? 'the selected rig'} · {scopeWell ? `${scopeWell.well_code} · ${scopeWell.well_name}` : 'the selected well'}. Change either here or on the register you open.
         </Typography>
       </Box>
     </Paper>}
@@ -465,17 +462,30 @@ export default function DailyCostManagement() {
       <ErrorMessage message={loadError} />
       {notice && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNotice('')}>{notice}</Alert>}
 
-      {!deletedView && <Paper variant="outlined" sx={{ p: 1.6, borderRadius: 2, mb: 1.8 }}>
-        <Box display="grid" gap={1.3} sx={{ gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1.3fr 1.3fr .8fr .8fr .8fr auto' } }} alignItems="center">
-          <TextField select label="Filter by well" value={filterWell} onChange={event => {
+      {!deletedView && <Paper variant="outlined" sx={{ borderRadius: 2.5, mb: 2, overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', px: 2, py: .95, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+          <FilterListRounded sx={{ fontSize: 16, color: 'text.secondary' }}/>
+          <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.11em', textTransform: 'uppercase', color: 'text.secondary' }}>Register filters</Typography>
+          <Typography fontSize={11} color="text.secondary">
+            Filters run on the server for this register only; searches and column filters inside the table narrow the rows already loaded.
+          </Typography>
+          <Box ml="auto" display="flex" alignItems="center" gap={1}>
+            <Typography fontSize={11} color="text.secondary" className="tnum">{tabRows.length} sheet{tabRows.length === 1 ? '' : 's'}</Typography>
+            <Button size="small" color="inherit" startIcon={<FilterAltOffOutlined sx={{ fontSize: 16 }}/>} onClick={() => {
+              setFilterWell(''); setFilterAfe(''); setFilterStatus(''); setDateFrom(''); setDateTo('')
+            }} disabled={!filtersActive}>Clear</Button>
+          </Box>
+        </Box>
+        <Box sx={{ p: 1.6, display: 'grid', gap: 1.3, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1.25fr 1.35fr .75fr .85fr .85fr' } }}>
+          <TextField select label="Well" value={filterWell} onChange={event => {
             const next = event.target.value
             setFilterWell(next)
             setFilterAfe('')
-          }} helperText="Narrows this register list only">
+          }}>
             <MenuItem value="">All wells</MenuItem>
             {(reference?.wells ?? []).map(well => <MenuItem key={well.id} value={well.id}>{well.well_code} · {well.well_name}</MenuItem>)}
           </TextField>
-          <TextField select label="Filter by AFE" value={filterAfe} onChange={event => setFilterAfe(event.target.value)} disabled={!reference?.afes.length}>
+          <TextField select label="AFE" value={filterAfe} onChange={event => setFilterAfe(event.target.value)} disabled={!reference?.afes.length}>
             <MenuItem value="">All AFEs</MenuItem>
             {(reference?.afes ?? []).filter(afe => !filterWell || afe.well_id === filterWell)
               .map(afe => <MenuItem key={afe.id} value={afe.id}>{afe.display_name}</MenuItem>)}
@@ -486,15 +496,10 @@ export default function DailyCostManagement() {
             <MenuItem value="submitted">Submitted</MenuItem>
           </TextField>
           <TextField type="date" label="Cost date from" value={dateFrom} onChange={event => setDateFrom(event.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField type="date" label="to" value={dateTo} onChange={event => setDateTo(event.target.value)} InputLabelProps={{ shrink: true }} />
-          <Button variant="outlined" startIcon={<FilterAltOffOutlined/>} onClick={() => {
-            setFilterWell(''); setFilterAfe(''); setFilterStatus(''); setDateFrom(''); setDateTo('')
-          }} disabled={!filtersActive}>Clear</Button>
+          <TextField type="date" label="Cost date to" value={dateTo} onChange={event => setDateTo(event.target.value)} InputLabelProps={{ shrink: true }}
+            error={Boolean(dateFrom && dateTo && dateFrom > dateTo)}
+            helperText={dateFrom && dateTo && dateFrom > dateTo ? 'Ends before it starts' : undefined}/>
         </Box>
-        {filtersActive && <Alert severity="info" sx={{ mt: 1.3, py: .4 }}>
-          Showing {tabRows.length} daily sheet{tabRows.length === 1 ? '' : 's'} for the selected filters.
-          {dateFrom && dateTo && dateFrom > dateTo ? ' The start date is after the end date, so no sheet can match.' : ''}
-        </Alert>}
       </Paper>}
 
       {loading && !rows.length ? <Box py={6} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={26} /></Box> : <>

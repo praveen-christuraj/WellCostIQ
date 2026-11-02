@@ -1,13 +1,14 @@
 /**
  * Design tokens — the single source of truth for the WellCostIQ interface.
  *
- * Aesthetic direction: an "enterprise navy instrument panel". Dense, quiet and
- * data-first: navy on white, one accent, no decorative motion, generous use of
- * hairline rules instead of heavy shadows, and a type scale that separates
- * heading / body / meta text by weight and size rather than by colour alone.
+ * Aesthetic direction: a "deep petrol instrument panel". Dense, calm and
+ * data-first: an ink navigation rail, white working surfaces, petrol-teal as the
+ * single action colour and brass reserved for measured emphasis in charts and
+ * eyebrows. Hierarchy is carried by weight, size and hairlines rather than by
+ * colour, decor or motion.
  *
  * The CSS custom properties in `src/styles.css` (`--wcp-*`) mirror these values so
- * plain CSS (nav, cards, print, scrollbars) stays in sync with the MUI theme.
+ * plain CSS (rail, cards, print, scrollbars) stays in sync with the MUI theme.
  * `frontend/src/theme.ts` composes the MUI theme from here; `DataTable` feeds the
  * AG Grid theme from here. Do not hardcode colours in pages — read a token.
  *
@@ -16,18 +17,38 @@
 
 export type Mode = 'light' | 'dark'
 
-/** Navy ramp — the brand scale. `700` is the primary action colour. */
-export const navy = {
-  50: '#F2F6FC',
-  100: '#E3EBF7',
-  200: '#C9D8ED',
-  300: '#93B0DD',
-  400: '#6F99D5',
-  500: '#2F63B3',
-  600: '#255091',
-  700: '#1B3F7A',
-  800: '#12315F',
-  900: '#0B2447',
+/**
+ * Brand ramp — deep petrol. `700` is the primary action colour in light mode,
+ * `300` is the accent in dark mode. The ramp is intentionally blue-green: it
+ * reads as technical (drilling fluids, instrumentation) without competing with
+ * the green success colour or the amber warning colour.
+ */
+export const brand = {
+  50: '#EEF7F8',
+  100: '#D6EBED',
+  200: '#AAD5DA',
+  300: '#79B9C1',
+  400: '#4797A2',
+  500: '#2B7B87',
+  600: '#1E636E',
+  700: '#15515B',
+  800: '#103F47',
+  900: '#0B3037',
+} as const
+
+/** Backwards-compatible alias: older files import the ramp as `navy`. */
+export const navy = brand
+
+/** Brass — the one secondary accent, used for eyebrows and chart series only. */
+export const brass = {
+  50: '#FBF5E9',
+  100: '#F3E7CE',
+  200: '#E6CFA0',
+  300: '#D6B271',
+  400: '#C29344',
+  500: '#A9782B',
+  600: '#8A5F1F',
+  700: '#6B4917',
 } as const
 
 export const fonts = {
@@ -48,10 +69,13 @@ export const radius = { xs: 4, sm: 6, md: 8, lg: 10, xl: 14, pill: 999 } as cons
  * Control heights. The app is zoomed to 87.5%, so these are deliberate.
  * Grid rows are compact (42) so a register shows more records per screen: the
  * tallest cell content is a two-line name/email stack (~36px) or a 31px avatar,
- * and row action buttons are ~30px, so 42 keeps everything untouchable-tight
- * without clipping. Do not go below 40 without re-checking those cells.
+ * and row action buttons are ~30px, so 42 keeps everything tight without
+ * clipping. Do not go below 40 without re-checking those cells.
  */
 export const control = { compact: 30, standard: 36, comfortable: 44, gridRow: 42, gridHeader: 40 } as const
+
+/** Shell geometry, shared by the Layout and the CSS rail. */
+export const layout = { railExpanded: 276, railCollapsed: 78, topBar: 64, pageMax: 1680 } as const
 
 /**
  * Motion is limited to state feedback (hover, focus, press, open/close) and is
@@ -71,18 +95,18 @@ export const motion = {
 
 /** Type scale. Sizes assume the 87.5% app density already applied on `#root`. */
 export const typeScale = {
-  h1: { fontFamily: fonts.display, fontSize: 32, lineHeight: 1.2, fontWeight: 800, letterSpacing: '-0.03em' },
-  h2: { fontFamily: fonts.display, fontSize: 26, lineHeight: 1.22, fontWeight: 800, letterSpacing: '-0.025em' },
-  h3: { fontFamily: fonts.display, fontSize: 21, lineHeight: 1.28, fontWeight: 800, letterSpacing: '-0.02em' },
-  h4: { fontFamily: fonts.display, fontSize: 18, lineHeight: 1.32, fontWeight: 800, letterSpacing: '-0.015em' },
-  h5: { fontFamily: fonts.display, fontSize: 15.5, lineHeight: 1.4, fontWeight: 800, letterSpacing: '-0.01em' },
-  h6: { fontFamily: fonts.ui, fontSize: 13.5, lineHeight: 1.45, fontWeight: 800, letterSpacing: 0 },
+  h1: { fontFamily: fonts.display, fontSize: 32, lineHeight: 1.18, fontWeight: 750, letterSpacing: '-0.028em' },
+  h2: { fontFamily: fonts.display, fontSize: 26, lineHeight: 1.22, fontWeight: 750, letterSpacing: '-0.024em' },
+  h3: { fontFamily: fonts.display, fontSize: 21, lineHeight: 1.28, fontWeight: 750, letterSpacing: '-0.02em' },
+  h4: { fontFamily: fonts.display, fontSize: 18, lineHeight: 1.32, fontWeight: 750, letterSpacing: '-0.015em' },
+  h5: { fontFamily: fonts.display, fontSize: 15.5, lineHeight: 1.4, fontWeight: 700, letterSpacing: '-0.01em' },
+  h6: { fontFamily: fonts.ui, fontSize: 13.5, lineHeight: 1.45, fontWeight: 700, letterSpacing: 0 },
   subtitle1: { fontFamily: fonts.ui, fontSize: 14, lineHeight: 1.45, fontWeight: 600, letterSpacing: 0 },
-  subtitle2: { fontFamily: fonts.ui, fontSize: 12.5, lineHeight: 1.45, fontWeight: 700, letterSpacing: 0 },
+  subtitle2: { fontFamily: fonts.ui, fontSize: 12.5, lineHeight: 1.45, fontWeight: 650, letterSpacing: 0 },
   body1: { fontFamily: fonts.ui, fontSize: 14, lineHeight: 1.55, fontWeight: 400, letterSpacing: 0 },
   body2: { fontFamily: fonts.ui, fontSize: 13, lineHeight: 1.5, fontWeight: 400, letterSpacing: 0 },
   caption: { fontFamily: fonts.ui, fontSize: 11.5, lineHeight: 1.4, fontWeight: 600, letterSpacing: 0 },
-  overline: { fontFamily: fonts.ui, fontSize: 10, lineHeight: 1.4, fontWeight: 800, letterSpacing: '1.4px' },
+  overline: { fontFamily: fonts.ui, fontSize: 10, lineHeight: 1.4, fontWeight: 750, letterSpacing: '1.4px' },
 } as const
 
 export type SurfaceTokens = {
@@ -105,43 +129,71 @@ export type SurfaceTokens = {
   accentSurface: string
   accentForeground: string
   mutedSurface: string
+  /** Ink navigation rail; identical role in both themes, deeper in dark mode. */
+  rail: string
+  railRaised: string
+  railText: string
+  railMuted: string
+  railLine: string
+  railHover: string
+  railActive: string
+  railActiveText: string
+  railAccent: string
 }
 
 export const surface = (mode: Mode): SurfaceTokens =>
   mode === 'dark'
     ? {
-        canvas: '#0B1220',
-        paper: '#121B2E',
-        raised: '#182339',
-        hover: '#1F2B44',
-        selected: '#243552',
-        divider: '#27354D',
-        dividerStrong: '#3A4A66',
-        text: '#E7EDF6',
-        textMuted: '#A3B2C8',
-        textDisabled: '#7B8BA3',
-        focus: navy[400],
-        focusSoft: 'rgba(143, 184, 228, 0.28)',
-        accentSurface: '#192B47',
-        accentForeground: navy[400],
-        mutedSurface: '#182339',
+        canvas: '#08111A',
+        paper: '#0F1B22',
+        raised: '#15252C',
+        hover: '#182B33',
+        selected: '#1E343D',
+        divider: '#22343C',
+        dividerStrong: '#334A53',
+        text: '#E7EFF1',
+        textMuted: '#9FB3BA',
+        textDisabled: '#768B93',
+        focus: brand[300],
+        focusSoft: 'rgba(121, 185, 193, 0.26)',
+        accentSurface: '#123039',
+        accentForeground: '#8ACBD4',
+        mutedSurface: '#15232A',
+        rail: '#060D12',
+        railRaised: '#0B161C',
+        railText: '#DCE9EC',
+        railMuted: '#7E959D',
+        railLine: 'rgba(255, 255, 255, 0.08)',
+        railHover: 'rgba(255, 255, 255, 0.055)',
+        railActive: 'rgba(121, 185, 193, 0.16)',
+        railActiveText: '#BFE8ED',
+        railAccent: brand[300],
       }
     : {
-        canvas: '#F3F5F9',
+        canvas: '#F3F6F6',
         paper: '#FFFFFF',
         raised: '#FFFFFF',
-        hover: navy[50],
-        selected: navy[100],
-        divider: '#D8E0EA',
-        dividerStrong: '#B9C6D8',
-        text: '#0F1F3D',
-        textMuted: '#5B6B85',
-        textDisabled: '#8A98AD',
-        focus: navy[900],
-        focusSoft: 'rgba(18, 58, 99, 0.16)',
-        accentSurface: navy[100],
-        accentForeground: navy[700],
-        mutedSurface: '#F4F6F9',
+        hover: '#F0F5F5',
+        selected: '#E2EEEF',
+        divider: '#DFE7E8',
+        dividerStrong: '#C2CFD1',
+        text: '#0D1B22',
+        textMuted: '#52666D',
+        textDisabled: '#84969D',
+        focus: brand[700],
+        focusSoft: 'rgba(21, 81, 91, 0.16)',
+        accentSurface: '#E7F2F3',
+        accentForeground: brand[700],
+        mutedSurface: '#F3F6F6',
+        rail: '#0A1A21',
+        railRaised: '#0E2229',
+        railText: '#DCE9EC',
+        railMuted: '#8399A0',
+        railLine: 'rgba(255, 255, 255, 0.09)',
+        railHover: 'rgba(255, 255, 255, 0.06)',
+        railActive: 'rgba(121, 185, 193, 0.15)',
+        railActiveText: '#C6EAEE',
+        railAccent: brand[300],
       }
 
 /**
@@ -156,17 +208,36 @@ export const surface = (mode: Mode): SurfaceTokens =>
 export const semantic = (mode: Mode) =>
   mode === 'dark'
     ? {
-        error: { main: '#F2B8B5', dark: '#E79C98', light: '#33201F', contrastText: '#33201F' },
-        warning: { main: '#E8C27A', dark: '#D9AC56', light: '#2E2718', contrastText: '#2E2718' },
-        success: { main: '#82C7A2', dark: '#5FBF8F', light: '#1B2E24', contrastText: '#1B2E24' },
-        info: { main: navy[400], dark: navy[500], light: navy[900], contrastText: navy[900] },
+        error: { main: '#F1B5B1', dark: '#E79C97', light: '#33201E', contrastText: '#33201E' },
+        warning: { main: '#E9C583', dark: '#D9AC56', light: '#2E2718', contrastText: '#2E2718' },
+        success: { main: '#84C9A4', dark: '#5FBF8F', light: '#162E22', contrastText: '#162E22' },
+        info: { main: brand[300], dark: brand[400], light: brand[900], contrastText: brand[900] },
       }
     : {
-        error: { main: '#B3261E', dark: '#8E1D17', light: '#FBEAE9', contrastText: '#FFFFFF' },
-        warning: { main: '#8A5A00', dark: '#6F4800', light: '#F7F1E4', contrastText: '#FFFFFF' },
-        success: { main: '#1E6B45', dark: '#145635', light: '#E7F2EC', contrastText: '#FFFFFF' },
-        info: { main: navy[700], dark: navy[800], light: navy[100], contrastText: '#FFFFFF' },
+        error: { main: '#A3211A', dark: '#821912', light: '#FBEAE8', contrastText: '#FFFFFF' },
+        warning: { main: '#8A5A0B', dark: '#6F4800', light: '#F8F1E2', contrastText: '#FFFFFF' },
+        success: { main: '#1B6B46', dark: '#145635', light: '#E7F2EC', contrastText: '#FFFFFF' },
+        info: { main: brand[700], dark: brand[800], light: brand[100], contrastText: '#FFFFFF' },
       }
+
+/**
+ * Chart series colour order. Planned figures always take the first slot, actual
+ * the second, adjustments the third; the order never changes between pages.
+ */
+export const chartPalette = (mode: Mode) => {
+  const s = surface(mode)
+  return {
+    planned: mode === 'dark' ? brand[300] : brand[700],
+    actual: mode === 'dark' ? brass[300] : brass[500],
+    adjusted: mode === 'dark' ? brand[200] : brand[400],
+    series: mode === 'dark'
+      ? [brand[300], brass[300], '#94A3B8', brand[200], '#84C9A4', '#E9C583', '#F1B5B1', '#6B8490']
+      : [brand[700], brass[500], '#64748B', brand[400], '#1B6B46', '#8A5A0B', '#A3211A', '#8CA0A8'],
+    axis: s.textMuted,
+    grid: s.divider,
+    surface: s.paper,
+  }
+}
 
 /**
  * Shadows are deliberately shallow: hairline borders carry structure, elevation
@@ -176,17 +247,17 @@ export const shadow = (mode: Mode) => {
   const dark = mode === 'dark'
   return {
     /** Cards and outlined paper. */
-    subtle: dark ? '0 1px 2px rgba(0, 0, 0, 0.34)' : '0 1px 2px rgba(16, 35, 58, 0.06), 0 1px 3px rgba(16, 35, 58, 0.04)',
+    subtle: dark ? '0 1px 2px rgba(0, 0, 0, 0.34)' : '0 1px 2px rgba(13, 27, 34, 0.045), 0 1px 3px rgba(13, 27, 34, 0.035)',
     /** App bar and sticky toolbars. */
-    bar: dark ? '0 1px 0 rgba(0, 0, 0, 0.4)' : '0 1px 2px rgba(16, 35, 58, 0.05)',
+    bar: dark ? '0 1px 0 rgba(0, 0, 0, 0.4)' : '0 1px 2px rgba(13, 27, 34, 0.04)',
     /** Menus, selects, popovers. */
     raised: dark
       ? '0 2px 6px rgba(0, 0, 0, 0.44), 0 14px 34px rgba(0, 0, 0, 0.38)'
-      : '0 2px 4px rgba(16, 35, 58, 0.06), 0 10px 26px rgba(16, 35, 58, 0.10)',
+      : '0 2px 4px rgba(13, 27, 34, 0.06), 0 10px 26px rgba(13, 27, 34, 0.10)',
     /** Dialogs and the modal backdrop edge. */
     overlay: dark
       ? '0 4px 12px rgba(0, 0, 0, 0.5), 0 28px 64px rgba(0, 0, 0, 0.5)'
-      : '0 12px 32px rgba(11, 26, 43, 0.20), 0 2px 6px rgba(11, 26, 43, 0.10)',
+      : '0 12px 32px rgba(9, 24, 30, 0.20), 0 2px 6px rgba(9, 24, 30, 0.10)',
   }
 }
 
@@ -195,18 +266,18 @@ export const gridThemeParams = (mode: Mode) => {
   const s = surface(mode)
   const dark = mode === 'dark'
   return {
-    accentColor: dark ? navy[400] : navy[700],
+    accentColor: dark ? brand[300] : brand[700],
     backgroundColor: s.paper,
     borderColor: s.divider,
     foregroundColor: s.text,
-    headerBackgroundColor: dark ? navy[900] : '#F4F6F9',
-    headerTextColor: dark ? navy[300] : navy[800],
+    headerBackgroundColor: dark ? '#101E25' : '#F6F8F8',
+    headerTextColor: dark ? '#A9C2C8' : '#455B62',
     headerFontWeight: 700,
     fontFamily: fonts.ui,
     fontSize: 12,
     rowHoverColor: s.hover,
-    oddRowBackgroundColor: dark ? '#17293D' : '#FAFBFD',
-    chromeBackgroundColor: s.raised,
+    oddRowBackgroundColor: dark ? '#0C181E' : '#FBFCFC',
+    chromeBackgroundColor: s.paper,
     // 8 (not the quartz default 10) tightens cell padding and the pagination
     // bar to match the compact row height above.
     spacing: 8,

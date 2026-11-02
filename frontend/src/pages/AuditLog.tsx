@@ -47,10 +47,20 @@ export default function AuditLog() {
     { headerName: 'IP ADDRESS', field: 'ip_address', minWidth: 125, valueFormatter: p => p.value || '—' },
   ], [])
 
-  return <><PageHeading eyebrow="OTHER MANAGEMENTS / AUDIT LOG" title="Audit Log" subtitle="Every action across the workspace, with actor, entity and source. Read-only." action={<Button variant="contained" startIcon={<RefreshRounded/>} onClick={load} disabled={busy}>{busy ? 'Refreshing...' : 'Refresh'}</Button>}/>
-    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2, mb: 2.2, bgcolor: 'background.paper' }}>
-      <Box display="flex" alignItems="center" gap={1} mb={1.6}><FilterListRounded sx={{ fontSize: 17, color: 'text.secondary' }}/><Typography fontWeight={800} fontSize={12} textTransform="uppercase" letterSpacing={0.8}>Filters</Typography></Box>
-      <Box display="flex" gap={1.5} flexWrap="wrap" alignItems="center">
+  return <><PageHeading
+    eyebrow="OTHER MANAGEMENTS / AUDIT LOG"
+    title="Audit log"
+    subtitle="Every recorded action in this workspace with its actor, object, source address and time. Read-only: nothing on this page changes a record."
+    action={<Button variant="outlined" startIcon={<RefreshRounded/>} onClick={load} disabled={busy}>{busy ? 'Refreshing…' : 'Refresh'}</Button>}
+  />
+    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, mb: 2, overflow: 'hidden', bgcolor: 'background.paper' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', px: 2, py: .95, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+        <FilterListRounded sx={{ fontSize: 16, color: 'text.secondary' }}/>
+        <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.11em', textTransform: 'uppercase', color: 'text.secondary' }}>Audit filters</Typography>
+        <Typography fontSize={11} color="text.secondary">Filters run on the server across the whole trail; the table search narrows the {rows.length} entries already loaded.</Typography>
+        {(action || entityType || actor || dateFrom || dateTo) && <Button size="small" color="inherit" sx={{ ml: 'auto' }} onClick={() => { setAction(''); setEntityType(''); setActor(''); setDateFrom(''); setDateTo('') }}>Clear</Button>}
+      </Box>
+      <Box sx={{ p: 1.6, display: 'flex', gap: 1.4, flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField select size="small" label="Action" value={action} onChange={e => setAction(e.target.value)} sx={{ minWidth: 150 }}>
           <MenuItem value="">All actions</MenuItem>
           {ACTIONS.map(a => <MenuItem key={a} value={a}>{a.replace('_', ' ')}</MenuItem>)}
@@ -60,11 +70,11 @@ export default function AuditLog() {
           {ENTITIES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
         </TextField>
         <TextField size="small" label="Actor (name or email)" value={actor} onChange={e => setActor(e.target.value)} sx={{ minWidth: 200 }}/>
-        <Typography color="text.secondary" fontSize={12} fontWeight={700} textTransform="uppercase" letterSpacing={0.8} ml={1}>Date range</Typography>
+        <Box sx={{ width: '1px', alignSelf: 'stretch', bgcolor: 'divider', mx: .5 }}/>
+        <Typography color="text.secondary" fontSize={10} fontWeight={750} letterSpacing=".09em" textTransform="uppercase">Date range</Typography>
         <TextField size="small" type="date" label="From" value={dateFrom} onChange={e => setDateFrom(e.target.value)} InputLabelProps={{ shrink: true }}/>
         <Typography color="text.secondary" fontSize={12}>to</Typography>
         <TextField size="small" type="date" label="To" value={dateTo} onChange={e => setDateTo(e.target.value)} InputLabelProps={{ shrink: true }}/>
-        {(action || entityType || actor || dateFrom || dateTo) && <Button color="inherit" size="small" onClick={() => { setAction(''); setEntityType(''); setActor(''); setDateFrom(''); setDateTo('') }}>Clear</Button>}
       </Box>
     </Box>
     <ErrorMessage message={error}/>

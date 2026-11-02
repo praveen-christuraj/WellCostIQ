@@ -4,17 +4,21 @@ import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import {
   AccountBalanceWalletOutlined, AlignVerticalBottomRounded, ArrowForwardRounded, CalendarMonthOutlined,
-  DescriptionOutlined, DownloadDoneRounded, EventBusyOutlined, InsightsOutlined, LayersOutlined,
-  PrecisionManufacturingOutlined, RefreshRounded, ReportProblemOutlined, ScheduleOutlined, SpeedOutlined,
-  StraightenRounded, TerrainOutlined, TrendingUpRounded, WarningAmberRounded,
+  DescriptionOutlined, DownloadDoneRounded, EventBusyOutlined, LayersOutlined,
+  RefreshRounded, ReportProblemOutlined, ScheduleOutlined, SpeedOutlined,
+  TerrainOutlined, TrendingUpRounded, WarningAmberRounded,
 } from '@mui/icons-material'
 import {
-  Alert, Box, Button, CircularProgress, Divider, FormControlLabel, LinearProgress, MenuItem, Paper,
+  Alert, Box, Button, FormControlLabel, LinearProgress, MenuItem, Paper,
   Switch, Tab, Tabs, TextField, Tooltip, Typography, useTheme,
 } from '@mui/material'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { ChartPanel } from '../components/ui/ChartPanel'
+import { DatasetState } from '../components/ui/DatasetState'
+import { SectionCard } from '../components/ui/SectionCard'
+import { StatCard } from '../components/ui/StatCard'
 import { DrillThroughPanel } from '../components/business-dashboard/DrillThroughPanel'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
@@ -24,37 +28,6 @@ import {
   type BusinessDashboard as BusinessDashboardData, type DashboardAfeRow, type DashboardFilters,
   type DashboardRigRow, type DashboardWellRow, type Money,
 } from '../lib/businessDashboard'
-
-type Tone = 'default' | 'warning' | 'error' | 'good'
-
-function KpiCard({ label, value, hint, icon, tone = 'default', onClick, title }: {
-  label: string
-  value: string
-  hint: string
-  icon: ReactNode
-  tone?: Tone
-  onClick?: () => void
-  title?: string
-}) {
-  const color = tone === 'error' ? 'error.main' : tone === 'warning' ? 'warning.main' : tone === 'good' ? 'success.main' : 'text.primary'
-  return <Paper
-    variant="outlined"
-    className="stat-card"
-    onClick={onClick}
-    role={onClick ? 'button' : undefined}
-    tabIndex={onClick ? 0 : undefined}
-    onKeyDown={onClick ? event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick() } } : undefined}
-    title={title}
-    sx={{ p: 1.8, borderRadius: 2, minWidth: 0, cursor: onClick ? 'pointer' : 'default' }}
-  >
-    <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
-      <Typography color="text.secondary" fontSize={10.5} fontWeight={800} letterSpacing={.75} textTransform="uppercase" lineHeight={1.35}>{label}</Typography>
-      <Box className="table-icon" sx={{ width: 26, height: 26, flex: '0 0 auto' }}>{icon}</Box>
-    </Box>
-    <Typography sx={{ fontSize: 20, my: .8, color, fontWeight: 800, overflowWrap: 'anywhere' }}>{value}</Typography>
-    <Typography color="text.secondary" fontSize={11} lineHeight={1.4}>{hint}</Typography>
-  </Paper>
-}
 
 function BalanceCell({ value, currency }: { value: Money; currency: string }) {
   const negative = value !== null && Number(value) < 0
@@ -547,48 +520,151 @@ export default function BusinessDashboard() {
   }
 
   const alerts = data?.alerts ?? []
+  const presetActive = (preset: 'all' | '7d' | '30d' | 'month' | 'quarter') => {
+    const range = presetRange(preset)
+    return (filters.from ?? '') === (range.from ?? '') && (filters.to ?? '') === (range.to ?? '')
+  }
+  const PRESETS: { key: 'all' | '7d' | '30d' | 'month' | 'quarter'; label: string }[] = [
+    { key: '7d', label: '7 days' },
+    { key: '30d', label: '30 days' },
+    { key: 'month', label: 'This month' },
+    { key: 'quarter', label: 'Quarter' },
+    { key: 'all', label: 'All time' },
+  ]
+  const financialCards = !data ? [] : [
+    caps.budget && {
+      key: 'afe',
+      label: 'AFE amount',
+      value: money(data!.kpis.afe_amount, currency),
+      hint: `${count(data!.kpis.afes)} AFE${data!.kpis.afes === 1 ? '' : 's'}${data!.kpis.conversion_pending_afes ? ` · ${data!.kpis.conversion_pending_afes} pending conversion` : ''}`,
+      icon: <DescriptionOutlined fontSize="small"/>,
+      title: 'Saved AFE estimate totals in the selected currency. Estimates with an incomplete conversion are excluded from this figure.',
+    },
+    caps.budget && {
+      key: 'sow',
+      label: 'SOW adjusted',
+      value: money(data!.kpis.sow_adjusted_amount, currency),
+      hint: `Effective plan ${compactMoney(data!.kpis.effective_afe_amount, currency)}`,
+      icon: <DownloadDoneRounded fontSize="small"/>,
+      title: 'Latest approved SOW adjustment. Where none exists, the saved AFE amount is the effective plan.',
+    },
+    caps.actuals && {
+      key: 'actual',
+      label: 'Actual cost',
+      value: money(data!.kpis.actual_amount, currency),
+      hint: `${count(data!.kpis.wells_with_actuals)} wells tracked · ${compactMoney(data!.kpis.other_expenses_amount, currency)} other`,
+      icon: <AccountBalanceWalletOutlined fontSize="small"/>,
+      title: 'Recorded daily cost in the selected currency, including other expenses.',
+    },
+    caps.budget && caps.actuals && {
+      key: 'balance',
+      label: 'AFE balance',
+      value: money(data!.kpis.afe_balance, currency),
+      hint: `${percent(data!.kpis.utilisation_percent)} of the effective plan used`,
+      icon: <TrendingUpRounded fontSize="small"/>,
+      tone: (data!.kpis.afe_balance !== null && Number(data!.kpis.afe_balance) < 0 ? 'error' : 'positive') as 'error' | 'positive',
+      title: 'Effective AFE amount (SOW adjusted, otherwise the saved estimate) less recorded actual cost.',
+      badge: <Box sx={{ mt: .25 }}>
+        <LinearProgress variant="determinate" value={Math.min(100, Math.max(0, Number(data!.kpis.utilisation_percent ?? 0)))} aria-label={`${percent(data!.kpis.utilisation_percent)} of the effective plan used`}
+          sx={{ height: 4, borderRadius: 2, bgcolor: 'divider', '& .MuiLinearProgress-bar': { transition: 'none', bgcolor: Number(data!.kpis.afe_balance ?? 0) < 0 ? 'error.main' : 'primary.main' } }}/>
+      </Box>,
+    },
+  ].filter(Boolean) as { key: string; label: string; value: string; hint: string; icon: ReactNode; tone?: 'error' | 'positive'; title?: string; badge?: ReactNode }[]
+
+  const operationCards = !data ? [] : [
+    {
+      key: 'wells',
+      label: 'Wells in scope',
+      value: count(data!.kpis.wells),
+      hint: `${count(data!.kpis.active_wells)} active · ${count(data!.kpis.completed_wells)} completed${caps.plan ? ` · ${count(data!.kpis.configured_wells)} configured` : ''}`,
+      icon: <LayersOutlined fontSize="small"/>,
+    },
+    caps.plan && {
+      key: 'planned',
+      label: 'Planned days',
+      value: decimal(data!.kpis.planned_days, 2),
+      hint: 'From the well configuration; an approved plan adjustment replaces it.',
+      icon: <ScheduleOutlined fontSize="small"/>,
+      title: 'Planned days from Well Configuration (drilling + configured completion), with any approved plan adjustment applied.',
+    },
+    caps.actuals && {
+      key: 'actual-days',
+      label: 'Actual days',
+      value: decimal(data!.kpis.actual_days),
+      hint: `${count(data!.kpis.recorded_days)} recorded · ${data!.kpis.day_variance === null ? '—' : `${Number(data!.kpis.day_variance) >= 0 ? '+' : ''}${decimal(data!.kpis.day_variance, 1)} vs plan`}`,
+      icon: <AlignVerticalBottomRounded fontSize="small"/>,
+      tone: (data!.kpis.day_variance !== null && Number(data!.kpis.day_variance) > 0 ? 'warning' : 'default') as 'warning' | 'default',
+      title: 'Calendar days from the first to the last day of each well\'s cost register, summed across wells.',
+    },
+    caps.actuals && {
+      key: 'npt',
+      label: 'NPT / UPA days',
+      value: `${decimal(data!.kpis.npt_days, 2)} / ${decimal(data!.kpis.upa_days, 2)}`,
+      hint: `${compactMoney(data!.kpis.npt_amount, currency)} NPT · ${compactMoney(data!.kpis.upa_amount, currency)} UPA`,
+      icon: <EventBusyOutlined fontSize="small"/>,
+      tone: (Number(data!.kpis.npt_days ?? 0) > 0 ? 'error' : 'default') as 'error' | 'default',
+      title: 'Deduplicated operational service hours classified as NPT or UPA, divided by 24. Affected cost dates are not treated as duration.',
+    },
+    {
+      key: 'depth',
+      label: 'Depth progress',
+      value: percent(data!.kpis.depth_progress_percent),
+      hint: `${decimal(data!.kpis.actual_depth, 0)} of ${decimal(data!.kpis.planned_depth, 0)} m`,
+      icon: <TerrainOutlined fontSize="small"/>,
+      title: 'Actual depth from the daily cost register (standardized in meters, ft ÷ 3.281) against planned well depth in meters across all wells.',
+      badge: <Box sx={{ mt: .25 }}>
+        <LinearProgress variant="determinate" value={Math.min(100, Math.max(0, Number(data!.kpis.depth_progress_percent ?? 0)))} aria-label={`Depth progress ${percent(data!.kpis.depth_progress_percent)}`}
+          sx={{ height: 4, borderRadius: 2, bgcolor: 'divider', '& .MuiLinearProgress-bar': { transition: 'none', bgcolor: 'primary.main' } }}/>
+      </Box>,
+    },
+  ].filter(Boolean) as { key: string; label: string; value: string; hint: string; icon: ReactNode; tone?: 'default' | 'warning' | 'error'; title?: string; badge?: ReactNode }[]
 
   return <>
     <PageHeading
-      eyebrow="BUSINESS / DASHBOARD"
+      eyebrow="HOME / OPERATIONS DASHBOARD"
       title="Operations dashboard"
-      subtitle="Rig and well plans, AFE budgets, SOW adjustments, actual cost, NPT/UPA time and depth progress in one live view. Filter it, open a well, and follow a figure back to the records behind it."
-      action={<Box display="flex" alignItems="center" gap={1.2} flexWrap="wrap">
+      subtitle="Rig and well plans, AFE budgets, SOW adjustments, actual cost, NPT/UPA time and depth progress in one view. Every figure keeps the currency it was reported in; open a well to follow it back to the records."
+      action={<Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
         <FormControlLabel
           control={<Switch size="small" checked={autoRefresh} onChange={event => setAutoRefresh(event.target.checked)}/>}
           label={<Typography fontSize={11.5}>Auto refresh</Typography>}
-          sx={{ mr: .5 }}
+          sx={{ mr: .25 }}
         />
-        <Button variant="outlined" startIcon={<RefreshRounded/>} onClick={() => void load()} disabled={loading}>
+        <Button size="small" variant="outlined" startIcon={<RefreshRounded sx={{ fontSize: 17 }}/>} onClick={() => void load()} disabled={loading}>
           {loading ? 'Refreshing…' : 'Refresh'}
         </Button>
+        {caps.actuals && can('daily-cost:read') && <Button size="small" component={RouterLink} to="/daily-cost/analysis" endIcon={<ArrowForwardRounded sx={{ fontSize: 16 }}/>}>Well cost analysis</Button>}
       </Box>}
     />
 
-    <Paper variant="outlined" sx={{ p: 1.8, borderRadius: 2, mb: 2 }}>
-      <Box display="flex" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap" mb={1.2}>
-        <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+    {/* Scope bar: the date range, currency and inclusion basis the whole page reads through. */}
+    <Paper variant="outlined" sx={{ borderColor: 'divider', borderRadius: 2.5, mb: 2, overflow: 'hidden' }}>
+      <Box sx={{ px: 1.75, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default', display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+        <Box display="flex" alignItems="center" gap={.9} sx={{ minWidth: 0 }}>
           <CalendarMonthOutlined sx={{ fontSize: 17, color: 'text.secondary' }}/>
-          <Typography fontWeight={800} fontSize={12} textTransform="uppercase" letterSpacing={.8}>Filters</Typography>
-          <Typography color="text.secondary" fontSize={11.5}>
+          <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: 'text.primary' }}>Scope &amp; period</Typography>
+          <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }} className="tnum">
             {filters.from || filters.to
               ? `${filters.from ? displayDate(filters.from) : 'start'} → ${filters.to ? displayDate(filters.to) : 'today'}`
               : 'All cost dates'}
             {` · ${currency || 'no currency'} · ${filters.includeDraft ? 'draft and submitted sheets' : 'submitted sheets only'}`}
           </Typography>
         </Box>
-        <Box display="flex" gap={.75} flexWrap="wrap">
-          {(['all', '7d', '30d', 'month', 'quarter'] as const).map(preset => <Button
-            key={preset}
+        <Box display="flex" gap={.5} flexWrap="wrap" ml="auto" alignItems="center">
+          {PRESETS.map(preset => <Button
+            key={preset.key}
             size="small"
-            variant="text"
-            onClick={() => { const range = presetRange(preset); setFilters(previous => ({ ...previous, from: range.from, to: range.to })) }}
-          >{preset === 'all' ? 'All time' : preset === '7d' ? 'Last 7 days' : preset === '30d' ? 'Last 30 days' : preset === 'month' ? 'This month' : 'This quarter'}</Button>)}
-          <Button size="small" color="inherit" onClick={() => setFiltersOpen(open => !open)} aria-expanded={filtersOpen}>{filtersOpen ? 'Hide criteria' : 'Advanced criteria'}</Button>
-          <Button size="small" color="inherit" onClick={() => setFilters(EMPTY_FILTERS)}>Reset</Button>
+            variant={presetActive(preset.key) ? 'contained' : 'text'}
+            color={presetActive(preset.key) ? 'primary' : 'inherit'}
+            onClick={() => { const range = presetRange(preset.key); setFilters(previous => ({ ...previous, from: range.from, to: range.to })) }}
+            sx={{ minWidth: 0, px: 1.1, py: .35, fontSize: 11.5, fontWeight: 650, borderRadius: 1.5 }}
+          >{preset.label}</Button>)}
+          <Box sx={{ width: '1px', height: 18, bgcolor: 'divider', mx: .5 }}/>
+          <Button size="small" color="inherit" onClick={() => setFiltersOpen(open => !open)} aria-expanded={filtersOpen} sx={{ fontSize: 11.5 }}>{filtersOpen ? 'Hide scope' : 'More scope'}</Button>
+          <Button size="small" color="inherit" onClick={() => setFilters(EMPTY_FILTERS)} sx={{ fontSize: 11.5 }}>Reset</Button>
         </Box>
       </Box>
-      <Box display="grid" gap={1.2} sx={{ gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0,1fr))', md: 'repeat(4, minmax(0,1fr))', xl: 'repeat(6, minmax(0,1fr))' } }}>
+      <Box sx={{ p: 1.75, display: 'grid', gap: 1.4, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0,1fr))', md: 'repeat(4, minmax(0,1fr))' } }}>
         <TextField size="small" type="date" label="From" value={filters.from} onChange={event => setFilter('from', event.target.value)} InputLabelProps={{ shrink: true }}/>
         <TextField size="small" type="date" label="To" value={filters.to} onChange={event => setFilter('to', event.target.value)} InputLabelProps={{ shrink: true }}/>
         <TextField select size="small" label="Currency" value={filters.currency || currency} onChange={event => setFilter('currency', event.target.value)} helperText="Amounts are never mixed across currencies">
@@ -623,258 +699,226 @@ export default function BusinessDashboard() {
           </TextField>
         </>}
       </Box>
-      <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" mt={1.4} sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 1.2 }}>
+      <Box sx={{ px: 1.75, py: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', borderTop: '1px solid', borderColor: 'divider' }}>
         <Tag tone="success">Live</Tag>
-        <Typography color="text.secondary" fontSize={11.5} className="tnum" aria-live="polite">
+        <Typography color="text.secondary" fontSize={11.2} className="tnum" aria-live="polite">
           {refreshedAt ? `Updated ${displayDateTime(refreshedAt.toISOString())}` : 'Loading…'}
           {autoRefresh ? ' · refreshes every 60 seconds' : ''}
           {data ? ` · ${count(data.kpis.wells)} wells · ${count(data.kpis.afes)} AFEs · ${count(data.kpis.rigs)} rigs` : ''}
         </Typography>
         <Box flex={1}/>
-        {data && !caps.budget && <Typography color="text.secondary" fontSize={11}>AFE figures are shown only to users with AFE read access.</Typography>}
-        {data && !caps.actuals && <Typography color="text.secondary" fontSize={11}>Actual cost figures are shown only to users with daily cost read access.</Typography>}
-        {data && !caps.plan && <Typography color="text.secondary" fontSize={11}>Planned days and depth need rig and well read access.</Typography>}
+        {data && !caps.budget && <Typography color="text.secondary" fontSize={10.8}>AFE figures need AFE read access.</Typography>}
+        {data && !caps.actuals && <Typography color="text.secondary" fontSize={10.8}>Actual cost needs daily cost read access.</Typography>}
+        {data && !caps.plan && <Typography color="text.secondary" fontSize={10.8}>Planned days and depth need rig and well read access.</Typography>}
       </Box>
     </Paper>
 
     <ErrorMessage message={error}/>
 
-    {alerts.length > 0 && <Box display="grid" gap={1} mb={2} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0,1fr))' } }}>
-      {alerts.map(alert => <Alert
-        key={`${alert.kind}-${alert.title}`}
-        severity={alert.severity}
-        icon={alert.severity === 'error' ? <ReportProblemOutlined/> : alert.severity === 'warning' ? <WarningAmberRounded/> : <SpeedOutlined/>}
-        action={alert.well_id ? <Button size="small" onClick={() => setDrillWell(alert.well_id!)}>Open</Button> : undefined}
-        sx={{ alignItems: 'flex-start', '& .MuiAlert-message': { minWidth: 0 } }}
-      >
-        <Typography fontSize={12.5} fontWeight={700}>{alert.title}</Typography>
-        <Typography fontSize={11.5} lineHeight={1.45}>{alert.detail}</Typography>
-      </Alert>)}
+    {alerts.length > 0 && <Box sx={{ mb: 2.25 }}>
+      <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
+        <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.12em', textTransform: 'uppercase', color: 'text.secondary' }}>Needs attention</Typography>
+        <Box sx={{ flex: 1, height: '1px', bgcolor: 'divider' }}/>
+        <Typography sx={{ fontSize: 10.5, color: 'text.secondary' }}>{alerts.length} signal{alerts.length === 1 ? '' : 's'}</Typography>
+      </Box>
+      <Box display="grid" gap={1} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0,1fr))' } }}>
+        {alerts.map(alert => <Alert
+          key={`${alert.kind}-${alert.title}`}
+          severity={alert.severity}
+          icon={alert.severity === 'error' ? <ReportProblemOutlined/> : alert.severity === 'warning' ? <WarningAmberRounded/> : <SpeedOutlined/>}
+          action={alert.well_id ? <Button size="small" onClick={() => setDrillWell(alert.well_id!)}>Open</Button> : undefined}
+          sx={{ alignItems: 'flex-start', '& .MuiAlert-message': { minWidth: 0 }, border: '1px solid', borderColor: 'divider' }}
+        >
+          <Typography fontSize={12.5} fontWeight={700}>{alert.title}</Typography>
+          <Typography fontSize={11.5} lineHeight={1.45}>{alert.detail}</Typography>
+        </Alert>)}
+      </Box>
     </Box>}
 
-    {loading && !data && <Box py={8} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={26}/></Box>}
+    {loading && !data && <DatasetState kind="loading" title="Reading the cost ledger for the selected scope…"/>}
 
-    {data && (data.kpis.wells ?? 0) === 0 && <Paper variant="outlined" sx={{ p: 3, borderRadius: 2, textAlign: 'center' }}>
-      <Typography fontWeight={800} fontSize={16}>No wells match the current filters</Typography>
-      <Typography color="text.secondary" fontSize={12.5} mt={.8} mb={2}>
-        Clear the filters, or create the rig, well and configuration that the dashboard summarises.
-      </Typography>
-      <Box display="flex" gap={1} justifyContent="center" flexWrap="wrap">
-        <Button variant="outlined" onClick={() => setFilters(EMPTY_FILTERS)}>Reset filters</Button>
-        {can('rig-well:read') && <Button component={RouterLink} to="/rig-well/wells" variant="contained" endIcon={<ArrowForwardRounded/>}>Well register</Button>}
-      </Box>
-    </Paper>}
+    {data && (data.kpis.wells ?? 0) === 0 && <SectionCard bodyPadding={0}>
+      <DatasetState
+        kind="empty"
+        title="No wells match the current scope"
+        message="Clear the filters, or create the rig, well and well configuration the dashboard summarises. Access to a module also decides which figures this page can show."
+        action={<>
+          <Button variant="outlined" onClick={() => setFilters(EMPTY_FILTERS)}>Reset filters</Button>
+          {can('rig-well:read') && <Button component={RouterLink} to="/rig-well/wells" variant="contained" endIcon={<ArrowForwardRounded/>}>Open well register</Button>}
+        </>}
+      />
+    </SectionCard>}
 
     {data && (data.kpis.wells ?? 0) > 0 && <>
-      <Box display="grid" gap={1.4} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(3, minmax(0,1fr))', xl: 'repeat(6, minmax(0,1fr))' } }}>
-        <KpiCard
-          label="Wells in scope"
-          value={count(data.kpis.wells)}
-          hint={`${count(data.kpis.active_wells)} active · ${count(data.kpis.completed_wells)} completed${caps.plan ? ` · ${count(data.kpis.configured_wells)} configured` : ''}`}
-          icon={<LayersOutlined fontSize="small"/>}
-        />
-        <KpiCard
-          label="Planned days"
-          value={decimal(data.kpis.planned_days, 2)}
-          hint={caps.plan ? 'From the well configuration' : 'Needs rig and well read access'}
-          icon={<ScheduleOutlined fontSize="small"/>}
-          title="Planned days from Well Configuration (drilling + configured completion), with any approved plan adjustment applied."
-        />
-        <KpiCard
-          label="Actual days"
-          value={decimal(data.kpis.actual_days)}
-          hint={caps.actuals ? `${count(data.kpis.recorded_days)} recorded · ${data.kpis.day_variance === null ? '—' : `${Number(data.kpis.day_variance) >= 0 ? '+' : ''}${decimal(data.kpis.day_variance, 1)} vs plan`}` : 'Needs daily cost read access'}
-          icon={<AlignVerticalBottomRounded fontSize="small"/>}
-          tone={data.kpis.day_variance !== null && Number(data.kpis.day_variance) > 0 ? 'warning' : 'default'}
-          title="Calendar days from the first to the last day of each well's cost register, summed across wells."
-        />
-        <KpiCard
-          label="NPT / UPA days"
-          value={`${decimal(data.kpis.npt_days, 2)} / ${decimal(data.kpis.upa_days, 2)}`}
-          hint={caps.actuals ? `${compactMoney(data.kpis.npt_amount, currency)} NPT · ${compactMoney(data.kpis.upa_amount, currency)} UPA` : 'Needs daily cost read access'}
-          icon={<EventBusyOutlined fontSize="small"/>}
-          tone={Number(data.kpis.npt_days ?? 0) > 0 ? 'error' : 'default'}
-          title="Deduplicated operational service hours classified as NPT or UPA, divided by 24. Affected cost dates are not treated as duration."
-        />
-        <KpiCard
-          label="AFE amount"
-          value={money(data.kpis.afe_amount, currency)}
-          hint={caps.budget ? `${count(data.kpis.afes)} AFEs${data.kpis.conversion_pending_afes ? ` · ${data.kpis.conversion_pending_afes} pending conversion` : ''}` : 'Needs AFE read access'}
-          icon={<DescriptionOutlined fontSize="small"/>}
-        />
-        <KpiCard
-          label="SOW adjusted"
-          value={money(data.kpis.sow_adjusted_amount, currency)}
-          hint={caps.budget ? `Effective plan ${compactMoney(data.kpis.effective_afe_amount, currency)}` : 'Needs AFE read access'}
-          icon={<DownloadDoneRounded fontSize="small"/>}
-          title="Latest approved AFE SOW adjustment. Where none exists, the saved AFE amount is the effective plan."
-        />
-        <KpiCard
-          label="Actual amount"
-          value={money(data.kpis.actual_amount, currency)}
-          hint={caps.actuals ? `${count(data.kpis.wells_with_actuals)} wells tracked · ${compactMoney(data.kpis.other_expenses_amount, currency)} other` : 'Needs daily cost read access'}
-          icon={<AccountBalanceWalletOutlined fontSize="small"/>}
-        />
-        <KpiCard
-          label="AFE balance"
-          value={money(data.kpis.afe_balance, currency)}
-          hint={caps.budget && caps.actuals ? `${percent(data.kpis.utilisation_percent)} of the effective plan used` : 'Needs AFE and daily cost access'}
-          icon={<TrendingUpRounded fontSize="small"/>}
-          tone={data.kpis.afe_balance !== null && Number(data.kpis.afe_balance) < 0 ? 'error' : 'good'}
-          title="Effective AFE amount (SOW adjusted, otherwise the saved estimate) less recorded actual cost."
-        />
-        <KpiCard
-          label="Depth progress"
-          value={percent(data.kpis.depth_progress_percent)}
-          hint={`${decimal(data.kpis.actual_depth, 0)} of ${decimal(data.kpis.planned_depth, 0)} m`}
-          icon={<TerrainOutlined fontSize="small"/>}
-          title="Actual depth from the daily cost register (standardized in meters, ft ÷ 3.281) against planned well depth in meters across all wells."
-        />
-        <KpiCard
-          label="Rigs in scope"
-          value={count(data.kpis.rigs)}
-          hint={caps.plan ? `${count(data.kpis.draft_wells)} wells still in configuration draft` : '—'}
-          icon={<PrecisionManufacturingOutlined fontSize="small"/>}
-        />
-        <KpiCard
-          label="Over budget"
-          value={`${count(data.kpis.over_budget_wells)} / ${count(data.kpis.over_budget_afes)}`}
-          hint="Wells / AFEs above their effective plan"
-          icon={<ReportProblemOutlined fontSize="small"/>}
-          tone={data.kpis.over_budget_wells ? 'error' : 'good'}
-        />
-        <KpiCard
-          label="Cost position"
-          value={compactMoney(data.kpis.actual_amount, currency)}
-          hint={caps.actuals ? `${count(data.kpis.recorded_days)} recording days · ${compactMoney(data.kpis.upa_amount, currency)} unplanned` : 'Needs daily cost read access'}
-          icon={<InsightsOutlined fontSize="small"/>}
-        />
+      <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1.2 }}>
+        <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.12em', textTransform: 'uppercase', color: 'text.secondary' }}>Financial exposure</Typography>
+        <Box sx={{ flex: 1, height: '1px', bgcolor: 'divider' }}/>
+        <Typography sx={{ fontSize: 10.5, color: 'text.secondary' }}>Effective plan against recorded actual · {currency || 'no currency'}</Typography>
+      </Box>
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: `repeat(${Math.max(financialCards.length, 1)}, minmax(0,1fr))` } }}>
+        {financialCards.map(card => <StatCard key={card.key} label={card.label} value={card.value} hint={card.hint} icon={card.icon} tone={card.tone} title={card.title} badge={card.badge}/>)}
       </Box>
 
-      <Box display="grid" gap={2} mt={2} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.05fr) minmax(0, 1fr)' } }}>
-        <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 2 }}>
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={1}>
-            <Box>
-              <Typography fontWeight={800} fontSize={15}>AFE against actual cost</Typography>
-              <Typography color="text.secondary" fontSize={11.5} mt={.35}>Top wells by effective plan. Click a bar to drill into the well.</Typography>
-            </Box>
-            <Tag tone={data.kpis.over_budget_wells ? 'error' : 'success'}>{data.kpis.over_budget_wells ? `${data.kpis.over_budget_wells} over` : 'Within plan'}</Tag>
-          </Box>
-          {chartWells.length
-            ? <Box height={286} mt={1}><ReactECharts
-              option={costOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
-              onEvents={{ click: (params: { dataIndex?: number }) => drillFromChart(params, chartWells) }}
-            /></Box>
-            : <Typography color="text.secondary" fontSize={12.5} py={7} textAlign="center">No AFE or actual cost to chart yet.</Typography>}
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 2 }}>
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={1}>
-            <Box>
-              <Typography fontWeight={800} fontSize={15}>Planned days against actual time</Typography>
-              <Typography color="text.secondary" fontSize={11.5} mt={.35}>Actual days split using allocated UPA and NPT hours ÷ 24. The marker is the plan.</Typography>
-            </Box>
-            <Tag tone="info">Time</Tag>
-          </Box>
-          {daysWells.length
-            ? <Box height={286} mt={1}><ReactECharts
-              option={daysOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
-              onEvents={{ click: (params: { dataIndex?: number }) => drillFromChart(params, daysWells) }}
-            /></Box>
-            : <Typography color="text.secondary" fontSize={12.5} py={7} textAlign="center">No plan or recorded days to chart yet.</Typography>}
-        </Paper>
+      <Box display="flex" alignItems="center" gap={1} sx={{ mt: 2.75, mb: 1.2 }}>
+        <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.12em', textTransform: 'uppercase', color: 'text.secondary' }}>Operations performance</Typography>
+        <Box sx={{ flex: 1, height: '1px', bgcolor: 'divider' }}/>
+        <Typography sx={{ fontSize: 10.5, color: 'text.secondary' }}>Time, depth and delivery</Typography>
+      </Box>
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(3, minmax(0,1fr))', xl: 'repeat(5, minmax(0,1fr))' } }}>
+        {operationCards.map(card => <StatCard key={card.key} label={card.label} value={card.value} hint={card.hint} icon={card.icon} tone={card.tone} title={card.title} badge={card.badge}/>)}
       </Box>
 
-      <Box display="grid" gap={2} mt={2} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr)' } }}>
-        <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 2 }}>
-          <Typography fontWeight={800} fontSize={15}>Cumulative actual cost</Typography>
-          <Typography color="text.secondary" fontSize={11.5} mt={.35} mb={1}>Every cost date in the filtered range, in {currency || 'the selected currency'}.</Typography>
-          {data.daily.length
-            ? <Box height={264}><ReactECharts option={trendOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
-            : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No recorded cost in this range.</Typography>}
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 2 }}>
-          <Typography fontWeight={800} fontSize={15}>Actual cost mix</Typography>
-          <Typography color="text.secondary" fontSize={11.5} mt={.35} mb={1}>Where the recorded money went.</Typography>
-          {data.cost_groups.some(row => Number(row.actual ?? 0) > 0)
-            ? <Box height={264}><ReactECharts option={mixOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
-            : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No recorded cost yet.</Typography>}
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 2 }}>
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-            <Box>
-              <Typography fontWeight={800} fontSize={15}>Depth progress</Typography>
-              <Typography color="text.secondary" fontSize={11.5} mt={.35}>Deepest section carrying cost against the plan.</Typography>
-            </Box>
-            <StraightenRounded sx={{ fontSize: 18, color: 'text.secondary' }}/>
+      <Box sx={{ mt: 1.5 }}>
+        <SectionCard bodyPadding={0}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(4, minmax(0,1fr))' } }}>
+            {[
+              { label: 'Rigs in scope', value: count(data.kpis.rigs), hint: `${count(data.kpis.draft_wells)} wells still in configuration draft` },
+              { label: 'Over budget', value: `${count(data.kpis.over_budget_wells)} / ${count(data.kpis.over_budget_afes)}`, hint: 'Wells / AFEs above their effective plan', alert: Boolean(data.kpis.over_budget_wells) },
+              { label: 'Recording days', value: count(data.kpis.recorded_days), hint: `${count(data.kpis.actual_days)} calendar days in scope` },
+              { label: 'Unplanned (UPA)', value: compactMoney(data.kpis.upa_amount, currency), hint: `${decimal(data.kpis.upa_days, 2)} UPA days in the cost register` },
+            ].map((fact, index) => <Box key={fact.label} sx={{ px: 2.1, py: 1.5, borderLeft: index === 0 ? 0 : '1px solid', borderColor: 'divider', borderTop: { xs: index >= 2 ? '1px solid' : 0, md: 0 } }}>
+              <Typography sx={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'text.secondary' }}>{fact.label}</Typography>
+              <Typography sx={{ fontSize: 17, fontWeight: 700, mt: .35, letterSpacing: '-.4px', color: fact.alert ? 'error.main' : 'text.primary' }} className="tnum">{fact.value}</Typography>
+              <Typography sx={{ fontSize: 10.5, color: 'text.secondary', mt: .2 }}>{fact.hint}</Typography>
+            </Box>)}
           </Box>
-          {data.wells.some(row => row.depth_progress_percent !== null)
-            ? <Box height={264} mt={.5}><ReactECharts option={depthOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
-            : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No depth progress available.</Typography>}
-        </Paper>
+        </SectionCard>
       </Box>
 
-      <Box display="grid" gap={2} mt={2} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 2fr) minmax(0, 1fr)' } }}>
-        <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 2 }}>
-          <Typography fontWeight={800} fontSize={15}>Cost group reconciliation</Typography>
-          <Typography color="text.secondary" fontSize={11.5} mt={.35} mb={1}>AFE planned against recorded actual, by cost group.</Typography>
+      <Box display="grid" gap={2} sx={{ mt: 2.5, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(0, 1fr)' } }}>
+        <ChartPanel
+          title="AFE against actual cost"
+          subtitle="Top wells by effective plan. Select a bar to open that well's drill-through panel."
+          meta={<Tag tone={data.kpis.over_budget_wells ? 'error' : 'success'}>{data.kpis.over_budget_wells ? `${data.kpis.over_budget_wells} over plan` : 'Within plan'}</Tag>}
+          height={296}
+          empty={!chartWells.length}
+          emptyMessage="No AFE or actual cost to chart for this scope yet."
+          caption={`AFE amount and actual cost in ${currency || 'the selected currency'}; SOW adjusted appears only where an approved adjustment exists.`}
+        >
+          <ReactECharts
+            option={costOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
+            onEvents={{ click: (params: { dataIndex?: number }) => drillFromChart(params, chartWells) }}
+          />
+        </ChartPanel>
+        <ChartPanel
+          title="Actual cost mix"
+          subtitle="Where the recorded money went, by cost group."
+          meta={<Tag tone="info">Share</Tag>}
+          height={296}
+          empty={!data.cost_groups.some(row => Number(row.actual ?? 0) > 0)}
+          emptyMessage="No recorded cost to break down yet."
+          caption="Shares of recorded actual cost in the selected currency; hover a slice for its exact amount."
+        >
+          <ReactECharts option={mixOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+        </ChartPanel>
+      </Box>
+
+      <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(0, 1fr)' } }}>
+        <ChartPanel
+          title="Cumulative actual cost"
+          subtitle="Daily actual cost with the running cumulative line, by cost date."
+          meta={<Tag tone="info">{currency || 'Currency'}</Tag>}
+          height={268}
+          empty={!data.daily.length}
+          emptyMessage="No recorded cost in this range."
+          caption={`Daily bars and the cumulative line are the same money counted differently — never add the two series. ${refreshedAt ? `Read at ${displayDateTime(refreshedAt.toISOString())}.` : ''}`}
+        >
+          <ReactECharts option={trendOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+        </ChartPanel>
+        <ChartPanel
+          title="Depth progress"
+          subtitle="Deepest section carrying cost against the planned depth, per well."
+          height={268}
+          empty={!data.wells.some(row => row.depth_progress_percent !== null)}
+          emptyMessage="No depth progress available."
+          caption="Progress uses the deepest configured hole section with recorded cost; depth is measured, never summed across sections."
+        >
+          <ReactECharts option={depthOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+        </ChartPanel>
+      </Box>
+
+      <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(0, 1fr)' } }}>
+        <ChartPanel
+          title="Planned days against actual time"
+          subtitle="Actual days split into productive, UPA and NPT by allocated service hours ÷ 24."
+          meta={<Tag tone="info">Duration</Tag>}
+          height={278}
+          empty={!daysWells.length}
+          emptyMessage="No plan or recorded days to chart yet."
+          caption="The diamond marks the planned duration. NPT and UPA are operational durations, not affected-date counts."
+        >
+          <ReactECharts
+            option={daysOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
+            onEvents={{ click: (params: { dataIndex?: number }) => drillFromChart(params, daysWells) }}
+          />
+        </ChartPanel>
+        <SectionCard title="Time classification" subtitle="Days and recorded cost under each classification." sx={{ height: '100%' }}>
+          <Box>
+            {data.classification.map(row => <Box key={row.key} sx={{ py: 1.15, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}>
+              <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
+                <Box display="flex" alignItems="center" gap={.8}>
+                  <Tag tone={row.key === 'NPT' ? 'error' : row.key === 'UPA' ? 'warning' : 'success'}>{row.key}</Tag>
+                  <Typography fontSize={11.5} color="text.secondary" className="tnum">{decimal(row.days, row.key === 'Planned' ? 0 : 2)} days</Typography>
+                </Box>
+                <Typography fontSize={12.5} fontWeight={700} className="tnum">{money(row.actual, currency)}</Typography>
+              </Box>
+              <Box display="flex" alignItems="center" gap={1} mt={.6}>
+                <LinearProgress variant="determinate" value={Math.min(100, Math.max(0, Number(row.share ?? 0)))} aria-label={`${row.key} share ${percent(row.share)}`} sx={{ flex: 1, height: 4, borderRadius: 2, bgcolor: 'divider', '& .MuiLinearProgress-bar': { transition: 'none', bgcolor: row.key === 'NPT' ? 'error.main' : row.key === 'UPA' ? 'warning.main' : 'primary.main' } }}/>
+                <Typography fontSize={10.5} color="text.secondary" className="tnum" sx={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}>{percent(row.share)} of cost</Typography>
+              </Box>
+            </Box>)}
+            {caps.actuals && data.kpis.other_expenses_amount !== null && Number(data.kpis.other_expenses_amount) > 0 && <Box sx={{ pt: 1.2, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'space-between' }}>
+              <Typography fontSize={11.5} color="text.secondary">Other expenses (unbudgeted)</Typography>
+              <Typography fontSize={12} fontWeight={700} color="warning.main" className="tnum">{money(data.kpis.other_expenses_amount, currency)}</Typography>
+            </Box>}
+          </Box>
+        </SectionCard>
+      </Box>
+
+      <Box sx={{ mt: 2 }}>
+        <SectionCard
+          title="Cost group reconciliation"
+          subtitle="AFE planned against recorded actual by cost group, in the selected currency."
+          meta={<Tag tone="info">{data.cost_groups.length} groups</Tag>}
+          bodyPadding={0}
+        >
           <Box sx={{ overflowX: 'auto' }}>
             <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <Box component="thead">
                 <Box component="tr">
                   {['Group', 'AFE planned', 'Actual', 'Balance', 'Share'].map(label => <Box component="th" key={label} sx={{
-                    textAlign: label === 'Group' ? 'left' : 'right', py: .9, px: 1, borderBottom: '1px solid', borderColor: 'divider',
-                    fontSize: 10, letterSpacing: .6, textTransform: 'uppercase', color: 'text.secondary',
+                    textAlign: label === 'Group' ? 'left' : 'right', py: 1, px: 2, bgcolor: 'background.default',
+                    borderBottom: '1px solid', borderColor: 'divider',
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'text.secondary',
                   }}>{label}</Box>)}
                 </Box>
               </Box>
               <Box component="tbody">
-                {data.cost_groups.map(row => <Box component="tr" key={row.key}>
-                  <Box component="td" sx={{ py: .8, px: 1, borderBottom: '1px solid', borderColor: 'divider', fontWeight: 600 }}>{row.label}</Box>
-                  <Box component="td" sx={{ py: .8, px: 1, borderBottom: '1px solid', borderColor: 'divider', textAlign: 'right' }}>{money(row.planned, currency)}</Box>
-                  <Box component="td" sx={{ py: .8, px: 1, borderBottom: '1px solid', borderColor: 'divider', textAlign: 'right' }}>{money(row.actual, currency)}</Box>
-                  <Box component="td" sx={{ py: .8, px: 1, borderBottom: '1px solid', borderColor: 'divider', textAlign: 'right' }}>
+                {data.cost_groups.map(row => <Box component="tr" key={row.key} sx={{ '&:hover td': { bgcolor: 'action.hover' } }}>
+                  <Box component="td" sx={{ py: .95, px: 2, borderBottom: '1px solid', borderColor: 'divider', fontWeight: 600 }}>{row.label}</Box>
+                  <Box component="td" sx={{ py: .95, px: 2, borderBottom: '1px solid', borderColor: 'divider', textAlign: 'right' }} className="tnum">{money(row.planned, currency)}</Box>
+                  <Box component="td" sx={{ py: .95, px: 2, borderBottom: '1px solid', borderColor: 'divider', textAlign: 'right' }} className="tnum">{money(row.actual, currency)}</Box>
+                  <Box component="td" sx={{ py: .95, px: 2, borderBottom: '1px solid', borderColor: 'divider', textAlign: 'right' }}>
                     <BalanceCell value={row.balance} currency={currency}/>
                   </Box>
-                  <Box component="td" sx={{ py: .8, px: 1, borderBottom: '1px solid', borderColor: 'divider', textAlign: 'right' }}>{percent(row.share)}</Box>
+                  <Box component="td" sx={{ py: .95, px: 2, borderBottom: '1px solid', borderColor: 'divider', textAlign: 'right' }} className="tnum">{percent(row.share)}</Box>
                 </Box>)}
               </Box>
             </Box>
           </Box>
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 2 }}>
-          <Typography fontWeight={800} fontSize={15}>Time classification</Typography>
-          <Typography color="text.secondary" fontSize={11.5} mt={.35} mb={1}>Days and cost recorded under each classification.</Typography>
-          {data.classification.map(row => <Box key={row.key} sx={{ borderTop: '1px solid', borderColor: 'divider', py: 1 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
-              <Tag tone={row.key === 'NPT' ? 'error' : row.key === 'UPA' ? 'warning' : 'success'}>{row.key}</Tag>
-              <Typography fontSize={11.5} color="text.secondary">{decimal(row.days, row.key === 'Planned' ? 0 : 2)} days</Typography>
-            </Box>
-            <Box display="flex" justifyContent="space-between" mt={.6}>
-              <Typography fontSize={12.5} fontWeight={700}>{money(row.actual, currency)}</Typography>
-              <Typography fontSize={11} color="text.secondary">{percent(row.share)} of cost</Typography>
-            </Box>
-          </Box>)}
-          {caps.actuals && (data.kpis.other_expenses_amount !== null && Number(data.kpis.other_expenses_amount) > 0) && <Box mt={1.2}>
-            <Divider/>
-            <Box display="flex" justifyContent="space-between" mt={1}>
-              <Typography fontSize={11.5} color="text.secondary">Other expenses (unbudgeted)</Typography>
-              <Typography fontSize={12} fontWeight={700} color="warning.main">{money(data.kpis.other_expenses_amount, currency)}</Typography>
-            </Box>
-          </Box>}
-        </Paper>
+        </SectionCard>
       </Box>
 
-      <Box mt={2.5}>
-        <Box display="flex" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap" mb={1}>
+      <Box sx={{ mt: 3 }}>
+        <Box display="flex" alignItems="flex-end" justifyContent="space-between" gap={1.5} flexWrap="wrap" sx={{ mb: 1.25 }}>
           <Box>
-            <Typography fontWeight={800} fontSize={15}>Register drill-through</Typography>
-            <Typography color="text.secondary" fontSize={11.5} mt={.35}>
-              Each row carries its own search, advanced filters, date range, 20/50/100 paging and CSV/XLSX/PDF export. Use Drill in for the record-level panel.
+            <Typography sx={{ fontSize: 14, fontWeight: 700 }}>Register drill-through</Typography>
+            <Typography color="text.secondary" fontSize={11.5} sx={{ mt: .3 }}>
+              Each register carries its own search, advanced filters, date range, 20/50/100 paging and CSV/XLSX/PDF export. Use Drill in for the record-level panel.
             </Typography>
           </Box>
-          {caps.actuals && can('daily-cost:read') && <Button component={RouterLink} to="/daily-cost/analysis" size="small" endIcon={<ArrowForwardRounded/>}>Well cost analysis</Button>}
         </Box>
-        <Tabs value={tab} onChange={(_event, value: number) => setTab(value)} sx={{ mb: 1.5 }}>
+        <Tabs value={tab} onChange={(_event, value: number) => setTab(value)} sx={{ mb: 1.5, minHeight: 42, '& .MuiTab-root': { minHeight: 42 } }}>
           <Tab label={`Wells (${data.wells.length})`}/>
           {caps.budget && <Tab label={`AFEs (${data.afes.length})`}/>}
           <Tab label={`Rigs (${data.rigs.length})`}/>
@@ -908,13 +952,13 @@ export default function BusinessDashboard() {
         />}
       </Box>
 
-      <Box display="flex" gap={2} flexWrap="wrap" mt={1.5} alignItems="center">
-        <Typography color="text.secondary" fontSize={11}>
+      <Box display="flex" gap={2} flexWrap="wrap" mt={1.75} alignItems="center">
+        <Typography color="text.secondary" fontSize={10.8}>
           Planned days and AFE amounts are plan-level figures; the date range narrows the cost register only.
         </Typography>
         <Box flex={1}/>
         <Tooltip title="Amounts are grouped by the AFE standard currency, never converted silently.">
-          <Typography color="text.secondary" fontSize={11} sx={{ textDecoration: 'underline dotted', cursor: 'help' }}>Currency: {currency || 'not set'}</Typography>
+          <Typography color="text.secondary" fontSize={10.8} sx={{ textDecoration: 'underline dotted', cursor: 'help' }}>Currency: {currency || 'not set'}</Typography>
         </Tooltip>
       </Box>
     </>}

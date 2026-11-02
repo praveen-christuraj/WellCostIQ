@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import { ArrowForwardRounded, DeleteOutlineRounded, Inventory2Outlined, LibraryBooksOutlined, StorageOutlined } from '@mui/icons-material'
-import { Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
+import { Box, Button, Typography } from '@mui/material'
 import { api } from '../lib/api'
 import type { MasterDataActivity, MasterDataOverview as OverviewData } from '../lib/masterData'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { DatasetState } from '../components/ui/DatasetState'
+import { SectionCard } from '../components/ui/SectionCard'
+import { StatCard } from '../components/ui/StatCard'
 
 // Vendors and PO/SO Orders have their own pages; the reference lists share one.
 const CONSUMABLE_KEYS = ['mud-chemicals', 'cement-additives', 'fuel-types', 'drill-bits']
@@ -24,15 +27,13 @@ function activityTone(action: string): 'neutral' | 'success' | 'info' | 'warning
 
 function RecentActivity({ entries }: { entries: MasterDataActivity[] }) {
   if (!entries.length) {
-    return <Box display="grid" sx={{ placeItems: 'center', minHeight: 200, color: 'text.secondary' }}>
-      <Typography fontSize={13}>Master data activity will appear here.</Typography>
-    </Box>
+    return <DatasetState kind="empty" compact title="No master data activity yet" message="Creates, edits, imports and deletions will appear here as they are audited."/>
   }
   return <Box>
-    {entries.map(entry => <Box key={entry.id} display="flex" alignItems="flex-start" gap={1.2} sx={{ borderTop: '1px solid', borderColor: 'divider', py: 1.45 }}>
-      <Tag tone={activityTone(entry.action)}>{entry.action.replaceAll('_', ' ')}</Tag>
+    {entries.map(entry => <Box key={entry.id} display="flex" alignItems="flex-start" gap={1.2} sx={{ borderTop: '1px solid', borderColor: 'divider', py: 1.35, '&:first-of-type': { borderTop: 0 } }}>
+      <Box sx={{ pt: .2 }}><Tag tone={activityTone(entry.action)}>{entry.action.replaceAll('_', ' ')}</Tag></Box>
       <Box flex={1} minWidth={0}>
-        <Typography fontSize={12} fontWeight={700} noWrap>{entry.entity_label}</Typography>
+        <Typography fontSize={12.5} fontWeight={650} noWrap>{entry.entity_label}</Typography>
         <Typography color="text.secondary" fontSize={11.5}>{entry.summary}</Typography>
         <Typography color="text.disabled" fontSize={10.5} mt={.35}>{new Date(entry.created_at).toLocaleString()}</Typography>
       </Box>
@@ -53,65 +54,39 @@ export default function MasterDataOverview() {
   return <>
     <PageHeading
       eyebrow="MASTER DATA MANAGEMENT / OVERVIEW"
-      title="Master Data Management"
-      subtitle="Workspace-wide reference data: units, currencies, well activities, drilling and completion services, vendors, and their PO/SO orders with attachments."
+      title="Master data"
+      subtitle="The workspace reference data every costing workflow reads from: units, currencies, phases, hole sections, activities, services, vendors and their PO/SO orders."
       action={<Box display="flex" gap={1} flexWrap="wrap">
         <Button component={RouterLink} to="/master-data/deleted" variant="outlined" startIcon={<DeleteOutlineRounded/>}>Deleted entries</Button>
         <Button component={RouterLink} to="/master-data/records" variant="contained" endIcon={<ArrowForwardRounded/>}>Manage master data</Button>
       </Box>}
     />
     <ErrorMessage message={error}/>
-    {!data ? <Box py={8} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={28}/></Box> : <>
-      <Box className="stat-grid" sx={{ gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' } }}>
-        <Paper className="stat-card" variant="outlined">
-          <Box className="stat-icon" sx={{ color: 'primary.main', bgcolor: 'var(--surface-accent)' }}><StorageOutlined sx={{ fontSize: 21 }}/></Box>
-          <Typography className="stat-value">{data.active_records}</Typography>
-          <Typography fontWeight={700} fontSize={13}>Active records</Typography>
-          <Typography color="text.secondary" fontSize={11.5} mt={.5}>Available to well-costing workflows</Typography>
-        </Paper>
-        <Paper className="stat-card" variant="outlined">
-          <Box className="stat-icon" sx={{ color: 'warning.main', bgcolor: 'var(--surface-muted)' }}><DeleteOutlineRounded sx={{ fontSize: 21 }}/></Box>
-          <Typography className="stat-value">{data.deleted_records}</Typography>
-          <Typography fontWeight={700} fontSize={13}>Deleted entries</Typography>
-          <Typography color="text.secondary" fontSize={11.5} mt={.5}>Recoverable until permanently removed</Typography>
-        </Paper>
-        <Paper className="stat-card" variant="outlined">
-          <Box className="stat-icon" sx={{ color: 'secondary.main', bgcolor: 'var(--surface-accent)' }}><LibraryBooksOutlined sx={{ fontSize: 21 }}/></Box>
-          <Typography className="stat-value">{data.module_count}</Typography>
-          <Typography fontWeight={700} fontSize={13}>Reference data types</Typography>
-          <Typography color="text.secondary" fontSize={11.5} mt={.5}>Reference lists, vendors, and PO/SO orders</Typography>
-        </Paper>
+
+    {!data ? <DatasetState kind="loading" title="Loading master data…"/> : <>
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(3, minmax(0,1fr))' } }}>
+        <StatCard label="Active records" value={data.active_records.toLocaleString()} hint="Available to well-costing workflows" icon={<StorageOutlined fontSize="small"/>}/>
+        <StatCard label="Deleted entries" value={data.deleted_records.toLocaleString()} hint="Recoverable until permanently removed" icon={<DeleteOutlineRounded fontSize="small"/>} tone={data.deleted_records ? 'warning' : 'default'}/>
+        <StatCard label="Reference types" value={data.module_count.toLocaleString()} hint="Reference lists, vendors and PO/SO orders" icon={<LibraryBooksOutlined fontSize="small"/>}/>
       </Box>
 
-      <Box className="overview-grid">
-        <Paper className="content-card" variant="outlined">
-          <Box display="flex" justifyContent="space-between" alignItems="start" mb={1.5}>
-            <Box>
-              <Typography fontWeight={800} fontSize={16}>Data by type</Typography>
-              <Typography fontSize={12} color="text.secondary" mt={.5}>Active and deleted workspace records</Typography>
-            </Box>
-            <Tag tone="info">{data.active_records + data.deleted_records} total</Tag>
-          </Box>
-          {data.modules.map(module => <Box key={module.key} display="flex" alignItems="center" gap={1.5} sx={{ borderTop: '1px solid', borderColor: 'divider', py: 1.6 }}>
+      <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.2fr) minmax(0, 1fr)' } }}>
+        <SectionCard title="Data by type" subtitle="Active and deleted records in each reference catalogue." meta={<Tag tone="info">{data.active_records + data.deleted_records} total</Tag>} bodyPadding={0}>
+          {data.modules.map(module => <Box key={module.key} display="flex" alignItems="center" gap={1.4} sx={{ px: 2.25, py: 1.35, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 }, '&:hover': { bgcolor: 'action.hover' } }}>
             <Box className="table-icon"><Inventory2Outlined sx={{ fontSize: 17 }}/></Box>
             <Box flex={1} minWidth={0}>
-              <Typography fontSize={12.5} fontWeight={700}>{module.label}</Typography>
+              <Typography fontSize={12.5} fontWeight={650}>{module.label}</Typography>
               <Typography color="text.secondary" fontSize={11}>{module.active_count} active · {module.deleted_count} deleted</Typography>
             </Box>
             <Button component={RouterLink} to={modulePath(module.key)} size="small" endIcon={<ArrowForwardRounded sx={{ fontSize: 16 }}/>}>Open</Button>
           </Box>)}
-        </Paper>
+        </SectionCard>
 
-        <Paper className="content-card" variant="outlined">
-          <Box display="flex" justifyContent="space-between" alignItems="start" mb={2.2}>
-            <Box>
-              <Typography fontWeight={800} fontSize={16}>Recent activity</Typography>
-              <Typography fontSize={12} color="text.secondary" mt={.5}>Changes and lifecycle events, audit logged</Typography>
-            </Box>
-            <Tag tone="success">Audit enabled</Tag>
+        <SectionCard title="Recent activity" subtitle="Changes and lifecycle events, recorded in the audit trail." meta={<Tag tone="success">Audit enabled</Tag>} bodyPadding={0}>
+          <Box sx={{ px: 2.25, py: 1 }}>
+            <RecentActivity entries={data.recent_activity}/>
           </Box>
-          <RecentActivity entries={data.recent_activity}/>
-        </Paper>
+        </SectionCard>
       </Box>
     </>}
   </>

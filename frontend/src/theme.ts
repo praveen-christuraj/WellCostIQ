@@ -1,7 +1,7 @@
 import { createTheme, type Theme } from '@mui/material/styles'
-import { fonts, motion, navy, radius, semantic, shadow, space, surface, typeScale } from './designSystem'
+import { brand, brass, fonts, motion, radius, semantic, shadow, space, surface, typeScale } from './designSystem'
 
-// Enterprise Navy Blue & White palette (light) and navy-based dark palette.
+// Deep petrol & paper palette (light) and ink-based dark palette.
 // No decorative motion: transitions are limited to essential state changes and are
 // disabled entirely for `prefers-reduced-motion` (see styles.css).
 // Every value comes from src/designSystem.ts so the MUI theme, the CSS variables and
@@ -21,9 +21,9 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
     palette: {
       mode,
       primary: light
-        ? { main: navy[800], dark: navy[900], light: navy[100], contrastText: '#FFFFFF' }
-        : { main: navy[400], dark: navy[500], light: navy[900], contrastText: '#0B1A2B' },
-      secondary: light ? { main: navy[600] } : { main: navy[400] },
+        ? { main: brand[700], dark: brand[800], light: brand[100], contrastText: '#FFFFFF' }
+        : { main: brand[300], dark: brand[400], light: brand[900], contrastText: '#06222A' },
+      secondary: light ? { main: brass[500] } : { main: brass[300] },
       background: { default: s.canvas, paper: s.paper },
       text: { primary: s.text, secondary: s.textMuted, disabled: s.textDisabled },
       divider: s.divider,
@@ -32,10 +32,10 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
       success: sem.success,
       info: sem.info,
       action: {
-        hover: light ? 'rgba(18, 58, 99, 0.045)' : 'rgba(143, 184, 228, 0.08)',
-        selected: light ? 'rgba(18, 58, 99, 0.09)' : 'rgba(143, 184, 228, 0.14)',
+        hover: light ? 'rgba(21, 81, 91, 0.05)' : 'rgba(121, 185, 193, 0.09)',
+        selected: light ? 'rgba(21, 81, 91, 0.09)' : 'rgba(121, 185, 193, 0.15)',
         disabled: s.textDisabled,
-        disabledBackground: light ? '#E2E8EF' : '#1B2C40',
+        disabledBackground: light ? '#E4EBEC' : '#17292F',
       },
     },
     typography: {
@@ -64,7 +64,7 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
           // ring around the whole panel: its border already separates it, and the FocusTrap puts
           // the visible focus on the first control inside.
           '.MuiDialog-container:focus-visible, [role="dialog"]:focus-visible': { outline: 'none' },
-          '::selection': { background: light ? navy[200] : navy[800], color: s.text },
+          '::selection': { background: light ? brand[200] : brand[800], color: s.text },
           '::-webkit-scrollbar': { width: 11, height: 11 },
           '::-webkit-scrollbar-track': { background: 'transparent' },
           '::-webkit-scrollbar-thumb': {
@@ -102,10 +102,10 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
             '&:hover': { boxShadow: 'none' },
             '&.Mui-disabled': { background: light ? '#E2E8EF' : '#1B2C40' },
           },
-          containedPrimary: { '&:hover': { backgroundColor: light ? navy[700] : navy[300] } },
+          containedPrimary: { '&:hover': { backgroundColor: light ? brand[800] : brand[200] } },
           outlined: {
             borderColor: s.dividerStrong,
-            '&:hover': { borderColor: light ? navy[800] : navy[400], backgroundColor: s.hover },
+            '&:hover': { borderColor: light ? brand[700] : brand[300], backgroundColor: s.hover },
             '&.Mui-disabled': { borderColor: s.divider },
           },
           text: { '&:hover': { backgroundColor: s.hover } },
@@ -147,8 +147,8 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
             borderRadius: radius.md,
             backgroundColor: light ? '#FFFFFF' : 'rgba(255, 255, 255, 0.02)',
             '& .MuiOutlinedInput-notchedOutline': { borderColor: s.dividerStrong },
-            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: navy[500] },
-            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: light ? navy[800] : navy[400] },
+            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: brand[500] },
+            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: light ? brand[700] : brand[300] },
             '&.Mui-focused': { boxShadow: `0 0 0 3px ${s.focusSoft}` },
             '&.Mui-disabled .MuiOutlinedInput-notchedOutline': { borderColor: s.divider },
           },
@@ -157,7 +157,7 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
       },
       MuiInputLabel: {
         styleOverrides: {
-          root: { fontSize: 13, color: s.textMuted, '&.Mui-focused': { color: light ? navy[800] : navy[400] } },
+          root: { fontSize: 13, color: s.textMuted, '&.Mui-focused': { color: light ? brand[700] : brand[300] } },
         },
       },
       MuiFormHelperText: {
@@ -279,8 +279,8 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
               transition: transition('background-color'),
             },
             '&.Mui-selected': {
-              color: light ? navy[700] : navy[400],
-              '&::after': { backgroundColor: light ? navy[700] : navy[400] },
+              color: light ? brand[700] : brand[300],
+              '&::after': { backgroundColor: light ? brand[700] : brand[300] },
             },
           },
         },
@@ -296,7 +296,7 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
             borderColor: s.dividerStrong,
             color: s.textMuted,
             '&.Mui-selected': {
-              color: light ? navy[700] : navy[400],
+              color: light ? brand[700] : brand[300],
               backgroundColor: s.accentSurface,
               '&:hover': { backgroundColor: s.accentSurface },
             },
@@ -309,11 +309,38 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
           label: { paddingLeft: 8, paddingRight: 8 },
         },
       },
+      // MUI derives a dark-mode standard alert by darkening `palette.<tone>.light`
+      // by 90%, which lands on near-black and reads as a hole punched in the page.
+      // The four standard tones are therefore drawn explicitly from the design
+      // tokens: a tinted surface, a hairline of the same family and the tone icon.
       MuiAlert: {
         styleOverrides: {
-          root: { borderRadius: radius.md, fontSize: 12.5, alignItems: 'flex-start', padding: '9px 12px' },
-          message: { fontWeight: 600, paddingTop: 1 },
-          icon: { paddingTop: 1 },
+          root: {
+            borderRadius: radius.md, fontSize: 12.5, alignItems: 'flex-start', padding: '9px 12px',
+            border: '1px solid', color: s.text,
+            '& .MuiAlert-message': { color: s.text, paddingTop: 1 },
+            '& .MuiAlert-action': { alignItems: 'center', paddingTop: 0, marginRight: -4 },
+          },
+          standardInfo: {
+            backgroundColor: light ? brand[50] : '#0E2A31',
+            borderColor: light ? '#C2DBDF' : '#2A4C54',
+            '& .MuiAlert-icon': { color: light ? brand[700] : brand[300] },
+          },
+          standardSuccess: {
+            backgroundColor: light ? '#E8F3EC' : '#12291F',
+            borderColor: light ? '#C4DFCF' : '#27503B',
+            '& .MuiAlert-icon': { color: sem.success.main },
+          },
+          standardWarning: {
+            backgroundColor: light ? '#FAF3E4' : '#2C2416',
+            borderColor: light ? '#EAD7B1' : '#4E412A',
+            '& .MuiAlert-icon': { color: sem.warning.main },
+          },
+          standardError: {
+            backgroundColor: light ? '#FBECEB' : '#2E1D1C',
+            borderColor: light ? '#F0CBC7' : '#573431',
+            '& .MuiAlert-icon': { color: sem.error.main },
+          },
         },
       },
       MuiAvatar: {
