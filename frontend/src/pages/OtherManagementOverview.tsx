@@ -1,23 +1,18 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import { Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
-import { ArrowForwardRounded, BackupOutlined, HistoryOutlined, StorageOutlined, TableRowsOutlined, TaskAltOutlined } from '@mui/icons-material'
+import { Box, Button, Typography } from '@mui/material'
+import {
+  ArrowForwardRounded, BackupOutlined, HistoryOutlined, StorageOutlined, TableRowsOutlined, TaskAltOutlined,
+} from '@mui/icons-material'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { DatasetState } from '../components/ui/DatasetState'
+import { SectionCard } from '../components/ui/SectionCard'
+import { StatCard } from '../components/ui/StatCard'
 import type { AuditPage } from '../lib/types'
 import type { TableCatalogue } from '../lib/databaseBrowser'
-
-function StatCard({ label, value, hint, icon }: { label: string; value: string | number | undefined; hint: string; icon: ReactNode }) {
-  return <Paper className="stat-card" variant="outlined" sx={{ p: 2.2, borderRadius: 2 }}>
-    <Box display="flex" alignItems="center" justifyContent="space-between" gap={1}>
-      <Typography color="text.secondary" fontSize={11} fontWeight={800} letterSpacing={.8} textTransform="uppercase">{label}</Typography>
-      <Box className="table-icon" sx={{ bgcolor: 'primary.light', color: 'text.secondary' }}>{icon}</Box>
-    </Box>
-    <Typography className="stat-value" sx={{ fontSize: 28, my: 1 }}>{value === undefined ? '…' : typeof value === 'number' ? value.toLocaleString() : value}</Typography>
-    <Typography color="text.secondary" fontSize={11.5}>{hint}</Typography>
-  </Paper>
-}
+import type { TaskOverview } from '../lib/workflowTypes'
 
 // Module dashboard for Other Managements. Each figure comes from an endpoint the user is
 // allowed to call; the API stays the authority, so a missing permission simply hides the card.
@@ -31,6 +26,7 @@ export default function OtherManagementOverview() {
   const [weekTotal, setWeekTotal] = useState<number | undefined>(undefined)
   const [catalogue, setCatalogue] = useState<TableCatalogue | null>(null)
   const [backup, setBackup] = useState<{ completed: number; latest_completed_at: string | null } | null>(null)
+  const [tasks, setTasks] = useState<TaskOverview | null>(null)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
 
@@ -46,59 +42,80 @@ export default function OtherManagementOverview() {
     if (canBrowse) tasks.push(api<TableCatalogue>('/database-browser/tables').then(data => { if (active) setCatalogue(data) }))
     if (canBackup) tasks.push(api<{ completed: number; latest_completed_at: string | null }>('/backup/overview')
       .then(data => { if (active) setBackup(data) }))
+    if (canTasks) tasks.push(api<TaskOverview>('/tasks/overview')
+      .then(data => { if (active) setTasks(data) }))
     Promise.all(tasks)
       .catch(caught => { if (active) setError(caught instanceof Error ? caught.message : 'The module summary could not be loaded') })
       .finally(() => { if (active) setBusy(false) })
     return () => { active = false }
-  }, [canAudit, canBrowse, canBackup])
+  }, [canAudit, canBrowse, canBackup, canTasks])
+
+  const tools = [
+    canTasks && { label: 'Task Manager', detail: 'Approval requests and manual work items, with priority, assignment and due dates.', to: '/other-management/tasks', icon: TaskAltOutlined, cta: 'Open queue' },
+    canAudit && { label: 'Audit Log', detail: 'Every recorded action, actor, object and time — read-only evidence.', to: '/other-management/audit', icon: HistoryOutlined, cta: 'Open audit log' },
+    canBrowse && { label: 'Database Browser', detail: 'Read-only table catalogue and row detail for this workspace.', to: '/other-management/database', icon: StorageOutlined, cta: 'Browse tables' },
+    canBackup && { label: 'Backup & Recovery', detail: 'Verified archives, retention and the two-person restore workflow.', to: '/other-management/backup', icon: BackupOutlined, cta: 'Open backups' },
+  ].filter(Boolean) as { label: string; detail: string; to: string; icon: typeof HistoryOutlined; cta: string }[]
 
   return <>
     <PageHeading
-      eyebrow="DASHBOARD / OTHER MANAGEMENTS"
-      title="Other Managements"
-      subtitle="The audit trail and workspace database tools: review who changed what, and browse the data and structure behind every module."
+      eyebrow="ADMINISTRATION / OTHER MANAGEMENTS"
+      title="Administration"
+      subtitle="Work queues and the workspace controls: assigned tasks, notifications, the audit trail, read-only database tools, and verified backup and recovery."
       action={<Box display="flex" gap={1} flexWrap="wrap">
         {canAudit && <Button component={RouterLink} to="/other-management/audit" variant="outlined" endIcon={<ArrowForwardRounded/>}>Audit Log</Button>}
         {canBrowse && <Button component={RouterLink} to="/other-management/database" variant="contained" endIcon={<ArrowForwardRounded/>}>Database Browser</Button>}
-        {canTasks && <Button component={RouterLink} to="/other-management/tasks" variant="contained" endIcon={<ArrowForwardRounded/>}>Task Manager</Button>}
-        {canBackup && <Button component={RouterLink} to="/other-management/backup" variant="outlined" startIcon={<BackupOutlined/>}>Backup & Recovery</Button>}
       </Box>}
     />
     <ErrorMessage message={error}/>
-    {busy ? <Box py={8} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={28}/></Box> : <>
-      <Box className="stat-grid" sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' }, mb: 2.5 }}>
-        {canAudit && <StatCard label="Audit entries" value={audit?.total} hint="Recorded actions in this workspace" icon={<HistoryOutlined sx={{ fontSize: 18 }}/>}/>}
-        {canAudit && <StatCard label="Last 7 days" value={weekTotal} hint="Actions recorded this week" icon={<HistoryOutlined sx={{ fontSize: 18 }}/>}/>}
-        {canBrowse && <StatCard label="Database tables" value={catalogue?.total_tables} hint="Tables available to browse" icon={<StorageOutlined sx={{ fontSize: 18 }}/>}/>}
-        {canBrowse && <StatCard label="Database records" value={catalogue?.total_rows} hint="Rows across the workspace tables" icon={<TableRowsOutlined sx={{ fontSize: 18 }}/>}/>}
+    {busy ? <DatasetState kind="loading" title="Loading administration figures…"/> : <>
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: 'repeat(4, minmax(0,1fr))' } }}>
+        {canAudit && <StatCard label="Audit entries" value={audit?.total?.toLocaleString() ?? '—'} hint="Recorded actions in this workspace" icon={<HistoryOutlined fontSize="small"/>}/>}
+        {canAudit && <StatCard label="Last 7 days" value={weekTotal?.toLocaleString() ?? '—'} hint="Actions recorded this week" icon={<HistoryOutlined fontSize="small"/>}/>}
+        {canBrowse && <StatCard label="Database tables" value={catalogue?.total_tables?.toLocaleString() ?? '—'} hint="Tables available to browse" icon={<StorageOutlined fontSize="small"/>}/>}
+        {canBrowse && <StatCard label="Database records" value={catalogue?.total_rows?.toLocaleString() ?? '—'} hint="Rows across the workspace tables" icon={<TableRowsOutlined fontSize="small"/>}/>}
         {canTasks && <StatCard
-          label="Task manager"
-          value="Open queue"
-          hint="Approval and manual work items"
-          icon={<TaskAltOutlined sx={{ fontSize: 18 }}/>} />}
-        {canBackup && <StatCard
-          label="Backups"
-          value={backup?.completed}
-          hint={backup?.latest_completed_at ? `Last completed ${new Date(backup.latest_completed_at).toLocaleDateString()}` : 'No archive taken yet'}
-          icon={<BackupOutlined sx={{ fontSize: 18 }}/>} />}
+          label="Open tasks"
+          value={tasks ? (tasks.open + tasks.in_progress).toLocaleString() : '—'}
+          hint={tasks
+            ? `${tasks.overdue} overdue · ${tasks.due_today} due today${tasks.mine ? ` · ${tasks.mine} assigned to you` : ''}`
+            : 'Approval and manual work items'}
+          icon={<TaskAltOutlined fontSize="small"/>}
+          tone={tasks && tasks.overdue ? 'error' : tasks && tasks.due_today ? 'warning' : 'default'}
+        />}
+        {canBackup && <StatCard label="Backups" value={backup?.completed !== undefined ? backup.completed.toLocaleString() : '—'} hint={backup?.latest_completed_at ? `Last completed ${new Date(backup.latest_completed_at).toLocaleDateString()}` : 'No archive taken yet'} icon={<BackupOutlined fontSize="small"/>}/>}
       </Box>
 
-      {canAudit && <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 2, borderColor: 'divider' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap" mb={1.5}>
-          <Box>
-            <Typography fontWeight={800} fontSize={15}>Recent activity</Typography>
-            <Typography color="text.secondary" fontSize={12} mt={.35}>The latest actions across the workspace, from the audit trail.</Typography>
+      <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: canAudit ? 'minmax(0, 1.35fr) minmax(0, 1fr)' : '1fr' } }}>
+        {canAudit && <SectionCard
+          title="Recent activity"
+          subtitle="The latest actions across the workspace, from the audit trail."
+          meta={<Tag tone="info">Read-only</Tag>}
+          action={<Button component={RouterLink} to="/other-management/audit" size="small" endIcon={<ArrowForwardRounded sx={{ fontSize: 15 }}/>}>Open log</Button>}
+          bodyPadding={0}
+        >
+          {audit && audit.items.length === 0 && <DatasetState compact kind="empty" title="No actions recorded yet" message="Audited actions will appear here as users work in the workspace."/>}
+          {audit?.items.slice(0, 8).map(entry => <Box key={entry.id} display="grid" gridTemplateColumns={{ xs: '1fr', md: '170px 1fr 180px' }} gap={1.2} alignItems="center" sx={{ px: 2.25, py: 1.1, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}>
+            <Typography fontSize={11.5} color="text.secondary" className="tnum">{new Date(entry.created_at).toLocaleString()}</Typography>
+            <Typography fontSize={12.5} noWrap>{entry.summary || `${entry.action} ${entry.entity_type}`}</Typography>
+            <Typography fontSize={11.5} color="text.secondary" noWrap>{entry.actor_name || 'System'} · {entry.entity_type.replace(/_/g, ' ')}</Typography>
+          </Box>)}
+        </SectionCard>}
+
+        <SectionCard title="Administration tools" subtitle="Each destination is gated by its own capability.">
+          <Box sx={{ display: 'grid', gap: 1 }}>
+            {tools.map(tool => <Box key={tool.label} sx={{ display: 'flex', alignItems: 'center', gap: 1.2, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, px: 1.5, py: 1.15, '&:hover': { borderColor: 'text.disabled' } }}>
+              <Box className="table-icon"><tool.icon sx={{ fontSize: 17 }}/></Box>
+              <Box flex={1} minWidth={0}>
+                <Typography fontSize={12.5} fontWeight={650}>{tool.label}</Typography>
+                <Typography fontSize={11} color="text.secondary" sx={{ lineHeight: 1.4 }}>{tool.detail}</Typography>
+              </Box>
+              <Button component={RouterLink} to={tool.to} size="small">{tool.cta}</Button>
+            </Box>)}
+            {!tools.length && <Typography color="text.secondary" fontSize={12.5}>No administration tools are assigned to your role.</Typography>}
           </Box>
-          <Tag tone="info">Read-only</Tag>
-        </Box>
-        {audit && audit.items.length === 0 && <Typography color="text.secondary" fontSize={13}>No actions recorded yet.</Typography>}
-        {audit?.items.slice(0, 8).map(entry => <Box key={entry.id} display="grid" gridTemplateColumns={{ xs: '1fr', md: '190px 1fr 200px' }} gap={1.2} alignItems="center" sx={{ borderTop: '1px solid', borderColor: 'divider', py: 1.1 }}>
-          <Typography fontSize={12} color="text.secondary" className="tnum">{new Date(entry.created_at).toLocaleString()}</Typography>
-          <Typography fontSize={12.5} noWrap>{entry.summary || `${entry.action} ${entry.entity_type}`}</Typography>
-          <Typography fontSize={12} color="text.secondary" noWrap>{entry.actor_name || 'System'} · {entry.entity_type.replace(/_/g, ' ')}</Typography>
-        </Box>)}
-      </Paper>}
-      {!canAudit && !canBrowse && !canTasks && !canBackup && <Typography color="text.secondary" fontSize={13}>No Other Managements tools are assigned to your role.</Typography>}
+        </SectionCard>
+      </Box>
     </>}
   </>
 }

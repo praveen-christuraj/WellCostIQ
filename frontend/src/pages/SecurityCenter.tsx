@@ -4,14 +4,18 @@ import {
   TableCell, TableContainer, TableHead, TablePagination, TableRow, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material'
 import {
-  ContentCopyRounded, FilterListRounded, KeyRounded, LockOpenRounded, LockRounded, LogoutRounded,
-  ManageAccountsRounded, RefreshRounded, SecurityRounded,
+  ContentCopyRounded, FilterListRounded, KeyRounded, LockOpenRounded, LockOutlined, LockRounded, LogoutRounded,
+  ManageAccountsRounded, PasswordOutlined, PendingActionsOutlined, PeopleOutline, RefreshRounded, SecurityRounded,
+  VpnKeyOutlined,
 } from '@mui/icons-material'
 import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag, type Tone } from '../components/Common'
+import { StatCard as SharedStatCard } from '../components/ui/StatCard'
 import { api, body } from '../lib/api'
 import { exportCsv, exportPdf, exportXlsx, type ExportColumn } from '../lib/export'
 import type { PasswordResetRequest, ResetCode, SecurityAccount, SecurityBulkAction, SecurityOverview } from '../lib/workflowTypes'
 import { useAuth } from '../context/AuthContext'
+
+const value = (input: number | undefined) => input === undefined ? '…' : input.toLocaleString()
 
 type AccountAction = 'reset-code' | 'force-password-change' | 'revoke-sessions' | 'lock' | 'unlock'
 
@@ -66,14 +70,6 @@ function days(value: string | null): string {
   return `${diff} day${diff === 1 ? '' : 's'} ago`
 }
 
-function StatCard({ label, value, hint, tone = 'info' }: { label: string; value: number | string | undefined; hint: string; tone?: Tone }) {
-  return <Paper className="stat-card" variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-    <Typography color="text.secondary" fontSize={11} fontWeight={800} letterSpacing={.8} textTransform="uppercase">{label}</Typography>
-    <Typography className="stat-value" sx={{ fontSize: 26, my: .8 }}>{value === undefined ? '…' : value}</Typography>
-    <Typography color="text.secondary" fontSize={11.5}>{hint}</Typography>
-    <Box sx={{ mt: 1, height: 3, borderRadius: 2, bgcolor: `var(--wcp-tone-${tone}-border)` }}/>
-  </Paper>
-}
 
 export default function SecurityCenter() {
   const { can, user } = useAuth()
@@ -299,12 +295,12 @@ export default function SecurityCenter() {
     {notice && <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 2 }}>{notice}</Alert>}
     <ErrorMessage message={error}/>
 
-    <Box className="stat-grid" sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(5, minmax(0, 1fr))' }, mb: 2.5, mt: 1 }}>
-      <StatCard label="Accounts" value={overview?.users} hint={`${overview?.active_users ?? 0} active in this workspace`} tone="info"/>
-      <StatCard label="Locked" value={overview?.locked_users} hint="Blocked from signing in" tone={overview?.locked_users ? 'error' : 'neutral'}/>
-      <StatCard label="Pending reviews" value={overview?.pending_requests} hint="Reset requests awaiting a decision" tone={overview?.pending_requests ? 'warning' : 'neutral'}/>
-      <StatCard label="Codes awaiting use" value={overview?.awaiting_use} hint={`Single-use, ${overview?.reset_minutes ?? 30} minutes`} tone="info"/>
-      <StatCard label="Forced changes" value={overview?.must_change_password} hint="Must set a new password first" tone={overview?.must_change_password ? 'error' : 'neutral'}/>
+    <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(5, minmax(0, 1fr))' }, mb: 2 }}>
+      <SharedStatCard label="Accounts" value={value(overview?.users)} hint={`${value(overview?.active_users)} active in this workspace`} icon={<PeopleOutline fontSize="small"/>}/>
+      <SharedStatCard label="Locked" value={value(overview?.locked_users)} hint="Blocked from signing in" icon={<LockOutlined fontSize="small"/>} tone={overview?.locked_users ? 'error' : 'default'}/>
+      <SharedStatCard label="Pending reviews" value={value(overview?.pending_requests)} hint="Reset requests awaiting a decision" icon={<PendingActionsOutlined fontSize="small"/>} tone={overview?.pending_requests ? 'warning' : 'default'}/>
+      <SharedStatCard label="Codes awaiting use" value={value(overview?.awaiting_use)} hint={`Single-use, ${overview?.reset_minutes ?? 30} minutes`} icon={<VpnKeyOutlined fontSize="small"/>}/>
+      <SharedStatCard label="Forced changes" value={value(overview?.must_change_password)} hint="Must set a new password first" icon={<PasswordOutlined fontSize="small"/>} tone={overview?.must_change_password ? 'error' : 'default'}/>
     </Box>
 
     <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>

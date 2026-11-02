@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Avatar, Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
-import { ArrowForwardRounded, ArrowOutwardRounded, AdminPanelSettingsOutlined, PeopleOutline, ShieldOutlined, VpnKeyOutlined } from '@mui/icons-material'
+import { Avatar, Box, Button, Typography, useTheme } from '@mui/material'
+import { ArrowForwardRounded, AdminPanelSettingsOutlined, PeopleOutline, ShieldOutlined, VpnKeyOutlined } from '@mui/icons-material'
 import ReactEChartsCore from 'echarts-for-react/lib/core'
 import * as echarts from 'echarts/core'
 import { BarChart } from 'echarts/charts'
@@ -13,21 +13,126 @@ import type { Overview as OverviewType } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { PageHeading, Tag } from '../components/Common'
+import { ChartPanel } from '../components/ui/ChartPanel'
+import { DatasetState } from '../components/ui/DatasetState'
+import { SectionCard } from '../components/ui/SectionCard'
+import { StatCard } from '../components/ui/StatCard'
+import { chartPalette, surface } from '../designSystem'
+
+function initials(name: string) {
+  return name.split(' ').filter(Boolean).map(part => part[0]).slice(0, 2).join('').toUpperCase()
+}
 
 // User Management dashboard. Reached from the User Management menu; the app
 // landing page is the Users register, not this summary.
 export default function Overview() {
   const { user, can } = useAuth()
   const { mode } = useColorMode()
+  const theme = useTheme()
   const [data, setData] = useState<OverviewType | null>(null)
   const [error, setError] = useState('')
-  useEffect(() => { api<OverviewType>('/overview').then(setData).catch(e => setError(e.message)) }, [])
-  const dark = mode === 'dark'
-  const cards = [
-    { title: 'Total users', value: data?.users, icon: PeopleOutline, color: dark ? '#8FB8E4' : '#123A63', bg: dark ? '#1B2F48' : '#E8EEF6', note: `${data?.active_users ?? 0} active members` },
-    { title: 'Active roles', value: data?.roles, icon: AdminPanelSettingsOutlined, color: dark ? '#A7B8CB' : '#4A6F96', bg: dark ? '#22364E' : '#EDF1F7', note: 'Defined access groups' },
-    { title: 'Permissions', value: data?.permissions, icon: VpnKeyOutlined, color: dark ? '#E8C27A' : '#8A5A00', bg: dark ? '#2E2718' : '#F7F1E4', note: 'Available capabilities' },
-    { title: 'Access status', value: data ? `${data.users ? Math.round(data.active_users / data.users * 100) : 0}%` : undefined, icon: ShieldOutlined, color: dark ? '#82C7A2' : '#1E6B45', bg: dark ? '#1B2E24' : '#E7F2EC', note: 'Users currently active' },
-  ]
-  return <><PageHeading eyebrow="USER MANAGEMENT / DASHBOARD" title={`Good to see you, ${user?.full_name.split(' ')[0]}.`} subtitle={`Module summary for ${user?.organization_name}.`} action={can('users:create') ? <Button component={Link} to="/users" variant="contained" endIcon={<ArrowForwardRounded/>}>Manage team</Button> : undefined}/>{error && <Typography color="error">{error}</Typography>}{!data ? <Box py={8} textAlign="center"><CircularProgress/></Box> : <><Box className="stat-grid">{cards.map(({ title, value, icon: Icon, color, bg, note }) => <Paper key={title} className="stat-card" variant="outlined"><Box display="flex" justifyContent="space-between" alignItems="start"><Box className="stat-icon" sx={{ color, bgcolor: bg }}><Icon sx={{ fontSize: 21 }}/></Box><ArrowOutwardRounded sx={{ color: 'text.disabled', fontSize: 18 }}/></Box><Typography className="stat-value">{value}</Typography><Typography fontWeight={700} fontSize={13}>{title}</Typography><Typography color="text.secondary" fontSize={11.5} mt={.5}>{note}</Typography></Paper>)}</Box><Box className="overview-grid"><Paper className="content-card" variant="outlined"><Box display="flex" justifyContent="space-between" alignItems="start"><Box><Typography fontWeight={800} fontSize={16}>Role distribution</Typography><Typography fontSize={12} color="text.secondary" mt={.5}>Members assigned to each role</Typography></Box><Tag tone="success">Live data</Tag></Box>{data.role_distribution.length ? <ReactEChartsCore echarts={echarts} style={{ height: 272, width: '100%', marginTop: 14 }} option={{ grid: { left: 8, right: 15, top: 25, bottom: 12, containLabel: true }, xAxis: { type: 'category', data: data.role_distribution.map(r => r.name), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: dark ? '#A7B8CB' : '#5B6B7F', fontSize: 11 } }, yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: dark ? '#27405C' : '#E3E9F0', type: 'dashed' } }, axisLabel: { color: dark ? '#A7B8CB' : '#5B6B7F' } }, tooltip: { trigger: 'axis' }, series: [{ type: 'bar', data: data.role_distribution.map(r => r.count), barMaxWidth: 42, itemStyle: { color: dark ? '#8FB8E4' : '#123A63', borderRadius: [3, 3, 0, 0] } }] }} /> : <Box display="grid" sx={{ placeItems: 'center', height: 260, color: 'text.secondary' }}>Create a role to see distribution</Box>}</Paper><Paper className="content-card" variant="outlined"><Box display="flex" justifyContent="space-between" alignItems="center" mb={2.2}><Box><Typography fontWeight={800} fontSize={16}>Recently added</Typography><Typography fontSize={12} color="text.secondary" mt={.5}>The latest people in your workspace</Typography></Box>{can('users:read') && <Button component={Link} to="/users" size="small" endIcon={<ArrowForwardRounded/>}>View all</Button>}</Box>{data.recent_users.map(person => <Box key={person.id} display="flex" alignItems="center" gap={1.5} sx={{ borderTop: '1px solid', borderColor: 'divider', py: 1.5 }}><Avatar sx={{ width: 35, height: 35, bgcolor: 'primary.light', color: 'primary.dark', fontSize: 12, fontWeight: 800 }}>{person.full_name.split(' ').map(x => x[0]).slice(0, 2).join('').toUpperCase()}</Avatar><Box flex={1} minWidth={0}><Typography fontSize={12.5} fontWeight={700} noWrap>{person.full_name}</Typography><Typography fontSize={11} color="text.secondary" noWrap>{person.email}</Typography></Box><Tag tone={person.is_active ? 'success' : 'neutral'}>{person.is_active ? 'Active' : 'Inactive'}</Tag></Box>)}</Paper></Box><Paper variant="outlined" className="welcome-strip"><Box className="welcome-symbol"><ShieldOutlined sx={{ fontSize: 26 }}/></Box><Box flex={1}><Typography fontWeight={800} fontSize={15}>Your workspace, your rules.</Typography><Typography fontSize={12} color="text.secondary" mt={.5}>Create custom roles and permissions to give every team member exactly the access they need.</Typography></Box>{can('roles:read') && <Button component={Link} to="/roles" variant="outlined" size="small" endIcon={<ArrowForwardRounded/>}>Explore roles</Button>}</Paper></>}</>
+  useEffect(() => { api<OverviewType>('/overview').then(setData).catch((caught: unknown) => setError(caught instanceof Error ? caught.message : 'The workspace summary could not be loaded')) }, [])
+
+  const palette = chartPalette(mode)
+  const s = surface(mode)
+  const axisText = theme.palette.text.secondary
+  const activeShare = data && data.users ? Math.round((data.active_users / data.users) * 100) : 0
+
+  // Horizontal bars keep a single-role workspace readable: the category label
+  // sits on the axis and the bar length carries the count.
+  const roleRows = [...(data?.role_distribution ?? [])].sort((a, b) => a.count - b.count)
+  const roleOption = useMemo(() => ({
+    animation: false,
+    grid: { left: 2, right: 30, top: 8, bottom: 6, containLabel: true },
+    xAxis: {
+      type: 'value' as const, minInterval: 1,
+      splitLine: { lineStyle: { color: s.divider } },
+      axisLabel: { color: axisText, fontSize: 10.5 }, axisLine: { show: false }, axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'category' as const,
+      data: roleRows.map(row => row.name),
+      axisLine: { lineStyle: { color: s.divider } }, axisTick: { show: false },
+      axisLabel: { color: axisText, fontSize: 10.5, width: 150, overflow: 'truncate' },
+    },
+    tooltip: {
+      trigger: 'axis' as const, axisPointer: { type: 'shadow' as const }, confine: true,
+      backgroundColor: theme.palette.background.paper, borderColor: s.divider,
+      textStyle: { color: theme.palette.text.primary, fontSize: 11.5 },
+      valueFormatter: (value: unknown) => `${Number(value ?? 0).toLocaleString()} member${Number(value) === 1 ? '' : 's'}`,
+    },
+    series: [{
+      type: 'bar' as const, barMaxWidth: 18,
+      data: roleRows.map(row => row.count),
+      itemStyle: { color: palette.planned, borderRadius: [0, 3, 3, 0] },
+      label: { show: true, position: 'right' as const, color: axisText, fontSize: 10.5 },
+    }],
+  }), [roleRows, axisText, s.divider, theme.palette.background.paper, theme.palette.text.primary, palette])
+
+  return <>
+    <PageHeading
+      eyebrow="USER MANAGEMENT / DASHBOARD"
+      title={`Welcome, ${user?.full_name.split(' ')[0] ?? 'there'}.`}
+      subtitle={`People, roles and permissions in ${user?.organization_name ?? 'this workspace'}. Membership and access changes are audit logged.`}
+      action={can('users:create') ? <Button component={Link} to="/users" variant="contained" endIcon={<ArrowForwardRounded/>}>Manage team</Button> : undefined}
+    />
+    {error && <Typography color="error.main" fontSize={12.5} sx={{ mb: 2 }}>{error}</Typography>}
+
+    {!data ? <DatasetState kind="loading" title="Loading the workspace summary…"/> : <>
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: 'repeat(4, minmax(0,1fr))' } }}>
+        <StatCard label="Total users" value={data.users.toLocaleString()} hint={`${data.active_users.toLocaleString()} active members`} icon={<PeopleOutline fontSize="small"/>}/>
+        <StatCard label="Active roles" value={data.roles.toLocaleString()} hint="Defined access groups" icon={<AdminPanelSettingsOutlined fontSize="small"/>}/>
+        <StatCard label="Permissions" value={data.permissions.toLocaleString()} hint="Capabilities available to grant" icon={<VpnKeyOutlined fontSize="small"/>}/>
+        <StatCard label="Access status" value={`${activeShare}%`} hint="Users currently active" icon={<ShieldOutlined fontSize="small"/>} tone={activeShare >= 80 ? 'positive' : 'default'}/>
+      </Box>
+
+      <Box display="grid" gap={2} sx={{ mt: 2, alignItems: 'start', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.1fr) minmax(0, 1fr)' } }}>
+        <ChartPanel
+          title="Role distribution"
+          subtitle="Members assigned to each role. A user can hold more than one role, so the bars can exceed the user count."
+          meta={<Tag tone="success">Live data</Tag>}
+          height={Math.max(220, roleRows.length * 34 + 64)}
+          empty={!roleRows.length}
+          emptyMessage="Create a role to see how members are distributed."
+          caption="Counts come from the role assignments the API reports for this workspace."
+        >
+          <ReactEChartsCore echarts={echarts} notMerge lazyUpdate option={roleOption} style={{ height: '100%', width: '100%' }}/>
+        </ChartPanel>
+
+        <SectionCard
+          title="Recently added"
+          subtitle="The latest people in this workspace."
+          action={can('users:read') ? <Button component={Link} to="/users" size="small" endIcon={<ArrowForwardRounded sx={{ fontSize: 15 }}/>}>View all</Button> : undefined}
+          bodyPadding={0}
+        >
+          {data.recent_users.length ? data.recent_users.map(person => <Box key={person.id} display="flex" alignItems="center" gap={1.4} sx={{ px: 2.25, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}>
+            <Avatar sx={{ width: 32, height: 32, fontSize: 11.5, fontWeight: 750 }}>{initials(person.full_name)}</Avatar>
+            <Box flex={1} minWidth={0}>
+              <Typography fontSize={12.5} fontWeight={650} noWrap>{person.full_name}</Typography>
+              <Typography fontSize={11} color="text.secondary" noWrap>{person.email}</Typography>
+            </Box>
+            <Tag tone={person.is_active ? 'success' : 'neutral'}>{person.is_active ? 'Active' : 'Inactive'}</Tag>
+          </Box>)
+            : <Box sx={{ px: 2.25, py: 2.5 }}><Typography color="text.secondary" fontSize={12.5}>No users in this workspace yet.</Typography></Box>}
+        </SectionCard>
+      </Box>
+
+      <Box sx={{ mt: 2 }}>
+        <SectionCard
+          title="Your workspace, your rules"
+          subtitle="Roles bundle the permissions a person needs. Grant only what the job requires; every change is recorded against the administrator who made it."
+        >
+          <Box display="flex" alignItems="center" gap={1.4} flexWrap="wrap">
+            <Box className="table-icon" sx={{ width: 36, height: 36 }}><ShieldOutlined sx={{ fontSize: 18 }}/></Box>
+            <Typography fontSize={12} color="text.secondary" sx={{ flex: 1, minWidth: 240, lineHeight: 1.55 }}>
+              {data.permissions.toLocaleString()} capabilities are available across {data.roles.toLocaleString()} role{data.roles === 1 ? '' : 's'}.
+              {can('roles:read') ? ' Open Roles to review what each one can reach.' : ' Ask a workspace owner for role access.'}
+            </Typography>
+            {can('roles:read') && <Button component={Link} to="/roles" variant="outlined" size="small" endIcon={<ArrowForwardRounded sx={{ fontSize: 15 }}/>}>Explore roles</Button>}
+            {can('permissions:read') && <Button component={Link} to="/permissions" size="small">Permission catalogue</Button>}
+          </Box>
+        </SectionCard>
+      </Box>
+    </>}
+  </>
 }

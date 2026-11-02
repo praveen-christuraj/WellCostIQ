@@ -1,37 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="rigGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#8FB8E4"/>
-      <stop offset="100%" stop-color="#123A63"/>
-    </linearGradient>
-  </defs>
-  <!-- Derrick/Rig structure -->
-  <g stroke="url(#rigGrad)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Main tower legs -->
-    <line x1="20" y1="52" x2="32" y2="14"/>
-    <line x1="44" y1="52" x2="32" y2="14"/>
-    <!-- Cross braces (X pattern) -->
-    <line x1="22" y1="46" x2="42" y2="46"/>
-    <line x1="24" y1="40" x2="40" y2="40"/>
-    <line x1="26" y1="34" x2="38" y2="34"/>
-    <line x1="28" y1="28" x2="36" y2="28"/>
-    <line x1="30" y1="22" x2="34" y2="22"/>
-    <!-- X bracing -->
-    <line x1="22" y1="46" x2="40" y2="40"/>
-    <line x1="42" y1="46" x2="24" y2="40"/>
-    <line x1="24" y1="40" x2="38" y2="34"/>
-    <line x1="40" y1="40" x2="26" y2="34"/>
-    <line x1="26" y1="34" x2="36" y2="28"/>
-    <line x1="38" y1="34" x2="28" y2="28"/>
-    <line x1="28" y1="28" x2="34" y2="22"/>
-    <line x1="36" y1="28" x2="30" y2="22"/>
-    <!-- Crown block at top -->
-    <rect x="28" y="10" width="8" height="4" rx="1" fill="#123A63" stroke="none"/>
-    <!-- Derrick base -->
-    <line x1="16" y1="52" x2="48" y2="52" stroke-width="3"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="WellCostIQ">
+  <rect width="64" height="64" rx="14" fill="#0F3F47"/>
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#79B9C1" stroke-opacity="0.28"/>
+  <!-- Derrick: four legs and cross bracing, drawn as one technical structure. -->
+  <g stroke="#C6EAEE" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.95">
+    <path d="M24 50 L32 14 L40 50"/>
+    <path d="M26.2 42 H37.8 M27.6 34 H36.4 M29 26 H35"/>
+    <path d="M26.2 42 L36.4 34 M37.8 42 L27.6 34 M27.6 34 L35 26 M36.4 34 L29 26"/>
+    <path d="M19.5 50 H44.5"/>
   </g>
-  <!-- Dollar sign overlay -->
-  <g fill="#8FB8E4">
-    <text x="32" y="44" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700">$</text>
-  </g>
+  <!-- The cost line: measured, rising, brass. -->
+  <path d="M17 44 L26 38 L33 41 L47 27" stroke="#D6B271" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="47" cy="27" r="3" fill="#D6B271"/>
 </svg>

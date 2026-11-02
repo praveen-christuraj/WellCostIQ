@@ -4,14 +4,27 @@ import { useBlocker } from 'react-router-dom'
 import { ErrorOutlineRounded } from '@mui/icons-material'
 
 // Page header: eyebrow (where you are) → title (what this is) → subtitle (what to do).
-export function PageHeading({ eyebrow, title, subtitle, action }: { eyebrow: string; title: string; subtitle: string; action?: ReactNode }) {
-  return <Box component="header" display="flex" justifyContent="space-between" alignItems="flex-end" gap={2} rowGap={1.5} flexWrap="wrap" sx={{ mb: 3.5 }}>
-    <Box minWidth={0}>
-      <Typography className="eyebrow">{eyebrow}</Typography>
-      <Typography variant="h4" sx={{ fontSize: { xs: 25, sm: 30 }, letterSpacing: '-1.1px', mt: .5 }}>{title}</Typography>
-      <Typography color="text.secondary" fontSize={13} sx={{ mt: .8, maxWidth: 760, lineHeight: 1.5 }}>{subtitle}</Typography>
+// One page has exactly one of these; the top bar carries the breadcrumb, so the
+// heading never repeats the navigation. Actions sit on the title's baseline and
+// wrap under it on narrow screens instead of squeezing the title.
+export function PageHeading({ eyebrow, title, subtitle, action, meta }: {
+  eyebrow: string
+  title: string
+  subtitle: string
+  action?: ReactNode
+  /** Status chips or record context shown directly under the title. */
+  meta?: ReactNode
+}) {
+  return <Box component="header" sx={{ mb: 3.25 }}>
+    <Box display="flex" justifyContent="space-between" alignItems="flex-end" gap={2.5} rowGap={1.5} flexWrap="wrap">
+      <Box minWidth={0} sx={{ flex: '1 1 420px' }}>
+        <Typography className="eyebrow">{eyebrow}</Typography>
+        <Typography variant="h4" sx={{ fontSize: { xs: 25, sm: 29 }, letterSpacing: '-1.1px', mt: .7, color: 'text.primary' }}>{title}</Typography>
+        <Typography color="text.secondary" fontSize={13} sx={{ mt: .9, maxWidth: 820, lineHeight: 1.55 }}>{subtitle}</Typography>
+      </Box>
+      {action ? <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" sx={{ pb: .4, justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>{action}</Box> : null}
     </Box>
-    {action ? <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" sx={{ pb: .5 }}>{action}</Box> : null}
+    {meta ? <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" sx={{ mt: 1.5 }}>{meta}</Box> : null}
   </Box>
 }
 
@@ -27,9 +40,12 @@ export function Tag({ children, tone = 'neutral' }: { children: ReactNode; tone?
     color: `var(--wcp-tone-${tone}-fg)`,
     border: '1px solid',
     borderColor: `var(--wcp-tone-${tone}-border)`,
-    height: 24,
-    fontSize: 11,
+    height: 22,
+    borderRadius: '5px',
+    fontSize: 10.5,
     fontWeight: 700,
+    letterSpacing: '.01em',
+    '& .MuiChip-label': { px: .9, lineHeight: 1.4 },
   }}/>
 }
 

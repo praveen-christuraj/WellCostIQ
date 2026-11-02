@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Box, Button, Collapse, Divider, IconButton, InputAdornment, Menu, MenuItem, Paper, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, Collapse, Divider, IconButton, InputAdornment, Menu, MenuItem, Paper, TextField, Typography } from '@mui/material'
 import { AddRounded, CloseRounded, DownloadRounded, FilterListRounded, SearchRounded, UploadRounded } from '@mui/icons-material'
 import { AgGridReact } from 'ag-grid-react'
 import { AllCommunityModule, ModuleRegistry, themeQuartz, type ColDef, type GridApi } from 'ag-grid-community'
@@ -188,27 +188,58 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
   const addRule = () => setRules(rs => [...rs, { id: Date.now(), field: fields[0]?.field || '', op: 'contains', value: '' }])
   const clearFilters = () => { setRules([]); setDateField(''); setDateFrom(''); setDateTo('') }
 
-  return <Paper variant="outlined" sx={{ borderColor: 'divider', overflow: 'hidden', borderRadius: 2 }}>
-    <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 2.2, gap: 2, flexWrap: 'wrap' }}>
-      <Box display="flex" alignItems="center" gap={1.2} flexWrap="wrap">
-        <TextField placeholder={searchPlaceholder} aria-label={searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)} size="small" sx={{ width: { xs: '100%', sm: 260 } }} InputProps={{ startAdornment: <InputAdornment position="start"><SearchRounded sx={{ color: 'text.secondary', fontSize: 19 }}/></InputAdornment> }}/>
-        <Button size="small" startIcon={<FilterListRounded sx={{ fontSize: 18 }}/>} onClick={() => setFiltersOpen(o => !o)} color={activeFilters ? 'primary' : 'inherit'} aria-expanded={filtersOpen}>Filters{activeFilters ? ` (${activeFilters})` : ''}</Button>
-        {onImport && <Button size="small" color="inherit" startIcon={<UploadRounded sx={{ fontSize: 18 }}/>} onClick={onImport}>Import</Button>}
-        {canExport && <Button size="small" color="inherit" startIcon={<DownloadRounded sx={{ fontSize: 18 }}/>} onClick={e => setExportAnchor(e.currentTarget)}>Export</Button>}
-        {canExport && <Menu anchorEl={exportAnchor} open={!!exportAnchor} onClose={() => setExportAnchor(null)}>
-          <MenuItem onClick={() => doExport('csv')}>Export as CSV (.csv)</MenuItem>
-          <MenuItem onClick={() => doExport('xlsx')}>Export as Excel (.xlsx)</MenuItem>
-          <MenuItem onClick={() => doExport('pdf')}>Export as PDF (.pdf)</MenuItem>
-        </Menu>}
+  const searchActive = Boolean(search.trim())
+  const filterChips: { key: string; label: string; onDelete: () => void }[] = [
+    ...rules.filter(rule => rule.value || rule.op === 'is empty' || rule.op === 'is not empty').map(rule => ({
+      key: `rule-${rule.id}`,
+      label: `${fields.find(f => f.field === rule.field)?.label ?? rule.field} ${rule.op}${rule.value ? ` “${rule.value}”` : ''}`,
+      onDelete: () => setRules(list => list.filter(item => item.id !== rule.id)),
+    })),
+    ...(dateField && (dateFrom || dateTo) ? [{
+      key: 'date-range',
+      label: `${fields.find(f => f.field === dateField)?.label ?? 'Date'} ${dateFrom || 'start'} → ${dateTo || 'today'}`,
+      onDelete: () => { setDateField(''); setDateFrom(''); setDateTo('') },
+    }] : []),
+  ]
+  return <Paper variant="outlined" sx={{ borderColor: 'divider', overflow: 'hidden', borderRadius: 2.5, bgcolor: 'background.paper' }}>
+    <Box sx={{ px: 1.75, py: 1.4, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" gap={1.5} flexWrap="wrap">
+        <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" sx={{ flex: 1, minWidth: 0 }}>
+          <TextField
+            placeholder={searchPlaceholder} aria-label={searchPlaceholder} value={search}
+            onChange={e => setSearch(e.target.value)} size="small"
+            sx={{ width: { xs: '100%', sm: 280 }, '& .MuiOutlinedInput-root': { bgcolor: 'background.paper' } }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchRounded sx={{ color: 'text.secondary', fontSize: 19 }}/></InputAdornment>,
+              endAdornment: searchActive ? <InputAdornment position="end"><IconButton size="small" aria-label="Clear search" onClick={() => setSearch('')}><CloseRounded sx={{ fontSize: 16 }}/></IconButton></InputAdornment> : undefined,
+            }}
+          />
+          <Button size="small" startIcon={<FilterListRounded sx={{ fontSize: 18 }}/>} onClick={() => setFiltersOpen(o => !o)} color={activeFilters ? 'primary' : 'inherit'} variant={activeFilters ? 'outlined' : 'text'} aria-expanded={filtersOpen} sx={{ fontWeight: 650 }}>Filters{activeFilters ? ` · ${activeFilters}` : ''}</Button>
+          {onImport && <Button size="small" color="inherit" startIcon={<UploadRounded sx={{ fontSize: 18 }}/>} onClick={onImport}>Import</Button>}
+          {canExport && <Button size="small" color="inherit" startIcon={<DownloadRounded sx={{ fontSize: 18 }}/>} onClick={e => setExportAnchor(e.currentTarget)}>Export</Button>}
+          {canExport && <Menu anchorEl={exportAnchor} open={!!exportAnchor} onClose={() => setExportAnchor(null)}>
+            <MenuItem onClick={() => doExport('csv')}>Export as CSV (.csv)</MenuItem>
+            <MenuItem onClick={() => doExport('xlsx')}>Export as Excel (.xlsx)</MenuItem>
+            <MenuItem onClick={() => doExport('pdf')}>Export as PDF (.pdf)</MenuItem>
+          </Menu>}
+        </Box>
+        <Typography fontSize={11.5} color="text.secondary" className="tnum" aria-live="polite" sx={{ whiteSpace: 'nowrap' }}>
+          <Box component="span" sx={{ color: 'text.primary', fontWeight: 700 }}>{visible.length.toLocaleString()}</Box> of {rows.length.toLocaleString()} {rows.length === 1 ? 'record' : 'records'}
+        </Typography>
       </Box>
-      <Typography fontSize={12} color="text.secondary" className="tnum" aria-live="polite">{visible.length} of {rows.length} {rows.length === 1 ? 'record' : 'records'}</Typography>
+      {(filterChips.length > 0 || searchActive) && <Box display="flex" alignItems="center" gap={.75} flexWrap="wrap" sx={{ mt: 1 }}>
+        <Typography sx={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'text.secondary' }}>Active</Typography>
+        {searchActive && <Chip size="small" label={`Search: ${search.trim()}`} onDelete={() => setSearch('')} sx={{ height: 22, fontSize: 10.5, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' }}/>}
+        {filterChips.map(chip => <Chip key={chip.key} size="small" label={chip.label} onDelete={chip.onDelete} sx={{ height: 22, fontSize: 10.5, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' }}/>)}
+        <Button size="small" color="inherit" onClick={() => { setSearch(''); clearFilters() }} sx={{ minWidth: 0, py: 0, fontSize: 11 }}>Clear all</Button>
+      </Box>}
     </Box>
-    {exportError && <Alert severity="error" onClose={() => setExportError('')} sx={{ mx: 2.2, mb: 1.5 }}>{exportError}</Alert>}
+    {exportError && <Alert severity="error" onClose={() => setExportError('')} sx={{ mx: 1.75, mt: 1.25 }}>{exportError}</Alert>}
     <Collapse in={filtersOpen} unmountOnExit>
-      <Box sx={{ px: 2.2, pb: 2.2 }}>
-        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2 }}>
+      <Box sx={{ px: 1.75, py: 1.75, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2, bgcolor: 'background.paper' }}>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5}>
-            <Typography fontWeight={800} fontSize={12} textTransform="uppercase" letterSpacing={0.8}>Filter conditions</Typography>
+            <Typography fontWeight={700} fontSize={11} textTransform="uppercase" letterSpacing={0.8} color="text.secondary">Filter conditions</Typography>
             <Box display="flex" gap={1}>
               {fields.length > 0 && <Button size="small" startIcon={<AddRounded sx={{ fontSize: 16 }}/>} onClick={addRule}>Add condition</Button>}
               {(rules.length > 0 || dateField) && <Button size="small" color="inherit" startIcon={<CloseRounded sx={{ fontSize: 16 }}/>} onClick={clearFilters}>Clear all</Button>}
@@ -267,7 +298,7 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
           const value = typeof rowKey === 'function' ? (rowKey as (row: T) => string)(p.data as T) : data[rowKey]
           return String(value ?? '')
         }}
-        overlayNoRowsTemplate='<span class="grid-empty">No records match the current search or filters.</span>'
+        overlayNoRowsTemplate='<div class="grid-empty"><strong>No records match the current view</strong><span>Adjust the search or filters, or reset them to see every record you can access.</span></div>'
         suppressCellFocus
       />
     </Box>
