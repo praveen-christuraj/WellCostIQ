@@ -4,12 +4,12 @@
 
 ## Stack
 
-React 19 · TypeScript · Material UI 7 · AG Grid Community · ECharts · FastAPI · SQLAlchemy 2 · Alembic · PostgreSQL 17 (Alpine). SQLite is available for local smoke tests when PostgreSQL is not installed.
+React 19 · TypeScript · Material UI 7 · AG Grid Community · ECharts · FastAPI · SQLAlchemy 2 · Alembic · PostgreSQL 18.6 (Alpine). SQLite is available for local smoke tests when PostgreSQL is not installed.
 
 ## Run with PostgreSQL (recommended)
 
-1. Copy `.env.example` to `.env`, and replace **both** secrets with strong random values (`openssl rand -hex 32` for `SECRET_KEY`).
-2. `docker compose up --build` (web at http://localhost:8080, API docs at http://localhost:8080/docs).
+1. Copy `.env.example` to `.env`, and replace `SECRET_KEY` and all three database passwords with independent strong random values (`openssl rand -hex 32` for each).
+2. `docker compose up --build` (web at http://localhost:8080; API documentation is not exposed through Nginx).
 3. Provision the first workspace and owner. This asks for the workspace, the administrator and a password you choose (12+ characters), and runs migrations first if they are pending:
    ```sh
    docker compose exec -it api python -m app.seed
@@ -19,13 +19,15 @@ React 19 · TypeScript · Material UI 7 · AG Grid Community · ECharts · FastA
 
 Production deployments should terminate HTTPS at a trusted proxy and set `SECURE_COOKIES=true`.
 
-Compose uses `postgres:17-alpine`. If your `postgres_data` volume was initialized with PostgreSQL 16, back it up and migrate it using `pg_upgrade` or dump/restore into a fresh PostgreSQL 17 volume before starting this version. Changing the image alone does not upgrade existing database files; do not delete a volume containing data you need.
+Compose pins PostgreSQL **18.6** by tag and digest. It uses a new `postgres18_data` volume mounted at `/var/lib/postgresql`; older `postgres_data` volumes are preserved. **Do not run the upgraded stack against existing data until the backup/restore procedure in [the security baseline](docs/CYBERSEC_BASELINE.md) is complete.** Supply three distinct database passwords in `.env`; a one-shot migration service owns schema changes and the API uses a restricted DML-only role. PostgreSQL has no published host port; the web tier binds to loopback port 8080 by default.
+
+Python **3.12.16** and Node **22.23.4** are pinned in the repository version files, Dockerfiles and CI. Install the selected runtimes before the local commands below. See [CyberSec baseline and review checklist](docs/CYBERSEC_BASELINE.md) for lockfile updates, scanner tooling, evidence collection and managed-database differences.
 
 ## Run locally without Docker
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -r backend/requirements.txt
+.venv/bin/pip install --require-hashes -r backend/requirements-dev.txt
 cd backend
 ../.venv/bin/alembic upgrade head
 ../.venv/bin/python -m app.seed          # guided: workspace, owner and password; offers to migrate first
@@ -76,7 +78,7 @@ Set `TEST_DATABASE_URL` (for example a PostgreSQL URL) to run the backend suite 
 - `frontend/src/pages`, `components`, `context`, `lib` — routed UI and typed API layer.
 - `.agent/` and `AGENTS.md` — committed Graphify tool, architecture graph, durable AI memory and agent workflows; not in `.gitignore`.
 - `frontend/src/designSystem.ts` — the design tokens (navy ramp, surfaces, semantics, type scale, spacing, radii, shadows, motion, AG Grid skin) composed into `theme.ts` and mirrored as `--wcp-*` variables in `styles.css`. Rules and the accessibility checklist are in `.agent/memory/design-system.md`; `make ui-check` asserts them in light and dark. The whole layer is reversible: **`make ui-rollback`** restores the pre-design-layer interface.
-- `docs/ci-template.yml` — backend test/migration and frontend build CI template; copy to `.github/workflows/ci.yml` when a GitHub connection with workflow permissions is available.
+- `.github/workflows/security.yml` — maintained security/regression workflow with pinned runtimes and lockfile installs; `docs/ci-template.yml` points to this canonical workflow.
 - `docs/SECURITY_MANUAL.md` — plain-language user guidance (including password expiry and mandatory-change rules) plus the IT deployment, incident-response and security-control checklist.
 - `docs/SECURITY_AUDIT_FINAL.md` — the IT handover: findings, the disposition of the previous 24-item checklist, the implemented password lifecycle, executed evidence, residual risks and the go-live checklist. Start here.
 - `docs/SECURITY_VALIDATION.md` — what was actually executed (backend suite, migration round trip, frontend build/tests, dependency and static analysis) and what remains untested.
@@ -88,3 +90,7 @@ Master Data workflows — including the legacy Services, Vendors/Suppliers and P
 ### Production follow-ups
 
 This is a **foundation**, not a claim of complete production readiness: add invitations and approved-channel reset-code delivery, MFA/SSO, distributed rate limiting, backup/restore automation, observability and PostgreSQL integration tests before a public SaaS launch. Use HTTPS, strong unique secrets, secure cookies and deployment-specific CORS; review RLS/tenant isolation strategy for multi-tenant compliance needs.
+
+## CyberSec review downloads
+
+The [2026-11-02 review package and exact file checklist](docs/reviews/2026-11-02/README.md) are committed for direct download. The package is a dated evidence snapshot; its validation scope and outstanding live-environment requirements are included.

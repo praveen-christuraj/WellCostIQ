@@ -1,0 +1,9 @@
+#!/bin/sh
+# Opt in with: git config core.hooksPath .githooks
+# Install backend/requirements-tools.txt in an isolated venv and put its bin on PATH.
+set -eu
+command -v detect-secrets-hook >/dev/null 2>&1 || {
+  echo 'Install the pinned security-tools environment and add its bin to PATH before committing.' >&2
+  exit 1
+}
+python3 scripts/check-staged-secrets.py

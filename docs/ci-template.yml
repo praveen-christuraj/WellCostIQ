@@ -1,35 +1,4 @@
-name: CI
-on:
-  push:
-    branches: [main, 'arena/**']
-  pull_request:
-jobs:
-  backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - run: pip install -r backend/requirements.txt
-      - run: python -m pytest -q
-        working-directory: backend
-      - run: alembic upgrade head
-        working-directory: backend
-        env:
-          DATABASE_URL: sqlite:///./ci.db
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-        working-directory: frontend
-      - run: npm run build
-        working-directory: frontend
+# Reference only. The maintained workflow is .github/workflows/security.yml.
+# Copy that file when configuring another repository. It pins Node/Python via
+# version files, installs with npm ci and pip --require-hashes, separates scanner
+# tooling, uploads audit JSON and runs the regression/build gates.

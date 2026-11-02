@@ -158,7 +158,7 @@ density is unchanged.
 ## 9. Verification
 
 1. `cd frontend && npm run build` — TypeScript + bundle.
-2. `bash -c 'cd frontend && npm install --no-save jsdom && NODE_PATH="$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/ui-check.jsx --bundle --platform=node --format=esm --jsx=automatic --outfile=node_modules/.cache/ui-check.mjs --loader:.jsx=jsx --log-level=error --external:jsdom && node node_modules/.cache/ui-check.mjs'`
+2. `bash -c 'cd frontend && npm ci && NODE_PATH="$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/ui-check.jsx --bundle --platform=node --format=esm --jsx=automatic --outfile=node_modules/.cache/ui-check.mjs --loader:.jsx=jsx --log-level=error --external:jsdom && node node_modules/.cache/ui-check.mjs'`
    — renders the real theme and shared components in a DOM and asserts the rules above (33
    checks across light/dark shared components plus shell/feedback contracts). The app's own dependencies are untouched.
 3. `cd backend && ../.venv/bin/python -m pytest -q` — a UI change must not move the API tests.

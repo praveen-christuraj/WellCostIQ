@@ -8,18 +8,22 @@ services:
     runtime: python
     plan: free # choose a paid instance for an always-on service
     rootDir: backend
-    buildCommand: pip install -r requirements.lock
-    # Keep migrations in the start command for this Free Blueprint. Paid services
-    # can use preDeployCommand and run only Uvicorn in startCommand.
-    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+    buildCommand: pip install --require-hashes -r requirements.txt
+    # Works on Free plans: the wrapper migrates with a separate credential, then
+    # removes it from the environment before exec'ing the restricted API process.
+    startCommand: sh start-hosted.sh
     healthCheckPath: /api/health
     envVars:
       # Do not inherit Render's changing default Python runtime. Keep this in
       # sync with the version used for local development and CI.
       - key: PYTHON_VERSION
-        value: "3.12.11"
+        value: "3.12.16"
       # Supabase Connect -> Session pooler: preserve generated host/user, use port 5432.
+      # Runtime role: no superuser, no role/database/schema creation.
       - key: DATABASE_URL
+        sync: false
+      # Migration/schema-owner role; never the cluster administrator.
+      - key: MIGRATION_DATABASE_URL
         sync: false
       # Generate with: openssl rand -hex 32  (unique per environment, at least 32 characters)
       - key: ENVIRONMENT

@@ -1,0 +1,5 @@
+# Scanner/compiler host only; never installed in application images.
+pip-tools==7.6.2
+pip-audit==2.10.1
+bandit==1.9.4
+detect-secrets==1.5.0

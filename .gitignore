@@ -13,3 +13,18 @@ __pycache__/
 coverage/
 
 *.tsbuildinfo
+
+# Credentials, local evidence and quarterly snapshots
+*.pem
+*.key
+*.p12
+*.pfx
+security-evidence/
+*-audit-report.json
+*-audit-q.json
+*-outdated-q.txt
+docker-pkgs*.txt
+vscode-ext*.txt
+pg-ext*.txt
+
+.security-tools/

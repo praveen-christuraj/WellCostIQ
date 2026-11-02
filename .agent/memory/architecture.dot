@@ -149,7 +149,6 @@ digraph WellCostIQ {
   "frontend/src/components/afe/TangibleLineDialog.tsx";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx";
-  "frontend/src/components/catalogue/FuelRegister.tsx";
   "frontend/src/components/catalogue/MasterSelect.tsx";
   "frontend/src/components/catalogue/OptionSelect.tsx";
   "frontend/src/components/catalogue/PriceHistoryDialog.tsx";
@@ -272,6 +271,8 @@ digraph WellCostIQ {
   "frontend/src/pages/reports/VendorWiseCostReport.tsx";
   "frontend/src/theme.ts";
   "frontend/vite.config.ts";
+  "scripts/check-staged-secrets.py";
+  "scripts/collect-cybersec-evidence.py";
   "backend/app/api/afe.py" -> "backend/app/api/deps.py";
   "backend/app/api/afe.py" -> "backend/app/schemas/afe.py";
   "backend/app/api/afe.py" -> "backend/app/services/__init__.py";
@@ -469,6 +470,7 @@ digraph WellCostIQ {
   "backend/app/models/well_sub_activity.py" -> "backend/app/core/database.py";
   "backend/app/models/well_sub_activity.py" -> "backend/app/models/master_data.py";
   "backend/app/models/well_sub_activity.py" -> "backend/app/models/rig_well.py";
+  "backend/app/models/well_sub_activity.py" -> "backend/app/models/vendor_master.py";
   "backend/app/schemas/afe.py" -> "backend/app/core/precision.py";
   "backend/app/schemas/afe.py" -> "backend/app/domain/afe_costing.py";
   "backend/app/schemas/catalogue.py" -> "backend/app/core/precision.py";
@@ -783,13 +785,6 @@ digraph WellCostIQ {
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/lib/catalogue.ts";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/lib/export.ts";
-  "frontend/src/components/catalogue/FuelRegister.tsx" -> "frontend/src/components/Common.tsx";
-  "frontend/src/components/catalogue/FuelRegister.tsx" -> "frontend/src/components/DataTable.tsx";
-  "frontend/src/components/catalogue/FuelRegister.tsx" -> "frontend/src/components/catalogue/PriceHistoryDialog.tsx";
-  "frontend/src/components/catalogue/FuelRegister.tsx" -> "frontend/src/components/catalogue/ReviseRateDialog.tsx";
-  "frontend/src/components/catalogue/FuelRegister.tsx" -> "frontend/src/context/AuthContext.tsx";
-  "frontend/src/components/catalogue/FuelRegister.tsx" -> "frontend/src/lib/api.ts";
-  "frontend/src/components/catalogue/FuelRegister.tsx" -> "frontend/src/lib/catalogue.ts";
   "frontend/src/components/catalogue/MasterSelect.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/catalogue/MasterSelect.tsx" -> "frontend/src/lib/masterData.ts";
   "frontend/src/components/catalogue/OptionSelect.tsx" -> "frontend/src/lib/api.ts";
@@ -979,7 +974,6 @@ digraph WellCostIQ {
   "frontend/src/pages/Consumables.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/Consumables.tsx" -> "frontend/src/components/MasterDataTabs.tsx";
   "frontend/src/pages/Consumables.tsx" -> "frontend/src/components/catalogue/CatalogueItemRegister.tsx";
-  "frontend/src/pages/Consumables.tsx" -> "frontend/src/components/catalogue/FuelRegister.tsx";
   "frontend/src/pages/Consumables.tsx" -> "frontend/src/lib/catalogue.ts";
   "frontend/src/pages/ConsumptionLossesReport.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/ConsumptionLossesReport.tsx" -> "frontend/src/components/DataTable.tsx";

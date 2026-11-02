@@ -1,0 +1,4 @@
+# Tests extend the exact production resolution.
+-r requirements.txt
+pytest>=8,<10
+httpx>=0.27,<1

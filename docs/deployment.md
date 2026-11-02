@@ -1,3 +1,5 @@
+> Current repository baseline: [CYBERSEC_BASELINE.md](CYBERSEC_BASELINE.md). Use Python 3.12.16, Node 22.23.4 and hash-verified Python installs. Configure separate restricted-runtime `DATABASE_URL` and schema-owner `MIGRATION_DATABASE_URL` secrets, then use `sh start-hosted.sh` as the Render start command. The wrapper removes the migration credential before starting the API. Provision and verify both roles/grants with the database administrator before deploying. The Compose PostgreSQL 18.6 baseline does not upgrade a managed Supabase/Render database; confirm its live version and extensions with the provider.
+
 # Deploying WellCostIQ: Vercel + Render + Supabase
 
 This guide deploys the three parts of the application to three managed services:
@@ -76,6 +78,13 @@ long-running Render API.
    port `6543`) is intended for short-lived/serverless connections and is not
    the fallback recommended here.
 
+Before using either connection, ask the database administrator to provision the
+separate roles and grants in [the current baseline](CYBERSEC_BASELINE.md).
+Supabase's default `postgres.<PROJECT_REF>` administrator URI is for database
+administration; do not put it in the API runtime configuration. Obtain the
+provider-correct pooler username/URI for each dedicated role rather than guessing
+from the administrator URI.
+
 **Supabase notes**
 
 - Check Supabase's current plan limits and pause policy in the dashboard; the
@@ -114,23 +123,22 @@ service from `render.yaml`.
    | Name | `wellcosting-api` (or another available name; copy the actual URL Render assigns) |
    | Region | Same region as the Supabase project, or the nearest available region |
    | Environment | **Python 3** |
-   | Python version | Set environment variable `PYTHON_VERSION=3.12.11` (pin for first deploy) |
+   | Python version | Set environment variable `PYTHON_VERSION=3.12.16` (pin for first deploy) |
    | Root Directory | `backend` |
-   | Build Command | `pip install -r requirements.txt` |
-   | Start Command (Free plan) | `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+   | Build Command | `pip install --require-hashes -r requirements.txt` |
+   | Start Command (Free plan) | `sh start-hosted.sh` |
    | Health Check Path | `/api/health` |
    | Instance plan | Free for testing (sleeps when idle); choose a paid instance for an always-on service |
 
-   Render provides `PORT`; bind Uvicorn to `0.0.0.0` and that port. On a Free
-   instance use the combined start command above so migrations run before the
-   API process. **Do not put `alembic upgrade head` in both commands.** A paid
-   service can instead set **Pre-Deploy Command** to `alembic upgrade head` and
-   use `uvicorn app.main:app --host 0.0.0.0 --port $PORT` as its Start Command.
-   Pre-deploy migrations are preferable for paid services because they run
-   before the new application version starts.
-4. In the service form's **Advanced** section, set `PYTHON_VERSION=3.12.11` and add the environment variables
+   Render provides `PORT`; the startup wrapper binds Uvicorn to that port.
+   The wrapper runs migrations using `MIGRATION_DATABASE_URL`, removes that
+   variable, and starts the API with the restricted `DATABASE_URL`. This works
+   on both Free and paid plans. Do not also configure a duplicate migration
+   command. A separate paid pre-deploy job is another option only when it has
+   its own migration secret and the API job does not receive that secret.
+4. In the service form's **Advanced** section, set `PYTHON_VERSION=3.12.16` and add the environment variables
    from the next section before creating the service. In particular, set the
-   `DATABASE_URL` from §1, a `SECRET_KEY`, and `CORS_ORIGINS` to the production
+   `DATABASE_URL` and `MIGRATION_DATABASE_URL` for the two dedicated roles, a `SECRET_KEY`, and `CORS_ORIGINS` to the production
    Vercel origin you plan to use. If you have not created the Vercel project
    yet, use the expected `https://<project>.vercel.app` origin and correct it
    after the first Vercel deployment.
@@ -159,8 +167,9 @@ service from `render.yaml`.
 
 | Variable | Required | Value / how to generate |
 |---|---|---|
-| `PYTHON_VERSION` | **Yes for reproducible first deploy** | `3.12.11` (pin a supported Python 3.12 patch release; Render currently defaults new services to Python 3.14) |
-| `DATABASE_URL` | **Yes** | The Session pooler URI from §1, with the `postgresql+psycopg://` driver prefix and `sslmode=require` |
+| `PYTHON_VERSION` | **Yes for reproducible first deploy** | `3.12.16` (pin a supported Python 3.12 patch release; Render currently defaults new services to Python 3.14) |
+| `DATABASE_URL` | **Yes** | Restricted application-role Session pooler URI, `postgresql+psycopg://`, `sslmode=require`; never the cluster administrator |
+| `MIGRATION_DATABASE_URL` | **Yes** | Distinct schema-owner migration-role URI for `start-hosted.sh`; removed before the API starts |
 | `SECRET_KEY` | **Yes** | Generate a unique key with `openssl rand -hex 32`; on Windows PowerShell, `py -c "import secrets; print(secrets.token_hex(32))"` also works. Use at least 32 characters per environment; the app rejects a missing, short, or default key with PostgreSQL. |
 | `SECURE_COOKIES` | **Yes** | `true` — Vercel serves HTTPS, and the refresh cookie is set with the `Secure` flag |
 | `CORS_ORIGINS` | **Yes** | Exact Vercel origin(s), comma-separated, e.g. `https://wellcostiq.vercel.app`. Add custom domains too. No paths or trailing slash. |
@@ -189,7 +198,7 @@ Notes:
   the Render logs and by signing in once.
 - Verify migrations in the Render deploy/runtime logs: they should complete
   before Uvicorn starts. If the log says `alembic: command not found`, check
-  that `pip install -r requirements.txt` succeeded and that the root directory
+  that `pip install --require-hashes -r requirements.txt` succeeded and that the root directory
   is exactly `backend`.
 
 ---
@@ -207,7 +216,8 @@ Notes:
    | Root Directory | `frontend` |
    | Build Command | `npm run build` (default) |
    | Output Directory | `dist` (default) |
-   | Install Command | `npm ci` (recommended; `package-lock.json` is committed) |
+   | Install Command | `npm ci` (enforced by `frontend/vercel.json`) |
+   | Node.js version | Select **22.x**; verify the deployed patch is at least 22.23.4, as required by `package.json` |
    | Production Branch | The branch you deploy (commonly `main`) |
 
 3. **Environment variables: none are required.** The frontend has no build-time
@@ -310,7 +320,7 @@ e-mail and the password you chose.
 
 ### Diagnostic sequence: follow this order instead of guessing
 
-1. **Build failed:** open Render → service → **Events → failed deploy → Logs**. Check Python version, `backend` root directory, and dependency installation. Set `PYTHON_VERSION=3.12.11` and use **Save, rebuild, and deploy** if changing the runtime.
+1. **Build failed:** open Render → service → **Events → failed deploy → Logs**. Check Python version, `backend` root directory, and dependency installation. Set `PYTHON_VERSION=3.12.16` and use **Save, rebuild, and deploy** if changing the runtime.
 2. **Build succeeded but startup failed:** locate the first error after `alembic upgrade head`. If it says `password authentication failed`, `could not translate host name`, or `connection refused`, fix the Supabase Session pooler URI. If it says `SECRET_KEY`, fix that variable. If it says `alembic` or `ModuleNotFoundError`, verify the root directory and installed requirements.
 3. **Service live but sign-in is impossible:** inspect the Render logs for `Administrator setup failed`, `No administrator account exists`, migration errors or database exceptions. Verify that all five `SEED_*` variables are set and that migrations finished. `/api/health` no longer reports setup state, and HTTP 200 from it is not proof of a working database.
 4. **Render API works, Vercel API fails:** check `frontend/vercel.json` for the actual Render hostname, commit the change, and verify a new production Vercel deployment. Test `https://YOUR-VERCEL-DOMAIN/api/health` before testing login.
