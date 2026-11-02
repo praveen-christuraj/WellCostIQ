@@ -53,6 +53,7 @@ REFERENCE_LABELS: dict[str, str] = {
     "po_so_orders": "PO/SO order(s)",
     "services": "service record(s)",
     "vendors": "vendor record(s)",
+    "vendor_service_subcategories": "vendor service subcategory record(s)",
     "tangibles": "tangible record(s)",
     "drill_bits": "drill-bit record(s)",
     "mud_chemicals": "mud-chemical record(s)",

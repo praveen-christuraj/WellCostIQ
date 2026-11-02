@@ -3,6 +3,12 @@
 A sub activity belongs to one well and one configuration scope (drilling or
 completion) and references an active Activity from the workspace's Master Data
 register. Its code is unique within that well and scope.
+
+``responsible_party`` is the display snapshot used by every historical report
+and print sheet. It is filled from the Master Data vendor the sub activity is
+linked to (``vendor_id``) and, when configured, the vendor's own service line
+(``vendor_subcategory_id``), so NPT/UPA reporting can group the same records by
+responsible party and by that party's service without re-keying anything.
 """
 
 from datetime import datetime, timezone
@@ -14,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.models.master_data import Activity
 from app.models.rig_well import Well
+from app.models.vendor_master import Vendor, VendorServiceSubcategory
 
 
 def uid() -> str:
@@ -40,6 +47,7 @@ class WellSubActivity(Base):
         Index("ix_well_sub_activities_org_deleted", "organization_id", "is_deleted"),
         Index("ix_well_sub_activities_org_activity", "organization_id", "activity_id"),
         Index("ix_well_sub_activities_well_scope", "organization_id", "well_id", "scope"),
+        Index("ix_well_sub_activities_org_vendor", "organization_id", "vendor_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
@@ -57,6 +65,14 @@ class WellSubActivity(Base):
     activity_id: Mapped[str] = mapped_column(
         ForeignKey("activities.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    vendor_id: Mapped[str | None] = mapped_column(
+        ForeignKey("vendors.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    vendor_subcategory_id: Mapped[str | None] = mapped_column(
+        ForeignKey("vendor_service_subcategories.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     responsible_party: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     is_deleted: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False)
@@ -68,3 +84,5 @@ class WellSubActivity(Base):
 
     well: Mapped[Well] = relationship(back_populates="sub_activities", lazy="joined")
     activity: Mapped[Activity] = relationship(lazy="joined")
+    vendor: Mapped[Vendor | None] = relationship(lazy="joined")
+    vendor_subcategory: Mapped[VendorServiceSubcategory | None] = relationship(lazy="joined")

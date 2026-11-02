@@ -17,6 +17,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -80,6 +81,44 @@ class Vendor(MasterDataRecord):
     orders: Mapped[list["PurchaseOrder"]] = relationship(
         back_populates="vendor", cascade="all, delete-orphan"
     )
+    service_subcategories: Mapped[list["VendorServiceSubcategory"]] = relationship(
+        back_populates="vendor", cascade="all, delete-orphan"
+    )
+
+
+class VendorServiceSubcategory(MasterDataRecord):
+    """One service line a vendor provides (e.g. Halliburton — Liner Service).
+
+    A vendor sells several distinct services that carry their own rates, their
+    own NPT/UPA exposure and their own responsible crew. Keeping them as rows
+    under the vendor (rather than free text on each sub activity) is what makes
+    vendor totals and vendor-service totals reconcile: the sub activity points
+    at exactly one vendor and, optionally, one of that vendor's services.
+    ``subcategory_code`` is unique per vendor inside the workspace.
+    """
+
+    __tablename__ = "vendor_service_subcategories"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "vendor_id",
+            "subcategory_code",
+            name="uq_vendor_service_subcategories_org_vendor_code",
+        ),
+        Index(
+            "ix_vendor_service_subcategories_org_vendor",
+            "organization_id",
+            "vendor_id",
+        ),
+    )
+
+    vendor_id: Mapped[str] = mapped_column(
+        ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    subcategory_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    subcategory_name: Mapped[str] = mapped_column(String(150), nullable=False)
+
+    vendor: Mapped[Vendor] = relationship(back_populates="service_subcategories", lazy="joined")
 
 
 class PurchaseOrder(MasterDataRecord):

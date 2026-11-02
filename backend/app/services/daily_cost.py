@@ -39,7 +39,7 @@ from app.models import (
     DailyCostConsumableLine, DailyCostEntry, DailyCostOtherExpenseLine, DailyCostServiceLine,
     DailyCostTangibleLine,
     DailyCostWellRateBaseline, DrillBit, FuelType, HoleSection, LihCostEntry, MudChemical, Phase, Rig,
-    Service, Tangible, Vendor, Well, WellPhase, WellSection, WellSubActivity,
+    Service, Tangible, Vendor, VendorServiceSubcategory, Well, WellPhase, WellSection, WellSubActivity,
 )
 from app.models.daily_cost import OTHER_EXPENSE_TYPE_LABELS
 from app.models.entities import User
@@ -58,6 +58,7 @@ from app.schemas.daily_cost import (
     DailyCostRateOut, DailyCostReference, DailyCostReopenIn, DailyCostRigOption, DailyCostSaveIn,
     DailyCostSectionDepthOut, DailyCostSectionOption, DailyCostServiceLineIn, DailyCostServiceLineOut, DailyCostStatusIn,
     DailyCostSubActivityOption, DailyCostTangibleLineIn, DailyCostTangibleLineOut,
+    DailyCostVendorServiceSubcategoryOption,
     DailyCostTrendPoint, DailyCostVendorOption, DailyCostWarnings, DailyCostWellHeader,
     DailyCostWellOption, DailyCostWellProgress, DailyCostWellProgressReport,
     DailyCostMudReconciliation, DailyCostMudSectionReconciliation,
@@ -817,6 +818,17 @@ def reference_data(db: Session, organization_id: str) -> DailyCostReference:
     vendors = db.scalars(select(Vendor).where(
         Vendor.organization_id == organization_id, Vendor.is_deleted.is_(False), Vendor.status == "active"
     ).order_by(Vendor.vendor_code)).all()
+    service_subcategories = db.scalars(
+        select(VendorServiceSubcategory).options(joinedload(VendorServiceSubcategory.vendor))
+        .join(Vendor, Vendor.id == VendorServiceSubcategory.vendor_id)
+        .where(
+            VendorServiceSubcategory.organization_id == organization_id,
+            VendorServiceSubcategory.is_deleted.is_(False),
+            Vendor.is_deleted.is_(False),
+            Vendor.status != "blocked",
+        )
+        .order_by(Vendor.vendor_code, VendorServiceSubcategory.subcategory_code)
+    ).unique().all()
     currencies = db.scalars(select(Currency).where(
         Currency.organization_id == organization_id, Currency.is_deleted.is_(False)
     ).order_by(Currency.currency_code)).all()
@@ -894,6 +906,16 @@ def reference_data(db: Session, organization_id: str) -> DailyCostReference:
             scope=(row.scope if row.scope in ("drilling", "completion") else "drilling"),
             activity_id=row.activity_id, sub_activity_code=row.sub_activity_code,
             sub_activity_name=row.sub_activity_name, responsible_party=row.responsible_party,
+            vendor_id=row.vendor_id,
+            vendor_code=row.vendor.vendor_code if row.vendor else "",
+            vendor_name=row.vendor.vendor_name if row.vendor else "",
+            vendor_subcategory_id=row.vendor_subcategory_id,
+            vendor_subcategory_code=(
+                row.vendor_subcategory.subcategory_code if row.vendor_subcategory else ""
+            ),
+            vendor_subcategory_name=(
+                row.vendor_subcategory.subcategory_name if row.vendor_subcategory else ""
+            ),
             display_name=_label(row.sub_activity_code, row.sub_activity_name),
         ) for row in sub_activities],
         services=[{
@@ -905,6 +927,13 @@ def reference_data(db: Session, organization_id: str) -> DailyCostReference:
             "display_name": _label(row.service_code, row.service_name),
         } for row in services],
         catalogue_items=catalogue_items,
+        vendor_service_subcategories=[DailyCostVendorServiceSubcategoryOption(
+            id=line.id, vendor_id=line.vendor_id,
+            vendor_code=line.vendor.vendor_code if line.vendor else "",
+            vendor_name=line.vendor.vendor_name if line.vendor else "",
+            subcategory_code=line.subcategory_code, subcategory_name=line.subcategory_name,
+            display_name=_label(line.subcategory_code, line.subcategory_name),
+        ) for line in service_subcategories],
         vendors=[DailyCostVendorOption(
             id=row.id, vendor_code=row.vendor_code, vendor_name=row.vendor_name, vendor_type=row.vendor_type,
             status=row.status, display_name=_label(row.vendor_code, row.vendor_name),
@@ -1270,6 +1299,16 @@ def _base_fields(
         existing=existing, label=label,
     )
     vendor = _get_vendor(db, entry.organization_id, data.vendor_id, existing=existing, label=label)
+    if vendor is None and sub_activity is not None and sub_activity.vendor_id:
+        # The sub activity already names the responsible party in Master Data,
+        # so the cost line follows it instead of being typed again per line.
+        vendor = db.scalar(
+            select(Vendor).where(
+                Vendor.id == sub_activity.vendor_id,
+                Vendor.organization_id == entry.organization_id,
+                Vendor.is_deleted.is_(False),
+            )
+        )
     party = data.party_name or (vendor.vendor_name if vendor else "")
     if classification in ("UPA", "NPT") and not (vendor or party):
         raise HTTPException(status_code=422, detail=f"{label}: identify the vendor or responsible party for UPA/NPT")

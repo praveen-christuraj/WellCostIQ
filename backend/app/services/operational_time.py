@@ -34,8 +34,16 @@ def record_service_allocation(
     charge_category: str | None,
     quantity_unit: str | None,
     quantity: Decimal | str | int | float | None,
+    parties: dict[AllocationKey, str] | None = None,
+    party_key: str = "",
 ) -> AllocationKey | None:
-    """Record one eligible line and return its deduplicated allocation key."""
+    """Record one eligible line and return its deduplicated allocation key.
+
+    ``parties`` maps an allocation to the responsible party of the line that
+    recorded the greatest duration. Vendor and service-subcategory NPT/UPA
+    totals therefore sum back to the well totals: every hour is attributed once,
+    to one party, exactly as it is counted once.
+    """
     if (
         charging_basis != "Day Rate"
         or charge_category in ONE_TIME_SERVICE_CATEGORIES
@@ -53,7 +61,11 @@ def record_service_allocation(
         phase_id or "",
     )
     hours = Decimal(str(quantity or 0))
-    allocations[key] = max(allocations.get(key, Decimal("0")), hours)
+    previous = allocations.get(key)
+    if previous is None or hours > previous:
+        allocations[key] = hours
+        if parties is not None:
+            parties[key] = party_key
     return key
 
 

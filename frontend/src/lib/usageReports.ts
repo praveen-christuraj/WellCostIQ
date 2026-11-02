@@ -166,11 +166,52 @@ export interface NptUpaDetailRow {
   block_code: string
   scope: string
   classification: string
+  vendor_id: string
+  vendor_code: string
+  vendor_name: string
+  vendor_subcategory_id: string
+  vendor_subcategory_code: string
+  vendor_subcategory_name: string
   affected_dates: number
   hours: string
   days: string
   amount: string
   currency: string
+}
+
+/** NPT/UPA totals for one responsible party or one of its service lines. */
+export interface NptUpaPartyRow {
+  party_key: string
+  party_name: string
+  vendor_id: string
+  vendor_code: string
+  vendor_name: string
+  vendor_subcategory_id: string
+  vendor_subcategory_code: string
+  vendor_subcategory_name: string
+  is_linked: boolean
+  well_count: number
+  planned_affected_dates: number
+  upa_affected_dates: number
+  npt_affected_dates: number
+  planned_hours: string
+  upa_hours: string
+  npt_hours: string
+  planned_days: string
+  upa_days: string
+  npt_days: string
+  planned_amount: string
+  upa_amount: string
+  npt_amount: string
+  total_amount: string
+}
+
+export interface NptUpaPartyWellRow extends NptUpaPartyRow {
+  well_id: string
+  well_code: string
+  well_name: string
+  rig_code: string
+  block_code: string
 }
 export interface NptUpaReport {
   currency: string
@@ -179,6 +220,9 @@ export interface NptUpaReport {
   include_draft: boolean
   wells: NptUpaWellRow[]
   detail: NptUpaDetailRow[]
+  parties: NptUpaPartyRow[]
+  party_subcategories: NptUpaPartyRow[]
+  party_wells: NptUpaPartyWellRow[]
   totals: NptUpaWellRow
   entry_count: number
   excluded_entry_count: number
