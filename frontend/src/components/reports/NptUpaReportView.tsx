@@ -12,7 +12,6 @@ import {
 } from '../../lib/usageReports'
 import FiltersCard from './UsageReportFilters'
 import NptUpaMatrix from './NptUpaMatrix'
-import NptUpaPartyTable from './NptUpaPartyTable'
 
 function Stat({ label, value, note }: { label: string; value: string; note: string }) {
   return <Paper variant="outlined" sx={{ p: 1.7, borderRadius: 2, minWidth: 0 }}>
@@ -71,15 +70,6 @@ export default function NptUpaReportView() {
     { headerName: 'RIG', field: 'rig_code', minWidth: 110 },
     { headerName: 'SCOPE', field: 'scope', minWidth: 110 },
     { headerName: 'CLASSIFICATION', field: 'classification', minWidth: 140 },
-    {
-      headerName: 'RESPONSIBLE VENDOR', field: 'vendor_name', minWidth: 185,
-      valueFormatter: params => params.value || 'Administrative / unassigned',
-    },
-    { headerName: 'VENDOR CODE', field: 'vendor_code', minWidth: 130, valueFormatter: params => params.value || '—' },
-    {
-      headerName: 'VENDOR SERVICE SUBCATEGORY', field: 'vendor_subcategory_name', minWidth: 200,
-      valueFormatter: params => params.value || '—',
-    },
     { headerName: 'AFFECTED DATES', field: 'affected_dates', minWidth: 135, type: 'numericColumn' },
     { headerName: 'ALLOCATED HOURS', field: 'hours', minWidth: 140, type: 'numericColumn', valueFormatter: params => formatQuantity(params.value) },
     { headerName: 'ALLOCATED DAYS', field: 'days', minWidth: 135, type: 'numericColumn', valueFormatter: params => formatQuantity(params.value) },
@@ -97,7 +87,7 @@ export default function NptUpaReportView() {
     <PageHeading
       eyebrow="REPORTS / NPT / UPA"
       title="NPT/UPA report"
-      subtitle="NPT and UPA allocated duration, affected cost dates and costs per well, per responsible vendor and per vendor service subcategory. Duration comes only from deduplicated explicit service-hour allocations; affected dates remain a separate measure."
+      subtitle="NPT and UPA allocated duration, affected cost dates and costs per well. Duration comes only from deduplicated explicit service-hour allocations; affected dates remain a separate measure."
       action={<Box display="flex" gap={1} flexWrap="wrap">
         <Button component={RouterLink} to="/reports" variant="outlined" startIcon={<ArrowBackRounded />}>Reports</Button>
         <Button variant="outlined" startIcon={<RefreshRounded />} onClick={() => setRefreshKey(value => value + 1)} disabled={loading}>Refresh</Button>
@@ -130,7 +120,6 @@ export default function NptUpaReportView() {
         <Stat label={`UPA cost (${report.currency})`} value={formatMoney(report.totals.upa_amount)} note="Unplanned activity lines" />
       </Box>
       <NptUpaMatrix report={report} currency={report.currency} />
-      <NptUpaPartyTable report={report} currency={report.currency} />
       <DataTable
         rows={report.detail}
         columns={columns}

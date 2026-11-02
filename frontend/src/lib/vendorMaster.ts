@@ -27,52 +27,12 @@ export type Vendor = {
   description: string
   order_count: number
   document_count: number
-  service_subcategory_count: number
   latest_order_date: string | null
   is_deleted: boolean
   deleted_at: string | null
   created_at: string
   updated_at: string
 }
-
-/** One service line a vendor provides (Halliburton — Liner Service). */
-export type VendorServiceSubcategory = {
-  id: string
-  vendor_id: string
-  vendor_code: string
-  vendor_name: string
-  vendor_status: VendorStatus
-  subcategory_code: string
-  subcategory_name: string
-  description: string
-  display_name: string
-  sub_activity_count: number
-  is_deleted: boolean
-  deleted_at: string | null
-  created_at: string
-  updated_at: string
-}
-
-export type VendorServiceSubcategoryOption = {
-  id: string
-  vendor_id: string
-  vendor_code: string
-  vendor_name: string
-  subcategory_code: string
-  subcategory_name: string
-  display_name: string
-  label: string
-}
-
-export type VendorServiceSubcategoryPayload = {
-  subcategory_code: string
-  subcategory_name: string
-  description: string
-}
-
-export const emptyVendorServiceSubcategoryForm = (): VendorServiceSubcategoryPayload => ({
-  subcategory_code: '', subcategory_name: '', description: '',
-})
 
 export type VendorOption = {
   vendor_type: VendorType

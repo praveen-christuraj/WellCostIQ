@@ -19,7 +19,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -35,7 +35,6 @@ from app.models.vendor_master import (
     OrderDocument,
     PurchaseOrder,
     Vendor,
-    VendorServiceSubcategory,
 )
 from app.schemas.master_data import (
     MasterDataActivity,
@@ -57,10 +56,6 @@ from app.schemas.vendor_master import (
     VendorCreate,
     VendorOption,
     VendorOut,
-    VendorServiceSubcategoryCreate,
-    VendorServiceSubcategoryOption,
-    VendorServiceSubcategoryOut,
-    VendorServiceSubcategoryUpdate,
     VendorPoCount,
     VendorPoOverview,
     VendorPoTopVendor,
@@ -364,43 +359,11 @@ def _service_count_for_vendor(
     return db.scalar(statement) or 0
 
 
-def _active_subcategory_count_for_vendor(
-    db: Session, organization_id: str, vendor_id: str
-) -> int:
-    return db.scalar(
-        select(func.count(VendorServiceSubcategory.id)).where(
-            VendorServiceSubcategory.organization_id == organization_id,
-            VendorServiceSubcategory.vendor_id == vendor_id,
-            VendorServiceSubcategory.is_deleted.is_(False),
-        )
-    ) or 0
-
-
-def _linked_sub_activity_count(db: Session, organization_id: str, vendor_id: str) -> int:
-    """Well sub activities (active or retained) pointing at this vendor."""
-    from app.models.well_sub_activity import WellSubActivity
-
-    return db.scalar(
-        select(func.count(WellSubActivity.id)).where(
-            WellSubActivity.organization_id == organization_id,
-            or_(
-                WellSubActivity.vendor_id == vendor_id,
-                WellSubActivity.vendor_subcategory_id.in_(
-                    select(VendorServiceSubcategory.id).where(
-                        VendorServiceSubcategory.vendor_id == vendor_id
-                    )
-                ),
-            ),
-        )
-    ) or 0
-
-
 def _vendor_out(
     vendor: Vendor,
     *,
     order_count: int = 0,
     document_count: int = 0,
-    service_subcategory_count: int = 0,
     latest_order_date: date | None = None,
 ) -> VendorOut:
     return VendorOut(
@@ -421,7 +384,6 @@ def _vendor_out(
         description=vendor.description or "",
         order_count=order_count,
         document_count=document_count,
-        service_subcategory_count=service_subcategory_count,
         latest_order_date=latest_order_date,
         is_deleted=vendor.is_deleted,
         deleted_at=vendor.deleted_at,
@@ -843,13 +805,11 @@ def list_vendors(db: Db, user: Current) -> list[VendorOut]:
         .order_by(Vendor.vendor_code)
     ).all()
     orders, documents, latest = _vendor_stats(db, user.organization_id)
-    subcategories = _subcategory_counts_by_vendor(db, user.organization_id)
     return [
         _vendor_out(
             vendor,
             order_count=orders.get(vendor.id, 0),
             document_count=documents.get(vendor.id, 0),
-            service_subcategory_count=subcategories.get(vendor.id, 0),
             latest_order_date=latest.get(vendor.id),
         )
         for vendor in vendors
@@ -864,12 +824,10 @@ def list_vendors(db: Db, user: Current) -> list[VendorOut]:
 def get_vendor(vendor_id: str, db: Db, user: Current) -> VendorOut:
     vendor = _vendor_or_404(db, vendor_id, user.organization_id)
     orders, documents, latest = _vendor_stats(db, user.organization_id)
-    subcategories = _subcategory_counts_by_vendor(db, user.organization_id)
     return _vendor_out(
         vendor,
         order_count=orders.get(vendor.id, 0),
         document_count=documents.get(vendor.id, 0),
-        service_subcategory_count=subcategories.get(vendor.id, 0),
         latest_order_date=latest.get(vendor.id),
     )
 
@@ -1038,18 +996,6 @@ def soft_delete_vendor(vendor_id: str, request: Request, db: Db, user: Current) 
                 "Move those services to deleted entries first."
             ),
         )
-    active_subcategories = _active_subcategory_count_for_vendor(
-        db, user.organization_id, vendor.id
-    )
-    if active_subcategories:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Vendor {vendor.vendor_code} still has {active_subcategories} active service "
-                f"{'subcategory' if active_subcategories == 1 else 'subcategories'}. "
-                "Move them to deleted entries first."
-            ),
-        )
     vendor.is_deleted = True
     vendor.deleted_at = datetime.now(timezone.utc)
     _audit(
@@ -1122,16 +1068,6 @@ def permanently_delete_vendor(vendor_id: str, request: Request, db: Db, user: Cu
             detail=(
                 f"Vendor {vendor.vendor_code} is still referenced by {remaining_services} service "
                 f"{'record' if remaining_services == 1 else 'records'}. Permanently delete those services first."
-            ),
-        )
-    linked_sub_activities = _linked_sub_activity_count(db, user.organization_id, vendor.id)
-    if linked_sub_activities:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Vendor {vendor.vendor_code} is still the responsible party for "
-                f"{linked_sub_activities} well sub {'activity' if linked_sub_activities == 1 else 'activities'}. "
-                "Reassign those sub activities to another vendor first."
             ),
         )
     assert_no_dependencies(db, vendor, user.organization_id, entity_label=f"vendor {vendor.vendor_code}")
@@ -1394,416 +1330,6 @@ def import_vendors(
         errors=errors[:100],
         success=not errors,
     )
-
-
-
-
-# --------------------------------------------------------------------------- #
-# Vendor service subcategories
-# --------------------------------------------------------------------------- #
-
-VENDOR_SUBCATEGORY_LABEL = "Vendor service subcategories"
-VENDOR_SUBCATEGORY_ENTITY = "vendor_service_subcategory"
-
-
-def _subcategory_counts(db: Session, organization_id: str) -> dict[str, int]:
-    """Active sub activities per vendor service subcategory."""
-    from app.models.well_sub_activity import WellSubActivity
-
-    rows = db.execute(
-        select(WellSubActivity.vendor_subcategory_id, func.count(WellSubActivity.id))
-        .where(
-            WellSubActivity.organization_id == organization_id,
-            WellSubActivity.is_deleted.is_(False),
-            WellSubActivity.vendor_subcategory_id.is_not(None),
-        )
-        .group_by(WellSubActivity.vendor_subcategory_id)
-    ).all()
-    return {subcategory_id: count for subcategory_id, count in rows if subcategory_id}
-
-
-def _subcategory_counts_by_vendor(db: Session, organization_id: str) -> dict[str, int]:
-    rows = db.execute(
-        select(VendorServiceSubcategory.vendor_id, func.count(VendorServiceSubcategory.id))
-        .where(
-            VendorServiceSubcategory.organization_id == organization_id,
-            VendorServiceSubcategory.is_deleted.is_(False),
-        )
-        .group_by(VendorServiceSubcategory.vendor_id)
-    ).all()
-    return {vendor_id: count for vendor_id, count in rows}
-
-
-def _subcategory_or_404(
-    db: Session, subcategory_id: str, organization_id: str, *, include_deleted: bool = True
-) -> VendorServiceSubcategory:
-    statement = select(VendorServiceSubcategory).where(
-        VendorServiceSubcategory.id == subcategory_id,
-        VendorServiceSubcategory.organization_id == organization_id,
-    )
-    if not include_deleted:
-        statement = statement.where(VendorServiceSubcategory.is_deleted.is_(False))
-    record = db.scalar(statement)
-    if record is None:
-        raise HTTPException(
-            status_code=404, detail="Vendor service subcategory not found in this workspace"
-        )
-    return record
-
-
-def _subcategory_out(
-    record: VendorServiceSubcategory, *, sub_activity_count: int = 0
-) -> VendorServiceSubcategoryOut:
-    vendor = record.vendor
-    return VendorServiceSubcategoryOut(
-        id=record.id,
-        vendor_id=record.vendor_id,
-        vendor_code=vendor.vendor_code if vendor else "",
-        vendor_name=vendor.vendor_name if vendor else "",
-        vendor_status=(vendor.status if vendor and vendor.status in VENDOR_STATUSES else "active"),
-        subcategory_code=record.subcategory_code,
-        subcategory_name=record.subcategory_name,
-        description=record.description or "",
-        display_name=f"{record.subcategory_code} — {record.subcategory_name}",
-        sub_activity_count=sub_activity_count,
-        is_deleted=record.is_deleted,
-        deleted_at=record.deleted_at,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
-    )
-
-
-def _subcategory_option(record: VendorServiceSubcategory) -> VendorServiceSubcategoryOption:
-    vendor = record.vendor
-    code = vendor.vendor_code if vendor else ""
-    name = vendor.vendor_name if vendor else ""
-    return VendorServiceSubcategoryOption(
-        id=record.id,
-        vendor_id=record.vendor_id,
-        vendor_code=code,
-        vendor_name=name,
-        subcategory_code=record.subcategory_code,
-        subcategory_name=record.subcategory_name,
-        display_name=f"{record.subcategory_code} — {record.subcategory_name}",
-        label=f"{code} · {record.subcategory_name}" if name else record.subcategory_name,
-    )
-
-
-def _duplicate_subcategory(
-    db: Session,
-    organization_id: str,
-    vendor_id: str,
-    code: str,
-    *,
-    exclude_id: str | None = None,
-) -> VendorServiceSubcategory | None:
-    statement = select(VendorServiceSubcategory).where(
-        VendorServiceSubcategory.organization_id == organization_id,
-        VendorServiceSubcategory.vendor_id == vendor_id,
-        VendorServiceSubcategory.subcategory_code == code,
-    )
-    if exclude_id:
-        statement = statement.where(VendorServiceSubcategory.id != exclude_id)
-    return db.scalar(statement)
-
-
-@router.get(
-    "/vendor-service-subcategories",
-    response_model=list[VendorServiceSubcategoryOut],
-    dependencies=[Depends(require("master-data:read"))],
-)
-def list_vendor_service_subcategories(
-    db: Db,
-    user: Current,
-    vendor_id: str | None = None,
-    include_deleted: bool = False,
-) -> list[VendorServiceSubcategoryOut]:
-    """The service lines of one vendor (or every vendor when none is named)."""
-    statement = select(VendorServiceSubcategory).where(
-        VendorServiceSubcategory.organization_id == user.organization_id
-    )
-    if vendor_id:
-        _vendor_or_404(db, vendor_id, user.organization_id)
-        statement = statement.where(VendorServiceSubcategory.vendor_id == vendor_id)
-    if not include_deleted:
-        statement = statement.where(VendorServiceSubcategory.is_deleted.is_(False))
-    records = db.scalars(
-        statement.order_by(
-            VendorServiceSubcategory.vendor_id, VendorServiceSubcategory.subcategory_code
-        )
-    ).all()
-    counts = _subcategory_counts(db, user.organization_id)
-    return [_subcategory_out(record, sub_activity_count=counts.get(record.id, 0)) for record in records]
-
-
-@router.get(
-    "/vendor-service-subcategories/options",
-    response_model=list[VendorServiceSubcategoryOption],
-    dependencies=[Depends(require("master-data:read"))],
-)
-def vendor_service_subcategory_options(
-    db: Db,
-    user: Current,
-    vendor_id: str | None = None,
-) -> list[VendorServiceSubcategoryOption]:
-    """Active, usable service lines for the well sub activity dropdowns."""
-    statement = select(VendorServiceSubcategory).where(
-        VendorServiceSubcategory.organization_id == user.organization_id,
-        VendorServiceSubcategory.is_deleted.is_(False),
-    )
-    if vendor_id:
-        statement = statement.where(VendorServiceSubcategory.vendor_id == vendor_id)
-    records = db.scalars(
-        statement.order_by(
-            VendorServiceSubcategory.vendor_id, VendorServiceSubcategory.subcategory_code
-        )
-    ).all()
-    return [
-        _subcategory_option(record)
-        for record in records
-        if record.vendor is not None and not record.vendor.is_deleted
-    ]
-
-
-@router.post(
-    "/vendor-service-subcategories",
-    response_model=VendorServiceSubcategoryOut,
-    status_code=201,
-    dependencies=[Depends(require("master-data:create"))],
-)
-def create_vendor_service_subcategory(
-    data: VendorServiceSubcategoryCreate, request: Request, db: Db, user: Current
-) -> VendorServiceSubcategoryOut:
-    vendor = _vendor_or_404(db, data.vendor_id, user.organization_id, include_deleted=False)
-    duplicate = _duplicate_subcategory(
-        db, user.organization_id, vendor.id, data.subcategory_code
-    )
-    if duplicate is not None:
-        if not duplicate.is_deleted:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Vendor {vendor.vendor_code} already has a service subcategory "
-                    f"'{data.subcategory_code}'"
-                ),
-            )
-        duplicate.subcategory_name = data.subcategory_name
-        duplicate.description = data.description
-        duplicate.is_deleted = False
-        duplicate.deleted_at = None
-        _audit(
-            db,
-            user=user,
-            action=MasterDataAction.RESTORE,
-            entity_type=VENDOR_SUBCATEGORY_ENTITY,
-            entity_id=duplicate.id,
-            entity_label=f"{vendor.vendor_code} · {duplicate.subcategory_code}",
-            summary=(
-                f"Restored and updated service subcategory {duplicate.subcategory_code} of vendor "
-                f"{vendor.vendor_code} on create"
-            ),
-            request=request,
-        )
-        _commit(db)
-        db.refresh(duplicate)
-        return _subcategory_out(duplicate)
-    record = VendorServiceSubcategory(
-        organization_id=user.organization_id,
-        vendor_id=vendor.id,
-        subcategory_code=data.subcategory_code,
-        subcategory_name=data.subcategory_name,
-        description=data.description,
-    )
-    db.add(record)
-    db.flush()
-    _audit(
-        db,
-        user=user,
-        action=MasterDataAction.CREATE,
-        entity_type=VENDOR_SUBCATEGORY_ENTITY,
-        entity_id=record.id,
-        entity_label=f"{vendor.vendor_code} · {record.subcategory_code}",
-        summary=(
-            f"Created service subcategory {record.subcategory_code} — "
-            f"{record.subcategory_name} under vendor {vendor.vendor_code}"
-        ),
-        request=request,
-    )
-    _commit(db)
-    db.refresh(record)
-    return _subcategory_out(record)
-
-
-@router.patch(
-    "/vendor-service-subcategories/{subcategory_id}",
-    response_model=VendorServiceSubcategoryOut,
-    dependencies=[Depends(require("master-data:update"))],
-)
-def update_vendor_service_subcategory(
-    subcategory_id: str,
-    data: VendorServiceSubcategoryUpdate,
-    request: Request,
-    db: Db,
-    user: Current,
-) -> VendorServiceSubcategoryOut:
-    record = _subcategory_or_404(db, subcategory_id, user.organization_id, include_deleted=False)
-    payload = data.model_dump(exclude_unset=True)
-    changed: list[str] = []
-    if "subcategory_code" in payload and payload["subcategory_code"] != record.subcategory_code:
-        duplicate = _duplicate_subcategory(
-            db,
-            user.organization_id,
-            record.vendor_id,
-            payload["subcategory_code"],
-            exclude_id=record.id,
-        )
-        if duplicate is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Vendor {record.vendor.vendor_code} already retains service subcategory "
-                    f"'{payload['subcategory_code']}'; restore or permanently delete it first"
-                ),
-            )
-    for field, value in payload.items():
-        if value is None or getattr(record, field) == value:
-            continue
-        setattr(record, field, value)
-        changed.append(field)
-    if not changed:
-        return _subcategory_out(record)
-    _audit(
-        db,
-        user=user,
-        action=MasterDataAction.UPDATE,
-        entity_type=VENDOR_SUBCATEGORY_ENTITY,
-        entity_id=record.id,
-        entity_label=f"{record.vendor.vendor_code} · {record.subcategory_code}",
-        summary=(
-            f"Updated service subcategory {record.subcategory_code} of vendor "
-            f"{record.vendor.vendor_code} ({', '.join(changed)})"
-        ),
-        request=request,
-    )
-    _commit(db)
-    db.refresh(record)
-    return _subcategory_out(record)
-
-
-@router.delete(
-    "/vendor-service-subcategories/{subcategory_id}",
-    response_model=VendorServiceSubcategoryOut,
-    dependencies=[Depends(require("master-data:delete"))],
-)
-def soft_delete_vendor_service_subcategory(
-    subcategory_id: str, request: Request, db: Db, user: Current
-) -> VendorServiceSubcategoryOut:
-    record = _subcategory_or_404(db, subcategory_id, user.organization_id, include_deleted=False)
-    from app.models.well_sub_activity import WellSubActivity
-
-    live_links = db.scalar(
-        select(func.count(WellSubActivity.id)).where(
-            WellSubActivity.organization_id == user.organization_id,
-            WellSubActivity.vendor_subcategory_id == record.id,
-            WellSubActivity.is_deleted.is_(False),
-        )
-    ) or 0
-    if live_links:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Service subcategory {record.subcategory_code} is still linked to {live_links} "
-                f"active well sub {'activity' if live_links == 1 else 'activities'}. "
-                "Reassign them to another service subcategory first."
-            ),
-        )
-    record.is_deleted = True
-    record.deleted_at = datetime.now(timezone.utc)
-    _audit(
-        db,
-        user=user,
-        action=MasterDataAction.SOFT_DELETE,
-        entity_type=VENDOR_SUBCATEGORY_ENTITY,
-        entity_id=record.id,
-        entity_label=f"{record.vendor.vendor_code} · {record.subcategory_code}",
-        summary=(
-            f"Moved service subcategory {record.subcategory_code} of vendor "
-            f"{record.vendor.vendor_code} to deleted entries"
-        ),
-        request=request,
-    )
-    _commit(db)
-    db.refresh(record)
-    return _subcategory_out(record)
-
-
-@router.post(
-    "/vendor-service-subcategories/{subcategory_id}/restore",
-    response_model=VendorServiceSubcategoryOut,
-    dependencies=[Depends(require("master-data:restore"))],
-)
-def restore_vendor_service_subcategory(
-    subcategory_id: str, request: Request, db: Db, user: Current
-) -> VendorServiceSubcategoryOut:
-    record = _subcategory_or_404(db, subcategory_id, user.organization_id)
-    if not record.is_deleted:
-        raise HTTPException(status_code=409, detail="Only a deleted service subcategory can be restored")
-    if record.vendor is not None and record.vendor.is_deleted:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Restore vendor {record.vendor.vendor_code} before restoring its service subcategories",
-        )
-    record.is_deleted = False
-    record.deleted_at = None
-    _audit(
-        db,
-        user=user,
-        action=MasterDataAction.RESTORE,
-        entity_type=VENDOR_SUBCATEGORY_ENTITY,
-        entity_id=record.id,
-        entity_label=f"{record.vendor.vendor_code} · {record.subcategory_code}",
-        summary=(
-            f"Restored service subcategory {record.subcategory_code} of vendor "
-            f"{record.vendor.vendor_code}"
-        ),
-        request=request,
-    )
-    _commit(db)
-    db.refresh(record)
-    return _subcategory_out(record)
-
-
-@router.delete(
-    "/vendor-service-subcategories/{subcategory_id}/permanent",
-    status_code=204,
-    dependencies=[Depends(require("master-data:permanent-delete"))],
-)
-def permanently_delete_vendor_service_subcategory(
-    subcategory_id: str, request: Request, db: Db, user: Current
-) -> None:
-    record = _subcategory_or_404(db, subcategory_id, user.organization_id)
-    if not record.is_deleted:
-        raise HTTPException(
-            status_code=409, detail="Only a deleted service subcategory can be permanently deleted"
-        )
-    assert_no_dependencies(
-        db,
-        record,
-        user.organization_id,
-        entity_label=f"vendor service subcategory {record.subcategory_code}",
-    )
-    _audit(
-        db,
-        user=user,
-        action=MasterDataAction.PERMANENT_DELETE,
-        entity_type=VENDOR_SUBCATEGORY_ENTITY,
-        entity_id=record.id,
-        entity_label=f"{record.vendor.vendor_code if record.vendor else ''} · {record.subcategory_code}",
-        summary=f"Permanently deleted service subcategory {record.subcategory_code}",
-        request=request,
-    )
-    db.delete(record)
-    _commit(db)
 
 
 # --------------------------------------------------------------------------- #

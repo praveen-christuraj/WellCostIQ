@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
-import { AddRounded, CategoryOutlined, DeleteOutlineRounded, DescriptionOutlined, EditOutlined } from '@mui/icons-material'
+import { AddRounded, DeleteOutlineRounded, DescriptionOutlined, EditOutlined } from '@mui/icons-material'
 import { Alert, Box, Button, Chip, CircularProgress, Paper, Typography } from '@mui/material'
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
@@ -8,7 +8,6 @@ import { ErrorMessage, FormDialog, PageHeading } from '../components/Common'
 import { ImportDialog } from '../components/ImportDialog'
 import { MasterDataTabs } from '../components/MasterDataTabs'
 import { VendorFormDialog } from '../components/VendorFormDialog'
-import { VendorServiceSubcategoriesDialog } from '../components/VendorServiceSubcategoriesDialog'
 import { VendorPoKpis } from '../components/VendorPoKpis'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
@@ -41,7 +40,6 @@ export default function Vendors() {
   const [deleteRecord, setDeleteRecord] = useState<Vendor | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
-  const [servicesVendor, setServicesVendor] = useState<Vendor | null>(null)
 
   const setForm = useCallback((patch: Partial<VendorFormState>) => {
     setFormState(current => ({ ...current, ...patch }))
@@ -161,25 +159,12 @@ export default function Vendors() {
         sx={{ height: 22, fontSize: 11 }}
       />,
     },
-    {
-      headerName: 'SERVICES', field: 'service_subcategory_count', minWidth: 105, maxWidth: 120,
-      cellRenderer: ({ data }: { data: Vendor }) => data && (
-        <Box display="flex" alignItems="center" height="100%">
-          <Button size="small" sx={{ minWidth: 0, px: .8 }}
-            onClick={() => setServicesVendor(data)}
-            aria-label={`Service subcategories of ${data.vendor_code}`}
-            startIcon={<CategoryOutlined sx={{ fontSize: 15 }}/>}>
-            {data.service_subcategory_count}
-          </Button>
-        </Box>
-      ),
-    },
     { headerName: 'PO/SO', field: 'order_count', minWidth: 85, maxWidth: 110 },
     { headerName: 'FILES', field: 'document_count', minWidth: 85, maxWidth: 110 },
     { headerName: 'LATEST ORDER', field: 'latest_order_date', minWidth: 125, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '—' },
     { headerName: 'UPDATED', field: 'updated_at', minWidth: 125, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
     {
-      headerName: 'ACTIONS', width: 350, minWidth: 350, maxWidth: 350, flex: 0, sortable: false,
+      headerName: 'ACTIONS', width: 250, minWidth: 250, maxWidth: 250, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: Vendor }) => <Box display="flex" alignItems="center" height="100%" gap={.2}>
         {can('master-data:update') && <Button size="small" onClick={() => openEdit(data)} aria-label={`Edit ${data.vendor_code}`} startIcon={<EditOutlined sx={{ fontSize: 15 }}/>}>Edit</Button>}
         <Button size="small" color="inherit" onClick={() => navigate(`/master-data/po-so-orders?vendor=${encodeURIComponent(data.vendor_code)}`)} aria-label={`PO/SO orders of ${data.vendor_code}`} startIcon={<DescriptionOutlined sx={{ fontSize: 15 }}/>}>PO/SO</Button>
@@ -194,7 +179,7 @@ export default function Vendors() {
     <PageHeading
       eyebrow="MASTER DATA MANAGEMENT / VENDORS"
       title="Vendors"
-      subtitle="Add and maintain the suppliers first; every PO/SO order is filed against one of them. Each vendor also lists its service subcategories, which well sub activities use as their responsible party."
+      subtitle="Add and maintain the suppliers first; every PO/SO order is filed against one of them."
       action={<Box display="flex" gap={1} flexWrap="wrap">
         <Button component={RouterLink} to="/master-data/po-so-orders" variant="outlined" startIcon={<DescriptionOutlined/>}>PO/SO orders</Button>
         <Button component={RouterLink} to="/master-data/deleted" variant="outlined" startIcon={<DeleteOutlineRounded/>}>Deleted entries</Button>
@@ -234,13 +219,6 @@ export default function Vendors() {
         />}
       </Box>
     </Paper>
-
-    <VendorServiceSubcategoriesDialog
-      open={Boolean(servicesVendor)}
-      vendor={servicesVendor}
-      onClose={() => setServicesVendor(null)}
-      onChanged={() => void load()}
-    />
 
     <VendorFormDialog
       open={formOpen}

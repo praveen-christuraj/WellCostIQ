@@ -371,12 +371,6 @@ class WellSubActivityCreate(BaseModel):
     sub_activity_code: str = Field(min_length=1, max_length=50)
     sub_activity_name: str = Field(min_length=1, max_length=150)
     activity_id: str = Field(min_length=1, max_length=36)
-    # Responsible party: the Master Data vendor and, optionally, one of that
-    # vendor's service subcategories. ``responsible_party`` stays accepted as a
-    # free-text fallback so older clients and spreadsheets keep working; when a
-    # vendor is selected the server derives the text from the vendor itself.
-    vendor_id: str | None = Field(default=None, max_length=36)
-    vendor_subcategory_id: str | None = Field(default=None, max_length=36)
     responsible_party: str = Field(default="Not Applicable", max_length=200)
     description: str = Field(min_length=1, max_length=4000)
 
@@ -395,14 +389,6 @@ class WellSubActivityCreate(BaseModel):
         val = str(value).strip()
         return val if val else "Not Applicable"
 
-    @field_validator("vendor_id", "vendor_subcategory_id", mode="before")
-    @classmethod
-    def blank_reference_to_none(cls, value: Any) -> Any:
-        if value is None:
-            return None
-        text = str(value).strip()
-        return text or None
-
     @field_validator(
         "well_id", "sub_activity_name", "activity_id", "description", mode="before"
     )
@@ -415,8 +401,6 @@ class WellSubActivityUpdate(BaseModel):
     sub_activity_code: str | None = Field(default=None, min_length=1, max_length=50)
     sub_activity_name: str | None = Field(default=None, min_length=1, max_length=150)
     activity_id: str | None = Field(default=None, min_length=1, max_length=36)
-    vendor_id: str | None = Field(default=None, max_length=36)
-    vendor_subcategory_id: str | None = Field(default=None, max_length=36)
     responsible_party: str | None = Field(default=None, max_length=200)
     description: str | None = Field(default=None, min_length=1, max_length=4000)
 
@@ -435,14 +419,6 @@ class WellSubActivityUpdate(BaseModel):
         val = str(value).strip()
         return val if val else "Not Applicable"
 
-    @field_validator("vendor_id", "vendor_subcategory_id", mode="before")
-    @classmethod
-    def blank_reference_to_none(cls, value: Any) -> Any:
-        if value is None:
-            return None
-        text = str(value).strip()
-        return text or None
-
     @field_validator(
         "sub_activity_name", "activity_id", "description", mode="before"
     )
@@ -458,14 +434,6 @@ class WellSubActivityOut(BaseModel):
     sub_activity_code: str
     sub_activity_name: str
     activity_id: str
-    vendor_id: str | None = None
-    vendor_code: str = ""
-    vendor_name: str = ""
-    vendor_subcategory_id: str | None = None
-    vendor_subcategory_code: str = ""
-    vendor_subcategory_name: str = ""
-    vendor_display: str = ""
-    vendor_subcategory_display: str = ""
     responsible_party: str
     description: str
     is_deleted: bool
@@ -482,34 +450,6 @@ class WellSubActivityOut(BaseModel):
     activity_display: str
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class SubActivityVendorOptionOut(BaseModel):
-    """An active vendor offered as the responsible party of a sub activity."""
-
-    id: str
-    vendor_code: str
-    vendor_name: str
-    vendor_type: str
-    status: str
-    label: str
-
-
-class SubActivityServiceLineOptionOut(BaseModel):
-    """One service subcategory of a vendor, for the dependent dropdown."""
-
-    id: str
-    vendor_id: str
-    vendor_code: str
-    vendor_name: str
-    subcategory_code: str
-    subcategory_name: str
-    display_name: str
-
-
-class SubActivityPartyOptionsOut(BaseModel):
-    vendors: list[SubActivityVendorOptionOut] = Field(default_factory=list)
-    service_lines: list[SubActivityServiceLineOptionOut] = Field(default_factory=list)
 
 
 class RigWellImportRequest(BaseModel):

@@ -20,9 +20,6 @@ import {
   type RigOption,
   type SubActivity,
   type SubActivityPayload,
-  type SubActivityPartyOptions,
-  type SubActivityServiceLineOption,
-  type SubActivityVendorOption,
   type Well,
   type WellConfigurationScope,
 } from '../lib/rigWell'
@@ -41,8 +38,6 @@ export default function WellSubActivities() {
   const [rigs, setRigs] = useState<RigOption[]>([])
   const [wells, setWells] = useState<Well[]>([])
   const [activities, setActivities] = useState<MasterActivity[]>([])
-  const [vendors, setVendors] = useState<SubActivityVendorOption[]>([])
-  const [serviceLines, setServiceLines] = useState<SubActivityServiceLineOption[]>([])
   const [selectedRigId, setSelectedRigId] = useState('')
   const [selectedWellId, setSelectedWellId] = useState('')
   const [selectedScope, setSelectedScope] = useState<WellConfigurationScope | ''>('')
@@ -82,17 +77,14 @@ export default function WellSubActivities() {
     setLoadingLookups(true)
     setLookupError('')
     try {
-      const [rigList, wellList, activityList, partyOptions] = await Promise.all([
+      const [rigList, wellList, activityList] = await Promise.all([
         api<RigOption[]>('/rig-well/rigs/dropdown'),
         api<Well[]>('/rig-well/wells'),
         api<MasterActivity[]>('/rig-well/sub-activities/activity-options'),
-        api<SubActivityPartyOptions>('/rig-well/sub-activities/party-options'),
       ])
       setRigs(rigList)
       setWells(wellList)
       setActivities(activityList)
-      setVendors(partyOptions.vendors.filter(vendor => vendor.status !== 'blocked'))
-      setServiceLines(partyOptions.service_lines)
       const queryRig = searchParams.get('rig_id') ?? ''
       const queryWell = searchParams.get('well_id') ?? ''
       const queryScope = searchParams.get('scope') ?? ''
@@ -191,12 +183,6 @@ export default function WellSubActivities() {
 
   const selectedActivity = activities.find(a => a.id === form.activity_id) ?? null
   const isPlanned = selectedActivity ? isPlannedActivity(selectedActivity) : true
-  const formVendor = vendors.find(vendor => vendor.id === form.vendor_id) ?? null
-  const formServiceLines = useMemo(
-    () => serviceLines.filter(line => line.vendor_id === form.vendor_id),
-    [serviceLines, form.vendor_id],
-  )
-  const vendorName = (vendorId: string) => vendors.find(vendor => vendor.id === vendorId)?.vendor_name ?? ''
 
   const openCreate = () => {
     if (!selectedScope) return
@@ -206,12 +192,6 @@ export default function WellSubActivities() {
     if (firstAct) {
       initial.activity_id = firstAct.id
       initial.responsible_party = isPlannedActivity(firstAct) ? 'Not Applicable' : ''
-    }
-    if (firstAct && !isPlannedActivity(firstAct) && vendors.length === 1) {
-      initial.vendor_id = vendors[0].id
-      initial.responsible_party = vendors[0].vendor_name
-      const onlyLines = serviceLines.filter(line => line.vendor_id === vendors[0].id)
-      if (onlyLines.length === 1) initial.vendor_subcategory_id = onlyLines[0].id
     }
     setForm(initial)
     setFormError('')
@@ -227,8 +207,6 @@ export default function WellSubActivities() {
       sub_activity_code: record.sub_activity_code,
       sub_activity_name: record.sub_activity_name,
       activity_id: record.activity_id,
-      vendor_id: record.vendor_id ?? '',
-      vendor_subcategory_id: record.vendor_subcategory_id ?? '',
       responsible_party: planned ? 'Not Applicable' : record.responsible_party,
       description: record.description,
     })
@@ -242,19 +220,7 @@ export default function WellSubActivities() {
     setForm(prev => ({
       ...prev,
       activity_id: activityId,
-      vendor_id: planned ? '' : prev.vendor_id,
-      vendor_subcategory_id: planned ? '' : prev.vendor_subcategory_id,
       responsible_party: planned ? 'Not Applicable' : (prev.responsible_party === 'Not Applicable' ? '' : prev.responsible_party),
-    }))
-  }
-
-  const onVendorChange = (vendorId: string) => {
-    const remaining = serviceLines.filter(line => line.vendor_id === vendorId)
-    setForm(prev => ({
-      ...prev,
-      vendor_id: vendorId,
-      vendor_subcategory_id: remaining.length === 1 ? remaining[0].id : '',
-      responsible_party: vendorId ? vendorName(vendorId) : '',
     }))
   }
 
@@ -268,11 +234,7 @@ export default function WellSubActivities() {
       sub_activity_code: form.sub_activity_code.trim(),
       sub_activity_name: form.sub_activity_name.trim(),
       activity_id: form.activity_id,
-      vendor_id: isPlanned ? null : (form.vendor_id || null),
-      vendor_subcategory_id: isPlanned ? null : (form.vendor_subcategory_id || null),
-      responsible_party: isPlanned
-        ? 'Not Applicable'
-        : (vendorName(form.vendor_id) || form.responsible_party.trim()),
+      responsible_party: isPlanned ? 'Not Applicable' : form.responsible_party.trim(),
       description: form.description.trim(),
     }
     try {
@@ -282,8 +244,6 @@ export default function WellSubActivities() {
             sub_activity_code: payload.sub_activity_code,
             sub_activity_name: payload.sub_activity_name,
             activity_id: payload.activity_id,
-            vendor_id: payload.vendor_id,
-            vendor_subcategory_id: payload.vendor_subcategory_id,
             responsible_party: payload.responsible_party,
             description: payload.description,
           }),
@@ -361,27 +321,7 @@ export default function WellSubActivities() {
       cellRenderer: ({ data }: { data: SubActivity }) => data && <Box display="flex" alignItems="center" height="100%"><Tag tone="info">{scopeLabel(data.scope)}</Tag></Box>,
     },
     { headerName: 'ACTIVITY', field: 'activity_display', minWidth: 180, flex: 1 },
-    {
-      headerName: 'RESPONSIBLE VENDOR', field: 'vendor_display', minWidth: 195, flex: 1,
-      valueFormatter: params => params.value || (params.data?.responsible_party && params.data.responsible_party !== 'Not Applicable' ? params.data.responsible_party : 'Not Applicable'),
-      cellRenderer: ({ data }: { data: SubActivity }) => data && <Box display="flex" alignItems="center" height="100%" gap={.6}>
-        {data.vendor_display
-          ? <Tag tone="success">{data.vendor_display}</Tag>
-          : <Typography fontSize={12.5} color={data.responsible_party && data.responsible_party !== 'Not Applicable' ? 'text.primary' : 'text.secondary'}>
-              {data.responsible_party || 'Not Applicable'}
-            </Typography>}
-      </Box>,
-    },
-    {
-      headerName: 'VENDOR SERVICE SUBCATEGORY', field: 'vendor_subcategory_display', minWidth: 215, flex: 1.1,
-      valueFormatter: params => params.value || '—',
-      cellRenderer: ({ data }: { data: SubActivity }) => data && <Box display="flex" alignItems="center" height="100%" gap={.6}>
-        {data.vendor_subcategory_display
-          ? <Tag tone="info">{data.vendor_subcategory_code}</Tag>
-          : <Typography fontSize={12.5} color="text.secondary">—</Typography>}
-        {data.vendor_subcategory_display && <Typography fontSize={12}>{(data.vendor_subcategory_display.split(' — ')[1] ?? data.vendor_subcategory_name)}</Typography>}
-      </Box>,
-    },
+    { headerName: 'RESPONSIBLE PARTY / COMPANY', field: 'responsible_party', minWidth: 195, flex: 1 },
     { headerName: 'DESCRIPTION / REMARKS', field: 'description', minWidth: 230, flex: 1.4, valueFormatter: params => params.value || '—' },
     { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
     {
@@ -435,7 +375,6 @@ export default function WellSubActivities() {
     {lookupError && <Alert severity="error" sx={{ mb: 1.5 }}>{lookupError}</Alert>}
     {!loadingLookups && !rigs.length && <Alert severity="info" sx={{ mb: 1.5 }} action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/rigs" size="small">Add a rig</Button> : undefined}>Create a rig and a well before entering well sub activities.</Alert>}
     {!loadingLookups && rigs.length > 0 && (!selectedWellId || !selectedScope) && <Alert severity="info" sx={{ mb: 1.5 }}>Choose a rig, well and scope (Drilling or Completion) to open its sub activity register. Codes are unique within each well scope, so Drilling and Completion maintain independent sub activity lists.</Alert>}
-    {!loadingLookups && selectedWellId && selectedScope && activities.length > 0 && !vendors.length && <Alert severity="warning" sx={{ mb: 1.5 }} action={can('master-data:create') ? <Button component={RouterLink} to="/master-data/vendors" size="small">Manage Vendors</Button> : undefined}>No active Vendors are available. UPA and NPT sub activities need a responsible vendor from Master Data.</Alert>}
     {!loadingLookups && selectedWellId && selectedScope && !activities.length && <Alert severity="warning" sx={{ mb: 1.5 }} icon={<FactCheckOutlined/>} action={can('master-data:read') ? <Button component={RouterLink} to="/master-data/records?module=activities" size="small">Manage Activities</Button> : undefined}>No active Master Data Activities are available. An Activity must be configured before a sub activity can be created.</Alert>}
     {notice && <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 1.5 }}>{notice}</Alert>}
     <ErrorMessage message={error}/>
@@ -457,12 +396,12 @@ export default function WellSubActivities() {
     <FormDialog
       open={formOpen}
       title={formRecord ? `Edit sub activity ${formRecord.sub_activity_code}` : `Add sub activity${activeWell && selectedScope ? ` · ${activeWell.well_code} (${scopeLabel(selectedScope)})` : ''}`}
-      subtitle="The well and configuration scope are fixed for this entry. Select a controlling Activity, then the responsible vendor and (optionally) that vendor's service subcategory from Master Data."
+      subtitle="The well and configuration scope are fixed for this entry. Select a controlling Activity from the workspace Master Data register."
       onClose={() => { if (!saving) { setFormOpen(false); setFormRecord(null) } }}
       onSubmit={() => void save()}
       busy={saving}
       dirty={formDirty}
-      submitDisabled={!selectedWellId || !selectedScope || !activities.length || !form.sub_activity_code.trim() || !form.sub_activity_name.trim() || !form.activity_id || (!isPlanned && !form.vendor_id) || !form.description.trim()}
+      submitDisabled={!selectedWellId || !selectedScope || !activities.length || !form.sub_activity_code.trim() || !form.sub_activity_name.trim() || !form.activity_id || (!isPlanned && (!form.responsible_party.trim() || form.responsible_party.trim() === 'Not Applicable')) || !form.description.trim()}
       submitLabel={formRecord ? 'Save changes' : 'Create sub activity'}
     >
       <Box display="grid" gap={2} pt={.5}>
@@ -477,44 +416,16 @@ export default function WellSubActivities() {
         <TextField select label="Activity" required fullWidth value={form.activity_id} onChange={event => onActivityChange(event.target.value)}>
           {activities.map(activity => <MenuItem key={activity.id} value={activity.id}>{activity.code} — {activity.name}</MenuItem>)}
         </TextField>
-        <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={1.5}>
-          <TextField
-            select
-            label="Responsible vendor / company"
-            required={!isPlanned}
-            disabled={isPlanned}
-            fullWidth
-            value={isPlanned ? '' : form.vendor_id}
-            onChange={event => onVendorChange(event.target.value)}
-            helperText={isPlanned
-              ? 'Not applicable for planned activities.'
-              : 'Selected from the Vendors register in Master Data (mandatory for UPA/NPT).'}
-          >
-            <MenuItem value="">{isPlanned ? 'Not Applicable' : 'Select a vendor'}</MenuItem>
-            {vendors.map(vendor => <MenuItem key={vendor.id} value={vendor.id}>{vendor.label}</MenuItem>)}
-          </TextField>
-          <TextField
-            select
-            label="Vendor service subcategory"
-            disabled={isPlanned || !form.vendor_id}
-            fullWidth
-            value={isPlanned ? '' : form.vendor_subcategory_id}
-            onChange={event => setForm({ ...form, vendor_subcategory_id: event.target.value })}
-            helperText={!form.vendor_id
-              ? 'Choose the vendor first.'
-              : formServiceLines.length
-                ? 'Optional: the vendor service line this work step belongs to.'
-                : `No service subcategories configured for ${formVendor?.vendor_name ?? 'this vendor'} yet.`}
-          >
-            <MenuItem value="">{formServiceLines.length ? 'No service subcategory' : 'None configured'}</MenuItem>
-            {formServiceLines.map(line => <MenuItem key={line.id} value={line.id}>{line.display_name}</MenuItem>)}
-          </TextField>
-        </Box>
-        {!isPlanned && form.vendor_id && !formServiceLines.length && formVendor && (
-          <Alert severity="info">
-            {formVendor.vendor_name} has no service subcategories yet. Add them under Master Data → Vendors → Services to report this vendor's NPT/UPA and costs per service line.
-          </Alert>
-        )}
+        <TextField
+          label="Responsible party / company"
+          required={!isPlanned}
+          disabled={isPlanned}
+          fullWidth
+          value={isPlanned ? 'Not Applicable' : form.responsible_party}
+          onChange={event => setForm({ ...form, responsible_party: event.target.value })}
+          inputProps={{ maxLength: 200 }}
+          helperText={isPlanned ? 'Not applicable for planned activities.' : 'Who performs or is responsible for this work step? (Mandatory for UPA/NPT)'}
+        />
         <TextField label="Description / remarks" required fullWidth multiline minRows={3} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} inputProps={{ maxLength: 4000 }}/>
         <ErrorMessage message={formError}/>
       </Box>
@@ -539,14 +450,10 @@ export default function WellSubActivities() {
       open={importOpen}
       onClose={() => setImportOpen(false)}
       title={`Import sub activities${activeWell && selectedScope ? ` · ${activeWell.well_code} (${scopeLabel(selectedScope)})` : ''}`}
-      subtitle="Rows are imported into the selected well scope (unless an optional scope column overrides a row to drilling or completion). Activity and vendor accept an exact Master Data code or name; vendor service subcategory is matched inside the named vendor and overrides the responsible_party text. The sub activity code is unique within each well scope."
+      subtitle="Rows are imported into the selected well scope (unless an optional scope column overrides a row to drilling or completion). The Activity column accepts an exact Master Data Activity code or name; the sub activity code is unique within each well scope."
       headers={SUB_ACTIVITY_HEADERS}
       optionalHeaders={SUB_ACTIVITY_IMPORT_OPTIONAL_HEADERS}
-      sample={{
-        sub_activity_code: 'RIH-01', sub_activity_name: 'Run in hole with tubing', activity: 'DRILL',
-        responsible_party: 'Halliburton', vendor: 'HAL', vendor_service_subcategory: 'LINER',
-        description: 'Run completion tubing to planned depth.',
-      }}
+      sample={{ sub_activity_code: 'RIH-01', sub_activity_name: 'Run in hole with tubing', activity: 'DRILL', responsible_party: 'Operations team', description: 'Run completion tubing to planned depth.' }}
       templateName={`well-sub-activities-${selectedScope || 'drilling'}-template.csv`}
       onRows={importRows}
     />
