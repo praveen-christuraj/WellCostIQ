@@ -92,7 +92,6 @@ class VendorOut(BaseModel):
     description: str
     order_count: int = 0
     document_count: int = 0
-    service_subcategory_count: int = 0
     latest_order_date: date | None = None
     is_deleted: bool
     deleted_at: datetime | None = None
@@ -107,75 +106,6 @@ class VendorOption(BaseModel):
     vendor_name: str
     status: VendorStatus
     order_count: int = 0
-    label: str
-
-
-class VendorServiceSubcategoryCreate(BaseModel):
-    """One service line offered by a vendor (Halliburton — Liner Service)."""
-
-    vendor_id: str = Field(min_length=1, max_length=36)
-    subcategory_code: str = Field(min_length=1, max_length=50)
-    subcategory_name: str = Field(min_length=1, max_length=150)
-    description: str = Field(default="", max_length=500)
-
-    model_config = ConfigDict(extra="forbid")
-
-    @field_validator("subcategory_code", mode="before")
-    @classmethod
-    def normalise_code(cls, value: Any) -> Any:
-        return value.strip().upper() if isinstance(value, str) else value
-
-    @field_validator("vendor_id", "subcategory_name", "description", mode="before")
-    @classmethod
-    def trim_text(cls, value: Any) -> Any:
-        return _trim(value)
-
-
-class VendorServiceSubcategoryUpdate(BaseModel):
-    subcategory_code: str | None = Field(default=None, min_length=1, max_length=50)
-    subcategory_name: str | None = Field(default=None, min_length=1, max_length=150)
-    description: str | None = Field(default=None, max_length=500)
-
-    model_config = ConfigDict(extra="forbid")
-
-    @field_validator("subcategory_code", mode="before")
-    @classmethod
-    def normalise_code(cls, value: Any) -> Any:
-        return value.strip().upper() if isinstance(value, str) else value
-
-    @field_validator("subcategory_name", "description", mode="before")
-    @classmethod
-    def trim_text(cls, value: Any) -> Any:
-        return _trim(value)
-
-
-class VendorServiceSubcategoryOut(BaseModel):
-    id: str
-    vendor_id: str
-    vendor_code: str
-    vendor_name: str
-    vendor_status: VendorStatus
-    subcategory_code: str
-    subcategory_name: str
-    description: str
-    display_name: str
-    sub_activity_count: int = 0
-    is_deleted: bool
-    deleted_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class VendorServiceSubcategoryOption(BaseModel):
-    """Flat dropdown option: one vendor service line with its parent vendor."""
-
-    id: str
-    vendor_id: str
-    vendor_code: str
-    vendor_name: str
-    subcategory_code: str
-    subcategory_name: str
-    display_name: str
     label: str
 
 

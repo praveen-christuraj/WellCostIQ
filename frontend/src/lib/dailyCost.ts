@@ -38,9 +38,6 @@ export type DailyCostActivityOption = { id: string; activity_code: string; activ
 export type DailyCostSubActivityOption = {
   id: string; well_id: string; scope?: WellScopeKey; activity_id: string; sub_activity_code: string
   sub_activity_name: string; responsible_party: string; display_name: string
-  /** Responsible party as configured in Master Data: vendor plus its service line. */
-  vendor_id?: string | null; vendor_code?: string; vendor_name?: string
-  vendor_subcategory_id?: string | null; vendor_subcategory_code?: string; vendor_subcategory_name?: string
 }
 export type DailyCostServiceOption = {
   id: string; service_code: string; service_name: string; service_category: string
@@ -55,17 +52,12 @@ export type DailyCostCatalogueOption = {
 export type DailyCostVendorOption = {
   id: string; vendor_code: string; vendor_name: string; vendor_type: string; status: string; display_name: string
 }
-export type DailyCostVendorServiceOption = {
-  id: string; vendor_id: string; vendor_code: string; vendor_name: string
-  subcategory_code: string; subcategory_name: string; display_name: string
-}
 export type DailyCostOtherExpenseTypeOption = { code: OtherExpenseType; label: string }
 export type DailyCostReference = {
   rigs: DailyCostRigOption[]; wells: DailyCostWellOption[]; afes: DailyCostAfeOption[]
   activities: DailyCostActivityOption[]; sub_activities: DailyCostSubActivityOption[]
   services: DailyCostServiceOption[]; catalogue_items: DailyCostCatalogueOption[]
-  vendors: DailyCostVendorOption[]; vendor_service_subcategories: DailyCostVendorServiceOption[]
-  currencies: string[]; charge_categories: ChargeCategory[]
+  vendors: DailyCostVendorOption[]; currencies: string[]; charge_categories: ChargeCategory[]
   charge_bases: ChargingBasis[]; quantity_units: DailyQuantityUnit[]; classifications: CostClassification[]
   consumable_categories: ConsumableCategory[]
   other_expense_types: DailyCostOtherExpenseTypeOption[]

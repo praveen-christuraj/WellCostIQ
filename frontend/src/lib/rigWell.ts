@@ -144,14 +144,6 @@ export type SubActivity = {
   sub_activity_code: string
   sub_activity_name: string
   activity_id: string
-  vendor_id: string | null
-  vendor_code: string
-  vendor_name: string
-  vendor_subcategory_id: string | null
-  vendor_subcategory_code: string
-  vendor_subcategory_name: string
-  vendor_display: string
-  vendor_subcategory_display: string
   responsible_party: string
   description: string
   is_deleted: boolean
@@ -240,36 +232,8 @@ export type SubActivityPayload = {
   sub_activity_code: string
   sub_activity_name: string
   activity_id: string
-  vendor_id: string
-  vendor_subcategory_id: string
   responsible_party: string
   description: string
-}
-
-/** A vendor or one of its service lines, as chosen on a well sub activity. */
-export type SubActivityVendorOption = {
-  id: string
-  vendor_code: string
-  vendor_name: string
-  status: string
-  vendor_type: string
-  label: string
-}
-
-export type SubActivityPartyOptions = {
-  vendors: SubActivityVendorOption[]
-  service_lines: SubActivityServiceLineOption[]
-}
-
-export type SubActivityServiceLineOption = {
-  id: string
-  vendor_id: string
-  vendor_code: string
-  vendor_name: string
-  subcategory_code: string
-  subcategory_name: string
-  display_name: string
-  label: string
 }
 
 export const BLOCK_IMPORT_HEADERS = ['block_code', 'block_name']
@@ -283,10 +247,7 @@ export const WELL_IMPORT_OPTIONAL_HEADERS = ['remarks']
 export const SUB_ACTIVITY_IMPORT_HEADERS = [
   'sub_activity_code', 'sub_activity_name', 'activity', 'responsible_party', 'description',
 ]
-// `vendor` + `vendor_service_subcategory` link the Master Data register; when a
-// vendor is named it wins over the free-text responsible_party column, so old
-// spreadsheets keep importing and new ones gain the link.
-export const SUB_ACTIVITY_IMPORT_OPTIONAL_HEADERS = ['scope', 'vendor', 'vendor_service_subcategory']
+export const SUB_ACTIVITY_IMPORT_OPTIONAL_HEADERS = ['scope']
 
 export const emptyBlockForm = (): BlockPayload => ({ block_code: '', block_name: '', description: '' })
 export const emptyRigForm = (): RigPayload => ({ rig_code: '', rig_name: '', remarks: '' })
@@ -306,8 +267,6 @@ export const emptySubActivityForm = (wellId = '', scope: WellConfigurationScope 
   sub_activity_code: '',
   sub_activity_name: '',
   activity_id: '',
-  vendor_id: '',
-  vendor_subcategory_id: '',
   responsible_party: '',
   description: '',
 })

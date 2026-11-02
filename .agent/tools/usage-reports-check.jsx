@@ -30,7 +30,6 @@ const { ThemeProvider, CssBaseline } = await import('@mui/material')
 const { buildTheme } = await import('../../frontend/src/theme')
 const UsageMatrix = (await import('../../frontend/src/components/reports/UsageMatrix')).default
 const NptUpaMatrix = (await import('../../frontend/src/components/reports/NptUpaMatrix')).default
-const NptUpaPartyTable = (await import('../../frontend/src/components/reports/NptUpaPartyTable')).default
 const UsageReportFilters = (await import('../../frontend/src/components/reports/UsageReportFilters')).default
 
 const results = []
@@ -103,41 +102,6 @@ const nptReport = {
   detail: [],
   totals: { well_id: '', well_code: '', well_name: 'All wells (USD)', rig_code: '', block_code: '', planned_affected_dates: 3, upa_affected_dates: 1, npt_affected_dates: 1, planned_hours: '48.00', upa_hours: '12.00', npt_hours: '12.00', planned_days: '2.0000', upa_days: '0.5000', npt_days: '0.5000', planned_amount: '250.00', upa_amount: '650.00', npt_amount: '200.00', total_amount: '1100.00', overallocated_dates: 0 },
   entry_count: 3, excluded_entry_count: 0, overallocated_date_count: 0,
-}
-
-// Responsible party / vendor service rollups: the vendor rows add up to the
-// well totals and each vendor's service rows add up to that vendor.
-const partyRow = (overrides = {}) => ({
-  party_key: 'vendor:v1', party_name: 'Halliburton', vendor_id: 'v1', vendor_code: 'HAL',
-  vendor_name: 'Halliburton', vendor_subcategory_id: '', vendor_subcategory_code: '',
-  vendor_subcategory_name: '', is_linked: true, well_count: 1,
-  planned_affected_dates: 0, upa_affected_dates: 1, npt_affected_dates: 1,
-  planned_hours: '0.00', upa_hours: '12.00', npt_hours: '12.00',
-  planned_days: '0.0000', upa_days: '0.5000', npt_days: '0.5000',
-  planned_amount: '0.00', upa_amount: '650.00', npt_amount: '200.00', total_amount: '850.00',
-  ...overrides,
-})
-const nptPartyReport = {
-  ...nptReport,
-  parties: [
-    partyRow(),
-    partyRow({
-      party_key: 'vendor:v2', party_name: 'Baker Hughes', vendor_id: 'v2', vendor_code: 'BAK',
-      vendor_name: 'Baker Hughes', well_count: 1, upa_affected_dates: 0, npt_affected_dates: 0,
-      upa_hours: '0.00', npt_hours: '0.00', upa_days: '0.0000', npt_days: '0.0000',
-      upa_amount: '0.00', npt_amount: '0.00', total_amount: '100.00', planned_amount: '100.00',
-    }),
-    partyRow({
-      party_key: 'party:legacy', party_name: 'Legacy crew', vendor_id: '', vendor_code: '',
-      vendor_name: '', is_linked: false, total_amount: '150.00', upa_amount: '0.00',
-      upa_hours: '0.00', upa_days: '0.0000', well_count: 1,
-    }),
-  ],
-  party_subcategories: [
-    partyRow({ party_key: 'v1|LINER', vendor_subcategory_id: 'sc1', vendor_subcategory_code: 'LINER', vendor_subcategory_name: 'Liner Service', total_amount: '700.00', upa_amount: '650.00', upa_hours: '12.00', upa_days: '0.5000', npt_amount: '50.00' }),
-    partyRow({ party_key: 'v1|MWD', vendor_subcategory_id: 'sc2', vendor_subcategory_code: 'MWD', vendor_subcategory_name: 'DD / MWD Service', total_amount: '150.00', upa_amount: '0.00', upa_hours: '0.00', upa_days: '0.0000', npt_amount: '150.00', npt_hours: '12.00', npt_days: '0.5000' }),
-  ],
-  party_wells: [],
 }
 
 const container = w.document.getElementById('root')
@@ -223,38 +187,6 @@ for (const mode of ['light', 'dark']) {
   const nptText = doc.body.textContent || ''
   check(`${mode}: NPT/UPA matrix separates duration, affected dates and cost`, nptText.includes('NPT allocated days') && nptText.includes('NPT affected cost dates') && nptText.includes('NPT cost') && nptText.includes('UPA allocated hours') && nptText.includes('UPA affected cost dates') && nptText.includes('UPA cost'))
   check(`${mode}: NPT/UPA totals and per-well allocations render`, nptText.includes('650.00 USD') && nptText.includes('All wells') && nptText.includes('0.5'))
-
-  // NPT/UPA by responsible party and vendor service.
-  await act(async () => {
-    root.render(
-      <CacheProvider value={cache}>
-        <ThemeProvider theme={buildTheme(mode)}>
-          <CssBaseline />
-          <NptUpaPartyTable report={nptPartyReport} currency="USD" />
-        </ThemeProvider>
-      </CacheProvider>
-    )
-  })
-  const partyText = doc.body.textContent || ''
-  check(`${mode}: NPT/UPA party table names the responsible party measures`,
-    partyText.includes('NPT / UPA by responsible party') && partyText.includes('NPT days') &&
-    partyText.includes('NPT cost') && partyText.includes('UPA days') && partyText.includes('Total cost'))
-  check(`${mode}: vendor totals render with codes and money`,
-    partyText.includes('Halliburton') && partyText.includes('HAL') && partyText.includes('850.00 USD') &&
-    partyText.includes('Baker Hughes'))
-  check(`${mode}: free-text parties are flagged instead of hidden`,
-    partyText.includes('Legacy crew') && partyText.includes('not linked to a vendor'))
-
-  await act(async () => {
-    const tab = Array.from(doc.querySelectorAll('[role="tab"]')).find(node => (node.textContent || '').includes('By vendor service'))
-    tab.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
-  })
-  const subcategoryText = doc.body.textContent || ''
-  check(`${mode}: vendor service view lists each vendor service subcategory with its code`,
-    subcategoryText.includes('LINER — Liner Service') && subcategoryText.includes('MWD — DD / MWD Service') &&
-    subcategoryText.includes('700.00 USD') && subcategoryText.includes('150.00 USD'))
-  check(`${mode}: vendor service view keeps the vendor name on every service row`,
-    subcategoryText.includes('Halliburton'))
 
   // Filter panel.
   await act(async () => {
