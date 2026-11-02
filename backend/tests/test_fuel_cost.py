@@ -749,3 +749,85 @@ def test_fuel_recent_five_days_rig_saving_summary_rollups_and_large_ledger():
             })
             assert audit_res.status_code == 204, audit_res.text
 
+
+
+def test_fuel_ledger_wording_is_configured_not_hardcoded():
+    """The register's fuel label follows Master Data, or what the site types."""
+    with TestClient(app) as client:
+        headers = login(client)
+
+        def wording() -> dict:
+            response = client.get("/api/v1/fuel-cost/settings", headers=headers)
+            assert response.status_code == 200, response.text
+            return response.json()["wording"]
+
+        # Nothing is seeded any more, so a fresh workspace reads generic wording.
+        generic = wording()
+        assert (generic["fuel_label"], generic["saving_label"], generic["unit_label"]) == (
+            "Fuel",
+            "Rig Saving",
+            "L",
+        )
+        assert generic["source"] == "generic" and generic["fuel_type_id"] == ""
+        assert "AGO" not in generic["fuel_label"]
+
+        # One fuel in Master Data is enough to name the whole register.
+        assert client.post(
+            "/api/v1/master-data/currencies", headers=headers,
+            json={"code": "usd", "name": "US Dollar", "symbol": "$"},
+        ).status_code == 201
+        assert client.post(
+            "/api/v1/master-data/uom", headers=headers, json={"code": "ltr", "name": "Litre", "symbol": "L"}
+        ).status_code == 201
+        fuel = _post(client, "/api/v1/master-data/fuel-types", headers, {
+            "fuel_code": "HSD", "fuel_name": "High Speed Diesel", "uom": "ltr",
+            "unit_rate": "0.95", "currency": "USD",
+        })
+        linked = wording()
+        assert linked["source"] == "master-data"
+        assert linked["fuel_label"] == "High Speed Diesel"
+        assert linked["saving_label"] == "Rig Saving"
+        # The unit is the fuel's own UOM from Master Data, not a constant "L".
+        assert linked["unit_label"] == "LTR"
+        assert linked["fuel_type_id"] == fuel["id"]
+
+        # A site that counts AGO types its own wording; the unit follows its master data.
+        saved = client.put(
+            "/api/v1/fuel-cost/settings", headers=headers,
+            json={"fuel_label": "Company consumption (AGO)", "saving_label": "Rig saving (AGO)",
+                  "remarks": "Named the way the daily report prints it."},
+        )
+        assert saved.status_code == 200, saved.text
+        typed = saved.json()["wording"]
+        assert typed["source"] == "typed"
+        assert typed["fuel_label"] == "Company consumption (AGO)"
+        assert typed["saving_label"] == "Rig saving (AGO)"
+        assert typed["unit_label"] == "LTR"
+
+        # The register itself prints the saved wording, not a constant.
+        reference = client.get("/api/v1/fuel-cost/reference", headers=headers).json()
+        assert reference["wording"]["fuel_label"] == "Company consumption (AGO)"
+
+        # A blank label hands the wording back to Master Data.
+        cleared = client.put(
+            "/api/v1/fuel-cost/settings", headers=headers,
+            json={"fuel_label": "  ", "saving_label": "", "fuel_type_id": fuel["id"]},
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["wording"]["source"] == "master-data"
+        assert cleared.json()["wording"]["fuel_label"] == "High Speed Diesel"
+
+        # The fuel must be a live row of this workspace's list.
+        assert client.put(
+            "/api/v1/fuel-cost/settings", headers=headers, json={"fuel_type_id": "not-a-fuel"}
+        ).status_code == 422
+
+        # Settings are per workspace: the other tenant still reads generic wording.
+        south = login(client, "south")
+        assert client.get("/api/v1/fuel-cost/settings", headers=south).json()["wording"]["source"] == "generic"
+
+        with SessionLocal() as db:
+            entry = db.query(AuditLog).filter_by(entity_label="Fuel ledger wording").order_by(
+                AuditLog.created_at.desc()
+            ).first()
+            assert entry is not None and "High Speed Diesel" in entry.summary

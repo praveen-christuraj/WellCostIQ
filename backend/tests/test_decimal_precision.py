@@ -20,7 +20,7 @@ from app.schemas.afe import (
     ServiceLineOut,
     TangibleLineOut,
 )
-from app.schemas.catalogue import FuelRevise
+from app.schemas.catalogue import UnitRevise  # fuel prices revise through the shared priced-spec model
 from app.schemas.daily_cost import DailyCostEntryCreate
 from app.schemas.mud_cost import MudCostLineIn
 from app.schemas.rig_well import ConfigurationPhaseIn, ConfigurationSectionIn
@@ -52,7 +52,7 @@ def test_shared_decimal_contract_accepts_ten_places_and_rejects_eleven():
             },
             "from_depth",
         ),
-        (FuelRevise, {"unit_rate": TEN_PLACES, "currency": "USD", "reason": "precision correction"}, "unit_rate"),
+        (UnitRevise, {"unit_rate": TEN_PLACES, "currency": "USD", "reason": "precision correction"}, "unit_rate"),
         (RateIn, {"category": "Operation", "unit_rate": TEN_PLACES}, "unit_rate"),
         (ExchangeRateIn, {"currency_code": "EUR", "rate": TEN_PLACES}, "rate"),
         (MudCostLineIn, {"line_code": "opening_stock", "amount": TEN_PLACES}, "amount"),

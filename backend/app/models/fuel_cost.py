@@ -65,6 +65,44 @@ FUEL_COMPANY_SOURCES = ("vendor", "manual", "import")
 FUEL_LINE_SOURCES = ("manual", "import")
 
 
+class FuelLedgerSettings(Base):
+    """What this workspace calls the fuel it counts, one row per workspace.
+
+    The register is a material balance of *one* fuel. Which fuel that is — AGO,
+    Diesel, HSD, a bio-blend — is the workspace's own list in
+    Master Data → Consumables → Fuel, never a constant in code. Linking a fuel
+    here makes the register take that fuel's name and unit of measure for every
+    heading, tile, export header and alert; the two label fields override the
+    wording when a site prefers its own phrasing.
+    """
+
+    __tablename__ = "fuel_ledger_settings"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_fuel_ledger_settings_org"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Master Data fuel whose name and UOM the register should speak.
+    fuel_type_id: Mapped[str | None] = mapped_column(
+        ForeignKey("fuel_types.id", ondelete="SET NULL"), nullable=True
+    )
+    # Explicit wording, preferred over the linked fuel's own name.
+    fuel_label: Mapped[str] = mapped_column(String(40), default="", server_default="", nullable=False)
+    saving_label: Mapped[str] = mapped_column(String(40), default="", server_default="", nullable=False)
+    remarks: Mapped[str] = mapped_column(
+        String(FUEL_MAX_REMARKS), default="", server_default="", nullable=False
+    )
+    created_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, onupdate=now, nullable=False
+    )
+
+
 class FuelCompany(Base):
     """A company that consumes fuel from a rig (usually linked to a vendor).
 

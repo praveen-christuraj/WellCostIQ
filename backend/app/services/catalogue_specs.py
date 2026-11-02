@@ -10,7 +10,6 @@ from app.models.catalogue import (
     CementAdditiveRevision,
     DrillBit,
     DrillBitRevision,
-    FUEL_TYPE_SEEDS,
     FuelPriceRevision,
     FuelType,
     MudChemical,
@@ -26,8 +25,9 @@ from app.schemas.catalogue import (
     DrillBitCreate,
     DrillBitOut,
     DrillBitUpdate,
+    FuelCreate,
     FuelOut,
-    FuelRevise,
+    FuelUpdate,
     MudChemicalCreate,
     MudChemicalOut,
     MudChemicalUpdate,
@@ -42,20 +42,7 @@ from app.services.catalogue import (
     OptionField,
     PricedSpec,
     TextField,
-    seed_fixed_records,
 )
-
-
-def _seed_fuel(db, organization_id: str) -> None:
-    seed_fixed_records(
-        db,
-        organization_id,
-        model=FuelType,
-        code_attr="fuel_code",
-        name_attr="fuel_name",
-        seeds=FUEL_TYPE_SEEDS,
-        uom="L",
-    )
 
 
 TANGIBLES = PricedSpec(
@@ -305,11 +292,34 @@ FUEL = PricedSpec(
     code_label="Fuel code",
     name_label="Fuel",
     priced="unit",
-    duplicate_rule="none",
-    lifecycle=False,
-    revise_model=FuelRevise,
+    texts=(TextField("uom", "Unit of measure", 50), TextField("remarks", "Remarks", 500)),
+    # A workspace's fuel list is its own: which fuels it buys, what it calls them
+    # and the unit they are priced in. Nothing is seeded and no name is fixed.
+    duplicate_rule="unique_name",
+    create_model=FuelCreate,
+    update_model=FuelUpdate,
+    revise_model=UnitRevise,
     out_model=FuelOut,
-    seed=_seed_fuel,
+    import_required=("fuel_code", "fuel_name", "unit_rate", "currency"),
+    import_optional=("uom", "po_number", "effective_date", "description", "remarks"),
+    import_aliases={
+        "fuel_code": ("code",),
+        "fuel_name": ("name", "fuel"),
+        "unit_rate": ("rate", "price", "price_per_litre", "unit_rate_po"),
+        "uom": ("unit", "unit_of_measure"),
+        "po_number": ("po_no", "po"),
+    },
+    sample_row={
+        "fuel_code": "AGO",
+        "fuel_name": "Automotive Gas Oil (AGO)",
+        "uom": "L",
+        "unit_rate": "95",
+        "currency": "USD",
+        "po_number": "PO-4500789",
+        "effective_date": "2026-02-01",
+        "description": "Rig engines and generators",
+        "remarks": "",
+    },
 )
 
 PRICED_SPECS: dict[str, PricedSpec] = {spec.key: spec for spec in (TANGIBLES, DRILL_BITS, MUD_CHEMICALS, CEMENT_ADDITIVES, FUEL)}

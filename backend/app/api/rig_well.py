@@ -2,7 +2,10 @@
 
 Blocks group wells by concession / field area and rigs own wells. Well
 configuration uses the workspace's Hole Sections and Phases master data, while
-well sub activities are tied to one well and one workspace Activity. All
+well sub activities are tied to one well and one workspace Activity and to a
+Master Data vendor when the responsible party is one. Every configuration scope
+tracks its own Upcoming / Active / Completed status, so a well that is created
+and still being planned is segregated from one a rig is actually drilling. All
 business rows are soft-deleted first, exports/imports and lifecycle changes
 are audited, and every lookup is organization-scoped.
 """
@@ -36,6 +39,7 @@ from app.models import (
     MudCostSectionSetting,
     Phase,
     Rig,
+    Vendor,
     Well,
     WellPhase,
     WellPlanAdjustment,
@@ -75,6 +79,7 @@ from app.schemas.rig_well import (
     RigWellConfigurationOptions,
     RigWellMasterDataOption,
     RigWellRecentActivity,
+    RigWellVendorOption,
     WellBulkDeleteRequest,
     WellConfigurationIn,
     WellConfigurationOut,
@@ -177,14 +182,26 @@ def _block_or_404(
     return block
 
 
+def _open_well_clause() -> Any:
+    """Wells that still have work ahead: not deleted, and not every scope completed.
+
+    Blocks and rigs count the wells they hold, so a well that is created and
+    still upcoming belongs in the total just as much as one being drilled.
+    """
+    return or_(
+        and_(Well.drilling_is_deleted.is_(False), Well.status != "completed"),
+        and_(Well.completion_is_deleted.is_(False), Well.completion_status != "completed"),
+    )
+
+
 def _block_well_counts(db: Session, organization_id: str) -> dict[str, int]:
-    """Active wells per block, used by the register, dropdown and overview."""
+    """Wells per block that are upcoming or active, for the register, dropdown and overview."""
     rows = db.execute(
         select(Well.block_id, func.count(Well.id))
         .where(
             Well.organization_id == organization_id,
             Well.is_deleted.is_(False),
-            Well.status == "active",
+            _open_well_clause(),
         )
         .group_by(Well.block_id)
     ).all()
@@ -203,6 +220,120 @@ def _block_out(block: Block, well_count: int = 0) -> BlockOut:
         created_at=block.created_at,
         updated_at=block.updated_at,
     )
+
+
+def _scope_status_column(scope: str) -> Any:
+    """The tracking-status column that belongs to one configuration scope."""
+    return Well.completion_status if scope == "completion" else Well.status
+
+
+def _scope_deleted_column(scope: str) -> Any:
+    return Well.completion_is_deleted if scope == "completion" else Well.drilling_is_deleted
+
+
+def _any_scope_status_clause(scope: str | None, status: str) -> Any:
+    """Wells whose *given* scope (or any live scope) carries ``status``.
+
+    A deleted scope never decides anything: a well that purged its Drilling scope
+    is matched on Completion alone, so the register cannot show a well under a
+    status the operator can no longer see.
+    """
+    if scope:
+        return and_(Well.is_deleted.is_(False), _scope_deleted_column(scope).is_(False), _scope_status_column(scope) == status)
+    return and_(
+        Well.is_deleted.is_(False),
+        or_(
+            and_(_scope_deleted_column("drilling").is_(False), _scope_status_column("drilling") == status),
+            and_(_scope_deleted_column("completion").is_(False), _scope_status_column("completion") == status),
+        ),
+    )
+
+
+def _well_tracking_clause(status: str) -> Any:
+    """Wells whose *roll-up* tracking status is ``status``, written in SQL.
+
+    The same rule as ``Well.tracking_status``: completed only when every live
+    scope is completed, upcoming only while every live scope is still under
+    planning, and active for every mix in between. The register filter and the
+    overview cards then answer the same question — a well whose Drilling scope is
+    running while its Completion plan waits appears once, under Active, never in
+    both buckets.
+    """
+
+    def every_live_scope(decision: Any) -> Any:
+        return and_(
+            or_(_scope_deleted_column("drilling").is_(True), decision(_scope_status_column("drilling"))),
+            or_(_scope_deleted_column("completion").is_(True), decision(_scope_status_column("completion"))),
+        )
+
+    fully_done = every_live_scope(lambda column: column == "completed")
+    fully_planned = every_live_scope(lambda column: column == "upcoming")
+    if status == "completed":
+        flag = fully_done
+    elif status == "upcoming":
+        flag = fully_planned
+    else:
+        flag = and_(fully_done.is_(False), fully_planned.is_(False))
+    return and_(Well.is_deleted.is_(False), flag)
+
+
+def _any_scope_plan_clause(scope: str | None, plan: str) -> Any:
+    """Wells whose given scope (or any live scope) has this plan status."""
+
+    def one(name: str) -> Any:
+        column = Well.completion_config_status if name == "completion" else Well.config_status
+        return and_(_scope_deleted_column(name).is_(False), column == plan)
+
+    if scope:
+        return and_(Well.is_deleted.is_(False), one(scope))
+    return and_(Well.is_deleted.is_(False), or_(one("drilling"), one("completion")))
+
+
+def _tracked_wells_counts(rows: list[tuple[Any, ...]]) -> dict[str, int]:
+    """Well counts by tracking status and by plan status, from live scopes only.
+
+    ``Well.tracking_status`` is the same roll-up in Python; keeping both here
+    means the overview cards and the register can never disagree. A well is
+    upcoming while *every* live scope is still under planning, completed only
+    when every one of them is completed, and active in every mix in between.
+    """
+    counts = {
+        "upcoming_wells": 0,
+        "active_wells": 0,
+        "completed_wells": 0,
+        "draft_wells": 0,
+        "configured_wells": 0,
+        "final_review_wells": 0,
+    }
+    for drilling_status, completion_status, drilling_plan, completion_plan, drilling_deleted, completion_deleted in rows:
+        scopes = [
+            (status, plan)
+            for status, plan, deleted in (
+                (drilling_status, drilling_plan, drilling_deleted),
+                (completion_status, completion_plan, completion_deleted),
+            )
+            if not deleted
+        ]
+        if not scopes:
+            continue
+        statuses = [status for status, _plan in scopes]
+        if all(status == "upcoming" for status in statuses):
+            counts["upcoming_wells"] += 1
+        elif all(status == "completed" for status in statuses):
+            counts["completed_wells"] += 1
+        else:
+            counts["active_wells"] += 1
+        # The plan ladder counts a well once, at the furthest live scope, so the
+        # cards add up to the register instead of double-counting a well whose
+        # Completion plan has not been started yet.
+        open_plans = [plan for status, plan in scopes if status != "completed"]
+        if "final_review" in open_plans:
+            counts["final_review_wells"] += 1
+        elif "configured" in open_plans:
+            counts["configured_wells"] += 1
+        elif open_plans:
+            counts["draft_wells"] += 1
+    return counts
 
 
 def _scope_label(scope: str) -> str:
@@ -420,6 +551,10 @@ def _well_out(
         objective=well.objective,
         remarks=well.remarks or "",
         status=well.status,
+        tracking_status=well.tracking_status,
+        upcoming_scope_count=sum(1 for scope in well.live_scopes if well.scope_value(scope, "status") == "upcoming"),
+        active_scope_count=sum(1 for scope in well.live_scopes if well.scope_value(scope, "status") == "active"),
+        completed_scope_count=sum(1 for scope in well.live_scopes if well.scope_value(scope, "status") == "completed"),
         config_status=well.config_status,
         depth_unit=well.depth_unit,
         standard_depth_unit="m",
@@ -512,7 +647,11 @@ def _sub_activity_or_404(
 ) -> WellSubActivity:
     statement = (
         select(WellSubActivity)
-        .options(joinedload(WellSubActivity.well).joinedload(Well.rig), joinedload(WellSubActivity.activity))
+        .options(
+            joinedload(WellSubActivity.well).joinedload(Well.rig),
+            joinedload(WellSubActivity.activity),
+            joinedload(WellSubActivity.vendor),
+        )
         .where(WellSubActivity.id == record_id, WellSubActivity.organization_id == organization_id)
     )
     if well_id is not None:
@@ -537,6 +676,12 @@ def _sub_activity_out(record: WellSubActivity) -> WellSubActivityOut:
         sub_activity_name=record.sub_activity_name,
         activity_id=record.activity_id,
         responsible_party=record.responsible_party,
+        vendor_id=record.vendor_id or "",
+        vendor_code=record.vendor_code_snapshot or (record.vendor.vendor_code if record.vendor else ""),
+        vendor_name=record.vendor.vendor_name if record.vendor else record.responsible_party,
+        vendor_status=record.vendor.status if record.vendor else "",
+        vendor_is_deleted=bool(record.vendor and record.vendor.is_deleted),
+        responsible_party_source=record.responsible_party_source or "manual",
         description=record.description,
         is_deleted=record.is_deleted,
         deleted_at=record.deleted_at,
@@ -666,7 +811,23 @@ def overview(db: Db, user: Current) -> RigWellOverview:
 
     active_rigs = count(Rig, deleted=False)
     deleted_rigs = count(Rig, deleted=True)
-    active_wells = count(Well, deleted=False, extra=(Well.status == "active",))
+    # Tracking and plan counts come from one pass over the live scopes of every
+    # well, because neither status is a single column any more: a well whose
+    # Drilling scope is active while Completion is still upcoming is an active
+    # well, and one whose only live scope is being planned is an upcoming well.
+    tracking_rows = db.execute(
+        select(
+            Well.status,
+            Well.completion_status,
+            Well.config_status,
+            Well.completion_config_status,
+            Well.drilling_is_deleted,
+            Well.completion_is_deleted,
+        ).where(Well.organization_id == org_id, Well.is_deleted.is_(False))
+    ).all()
+    tracking = _tracked_wells_counts(tracking_rows)
+    active_wells = tracking["active_wells"]
+    upcoming_wells = tracking["upcoming_wells"]
     whole_deleted_wells = count(
         Well,
         deleted=True,
@@ -683,22 +844,10 @@ def overview(db: Db, user: Current) -> RigWellOverview:
     deleted_wells = whole_deleted_wells + deleted_drilling_scopes + deleted_completion_scopes
     active_sub_activities = count(WellSubActivity, deleted=False)
     deleted_sub_activities = count(WellSubActivity, deleted=True)
-    configured_wells = count(
-        Well, deleted=False, extra=(Well.config_status == "configured", Well.status == "active")
-    )
-    draft_wells = count(Well, deleted=False, extra=(Well.config_status == "draft", Well.status == "active"))
-    final_review_wells = count(
-        Well,
-        deleted=False,
-        extra=(
-            Well.status == "active",
-            or_(
-                and_(Well.drilling_is_deleted.is_(False), Well.config_status == "final_review"),
-                and_(Well.completion_is_deleted.is_(False), Well.completion_config_status == "final_review"),
-            ),
-        ),
-    )
-    completed_wells = count(Well, deleted=False, extra=(Well.status == "completed",))
+    configured_wells = tracking["configured_wells"]
+    draft_wells = tracking["draft_wells"]
+    final_review_wells = tracking["final_review_wells"]
+    completed_wells = tracking["completed_wells"]
     active_blocks = count(Block, deleted=False)
     deleted_blocks = count(Block, deleted=True)
     block_well_counts = _block_well_counts(db, org_id)
@@ -762,6 +911,7 @@ def overview(db: Db, user: Current) -> RigWellOverview:
         block_counts=block_counts,
         active_rigs=active_rigs,
         deleted_rigs=deleted_rigs,
+        upcoming_wells=upcoming_wells,
         active_wells=active_wells,
         deleted_wells=deleted_wells,
         active_sub_activities=active_sub_activities,
@@ -796,7 +946,7 @@ def list_rigs_dropdown(db: Db, user: Current) -> list[RigDropdownOut]:
         .where(
             Well.organization_id == user.organization_id,
             Well.is_deleted.is_(False),
-            Well.status == "active",
+            _open_well_clause(),
         )
         .group_by(Well.rig_id)
     ).all()
@@ -859,7 +1009,11 @@ def list_rigs(db: Db, user: Current, search: str | None = Query(default=None, ma
     records = db.scalars(statement.order_by(Rig.rig_code)).all()
     count_rows = db.execute(
         select(Well.rig_id, func.count(Well.id))
-        .where(Well.organization_id == user.organization_id, Well.is_deleted.is_(False), Well.status == "active")
+        .where(
+            Well.organization_id == user.organization_id,
+            Well.is_deleted.is_(False),
+            _open_well_clause(),
+        )
         .group_by(Well.rig_id)
     ).all()
     counts = {rig_id: int(value) for rig_id, value in count_rows}
@@ -1722,11 +1876,18 @@ def list_wells(
     user: Current,
     rig_id: str | None = None,
     block_id: str | None = None,
-    status: Literal["active", "completed"] | None = None,
-    config_status: Literal["draft", "configured"] | None = None,
+    status: Literal["upcoming", "active", "completed"] | None = None,
+    scope: Literal["drilling", "completion"] | None = None,
+    config_status: Literal["draft", "configured", "final_review"] | None = None,
     block: str | None = Query(default=None, max_length=200),
     search: str | None = Query(default=None, max_length=200),
 ) -> list[WellOut]:
+    """Well register rows, optionally segregated by tracking status.
+
+    ``status`` is the Upcoming / Active / Completed flag of a scope: with
+    ``scope`` it must be that scope's own status, without it any live scope may
+    carry it. ``config_status`` stays the plan workflow of both scopes.
+    """
     statement = (
         select(Well)
         .options(
@@ -1749,9 +1910,17 @@ def list_wells(
         _block_or_404(db, block_id, user.organization_id, include_deleted=False)
         statement = statement.where(Well.block_id == block_id)
     if status:
-        statement = statement.where(Well.status == status)
+        # A scope tab flags that scope; without one the well's own roll-up decides,
+        # so the Upcoming / Active / Completed tiles and the list always agree.
+        statement = statement.where(
+            _any_scope_status_clause(scope, status) if scope else _well_tracking_clause(status)
+        )
+    elif scope:
+        # Only the scopes that still exist; a purged Drilling scope must not make
+        # a Completion-only well disappear from a scope-filtered register.
+        statement = statement.where(_scope_deleted_column(scope).is_(False))
     if config_status:
-        statement = statement.where(Well.config_status == config_status)
+        statement = statement.where(_any_scope_plan_clause(scope, config_status))
     if block and block.strip():
         text = block.strip()
         statement = statement.where(
@@ -1814,6 +1983,10 @@ def create_well(data: WellCreate, request: Request, db: Db, user: Current) -> We
         existing.well_location = data.well_location
         existing.objective = data.objective
         existing.remarks = data.remarks
+        # Restoring through the create form re-enters the well at the requested
+        # tracking status, exactly like a first-time create.
+        existing.status = data.status
+        existing.completion_status = data.status
         existing.drilling_is_deleted = not include_drilling
         existing.drilling_deleted_at = None
         existing.drilling_purged = not include_drilling
@@ -1840,6 +2013,11 @@ def create_well(data: WellCreate, request: Request, db: Db, user: Current) -> We
         well_location=data.well_location,
         objective=data.objective,
         remarks=data.remarks,
+        # A new well is upcoming (budget-ready, not yet spudded) unless the caller
+        # says operations have already started. Both created scopes share it and
+        # are moved independently afterwards.
+        status=data.status,
+        completion_status=data.status,
         drilling_is_deleted=not include_drilling,
         drilling_purged=not include_drilling,
         completion_is_deleted=not include_completion,
@@ -2386,6 +2564,9 @@ def import_wells(data: RigWellImportRequest, request: Request, db: Db, user: Cur
             "well_location": _row_value(row, "well_location", "location"),
             "objective": _row_value(row, "objective"),
             "remarks": _row_value(row, "remarks", "remark") or "",
+            # Optional: an importing register can say which wells are already
+            # drilling. Anything else stays upcoming, i.e. planned and budgeted.
+            "status": (_string(_row_value(row, "status", "well_status", "tracking_status")).lower() or "upcoming"),
         }
         try:
             payload = WellCreate.model_validate(raw)
@@ -2402,6 +2583,9 @@ def import_wells(data: RigWellImportRequest, request: Request, db: Db, user: Cur
                 Well.well_code == payload.well_code,
             )
         )
+        if payload.status not in ("upcoming", "active"):
+            errors.append(f"Row {row_number}: status must be upcoming or active (got '{payload.status}')")
+            continue
         if existing is None:
             existing = Well(
                 organization_id=user.organization_id,
@@ -2412,6 +2596,8 @@ def import_wells(data: RigWellImportRequest, request: Request, db: Db, user: Cur
                 well_location=payload.well_location,
                 objective=payload.objective,
                 remarks=payload.remarks,
+                status=payload.status,
+                completion_status=payload.status,
             )
             db.add(existing)
             action = "create"
@@ -2582,9 +2768,16 @@ def transition_well(
             detail=f"Restore or add the {_scope_label(data.scope)} scope on well {well.well_code} before changing its lifecycle state",
         )
     action = data.action
+    status = well.scope_value(data.scope, "status")
+    # The plan ladder (draft → configured → final review) is walked while the scope
+    # is being planned (upcoming) or already drilling (active); only a completed
+    # scope is locked, and only `activate` unlocks it.
+    if action in ("configure", "draft", "final_review") and status == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Reactivate the {data.scope} scope before editing its plan",
+        )
     if action == "configure":
-        if well.scope_value(data.scope, "status") != "active":
-            raise HTTPException(status_code=409, detail="Reactivate the well before marking it configured")
         if well.scope_value(data.scope, "config_status") != "draft":
             raise HTTPException(status_code=409, detail="The well is already configured")
         if not well.sections_for_scope(data.scope):
@@ -2592,23 +2785,93 @@ def transition_well(
         well.set_scope_value(data.scope, "config_status", "configured")
         label = "configured"
     elif action == "draft":
-        if well.scope_value(data.scope, "status") != "active":
-            raise HTTPException(status_code=409, detail="Reactivate the well before reopening its configuration")
         if well.scope_value(data.scope, "config_status") != "configured":
             raise HTTPException(status_code=409, detail="The well is already in Draft")
         well.set_scope_value(data.scope, "config_status", "draft")
         label = "Draft"
     elif action == "final_review":
-        if well.scope_value(data.scope, "status") != "active":
-            raise HTTPException(status_code=409, detail="Reactivate the well before marking its scope for final review")
         if well.scope_value(data.scope, "config_status") != "configured":
             raise HTTPException(status_code=409, detail="The well is already marked for final review")
         if not well.sections_for_scope(data.scope):
             raise HTTPException(status_code=409, detail="Save at least one section and phase before marking the scope for final review")
         well.set_scope_value(data.scope, "config_status", "final_review")
         label = "marked for final review"
+    elif action == "start":
+        # Upcoming → active: the rig is moving / operations have begun, so the
+        # scope leaves the planning bucket and starts consuming the programme.
+        if status != "upcoming":
+            raise HTTPException(
+                status_code=409,
+                detail=f"The {data.scope} scope is already {status}; only an upcoming scope can be started",
+            )
+        if not well.sections_for_scope(data.scope):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Save the {data.scope} section and phase plan before starting this scope",
+            )
+        if well.scope_value(data.scope, "config_status") == "draft":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Mark the {data.scope} plan as configured before starting the scope",
+            )
+        well.set_scope_value(data.scope, "status", "active")
+        label = "started (now active)"
+    elif action == "defer":
+        # active → upcoming: allowed only while nothing has been budgeted or
+        # booked, so a start that was recorded too early can be undone honestly.
+        if status != "active":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Only an active {data.scope} scope can be moved back to upcoming",
+            )
+        blockers: list[str] = []
+        afes = int(
+            db.scalar(
+                select(func.count(Afe.id)).where(
+                    Afe.organization_id == user.organization_id,
+                    Afe.well_id == well.id,
+                    Afe.configuration_scope == data.scope,
+                    Afe.is_deleted.is_(False),
+                )
+            )
+            or 0
+        )
+        if afes:
+            blockers.append(f"{afes} active AFE(s)")
+        sheets = int(
+            db.scalar(
+                select(func.count(DailyCostEntry.id))
+                .join(Afe, DailyCostEntry.afe_id == Afe.id)
+                .where(
+                    DailyCostEntry.organization_id == user.organization_id,
+                    DailyCostEntry.well_id == well.id,
+                    DailyCostEntry.is_deleted.is_(False),
+                    Afe.organization_id == user.organization_id,
+                    Afe.configuration_scope == data.scope,
+                )
+            )
+            or 0
+        )
+        if sheets:
+            blockers.append(f"{sheets} daily-cost sheet(s)")
+        # The milestone columns are named per scope (``drilling_spud_at`` /
+        # ``completion_spud_at``), so they are read directly rather than through
+        # ``scope_value``, which prefixes only the completion side.
+        if getattr(well, f"{data.scope}_spud_at", None) is not None:
+            blockers.append("a recorded spud date & time")
+        if blockers:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"The {data.scope} scope cannot return to upcoming while it has "
+                    + ", ".join(blockers)
+                    + ". Delete those records first."
+                ),
+            )
+        well.set_scope_value(data.scope, "status", "upcoming")
+        label = "returned to planning (upcoming)"
     elif action == "complete":
-        if well.scope_value(data.scope, "status") != "active":
+        if status == "completed":
             raise HTTPException(status_code=409, detail="The well is already completed")
         if (
             well.scope_value(data.scope, "config_status") != "final_review"
@@ -2618,7 +2881,7 @@ def transition_well(
         well.set_scope_value(data.scope, "status", "completed")
         label = "completed"
     else:
-        if well.scope_value(data.scope, "status") != "completed":
+        if status != "completed":
             raise HTTPException(status_code=409, detail="Only a completed well can be reactivated")
         well.set_scope_value(data.scope, "status", "active")
         well.set_scope_value(data.scope, "config_status", "configured")
@@ -2637,6 +2900,102 @@ def transition_well(
 # ---------------------------------------------------------------------------
 # Well sub activities
 # ---------------------------------------------------------------------------
+
+
+NOT_APPLICABLE_PARTY = "Not Applicable"
+# Text a planner types instead of naming a company; never accepted as a party.
+PARTY_PLACEHOLDERS = ("-", "N/A", "n/a", "None")
+
+
+def _vendor_or_422(db: Session, vendor_id: str, organization_id: str, *, allow_unchanged: bool = False) -> Vendor:
+    """A responsible party may only be a live vendor of this workspace.
+
+    An unchanged link is always accepted, so editing an unrelated field of a sub
+    activity never fails because the vendor was blocked in the meantime.
+    """
+    vendor = db.scalar(
+        select(Vendor).where(Vendor.id == vendor_id, Vendor.organization_id == organization_id)
+    )
+    if vendor is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Select the responsible party from the Master Data vendor register, or leave it blank to type a name",
+        )
+    if vendor.is_deleted:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Vendor {vendor.vendor_code} is in Deleted Entries; restore it or choose another vendor",
+        )
+    if not allow_unchanged and vendor.status != "active":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Vendor {vendor.vendor_code} is {vendor.status}; reactivate it in Master Data before assigning it",
+        )
+    return vendor
+
+
+def _vendor_from_import(db: Session, reference: Any, organization_id: str) -> Vendor | None:
+    """Resolve a spreadsheet vendor code or name. An ambiguous text links nothing."""
+    text = _string(reference)
+    if not text:
+        return None
+    rows = db.scalars(
+        select(Vendor).where(
+            Vendor.organization_id == organization_id,
+            Vendor.is_deleted.is_(False),
+            or_(
+                Vendor.vendor_code == text.upper(),
+                func.lower(Vendor.vendor_name) == text.casefold(),
+            ),
+        )
+    ).all()
+    return rows[0] if len(rows) == 1 else None
+
+
+def _resolve_responsible_party(
+    db: Session,
+    organization_id: str,
+    *,
+    vendor_id: str | None,
+    responsible_party: str | None,
+    classification: str,
+    via: str = "manual",
+    existing_vendor_id: str | None = None,
+) -> tuple[Vendor | None, str, str]:
+    """Work out (vendor, party text, source) for one sub activity.
+
+    A vendor picked from Master Data wins and its own name becomes the party text,
+    so the register, every report and the daily-cost drill-through keep reading a
+    single column while the row stays traceable to the vendor it belongs to. A
+    typed name is still accepted for a company that is not a vendor, and is
+    recorded as such. Planned steps carry no party; NPT and UPA steps must name one.
+    """
+    vendor: Vendor | None = None
+    if vendor_id:
+        vendor = _vendor_or_422(
+            db, vendor_id, organization_id, allow_unchanged=vendor_id == existing_vendor_id
+        )
+        text = vendor.vendor_name
+    else:
+        text = _string(responsible_party)
+    if classification == "Planned":
+        if not text or text in PARTY_PLACEHOLDERS:
+            text = NOT_APPLICABLE_PARTY
+    elif not text or text in (NOT_APPLICABLE_PARTY, *PARTY_PLACEHOLDERS):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Responsible party / company is required for {classification} sub activities",
+        )
+    return vendor, text, ("vendor" if vendor is not None else via)
+
+
+def _apply_responsible_party(
+    record: WellSubActivity, vendor: Vendor | None, party: str, source: str
+) -> None:
+    record.vendor_id = vendor.id if vendor else None
+    record.vendor_code_snapshot = vendor.vendor_code if vendor else ""
+    record.responsible_party = party
+    record.responsible_party_source = source
 
 
 def _activity_from_import(db: Session, reference: Any, organization_id: str) -> Activity | None:
@@ -2681,7 +3040,11 @@ def list_sub_activities(
     well = _well_for_sub_activity(db, well_id, user.organization_id, scope=scope)
     statement = (
         select(WellSubActivity)
-        .options(joinedload(WellSubActivity.well).joinedload(Well.rig), joinedload(WellSubActivity.activity))
+        .options(
+            joinedload(WellSubActivity.well).joinedload(Well.rig),
+            joinedload(WellSubActivity.activity),
+            joinedload(WellSubActivity.vendor),
+        )
         .where(
             WellSubActivity.organization_id == user.organization_id,
             WellSubActivity.well_id == well_id,
@@ -2720,7 +3083,11 @@ def list_deleted_sub_activities(
 ) -> list[WellSubActivityOut]:
     statement = (
         select(WellSubActivity)
-        .options(joinedload(WellSubActivity.well).joinedload(Well.rig), joinedload(WellSubActivity.activity))
+        .options(
+            joinedload(WellSubActivity.well).joinedload(Well.rig),
+            joinedload(WellSubActivity.activity),
+            joinedload(WellSubActivity.vendor),
+        )
         .where(
             WellSubActivity.organization_id == user.organization_id,
             WellSubActivity.is_deleted.is_(True),
@@ -2749,6 +3116,39 @@ def sub_activity_options(db: Db, user: Current) -> list[RigWellMasterDataOption]
     return [RigWellMasterDataOption(id=item.id, code=item.activity_code, name=item.activity_name) for item in activities]
 
 
+@router.get(
+    "/sub-activities/vendor-options",
+    response_model=list[RigWellVendorOption],
+    dependencies=[Depends(require("rig-well:read"))],
+)
+def sub_activity_vendor_options(db: Db, user: Current) -> list[RigWellVendorOption]:
+    """Vendors the responsible-party field may link to, for this workspace only.
+
+    Served from Rig & Well so a well engineer needs no Master Data capability to
+    pick the company behind a sub activity.
+    """
+    vendors = db.scalars(
+        select(Vendor)
+        .where(
+            Vendor.organization_id == user.organization_id,
+            Vendor.is_deleted.is_(False),
+            Vendor.status == "active",
+        )
+        .order_by(Vendor.vendor_code)
+    ).all()
+    return [
+        RigWellVendorOption(
+            id=vendor.id,
+            code=vendor.vendor_code,
+            name=vendor.vendor_name,
+            vendor_type=vendor.vendor_type,
+            category=vendor.category or "",
+            display_name=f"{vendor.vendor_code} — {vendor.vendor_name}",
+        )
+        for vendor in vendors
+    ]
+
+
 @router.post(
     "/sub-activities",
     response_model=WellSubActivityOut,
@@ -2764,16 +3164,13 @@ def create_sub_activity(
     well = _well_for_sub_activity(db, data.well_id, user.organization_id, scope=data.scope)
     activity = _master_record_or_422(db, Activity, data.activity_id, user.organization_id, "Activity")
     classification = classify_activity(activity)
-    responsible_party = (data.responsible_party or "").strip()
-    if classification == "Planned":
-        if not responsible_party or responsible_party in ("-", "N/A", "n/a", "None"):
-            responsible_party = "Not Applicable"
-    else:
-        if not responsible_party or responsible_party in ("Not Applicable", "N/A", "n/a", "None", "-"):
-            raise HTTPException(
-                status_code=422,
-                detail=f"Responsible party / company is required for {classification} sub activities",
-            )
+    vendor, responsible_party, party_source = _resolve_responsible_party(
+        db,
+        user.organization_id,
+        vendor_id=data.vendor_id,
+        responsible_party=data.responsible_party,
+        classification=classification,
+    )
     data.responsible_party = responsible_party
     existing = db.scalar(
         select(WellSubActivity).where(
@@ -2794,7 +3191,7 @@ def create_sub_activity(
             )
         existing.sub_activity_name = data.sub_activity_name
         existing.activity_id = activity.id
-        existing.responsible_party = data.responsible_party
+        _apply_responsible_party(existing, vendor, data.responsible_party, party_source)
         existing.description = data.description
         existing.is_deleted = False
         existing.deleted_at = None
@@ -2819,6 +3216,7 @@ def create_sub_activity(
         responsible_party=data.responsible_party,
         description=data.description,
     )
+    _apply_responsible_party(record, vendor, data.responsible_party, party_source)
     db.add(record)
     db.flush()
     _record_audit(
@@ -2827,6 +3225,7 @@ def create_sub_activity(
         summary=(
             f"Created sub activity {record.sub_activity_code} — {record.sub_activity_name} "
             f"under Activity {activity.activity_code} for well {well.well_code} ({_scope_label(data.scope)})"
+            + (f" · responsible party {vendor.vendor_code} — {vendor.vendor_name}" if vendor else "")
         ),
         request=request,
     )
@@ -2853,26 +3252,33 @@ def update_sub_activity(
     well = _well_for_sub_activity(db, well_id, user.organization_id, scope=record.scope)
     payload = data.model_dump(exclude_unset=True)
     changed: list[str] = []
+    # The party and its vendor are one decision, resolved together against the
+    # activity being saved (an activity change can make the party mandatory).
+    if "vendor_id" in payload or "responsible_party" in payload:
+        target_act_id = payload.get("activity_id") or record.activity_id
+        target_act = _master_record_or_422(db, Activity, target_act_id, user.organization_id, "Activity")
+        vendor, party_text, party_source = _resolve_responsible_party(
+            db,
+            user.organization_id,
+            vendor_id=payload.get("vendor_id", record.vendor_id or ""),
+            responsible_party=payload.get("responsible_party", record.responsible_party),
+            classification=classify_activity(target_act),
+            existing_vendor_id=record.vendor_id,
+        )
+        if (
+            record.responsible_party != party_text
+            or (record.vendor_id or "") != (vendor.id if vendor else "")
+            or record.responsible_party_source != party_source
+        ):
+            _apply_responsible_party(record, vendor, party_text, party_source)
+            changed.extend(field for field in ("responsible_party", "vendor_id") if field in payload)
+        payload.pop("vendor_id", None)
+        payload.pop("responsible_party", None)
     for field, value in payload.items():
         if value is None or getattr(record, field) == value:
             continue
         if field == "activity_id":
             _master_record_or_422(db, Activity, value, user.organization_id, "Activity")
-        elif field == "responsible_party":
-            target_act_id = payload.get("activity_id") or record.activity_id
-            target_act = _master_record_or_422(db, Activity, target_act_id, user.organization_id, "Activity")
-            classification = classify_activity(target_act)
-            party_str = str(value or "").strip()
-            if classification == "Planned":
-                if not party_str or party_str in ("-", "N/A", "n/a", "None"):
-                    party_str = "Not Applicable"
-            else:
-                if not party_str or party_str in ("Not Applicable", "N/A", "n/a", "None", "-"):
-                    raise HTTPException(
-                        status_code=422,
-                        detail=f"Responsible party / company is required for {classification} sub activities",
-                    )
-            value = party_str
         elif field == "sub_activity_code":
             duplicate = db.scalar(
                 select(WellSubActivity).where(
@@ -3087,6 +3493,9 @@ def import_sub_activities(
         code = _string(_row_value(row, "sub_activity_code", "code", "sub_activity")).upper()
         name = _string(_row_value(row, "sub_activity_name", "name"))
         responsible_party = _string(_row_value(row, "responsible_party", "responsible", "company"))
+        # A row may name the vendor register directly; a bare company name is kept
+        # as typed and linked automatically when it matches exactly one vendor.
+        vendor_reference = _row_value(row, "vendor_code", "vendor", "vendor_name", "company_code")
         description = _string(_row_value(row, "description", "remarks", "remark"))
         activity_ref = _row_value(row, "activity", "activity_code", "activity_name")
         raw_scope = _string(_row_value(row, "scope", "well_scope", "configuration_scope")).lower()
@@ -3128,13 +3537,26 @@ def import_sub_activities(
             errors.append(f"Row {row_number} ({payload.sub_activity_code}): Activity '{_string(activity_ref) or '—'}' is missing, ambiguous, or inactive in Master Data")
             continue
         classification = classify_activity(activity)
-        if classification == "Planned":
-            if not payload.responsible_party or payload.responsible_party in ("-", "N/A", "n/a", "None"):
-                payload.responsible_party = "Not Applicable"
-        else:
-            if not payload.responsible_party or payload.responsible_party in ("Not Applicable", "N/A", "n/a", "None", "-"):
-                errors.append(f"Row {row_number} ({payload.sub_activity_code}): Responsible party is required for {classification} sub activity")
-                continue
+        matched_vendor = _vendor_from_import(db, vendor_reference, user.organization_id) if _string(vendor_reference) else None
+        if _string(vendor_reference) and matched_vendor is None:
+            errors.append(
+                f"Row {row_number} ({payload.sub_activity_code}): vendor "
+                f"'{_string(vendor_reference)}' is not exactly one active vendor in Master Data"
+            )
+            continue
+        try:
+            vendor, party_text, party_source = _resolve_responsible_party(
+                db,
+                user.organization_id,
+                vendor_id=matched_vendor.id if matched_vendor else None,
+                responsible_party=payload.responsible_party,
+                classification=classification,
+                via="import",
+            )
+        except HTTPException as error:
+            errors.append(f"Row {row_number} ({payload.sub_activity_code}): {error.detail}")
+            continue
+        payload.responsible_party = party_text
         existing = db.scalar(
             select(WellSubActivity).where(
                 WellSubActivity.organization_id == user.organization_id,
@@ -3154,6 +3576,7 @@ def import_sub_activities(
                 responsible_party=payload.responsible_party,
                 description=payload.description,
             )
+            _apply_responsible_party(existing, vendor, payload.responsible_party, party_source)
             db.add(existing)
             action = "create"
             summary = f"Created sub activity {payload.sub_activity_code} for well {well.well_code} ({_scope_label(payload.scope)}) from import"
@@ -3161,7 +3584,7 @@ def import_sub_activities(
             action = "restore" if existing.is_deleted else "update"
             existing.sub_activity_name = payload.sub_activity_name
             existing.activity_id = activity.id
-            existing.responsible_party = payload.responsible_party
+            _apply_responsible_party(existing, vendor, payload.responsible_party, party_source)
             existing.description = payload.description
             existing.is_deleted = False
             existing.deleted_at = None

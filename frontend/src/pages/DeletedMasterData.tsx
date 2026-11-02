@@ -14,8 +14,8 @@ import { vendorToForm, type PoSoOrder, type Vendor, type VendorFormState, type V
 import { CONSUMABLE_TYPES, TANGIBLE_CONFIG, type CatalogueOption, type PricedRecord, type TypeConfig } from '../lib/catalogue'
 import { serviceFormToPayload, serviceToForm, type Service, type ServiceFormState } from '../lib/serviceMaster'
 
-// Priced catalogue types with soft delete (fuel has none) and the option lists behind them.
-const DELETABLE_CATALOGUE: TypeConfig[] = [TANGIBLE_CONFIG, ...CONSUMABLE_TYPES.filter(config => !config.fixed)]
+// Every priced catalogue type soft-deletes, including the user's own fuel list.
+const DELETABLE_CATALOGUE: TypeConfig[] = [TANGIBLE_CONFIG, ...CONSUMABLE_TYPES]
 
 const catalogueModuleKeys = (items: DeletedRow[]) => [...new Set(items.filter(item => item.kind === 'catalogue').map(item => item.module_key))]
 

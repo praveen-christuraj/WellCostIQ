@@ -48,7 +48,6 @@ export type TypeConfig = {
   codeLabel: string
   nameLabel: string
   priced: 'uplift' | 'unit'
-  fixed: boolean
   fields: FieldDef[]
   columns: ColumnDef[]
   breakdownLabel?: string
@@ -77,7 +76,6 @@ export const TANGIBLE_CONFIG: TypeConfig = {
   codeLabel: 'Tangible code',
   nameLabel: 'Tangible name',
   priced: 'uplift',
-  fixed: false,
   breakdownLabel: 'Category',
   fields: [
     { key: 'tangible_code', label: 'Tangible code', kind: 'text', section: 'master', required: true, maxLength: 50, help: 'Enter manually. Codes are upper-cased and unique in this workspace.' },
@@ -126,7 +124,6 @@ export const DRILL_BIT_CONFIG: TypeConfig = {
   codeLabel: 'Bit code',
   nameLabel: 'Bit name',
   priced: 'uplift',
-  fixed: false,
   breakdownLabel: 'Bit type',
   fields: [
     { key: 'bit_code', label: 'Bit code', kind: 'text', section: 'master', required: true, maxLength: 50, help: 'Enter manually. Unique in this workspace.' },
@@ -177,7 +174,6 @@ export const MUD_CHEMICAL_CONFIG: TypeConfig = {
   codeLabel: 'Chemical code',
   nameLabel: 'Chemical name',
   priced: 'unit',
-  fixed: false,
   breakdownLabel: 'Group',
   fields: [
     { key: 'chemical_code', label: 'Chemical code', kind: 'text', section: 'master', required: true, maxLength: 50, help: 'Enter manually. Unique in this workspace.' },
@@ -222,7 +218,6 @@ export const CEMENT_ADDITIVE_CONFIG: TypeConfig = {
   codeLabel: 'Additive code',
   nameLabel: 'Additive name',
   priced: 'unit',
-  fixed: false,
   breakdownLabel: 'Additive type',
   fields: [
     { key: 'additive_code', label: 'Additive code', kind: 'text', section: 'master', required: true, maxLength: 50, help: 'Enter manually. Unique in this workspace.' },
@@ -267,12 +262,12 @@ export const FUEL_CONFIG: TypeConfig = {
   codeLabel: 'Fuel code',
   nameLabel: 'Fuel',
   priced: 'unit',
-  fixed: true,
-  // Fuel only takes a price: no create, edit or PO fields.
   fields: [
-    { key: 'unit_rate', label: 'Price per litre', kind: 'number', section: 'rate', required: true, help: 'Enter the new price only when it changes.' },
-    { key: 'currency', label: 'Currency', kind: 'master', section: 'rate', required: true, masterSource: 'currencies' },
-    { key: 'effective_date', label: 'Effective date', kind: 'date', section: 'rate', help: 'Date the new price applies from. Defaults to today.' },
+    { key: 'fuel_code', label: 'Fuel code', kind: 'text', section: 'master', required: true, maxLength: 30, help: 'Enter manually, e.g. AGO, HSD, DIESEL. Codes are upper-cased and unique in this workspace.' },
+    { key: 'fuel_name', label: 'Fuel', kind: 'text', section: 'master', required: true, maxLength: 150, help: 'The name the fuel registers and reports show.' },
+    { key: 'uom', label: 'Unit of measure', kind: 'master', section: 'master', masterSource: 'uom', maxLength: 50 },
+    { key: 'description', label: 'Description', kind: 'textarea', section: 'master', maxLength: 500 },
+    ...rateFields(false),
   ],
   columns: [
     { key: 'fuel_code', label: 'CODE', width: 130 },
@@ -283,11 +278,14 @@ export const FUEL_CONFIG: TypeConfig = {
     { key: 'effective_date', label: 'PRICE EFFECTIVE', kind: 'date', width: 150 },
     { key: 'current_revision_number', label: 'PRICE REVISIONS', kind: 'number', width: 150 },
   ],
-  importHeaders: [],
-  importOptional: [],
-  sample: {},
+  importHeaders: ['fuel_code', 'fuel_name', 'unit_rate', 'currency'],
+  importOptional: ['uom', 'po_number', 'effective_date', 'description'],
+  sample: {
+    fuel_code: 'AGO', fuel_name: 'Automotive Gas Oil (AGO)', uom: 'L', unit_rate: '95', currency: 'USD',
+    po_number: 'PO-4500789', effective_date: '2026-02-01', description: 'Rig engines and generators',
+  },
   templateName: 'fuel-template.csv',
-  importHint: '',
+  importHint: 'Add the fuels this workspace buys. Codes are required and entered by you, names must be unique, and the unit of measure must exist in Master Data → Units.',
 }
 
 export const CONSUMABLE_TYPES = [MUD_CHEMICAL_CONFIG, CEMENT_ADDITIVE_CONFIG, FUEL_CONFIG, DRILL_BIT_CONFIG] as const

@@ -169,6 +169,10 @@ class WellCreate(BaseModel):
     scopes: list[Literal["drilling", "completion"]] = Field(
         default_factory=lambda: ["drilling", "completion"], min_length=1, max_length=2
     )
+    # Tracking status applied to every scope created here. A well is `upcoming`
+    # unless the register is told the operations have already started (importing a
+    # well that is currently drilling). A scope can never be created `completed`.
+    status: Literal["upcoming", "active"] = "upcoming"
 
     model_config = ConfigDict(extra="forbid")
 
@@ -225,7 +229,7 @@ class WellUpdate(BaseModel):
 
 
 class WellOut(BaseModel):
-    completion_status: Literal["active", "completed"] = "active"
+    completion_status: Literal["upcoming", "active", "completed"] = "upcoming"
     completion_config_status: Literal["draft", "configured", "final_review"] = "draft"
     completion_section_count: int = 0
     id: str
@@ -242,8 +246,13 @@ class WellOut(BaseModel):
     block: str
     objective: str
     remarks: str
-    status: Literal["active", "completed"]
+    status: Literal["upcoming", "active", "completed"]
     config_status: Literal["draft", "configured", "final_review"]
+    # Roll-up of the live scopes: what the registers and dashboards segregate on.
+    tracking_status: Literal["upcoming", "active", "completed"] = "upcoming"
+    upcoming_scope_count: int = 0
+    active_scope_count: int = 0
+    completed_scope_count: int = 0
     depth_unit: Literal["m", "ft"]
     completion_depth_unit: Literal["m", "ft"]
     standard_depth_unit: Literal["m"] = "m"
@@ -342,7 +351,7 @@ class WellConfigurationOut(BaseModel):
     well_name: str
     rig_code: str
     rig_name: str
-    status: Literal["active", "completed"]
+    status: Literal["upcoming", "active", "completed"]
     config_status: Literal["draft", "configured", "final_review"]
     depth_unit: Literal["m", "ft"]
     standard_depth_unit: Literal["m"] = "m"
@@ -354,7 +363,9 @@ class WellConfigurationOut(BaseModel):
 
 class WellTransitionIn(BaseModel):
     scope: Literal["drilling", "completion"] = "drilling"
-    action: Literal["configure", "draft", "final_review", "complete", "activate"]
+    # `configure`/`draft`/`final_review` walk the plan; `complete`/`activate` and
+    # `start`/`defer` walk the tracking status (upcoming → active → completed).
+    action: Literal["configure", "draft", "final_review", "complete", "activate", "start", "defer"]
     remarks: str = Field(min_length=3, max_length=500)
 
     model_config = ConfigDict(extra="forbid")
@@ -372,6 +383,10 @@ class WellSubActivityCreate(BaseModel):
     sub_activity_name: str = Field(min_length=1, max_length=150)
     activity_id: str = Field(min_length=1, max_length=36)
     responsible_party: str = Field(default="Not Applicable", max_length=200)
+    # Master Data vendor behind the responsible party. When it is set the vendor's
+    # own name is stored as `responsible_party`, so the text column, its reports
+    # and its search keep working while the row stays traceable to the vendor.
+    vendor_id: str = Field(default="", max_length=36)
     description: str = Field(min_length=1, max_length=4000)
 
     model_config = ConfigDict(extra="forbid")
@@ -380,6 +395,11 @@ class WellSubActivityCreate(BaseModel):
     @classmethod
     def normalise_code(cls, value: Any) -> Any:
         return _normalise_code(value)
+
+    @field_validator("vendor_id", mode="before")
+    @classmethod
+    def trim_vendor(cls, value: Any) -> Any:
+        return _trim_optional(value) or ""
 
     @field_validator("responsible_party", mode="before")
     @classmethod
@@ -402,6 +422,9 @@ class WellSubActivityUpdate(BaseModel):
     sub_activity_name: str | None = Field(default=None, min_length=1, max_length=150)
     activity_id: str | None = Field(default=None, min_length=1, max_length=36)
     responsible_party: str | None = Field(default=None, max_length=200)
+    # An empty string unlinks the vendor and keeps whatever name is typed, which
+    # is how a manual (non-vendor) responsible party is recorded.
+    vendor_id: str | None = Field(default=None, max_length=36)
     description: str | None = Field(default=None, min_length=1, max_length=4000)
 
     model_config = ConfigDict(extra="forbid")
@@ -410,6 +433,13 @@ class WellSubActivityUpdate(BaseModel):
     @classmethod
     def normalise_code(cls, value: Any) -> Any:
         return _normalise_code(value)
+
+    @field_validator("vendor_id", mode="before")
+    @classmethod
+    def trim_vendor(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        return str(value).strip()
 
     @field_validator("responsible_party", mode="before")
     @classmethod
@@ -435,6 +465,14 @@ class WellSubActivityOut(BaseModel):
     sub_activity_name: str
     activity_id: str
     responsible_party: str
+    # Vendor link, when the responsible party came from Master Data. The code and
+    # name are snapshotted on the row, so a renamed or removed vendor still reads.
+    vendor_id: str = ""
+    vendor_code: str = ""
+    vendor_name: str = ""
+    vendor_status: str = ""
+    vendor_is_deleted: bool = False
+    responsible_party_source: Literal["vendor", "manual", "import"] = "manual"
     description: str
     is_deleted: bool
     deleted_at: datetime | None = None
@@ -524,6 +562,22 @@ class RigWellMasterDataOption(BaseModel):
     name: str
 
 
+class RigWellVendorOption(BaseModel):
+    """A vendor the responsible-party picker may offer.
+
+    Only active, non-deleted vendors are listed: a sub activity must be trackable
+    to a vendor the workspace still trades with, and a row that outlived its
+    vendor keeps its own snapshot instead of pointing at a dead record.
+    """
+
+    id: str
+    code: str
+    name: str
+    vendor_type: str = ""
+    category: str = ""
+    display_name: str
+
+
 class RigWellConfigurationOptions(BaseModel):
     hole_sections: list[RigWellMasterDataOption]
     phases: list[RigWellMasterDataOption]
@@ -557,6 +611,8 @@ class RigWellOverview(BaseModel):
     block_counts: list[RigWellBlockCount] = Field(default_factory=list)
     active_rigs: int
     deleted_rigs: int
+    # Wells created and still under planning — the budget-plotting bucket.
+    upcoming_wells: int = 0
     active_wells: int
     deleted_wells: int
     active_sub_activities: int

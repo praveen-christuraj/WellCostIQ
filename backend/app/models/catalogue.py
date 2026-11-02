@@ -45,13 +45,10 @@ CATALOGUE_LISTS: dict[str, tuple[str, str | None]] = {
     "cement_additive_type": ("Cement additive types", None),
 }
 
-# Fixed fuel types seeded per workspace. Only their prices are maintained.
-FUEL_TYPE_SEEDS: tuple[tuple[str, str], ...] = (
-    ("DIESEL", "Diesel"),
-    ("PETROL", "Petrol / Gasoline"),
-    ("KEROSENE", "Kerosene"),
-    ("JET-A1", "Aviation fuel (Jet A-1)"),
-)
+# Fuel is a user-managed list like every other consumable: the workspace adds the
+# fuels it actually buys (by code, name and unit of measure) and maintains a price
+# revision for each. Nothing is seeded and no fuel name lives in the code.
+
 
 
 class CatalogueOption(MasterDataRecord):
@@ -247,7 +244,13 @@ class CementAdditiveRevision(RateRevision):
 
 
 class FuelType(PricedRecord):
-    """Fixed fuel types. Only the price (and its currency/unit) is maintained."""
+    """A fuel the workspace buys, maintained in Master Data like any consumable.
+
+    Codes, names and the unit of measure are the user's own; the price keeps an
+    append-only revision history. Nothing is seeded and no fuel name is written
+    into the code, so a site counting AGO, Diesel, HSD or a bio-blend configures
+    the same register.
+    """
 
     __tablename__ = "fuel_types"
     __table_args__ = (UniqueConstraint("organization_id", "fuel_code", name="uq_fuel_types_org_code"),)
@@ -255,6 +258,7 @@ class FuelType(PricedRecord):
     fuel_code: Mapped[str] = mapped_column(String(30), nullable=False)
     fuel_name: Mapped[str] = mapped_column(String(150), nullable=False)
     uom: Mapped[str] = mapped_column(String(50), default="L", server_default="L", nullable=False)
+    remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
 
     revisions: Mapped[list["FuelPriceRevision"]] = relationship(
         back_populates="fuel_type", cascade="all, delete-orphan", order_by="desc(FuelPriceRevision.revision_number)"

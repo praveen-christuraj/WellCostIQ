@@ -48,6 +48,8 @@ from app.models import (
     FuelCompanyCategory,
     FuelCostCompanyLine,
     FuelCostEntry,
+    FuelLedgerSettings,
+    FuelType,
     Rig,
     Vendor,
 )
@@ -82,6 +84,9 @@ from app.schemas.fuel_cost import (
     FuelCostRigOption,
     FuelCostRigSummaryOut,
     FuelCostVendorOption,
+    FuelLedgerSettingsIn,
+    FuelLedgerSettingsOut,
+    FuelLedgerWording,
 )
 from app.services import audit
 
@@ -682,6 +687,138 @@ def _previous_lines_for_rig_date(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Ledger wording — which fuel this workspace counts, and what it calls it
+# ---------------------------------------------------------------------------
+
+# Deliberately generic: no fuel name is written into the code. A workspace that
+# has not chosen one yet reads "Fuel" until it links a Master Data fuel.
+GENERIC_FUEL_LABEL = "Fuel"
+GENERIC_SAVING_LABEL = "Rig Saving"
+GENERIC_UNIT_LABEL = "L"
+
+
+def _linked_fuel(db: Session, organization_id: str, fuel_type_id: str | None) -> FuelType | None:
+    """The Master Data fuel behind the wording, when it still exists and is active."""
+    if not fuel_type_id:
+        return None
+    fuel = db.scalar(
+        select(FuelType).where(FuelType.id == fuel_type_id, FuelType.organization_id == organization_id)
+    )
+    if fuel is None or fuel.is_deleted:
+        return None
+    return fuel
+
+
+def ledger_wording(db: Session, organization_id: str) -> FuelLedgerWording:
+    """Resolve the words the register prints, from the workspace's own data.
+
+    Order of precedence: a label the operator typed, then the name and unit of the
+    linked Master Data fuel, then that fuel when the workspace stocks exactly one
+    (a single-fuel site never has to configure anything), then a generic word.
+    """
+    settings = db.scalar(
+        select(FuelLedgerSettings).where(FuelLedgerSettings.organization_id == organization_id)
+    )
+    fuel = _linked_fuel(db, organization_id, settings.fuel_type_id if settings else None)
+    typed = bool(settings and (settings.fuel_label or settings.saving_label))
+    if fuel is None:
+        # Nothing is linked: a site that stocks exactly one fuel never has to
+        # configure it, and that fuel still supplies the unit beside a typed label.
+        only = list(
+            db.scalars(
+                select(FuelType)
+                .where(
+                    FuelType.organization_id == organization_id,
+                    FuelType.is_deleted.is_(False),
+                )
+                .order_by(FuelType.fuel_code)
+                .limit(2)
+            ).all()
+        )
+        if len(only) == 1:
+            fuel = only[0]
+    label = (settings.fuel_label if settings else "") or (fuel.fuel_name if fuel else GENERIC_FUEL_LABEL)
+    saving = (settings.saving_label if settings else "") or GENERIC_SAVING_LABEL
+    unit = (fuel.uom if fuel and fuel.uom else GENERIC_UNIT_LABEL)
+    return FuelLedgerWording(
+        fuel_label=label,
+        saving_label=saving,
+        unit_label=unit,
+        fuel_type_id=fuel.id if fuel else "",
+        fuel_code=fuel.fuel_code if fuel else "",
+        fuel_name=fuel.fuel_name if fuel else "",
+        source="typed" if typed else ("master-data" if fuel else "generic"),
+    )
+
+
+def get_settings(db: Session, organization_id: str) -> FuelLedgerSettingsOut:
+    settings = db.scalar(
+        select(FuelLedgerSettings).where(FuelLedgerSettings.organization_id == organization_id)
+    )
+    return FuelLedgerSettingsOut(
+        fuel_type_id=(settings.fuel_type_id or "") if settings else "",
+        fuel_label=settings.fuel_label if settings else "",
+        saving_label=settings.saving_label if settings else "",
+        remarks=settings.remarks if settings else "",
+        updated_at=settings.updated_at if settings else None,
+        updated_by=settings.updated_by if settings else "",
+        wording=ledger_wording(db, organization_id),
+    )
+
+
+def update_settings(
+    db: Session,
+    organization_id: str,
+    user: User,
+    data: FuelLedgerSettingsIn,
+    request: Request | None,
+) -> FuelLedgerSettingsOut:
+    """Save the wording. Every field may be blank, which follows Master Data."""
+    settings = db.scalar(
+        select(FuelLedgerSettings).where(FuelLedgerSettings.organization_id == organization_id)
+    )
+    fuel_id = (data.fuel_type_id or "").strip()
+    if fuel_id:
+        chosen = db.scalar(
+            select(FuelType).where(FuelType.id == fuel_id, FuelType.organization_id == organization_id)
+        )
+        if chosen is None:
+            raise HTTPException(status_code=422, detail="Select a fuel from Master Data → Consumables → Fuel")
+        if chosen.is_deleted:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{chosen.fuel_name} is in Deleted Entries; restore it or choose another fuel",
+            )
+    if settings is None:
+        settings = FuelLedgerSettings(organization_id=organization_id)
+        db.add(settings)
+    settings.fuel_type_id = fuel_id or None
+    # A blank label is meaningful: it asks the register to follow Master Data.
+    settings.fuel_label = (data.fuel_label or "").strip()
+    settings.saving_label = (data.saving_label or "").strip()
+    settings.remarks = (data.remarks or "").strip()
+    settings.updated_by = _actor_name(user)
+    db.flush()
+    wording = ledger_wording(db, organization_id)
+    _audit(
+        db,
+        user=user,
+        action="update",
+        entity_type="fuel_cost",
+        entity_id=None,
+        entity_label="Fuel ledger wording",
+        summary=(
+            f"Fuel register wording is now \"{wording.fuel_label}\" / \"{wording.saving_label}\" "
+            f"({wording.unit_label})"
+            + (f" · {wording.fuel_code} from Master Data" if wording.fuel_code else "")
+        ),
+        request=request,
+    )
+    _commit(db)
+    return get_settings(db, organization_id)
+
+
 def reference_data(db: Session, organization_id: str) -> FuelCostReference:
     rigs = db.scalars(
         select(Rig)
@@ -702,6 +839,7 @@ def reference_data(db: Session, organization_id: str) -> FuelCostReference:
         .order_by(Vendor.vendor_name)
     ).all()
     return FuelCostReference(
+        wording=ledger_wording(db, organization_id),
         rigs=[
             FuelCostRigOption(
                 id=rig.id,
@@ -1411,7 +1549,8 @@ def save_entry(
         summary=(
             f"{'Saved' if action == 'update' else 'Created'} the fuel day of {rig.rig_code} on "
             f"{entry.cost_date.isoformat()}: {_litres_text(entry.rig_engine_consumption)} L rig engines, "
-            f"{_litres_text(balance['company_consumption'])} L companies, {_litres_text(total)} L AGO total, "
+            f"{_litres_text(balance['company_consumption'])} L companies, {_litres_text(total)} L "
+            f"{ledger_wording(db, organization_id).fuel_label} total, "
             f"{_litres_text(entry.gas_consumption)} L rig saving, opening {_litres_text(balance['opening_stock'])} L, "
             f"book closing {_litres_text(balance['book_closing_stock'])} L, actual closing "
             f"{_litres_text(balance['actual_closing_stock'])} L, adjustments "

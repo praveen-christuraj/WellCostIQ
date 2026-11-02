@@ -908,7 +908,15 @@ def test_afe_prices_and_validates_only_the_selected_configuration_scope():
         assert response.status_code == 200, response.text
         completion = response.json()
         assert completion["configuration_scope"] == "completion"
-        assert completion["well_status"] == "active"
+        # The Completion scope has a configured plan but has never spudded, so the
+        # AFE is budgeted against an *upcoming* scope — which is what a pre-spud
+        # AFE exists for. The flag it reports is that scope's own.
+        assert completion["well_status"] == "upcoming"
+        # An open AFE does not hold the well back either: the scope can start.
+        assert client.post(
+            f"{url}/transition", headers=headers,
+            json={"action": "start", "scope": "completion", "remarks": "Rig moved up, operations begin"},
+        ).status_code == 200
         estimate_url = f"/api/v1/afe/afes/{completion['id']}/estimate"
         payload = _estimate_payload(master, consumables=[], tangibles=[])
         saved = client.put(estimate_url, headers=headers, json=payload)

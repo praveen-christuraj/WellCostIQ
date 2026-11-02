@@ -50,6 +50,7 @@ from app.models.fuel_cost import (
     FuelCompanyCategory,
     FuelCostCompanyLine,
     FuelCostEntry,
+    FuelLedgerSettings,
 )
 from app.models.ndt_inspection import NdtInspection
 from app.models.security import (

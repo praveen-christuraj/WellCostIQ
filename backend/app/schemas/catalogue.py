@@ -454,8 +454,46 @@ class CementAdditiveOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Fuel
+# Fuel — a user-managed consumable type: the workspace owns the list, the unit
+# of measure and the price. Nothing about which fuels exist lives in the code.
 # ---------------------------------------------------------------------------
+
+
+class FuelCreate(_Strict):
+    fuel_code: str = Field(min_length=1, max_length=30)
+    fuel_name: str = Field(min_length=1, max_length=150)
+    uom: str = Field(default="L", max_length=50)
+    unit_rate: Decimal10 = Field(ge=0, le=MAX_RATE)
+    currency: str = Field(min_length=1, max_length=10)
+    po_number: str = Field(default="", max_length=100)
+    effective_date: date | None = None
+    description: str = Field(default="", max_length=500)
+    remarks: str = Field(default="", max_length=500)
+
+    @field_validator(
+        "fuel_code", "fuel_name", "uom", "currency", "po_number", "description", "remarks", mode="before"
+    )
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
+
+    @field_validator("effective_date", mode="before")
+    @classmethod
+    def blank_date(cls, value: Any) -> Any:
+        return _blank_to_none(value)
+
+
+class FuelUpdate(_Strict):
+    fuel_code: str | None = Field(default=None, min_length=1, max_length=30)
+    fuel_name: str | None = Field(default=None, max_length=150)
+    uom: str | None = Field(default=None, max_length=50)
+    description: str | None = Field(default=None, max_length=500)
+    remarks: str | None = Field(default=None, max_length=500)
+
+    @field_validator("fuel_code", "fuel_name", "uom", "description", mode="before")
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
 
 
 class FuelOut(BaseModel):
@@ -465,8 +503,11 @@ class FuelOut(BaseModel):
     uom: str
     unit_rate: Decimal
     currency: str
+    po_number: str = ""
     effective_date: date | None = None
     current_revision_number: int
+    description: str = ""
+    remarks: str = ""
     is_deleted: bool
     deleted_at: datetime | None = None
     created_at: datetime
@@ -515,23 +556,6 @@ class UnitRevise(_Strict):
         return _blank_to_none(value)
 
 
-class FuelRevise(_Strict):
-    unit_rate: Decimal10 = Field(ge=0, le=MAX_RATE)
-    currency: str = Field(min_length=1, max_length=10)
-    effective_date: date | None = None
-    reason: str = Field(min_length=3, max_length=500)
-
-    @field_validator("currency", "reason", mode="before")
-    @classmethod
-    def trim_text(cls, value: Any) -> Any:
-        return _trim(value)
-
-    @field_validator("effective_date", mode="before")
-    @classmethod
-    def blank_date(cls, value: Any) -> Any:
-        return _blank_to_none(value)
-
-
 __all__ = [
     "TangibleScope",
     "CatalogueOptionCreate",
@@ -555,8 +579,9 @@ __all__ = [
     "CementAdditiveCreate",
     "CementAdditiveUpdate",
     "CementAdditiveOut",
+    "FuelCreate",
+    "FuelUpdate",
     "FuelOut",
     "UpliftRevise",
     "UnitRevise",
-    "FuelRevise",
 ]

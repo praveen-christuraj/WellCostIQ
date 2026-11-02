@@ -192,8 +192,10 @@ class MudCostWellOption(BaseModel):
     well_code: str
     well_name: str
     display_name: str
-    status: Literal["active", "completed"]
-    config_status: Literal["draft", "configured"]
+    # The picker mirrors the well register's own vocabularies, so a well that is
+    # still under planning (or whose plan awaits final review) never breaks it.
+    status: Literal["upcoming", "active", "completed"]
+    config_status: Literal["draft", "configured", "final_review"]
     is_deleted: bool
     sections: list[MudCostSectionOption]
 

@@ -70,25 +70,19 @@ def build_item_router(spec: PricedSpec) -> APIRouter:
 
     @router.get("", dependencies=[read])
     def list_active(db: Db, user: Current) -> list[Any]:
-        if spec.seed is not None:
-            spec.seed(db, user.organization_id)
         return out_list(db, user.organization_id, svc.list_items(db, spec, user.organization_id, deleted=False))
 
     @router.get("/overview", response_model=PricedItemOverview, dependencies=[read])
     def overview(db: Db, user: Current) -> PricedItemOverview:
-        if spec.seed is not None:
-            spec.seed(db, user.organization_id)
         return svc.item_overview(db, spec, user.organization_id)
 
     @router.get("/revisions", response_model=list[RateRevisionOut], dependencies=[read])
     def all_revisions(db: Db, user: Current, include_removed: bool = False) -> list[RateRevisionOut]:
         return svc.revision_history(db, spec, user.organization_id, include_removed=include_removed)
 
-    if spec.lifecycle:
-
-        @router.get("/deleted", dependencies=[read])
-        def list_deleted(db: Db, user: Current) -> list[Any]:
-            return out_list(db, user.organization_id, svc.list_items(db, spec, user.organization_id, deleted=True))
+    @router.get("/deleted", dependencies=[read])
+    def list_deleted(db: Db, user: Current) -> list[Any]:
+        return out_list(db, user.organization_id, svc.list_items(db, spec, user.organization_id, deleted=True))
 
     @router.get("/{item_id}", dependencies=[read])
     def get_item(item_id: str, db: Db, user: Current) -> Any:
@@ -102,7 +96,7 @@ def build_item_router(spec: PricedSpec) -> APIRouter:
 
     # ----- writes -----
 
-    if spec.lifecycle and spec.create_model is not None:
+    if spec.create_model is not None:
 
         @router.post("", status_code=201, dependencies=[Depends(require("master-data:create"))])
         def create(data: spec.create_model, request: Request, db: Db, user: Current) -> Any:
@@ -184,7 +178,7 @@ def build_item_router(spec: PricedSpec) -> APIRouter:
 
         @router.post("/{item_id}/revise", dependencies=[Depends(require("master-data:update"))])
         def revise(item_id: str, data: spec.revise_model, request: Request, db: Db, user: Current) -> Any:
-            item = _item_or_404(db, spec, user.organization_id, item_id, deleted=None if not spec.lifecycle else False)
+            item = _item_or_404(db, spec, user.organization_id, item_id, deleted=False)
             svc.revise_item(db, spec, user.organization_id, user, item, data.model_dump(), request)
             _commit(db)
             db.refresh(item)

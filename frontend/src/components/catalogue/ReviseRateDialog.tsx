@@ -38,7 +38,6 @@ export function ReviseRateDialog({ config, record, busy, error, onClose, onSubmi
   const [reason, setReason] = useState('')
   const [localError, setLocalError] = useState('')
   const uplift = config.priced === 'uplift'
-  const fuel = config.fixed
 
   useEffect(() => {
     if (!record) return
@@ -69,31 +68,29 @@ export function ReviseRateDialog({ config, record, busy, error, onClose, onSubmi
 
   return <FormDialog
     open
-    title={fuel ? `Update price: ${name}` : `Revise rate: ${code}`}
-    subtitle={fuel
-      ? 'Enter the new price only when it changes. The previous price stays in the history.'
-      : `${name} · current revision ${record.current_revision_number}. The previous rate stays in the history.`}
+    title={`Revise rate: ${code}`}
+    subtitle={`${name} · current revision ${record.current_revision_number}. The previous rate stays in the history.`}
     onClose={() => { if (!busy) onClose() }}
     onSubmit={submit}
     busy={busy}
     dirty={dirty}
-    submitLabel={fuel ? 'Save new price' : 'Save revision'}
+    submitLabel="Save revision"
   >
     <Box display="grid" gap={2} pt={.5} sx={{ gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
       <Box sx={{ gridColumn: { sm: '1 / -1' }, p: 1.5, borderRadius: 1.5, bgcolor: 'action.hover' }}>
-        <Typography fontSize={12} color="text.secondary">Current {uplift ? 'rate as per PO' : fuel ? 'price' : 'unit rate'}</Typography>
+        <Typography fontSize={12} color="text.secondary">Current {uplift ? 'rate as per PO' : 'unit rate'}</Typography>
         <Typography fontSize={18} fontWeight={800}>{formatMoney(record.unit_rate)} {record.currency}</Typography>
         {uplift && currentFinal !== null && <Typography fontSize={12} color="text.secondary">Current final cost {formatMoney(currentFinal)} at {formatPercent(record.cost_uplift)} uplift</Typography>}
         {record.effective_date && <Typography fontSize={12} color="text.secondary">Effective since {record.effective_date}</Typography>}
       </Box>
-      <TextField label={uplift ? 'New rate as per PO' : fuel ? 'New price per litre' : 'New unit rate'} type="number" required value={form.unit_rate ?? ''}
+      <TextField label={uplift ? 'New rate as per PO' : 'New unit rate'} type="number" required value={form.unit_rate ?? ''}
         onChange={event => setForm({ ...form, unit_rate: event.target.value })} inputProps={{ min: 0, step: 'any' }}
         helperText={change === null ? ' ' : `Change ${change >= 0 ? '+' : ''}${change.toFixed(2)}% from current`} fullWidth/>
       {uplift && <TextField label="Cost uplift %" type="number" required value={form.cost_uplift ?? ''}
         onChange={event => setForm({ ...form, cost_uplift: event.target.value })} inputProps={{ min: 0, step: 'any' }}
         helperText={`New final cost ${previewFinalCost(newRate, form.cost_uplift ?? '')}`} fullWidth/>}
       <MasterSelect label="Currency" source="currencies" value={form.currency ?? ''} required onChange={code => setForm({ ...form, currency: code })} onError={setLocalError}/>
-      {!fuel && <TextField label="PO number" value={form.po_number ?? ''} onChange={event => setForm({ ...form, po_number: event.target.value })} inputProps={{ maxLength: 100 }} fullWidth/>}
+      <TextField label="PO number" value={form.po_number ?? ''} onChange={event => setForm({ ...form, po_number: event.target.value })} inputProps={{ maxLength: 100 }} fullWidth/>
       <TextField label="Effective date" type="date" required value={form.effective_date ?? ''} onChange={event => setForm({ ...form, effective_date: event.target.value })}
         InputLabelProps={{ shrink: true }} helperText="Cannot be in the future or earlier than the current rate's date." fullWidth/>
       <TextField label="Reason for change" required value={reason} onChange={event => setReason(event.target.value)} multiline minRows={2}

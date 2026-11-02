@@ -160,10 +160,63 @@ class FuelCostVendorOption(BaseModel):
     display_name: str
 
 
+class FuelLedgerWording(BaseModel):
+    """What the register calls the fuel it counts, and the saving line beside it.
+
+    Never a constant in the page code: the labels come from the workspace's own
+    Master Data fuel (or the wording typed over it), so a site counting Diesel,
+    HSD or a bio-blend reads its own vocabulary in every heading, tile, alert,
+    print column and export header.
+    """
+
+    fuel_label: str
+    saving_label: str
+    unit_label: str
+    # The Master Data fuel the wording came from, when there is one.
+    fuel_type_id: str = ""
+    fuel_code: str = ""
+    fuel_name: str = ""
+    # 'typed' when the workspace overrode the wording, 'master-data' when it came
+    # from the linked (or only) fuel, and 'generic' when nothing is configured.
+    source: Literal["typed", "master-data", "generic"] = "generic"
+
+
+class FuelLedgerSettingsOut(BaseModel):
+    """The saved wording, exactly as the operator set it (blanks mean "follow Master Data")."""
+
+    fuel_type_id: str = ""
+    fuel_label: str = ""
+    saving_label: str = ""
+    remarks: str = ""
+    updated_at: datetime | None = None
+    updated_by: str = ""
+    wording: FuelLedgerWording
+
+
+class FuelLedgerSettingsIn(_Strict):
+    """Set the register wording. An empty label follows the linked Master Data fuel."""
+
+    fuel_type_id: str = Field(default="", max_length=36)
+    fuel_label: str = Field(default="", max_length=40)
+    saving_label: str = Field(default="", max_length=40)
+    remarks: str = Field(default="", max_length=MAX_REMARKS)
+
+    @field_validator("fuel_type_id", "fuel_label", "saving_label", "remarks", mode="before")
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
+
+    @field_validator("fuel_type_id", mode="before")
+    @classmethod
+    def blank_to_none(cls, value: Any) -> Any:
+        return _blank_to_none(value)
+
+
 class FuelCostReference(BaseModel):
     rigs: list[FuelCostRigOption]
     companies: list[FuelCompanyOut]
     vendors: list[FuelCostVendorOption]
+    wording: FuelLedgerWording
 
 
 # ---------------------------------------------------------------------------

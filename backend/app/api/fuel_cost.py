@@ -31,6 +31,8 @@ from app.schemas.fuel_cost import (
     FuelCostPaginatedLinesOut,
     FuelCostReference,
     FuelCostRigSummaryOut,
+    FuelLedgerSettingsIn,
+    FuelLedgerSettingsOut,
 )
 from app.services import fuel_cost as service
 
@@ -51,6 +53,24 @@ def _can_override_opening(user: User) -> bool:
 @router.get("/reference", response_model=FuelCostReference, dependencies=[Depends(require("daily-cost:read"))])
 def reference(db: Db, user: Current) -> FuelCostReference:
     return service.reference_data(db, user.organization_id)
+
+
+@router.get(
+    "/settings",
+    response_model=FuelLedgerSettingsOut,
+    dependencies=[Depends(require("daily-cost:read"))],
+)
+def get_ledger_settings(db: Db, user: Current) -> FuelLedgerSettingsOut:
+    """The wording the register prints, including the resolved labels it uses."""
+    return service.get_settings(db, user.organization_id)
+
+
+@router.put("/settings", response_model=FuelLedgerSettingsOut, dependencies=[Depends(require("daily-cost:update"))])
+def update_ledger_settings(
+    data: FuelLedgerSettingsIn, request: Request, db: Db, user: Current
+) -> FuelLedgerSettingsOut:
+    """Name the fuel this workspace counts. Blanks follow Master Data again."""
+    return service.update_settings(db, user.organization_id, user, data, request)
 
 
 @router.get("/day", response_model=FuelCostDayOut, dependencies=[Depends(require("daily-cost:read"))])
