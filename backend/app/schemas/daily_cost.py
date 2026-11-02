@@ -397,6 +397,15 @@ class DailyCostSubActivityOption(BaseModel):
     sub_activity_code: str
     sub_activity_name: str
     responsible_party: str
+    # Responsible party as configured in Master Data: the vendor and, when set,
+    # one of that vendor's service subcategories. Daily cost lines inherit both
+    # so vendor-wise and service-wise NPT/UPA reporting reconciles.
+    vendor_id: str | None = None
+    vendor_code: str = ""
+    vendor_name: str = ""
+    vendor_subcategory_id: str | None = None
+    vendor_subcategory_code: str = ""
+    vendor_subcategory_name: str = ""
     display_name: str
 
 
@@ -437,6 +446,18 @@ class DailyCostVendorOption(BaseModel):
     display_name: str
 
 
+class DailyCostVendorServiceSubcategoryOption(BaseModel):
+    """One service line of a vendor, offered when creating a sub activity here."""
+
+    id: str
+    vendor_id: str
+    vendor_code: str
+    vendor_name: str
+    subcategory_code: str
+    subcategory_name: str
+    display_name: str
+
+
 class DailyCostOtherExpenseTypeOption(BaseModel):
     """One selectable type of unexpected cost, e.g. LIH or a hole problem."""
 
@@ -453,6 +474,7 @@ class DailyCostReference(BaseModel):
     services: list[DailyCostServiceOption]
     catalogue_items: list[DailyCostCatalogueOption]
     vendors: list[DailyCostVendorOption]
+    vendor_service_subcategories: list[DailyCostVendorServiceSubcategoryOption] = Field(default_factory=list)
     currencies: list[str]
     charge_categories: list[str]
     charge_bases: list[str]

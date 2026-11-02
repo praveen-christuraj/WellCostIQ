@@ -203,11 +203,60 @@ class NptUpaDetailRow(_Strict):
     block_code: str = ""
     scope: str = ""
     classification: str
+    vendor_id: str = ""
+    vendor_code: str = ""
+    vendor_name: str = ""
+    vendor_subcategory_id: str = ""
+    vendor_subcategory_code: str = ""
+    vendor_subcategory_name: str = ""
     affected_dates: int = 0
     hours: Decimal = Decimal("0")
     days: Decimal = Decimal("0")
     amount: Decimal = Decimal("0")
     currency: str
+
+
+class NptUpaPartyRow(_Strict):
+    """NPT/UPA totals for one responsible party (vendor) across the filters.
+
+    When ``vendor_id`` is empty the row is a free-text party recorded before
+    vendors were linked (``party_name``) or the unassigned bucket, so nothing
+    disappears from the report while a register is being cleaned up.
+    """
+
+    party_key: str
+    party_name: str = ""
+    vendor_id: str = ""
+    vendor_code: str = ""
+    vendor_name: str = ""
+    vendor_subcategory_id: str = ""
+    vendor_subcategory_code: str = ""
+    vendor_subcategory_name: str = ""
+    is_linked: bool = False
+    well_count: int = 0
+    planned_affected_dates: int = 0
+    upa_affected_dates: int = 0
+    npt_affected_dates: int = 0
+    planned_hours: Decimal = Decimal("0")
+    upa_hours: Decimal = Decimal("0")
+    npt_hours: Decimal = Decimal("0")
+    planned_days: Decimal = Decimal("0")
+    upa_days: Decimal = Decimal("0")
+    npt_days: Decimal = Decimal("0")
+    planned_amount: Decimal = Decimal("0")
+    upa_amount: Decimal = Decimal("0")
+    npt_amount: Decimal = Decimal("0")
+    total_amount: Decimal = Decimal("0")
+
+
+class NptUpaPartyWellRow(NptUpaPartyRow):
+    """The same responsible-party totals, per well (drill-through rows)."""
+
+    well_id: str
+    well_code: str = ""
+    well_name: str = ""
+    rig_code: str = ""
+    block_code: str = ""
 
 
 class NptUpaReportOut(_Strict):
@@ -217,6 +266,12 @@ class NptUpaReportOut(_Strict):
     include_draft: bool = True
     wells: list[NptUpaWellRow] = Field(default_factory=list)
     detail: list[NptUpaDetailRow] = Field(default_factory=list)
+    # Responsible-party rollups: vendors (``parties``), one row per vendor
+    # service subcategory (``party_subcategories``) and the same measures per
+    # well (``party_wells``). Summing the vendor rows reproduces ``totals``.
+    parties: list[NptUpaPartyRow] = Field(default_factory=list)
+    party_subcategories: list[NptUpaPartyRow] = Field(default_factory=list)
+    party_wells: list[NptUpaPartyWellRow] = Field(default_factory=list)
     totals: NptUpaWellRow
     entry_count: int = 0
     excluded_entry_count: int = 0

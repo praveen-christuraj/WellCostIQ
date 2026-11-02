@@ -47,6 +47,8 @@ from app.models import (
 )
 from app.schemas.usage_reports import (
     NptUpaDetailRow,
+    NptUpaPartyRow,
+    NptUpaPartyWellRow,
     NptUpaReportOut,
     NptUpaWellRow,
     UsageBlockOption,
@@ -1002,6 +1004,119 @@ def matrix_report(
 # ---------------------------------------------------------------------------
 
 
+def _sub_activity_party_map(
+    db: Session, organization_id: str, well_ids: list[str]
+) -> dict[str, dict[str, str]]:
+    """Vendor / service subcategory configured on each well sub activity."""
+    from app.models.well_sub_activity import WellSubActivity
+
+    rows = db.scalars(
+        select(WellSubActivity).where(
+            WellSubActivity.organization_id == organization_id,
+            WellSubActivity.well_id.in_(well_ids or [""]),
+        )
+    ).all()
+    output: dict[str, dict[str, str]] = {}
+    for row in rows:
+        output[row.id] = {
+            "vendor_id": row.vendor_id or "",
+            "party_name": row.responsible_party or "",
+            "subcategory_id": row.vendor_subcategory_id or "",
+            "subcategory_code": (
+                row.vendor_subcategory.subcategory_code if row.vendor_subcategory else ""
+            ),
+            "subcategory_name": (
+                row.vendor_subcategory.subcategory_name if row.vendor_subcategory else ""
+            ),
+        }
+    return output
+
+
+def _subcategory_map(
+    db: Session, organization_id: str
+) -> dict[str, Any]:
+    """All service subcategories of the workspace, deleted ones included.
+
+    Reports are historical: a subcategory renamed or removed today still labels
+    the periods in which it was used.
+    """
+    from app.models.vendor_master import VendorServiceSubcategory
+
+    return {
+        row.id: row
+        for row in db.scalars(
+            select(VendorServiceSubcategory).where(
+                VendorServiceSubcategory.organization_id == organization_id
+            )
+        ).all()
+    }
+
+
+def _party_identity(
+    fact: Any,
+    sub_activity_parties: dict[str, dict[str, str]],
+    vendors: dict[str, Vendor],
+) -> dict[str, str]:
+    """Resolve the responsible party (and its service line) for one cost line.
+
+    The responsible party is the vendor configured on the sub activity — that
+    is the party the register names — and only falls back to the vendor booked
+    on the line itself when the sub activity names none. Costs therefore follow
+    the configured party (the vendor-wise cost matrix still reports the booked
+    vendor). A service subcategory is only reported when it belongs to that same
+    vendor.
+    """
+    configured = sub_activity_parties.get(fact.sub_activity_id or "", {})
+    vendor_id = configured.get("vendor_id") or fact.vendor_id or ""
+    vendor = vendors.get(vendor_id) if vendor_id else None
+    party_name = (fact.party_name or configured.get("party_name") or "").strip()
+    if vendor is not None:
+        party_name = vendor.vendor_name
+    if not vendor_id:
+        label = party_name or "Unassigned"
+        return {
+            "party_key": f"party:{label.casefold()}",
+            "party_name": label,
+            "vendor_id": "",
+            "vendor_code": "",
+            "vendor_name": "",
+            "subcategory_id": "",
+            "subcategory_code": "",
+            "subcategory_name": "",
+            "is_linked": "false",
+        }
+    subcategory_id = ""
+    subcategory_code = ""
+    subcategory_name = ""
+    if configured.get("vendor_id") == vendor_id and configured.get("subcategory_id"):
+        subcategory_id = configured["subcategory_id"]
+        subcategory_code = configured.get("subcategory_code", "")
+        subcategory_name = configured.get("subcategory_name", "")
+    return {
+        "party_key": f"vendor:{vendor_id}",
+        "party_name": party_name,
+        "vendor_id": vendor_id,
+        "vendor_code": vendor.vendor_code if vendor else fact.vendor_code or "",
+        "vendor_name": vendor.vendor_name if vendor else (fact.vendor_name or party_name),
+        "subcategory_id": subcategory_id,
+        "subcategory_code": subcategory_code,
+        "subcategory_name": subcategory_name,
+        "is_linked": "true",
+    }
+
+
+def _subcategory_party_key(identity: dict[str, str]) -> str:
+    return f"{identity['party_key']}|sub:{identity['subcategory_id']}"
+
+
+def _empty_party_measures() -> dict[str, Any]:
+    return {
+        "dates": defaultdict(set),
+        "hours": defaultdict(lambda: ZERO),
+        "amount": defaultdict(lambda: ZERO),
+    }
+
+
 def npt_upa_report(
     db: Session,
     organization_id: str,
@@ -1057,14 +1172,52 @@ def npt_upa_report(
     # repeated for several services or charge categories, so retain only its
     # greatest recorded duration before rolling up the well/classification.
     allocation_hours: dict[AllocationKey, Decimal] = {}
+    # The party that recorded the greatest duration for each deduplicated
+    # allocation, keyed by the most granular identity (vendor + service line).
+    allocation_parties: dict[AllocationKey, str] = {}
+    party_identity: dict[str, dict[str, str]] = {}
+    subcategory_identity: dict[str, dict[str, str]] = {}
+    subcategory_to_party: dict[str, str] = {}
+    party_measures: dict[str, dict[str, Any]] = {}
+    subcategory_measures: dict[str, dict[str, Any]] = {}
+    party_well_measures: dict[str, dict[str, Any]] = {}
+    # Well × vendor service line: what the detail grid shows, so each row is
+    # filterable by vendor and by the vendor's service subcategory.
+    party_well_line_measures: dict[str, dict[str, Any]] = {}
+    subcategory_wells: dict[str, set[str]] = defaultdict(set)
+    sub_activity_parties = _sub_activity_party_map(db, organization_id, selected_well_ids)
+    vendors = _vendor_map(db, organization_id)
     scopes_seen: dict[str, set[str]] = defaultdict(set)
     wells_with_facts: set[str] = set()
+
+    def _measures_for(
+        bucket: dict[str, dict[str, Any]], key: str
+    ) -> dict[str, Any]:
+        if key not in bucket:
+            bucket[key] = _empty_party_measures()
+        return bucket[key]
+
     for fact in facts:
         classification = fact.classification or "Planned"
         if classification not in CLASSIFICATIONS:
             classification = "Planned"
         affected_dates[fact.well_id][classification].add(fact.cost_date)
         amounts[fact.well_id][classification] += Decimal(str(fact.amount or 0))
+        identity = _party_identity(fact, sub_activity_parties, vendors)
+        party_key = identity["party_key"]
+        subcategory_key = _subcategory_party_key(identity)
+        party_identity.setdefault(party_key, identity)
+        subcategory_identity[subcategory_key] = identity
+        subcategory_to_party[subcategory_key] = party_key
+        subcategory_wells[subcategory_key].add(fact.well_id)
+        for target in (
+            _measures_for(party_measures, party_key),
+            _measures_for(subcategory_measures, subcategory_key),
+            _measures_for(party_well_measures, f"{fact.well_id}|{party_key}"),
+            _measures_for(party_well_line_measures, f"{fact.well_id}|{subcategory_key}"),
+        ):
+            target["dates"][classification].add(fact.cost_date)
+            target["amount"][classification] += Decimal(str(fact.amount or 0))
         if fact.cost_group == "Services":
             record_service_allocation(
                 allocation_hours,
@@ -1080,6 +1233,8 @@ def npt_upa_report(
                 charge_category=fact.charge_category,
                 quantity_unit=fact.uom,
                 quantity=fact.quantity,
+                parties=allocation_parties,
+                party_key=subcategory_key,
             )
         if fact.scope:
             scopes_seen[fact.well_id].add(fact.scope)
@@ -1097,6 +1252,14 @@ def npt_upa_report(
         well_id, cost_date, classification, *_ = allocation_key
         duration_hours[well_id][classification] += hours
         well_date_hours[(well_id, cost_date)] += hours
+        subcategory_key = allocation_parties.get(allocation_key, "")
+        if not subcategory_key:
+            continue
+        party_key = subcategory_to_party.get(subcategory_key, subcategory_key)
+        _measures_for(party_measures, party_key)["hours"][classification] += hours
+        _measures_for(subcategory_measures, subcategory_key)["hours"][classification] += hours
+        _measures_for(party_well_measures, f"{well_id}|{party_key}")["hours"][classification] += hours
+        _measures_for(party_well_line_measures, f"{well_id}|{subcategory_key}")["hours"][classification] += hours
     overallocated_dates: dict[str, int] = defaultdict(int)
     for (well_id, _cost_date), hours in well_date_hours.items():
         if hours > Decimal("24"):
@@ -1133,21 +1296,6 @@ def npt_upa_report(
             totals[classification]["affected_dates"] += affected_date_count
             totals[classification]["hours"] += hours
             totals[classification]["amount"] += amount
-            detail_rows.append(NptUpaDetailRow(
-                row_id=f"npt-upa:{well_id}:{classification}",
-                well_id=well.id,
-                well_code=well.well_code,
-                well_name=well.well_name,
-                rig_code=row.rig_code,
-                block_code=row.block_code,
-                scope=",".join(sorted(scopes_seen[well_id])),
-                classification=classification,
-                affected_dates=affected_date_count,
-                hours=hours,
-                days=days,
-                amount=amount,
-                currency=selected_currency,
-            ))
         row.total_amount = _money(
             amounts[well_id].get("Planned", ZERO)
             + amounts[well_id].get("UPA", ZERO)
@@ -1172,6 +1320,145 @@ def npt_upa_report(
     result.overallocated_date_count = sum(overallocated_dates.values())
     result.totals.overallocated_dates = result.overallocated_date_count
     result.wells = well_rows
+
+    def _party_row(
+        party_key: str,
+        identity: dict[str, str],
+        measures: dict[str, Any],
+        *,
+        well_count: int = 0,
+    ) -> NptUpaPartyRow:
+        row = NptUpaPartyRow(
+            party_key=party_key,
+            party_name=identity.get("party_name", ""),
+            vendor_id=identity.get("vendor_id", ""),
+            vendor_code=identity.get("vendor_code", ""),
+            vendor_name=identity.get("vendor_name", ""),
+            vendor_subcategory_id=identity.get("subcategory_id", ""),
+            vendor_subcategory_code=identity.get("subcategory_code", ""),
+            vendor_subcategory_name=identity.get("subcategory_name", ""),
+            is_linked=identity.get("is_linked") == "true",
+            well_count=well_count,
+        )
+        for classification in CLASSIFICATIONS:
+            prefix = "planned" if classification == "Planned" else classification.lower()
+            hours = Decimal(measures["hours"][classification]).quantize(DURATION_HOURS_QUANT)
+            setattr(row, f"{prefix}_hours", hours)
+            setattr(row, f"{prefix}_days", hours_to_days(hours))
+            setattr(row, f"{prefix}_affected_dates", len(measures["dates"][classification]))
+            setattr(row, f"{prefix}_amount", _money(measures["amount"][classification]))
+        row.total_amount = _money(sum(
+            (Decimal(measures["amount"][classification]) for classification in CLASSIFICATIONS), ZERO
+        ))
+        return row
+
+    def _party_sort_key(row: NptUpaPartyRow) -> tuple[Any, ...]:
+        return (
+            -row.npt_amount,
+            -row.upa_amount,
+            -row.total_amount,
+            (row.party_name or row.vendor_name or "Unassigned").casefold(),
+            row.vendor_subcategory_code.casefold(),
+        )
+
+    parties = [
+        _party_row(
+            party_key,
+            identity,
+            party_measures.get(party_key, _empty_party_measures()),
+            well_count=len({
+                composite.split("|", 1)[0]
+                for composite in party_well_measures
+                if composite.split("|", 1)[1] == party_key
+            }),
+        )
+        for party_key, identity in party_identity.items()
+    ]
+    parties.sort(key=_party_sort_key)
+    result.parties = parties
+
+    subcategory_rows = [
+        _party_row(
+            subcategory_key,
+            identity,
+            measures,
+            well_count=len(subcategory_wells.get(subcategory_key, set())),
+        )
+        for subcategory_key, identity in subcategory_identity.items()
+        for measures in (subcategory_measures[subcategory_key],)
+    ]
+    subcategory_rows.sort(key=lambda row: (
+        (row.vendor_name or row.party_name or "").casefold(),
+        row.vendor_subcategory_name.casefold(),
+        row.party_key,
+    ))
+    result.party_subcategories = subcategory_rows
+
+    party_well_rows: list[NptUpaPartyWellRow] = []
+    for composite, measures in party_well_measures.items():
+        well_id, party_key = composite.split("|", 1)
+        well = well_by_id.get(well_id)
+        if well is None or well_id not in column_well_ids:
+            continue
+        identity = party_identity.get(party_key, {})
+        base = _party_row(party_key, identity, measures)
+        party_well_rows.append(NptUpaPartyWellRow(
+            **base.model_dump(),
+            well_id=well.id,
+            well_code=well.well_code,
+            well_name=well.well_name,
+            rig_code=well.rig.rig_code if well.rig else "",
+            block_code=well.block_record.block_code if well.block_record else "",
+        ))
+    party_well_rows.sort(key=lambda row: (
+        column_well_ids.index(row.well_id),
+        *_party_sort_key(row),
+    ))
+    result.party_wells = party_well_rows
+
+    # Flat classification rows, now one per well × classification × responsible
+    # party, so the grid can be filtered by vendor or service subcategory.
+    for composite in sorted(
+        party_well_line_measures,
+        key=lambda item: (
+            column_well_ids.index(item.split("|", 1)[0]) if item.split("|", 1)[0] in column_well_ids else 9999,
+            item,
+        ),
+    ):
+        well_id, line_key = composite.split("|", 1)
+        well = well_by_id.get(well_id)
+        if well is None or well_id not in column_well_ids:
+            continue
+        identity = subcategory_identity.get(line_key) or party_identity.get(line_key, {})
+        party_key = subcategory_to_party.get(line_key, line_key)
+        measures = party_well_line_measures[composite]
+        for classification in CLASSIFICATIONS:
+            hours = Decimal(measures["hours"][classification]).quantize(DURATION_HOURS_QUANT)
+            amount = _money(measures["amount"][classification])
+            date_count = len(measures["dates"][classification])
+            if not (hours or amount or date_count):
+                continue
+            detail_rows.append(NptUpaDetailRow(
+                row_id=f"npt-upa:{well_id}:{classification}:{line_key}",
+                well_id=well.id,
+                well_code=well.well_code,
+                well_name=well.well_name,
+                rig_code=well.rig.rig_code if well.rig else "",
+                block_code=well.block_record.block_code if well.block_record else "",
+                scope=",".join(sorted(scopes_seen[well_id])),
+                classification=classification,
+                vendor_id=identity.get("vendor_id", ""),
+                vendor_code=identity.get("vendor_code", ""),
+                vendor_name=identity.get("vendor_name", ""),
+                vendor_subcategory_id=identity.get("subcategory_id", ""),
+                vendor_subcategory_code=identity.get("subcategory_code", ""),
+                vendor_subcategory_name=identity.get("subcategory_name", ""),
+                affected_dates=date_count,
+                hours=hours,
+                days=hours_to_days(hours),
+                amount=amount,
+                currency=selected_currency,
+            ))
     result.detail = detail_rows
     return result
 

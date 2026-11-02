@@ -39,6 +39,8 @@ from app.models import (
     Well,
     WellPhase,
     WellPlanAdjustment,
+    Vendor,
+    VendorServiceSubcategory,
     WellSection,
     WellSubActivity,
 )
@@ -80,6 +82,9 @@ from app.schemas.rig_well import (
     WellConfigurationOut,
     WellCreate,
     WellOut,
+    SubActivityPartyOptionsOut,
+    SubActivityServiceLineOptionOut,
+    SubActivityVendorOptionOut,
     WellSubActivityCreate,
     WellSubActivityOut,
     WellSubActivityUpdate,
@@ -514,6 +519,9 @@ def _sub_activity_or_404(
         select(WellSubActivity)
         .options(joinedload(WellSubActivity.well).joinedload(Well.rig), joinedload(WellSubActivity.activity))
         .where(WellSubActivity.id == record_id, WellSubActivity.organization_id == organization_id)
+        # A vendor change must be reflected in the joined vendor/subcategory
+        # this response serialises, not just in the foreign-key columns.
+        .execution_options(populate_existing=True)
     )
     if well_id is not None:
         statement = statement.where(WellSubActivity.well_id == well_id)
@@ -525,10 +533,143 @@ def _sub_activity_or_404(
     return record
 
 
+PARTY_PLACEHOLDERS = frozenset({"", "-", "n/a", "na", "none", "not applicable"})
+
+
+def _active_vendor(db: Session, organization_id: str, vendor_id: str | None) -> Vendor | None:
+    if not vendor_id:
+        return None
+    return db.scalar(
+        select(Vendor).where(
+            Vendor.id == vendor_id,
+            Vendor.organization_id == organization_id,
+            Vendor.is_deleted.is_(False),
+        )
+    )
+
+
+def _vendor_matching_text(db: Session, organization_id: str, text: str) -> Vendor | None:
+    """Resolve a legacy free-text responsible party to a Master Data vendor.
+
+    Exact code or name first, then a case-insensitive name match, and only when
+    it is unambiguous. Nothing is guessed: unclear text stays free text.
+    """
+    cleaned = (text or "").strip()
+    if not cleaned or cleaned.casefold() in PARTY_PLACEHOLDERS:
+        return None
+    by_code = db.scalar(
+        select(Vendor).where(
+            Vendor.organization_id == organization_id,
+            Vendor.is_deleted.is_(False),
+            func.upper(Vendor.vendor_code) == cleaned.upper(),
+        )
+    )
+    if by_code is not None:
+        return by_code
+    matches = list(
+        db.scalars(
+            select(Vendor).where(
+                Vendor.organization_id == organization_id,
+                Vendor.is_deleted.is_(False),
+                func.lower(Vendor.vendor_name) == cleaned.lower(),
+            )
+        ).all()
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _subcategory_of_vendor(
+    db: Session, organization_id: str, vendor_id: str, subcategory_id: str | None
+) -> VendorServiceSubcategory | None:
+    if not subcategory_id:
+        return None
+    record = db.scalar(
+        select(VendorServiceSubcategory).where(
+            VendorServiceSubcategory.id == subcategory_id,
+            VendorServiceSubcategory.organization_id == organization_id,
+            VendorServiceSubcategory.is_deleted.is_(False),
+        )
+    )
+    if record is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Select an active vendor service subcategory from this workspace's Master Data",
+        )
+    if record.vendor_id != vendor_id:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Service subcategory '{record.subcategory_code}' belongs to a different vendor. "
+                "Choose the subcategory of the selected vendor."
+            ),
+        )
+    return record
+
+
+def _resolve_responsible_party(
+    db: Session,
+    organization_id: str,
+    *,
+    classification: str,
+    vendor_id: str | None,
+    vendor_subcategory_id: str | None,
+    responsible_party: str,
+    require_vendor: bool = False,
+) -> tuple[str | None, str | None, str]:
+    """Validate and normalise the sub activity's responsible party.
+
+    Returns ``(vendor_id, vendor_subcategory_id, responsible_party_text)``.
+    Planned activities carry no party at all. Unplanned ones name a vendor from
+    Master Data; ``require_vendor`` (set whenever the caller speaks the vendor
+    fields, i.e. the current UI and import) refuses free text outright, while
+    legacy payloads that never had a vendor keep working and are linked
+    automatically when the text matches exactly one vendor.
+    """
+    text = (responsible_party or "").strip()
+    if classification == "Planned":
+        return None, None, "Not Applicable"
+    vendor = _active_vendor(db, organization_id, vendor_id)
+    if vendor_id and vendor is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Select an active vendor from this workspace's Master Data",
+        )
+    if vendor_subcategory_id and vendor is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Select the responsible vendor before choosing one of its service subcategories",
+        )
+    if vendor is None:
+        vendor = _vendor_matching_text(db, organization_id, text)
+    if vendor is None:
+        if require_vendor:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Select the responsible vendor from Master Data for {classification} sub activities. "
+                    f"'{text}' is not a vendor in this workspace."
+                    if text
+                    else f"Select the responsible vendor from Master Data for {classification} sub activities"
+                ),
+            )
+        if text.casefold() in PARTY_PLACEHOLDERS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Responsible party / vendor is required for {classification} sub activities",
+            )
+        # Legacy free text with no matching vendor: keep it, so historical
+        # registers and spreadsheets continue to import unchanged.
+        return None, None, text
+    subcategory = _subcategory_of_vendor(db, organization_id, vendor.id, vendor_subcategory_id)
+    return vendor.id, subcategory.id if subcategory else None, vendor.vendor_name
+
+
 def _sub_activity_out(record: WellSubActivity) -> WellSubActivityOut:
     well = record.well
     rig = well.rig if well else None
     activity = record.activity
+    vendor = record.vendor
+    subcategory = record.vendor_subcategory
     return WellSubActivityOut(
         id=record.id,
         well_id=record.well_id,
@@ -536,6 +677,18 @@ def _sub_activity_out(record: WellSubActivity) -> WellSubActivityOut:
         sub_activity_code=record.sub_activity_code,
         sub_activity_name=record.sub_activity_name,
         activity_id=record.activity_id,
+        vendor_id=vendor.id if vendor else None,
+        vendor_code=vendor.vendor_code if vendor else "",
+        vendor_name=vendor.vendor_name if vendor else "",
+        vendor_subcategory_id=subcategory.id if subcategory else None,
+        vendor_subcategory_code=subcategory.subcategory_code if subcategory else "",
+        vendor_subcategory_name=subcategory.subcategory_name if subcategory else "",
+        vendor_display=f"{vendor.vendor_code} — {vendor.vendor_name}" if vendor else "",
+        vendor_subcategory_display=(
+            f"{subcategory.subcategory_code} — {subcategory.subcategory_name}"
+            if subcategory
+            else ""
+        ),
         responsible_party=record.responsible_party,
         description=record.description,
         is_deleted=record.is_deleted,
@@ -2666,6 +2819,60 @@ def _activity_from_import(db: Session, reference: Any, organization_id: str) -> 
     return None
 
 
+def _vendor_from_import(db: Session, reference: Any, organization_id: str) -> Vendor | None:
+    text = _string(reference)
+    if not text:
+        return None
+    by_code = db.scalar(
+        select(Vendor).where(
+            Vendor.organization_id == organization_id,
+            func.upper(Vendor.vendor_code) == text.upper(),
+            Vendor.is_deleted.is_(False),
+        )
+    )
+    if by_code is not None:
+        return by_code
+    matches = list(
+        db.scalars(
+            select(Vendor).where(
+                Vendor.organization_id == organization_id,
+                func.lower(Vendor.vendor_name) == text.lower(),
+                Vendor.is_deleted.is_(False),
+            )
+        ).all()
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _subcategory_from_import(
+    db: Session, reference: Any, organization_id: str, vendor: Vendor
+) -> VendorServiceSubcategory | None:
+    text = _string(reference)
+    if not text:
+        return None
+    by_code = db.scalar(
+        select(VendorServiceSubcategory).where(
+            VendorServiceSubcategory.organization_id == organization_id,
+            VendorServiceSubcategory.vendor_id == vendor.id,
+            func.upper(VendorServiceSubcategory.subcategory_code) == text.upper(),
+            VendorServiceSubcategory.is_deleted.is_(False),
+        )
+    )
+    if by_code is not None:
+        return by_code
+    matches = list(
+        db.scalars(
+            select(VendorServiceSubcategory).where(
+                VendorServiceSubcategory.organization_id == organization_id,
+                VendorServiceSubcategory.vendor_id == vendor.id,
+                func.lower(VendorServiceSubcategory.subcategory_name) == text.lower(),
+                VendorServiceSubcategory.is_deleted.is_(False),
+            )
+        ).all()
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
 @router.get(
     "/sub-activities",
     response_model=list[WellSubActivityOut],
@@ -2701,6 +2908,22 @@ def list_sub_activities(
                 WellSubActivity.sub_activity_name.ilike(pattern),
                 WellSubActivity.responsible_party.ilike(pattern),
                 WellSubActivity.description.ilike(pattern),
+                WellSubActivity.vendor_id.in_(
+                    select(Vendor.id).where(
+                        or_(
+                            Vendor.vendor_code.ilike(pattern),
+                            Vendor.vendor_name.ilike(pattern),
+                        )
+                    )
+                ),
+                WellSubActivity.vendor_subcategory_id.in_(
+                    select(VendorServiceSubcategory.id).where(
+                        or_(
+                            VendorServiceSubcategory.subcategory_code.ilike(pattern),
+                            VendorServiceSubcategory.subcategory_name.ilike(pattern),
+                        )
+                    )
+                ),
             )
         )
     records = db.scalars(statement.order_by(WellSubActivity.sub_activity_code)).all()
@@ -2749,6 +2972,64 @@ def sub_activity_options(db: Db, user: Current) -> list[RigWellMasterDataOption]
     return [RigWellMasterDataOption(id=item.id, code=item.activity_code, name=item.activity_name) for item in activities]
 
 
+@router.get(
+    "/sub-activities/party-options",
+    response_model=SubActivityPartyOptionsOut,
+    dependencies=[Depends(require("rig-well:read"))],
+)
+def sub_activity_party_options(db: Db, user: Current) -> SubActivityPartyOptionsOut:
+    """Responsible-party choices for the sub activity form.
+
+    Vendors and their service subcategories come from Master Data, but the
+    endpoint lives under Rig & Well so a user who may maintain well sub
+    activities does not need the Master Data module to fill the form.
+    """
+    vendors = db.scalars(
+        select(Vendor)
+        .where(
+            Vendor.organization_id == user.organization_id,
+            Vendor.is_deleted.is_(False),
+        )
+        .order_by(Vendor.vendor_code)
+    ).all()
+    service_lines = db.scalars(
+        select(VendorServiceSubcategory)
+        .options(joinedload(VendorServiceSubcategory.vendor))
+        .join(Vendor, Vendor.id == VendorServiceSubcategory.vendor_id)
+        .where(
+            VendorServiceSubcategory.organization_id == user.organization_id,
+            VendorServiceSubcategory.is_deleted.is_(False),
+            Vendor.is_deleted.is_(False),
+        )
+        .order_by(Vendor.vendor_code, VendorServiceSubcategory.subcategory_code)
+    ).unique().all()
+    return SubActivityPartyOptionsOut(
+        vendors=[
+            SubActivityVendorOptionOut(
+                id=vendor.id,
+                vendor_code=vendor.vendor_code,
+                vendor_name=vendor.vendor_name,
+                vendor_type=vendor.vendor_type,
+                status=vendor.status,
+                label=f"{vendor.vendor_code} — {vendor.vendor_name}",
+            )
+            for vendor in vendors
+        ],
+        service_lines=[
+            SubActivityServiceLineOptionOut(
+                id=line.id,
+                vendor_id=line.vendor_id,
+                vendor_code=line.vendor.vendor_code if line.vendor else "",
+                vendor_name=line.vendor.vendor_name if line.vendor else "",
+                subcategory_code=line.subcategory_code,
+                subcategory_name=line.subcategory_name,
+                display_name=f"{line.subcategory_code} — {line.subcategory_name}",
+            )
+            for line in service_lines
+        ],
+    )
+
+
 @router.post(
     "/sub-activities",
     response_model=WellSubActivityOut,
@@ -2764,16 +3045,17 @@ def create_sub_activity(
     well = _well_for_sub_activity(db, data.well_id, user.organization_id, scope=data.scope)
     activity = _master_record_or_422(db, Activity, data.activity_id, user.organization_id, "Activity")
     classification = classify_activity(activity)
-    responsible_party = (data.responsible_party or "").strip()
-    if classification == "Planned":
-        if not responsible_party or responsible_party in ("-", "N/A", "n/a", "None"):
-            responsible_party = "Not Applicable"
-    else:
-        if not responsible_party or responsible_party in ("Not Applicable", "N/A", "n/a", "None", "-"):
-            raise HTTPException(
-                status_code=422,
-                detail=f"Responsible party / company is required for {classification} sub activities",
-            )
+    vendor_id, vendor_subcategory_id, responsible_party = _resolve_responsible_party(
+        db,
+        user.organization_id,
+        classification=classification,
+        vendor_id=data.vendor_id,
+        vendor_subcategory_id=data.vendor_subcategory_id,
+        responsible_party=data.responsible_party,
+        require_vendor=bool(
+            {"vendor_id", "vendor_subcategory_id"} & set(data.model_fields_set)
+        ),
+    )
     data.responsible_party = responsible_party
     existing = db.scalar(
         select(WellSubActivity).where(
@@ -2794,6 +3076,8 @@ def create_sub_activity(
             )
         existing.sub_activity_name = data.sub_activity_name
         existing.activity_id = activity.id
+        existing.vendor_id = vendor_id
+        existing.vendor_subcategory_id = vendor_subcategory_id
         existing.responsible_party = data.responsible_party
         existing.description = data.description
         existing.is_deleted = False
@@ -2816,6 +3100,8 @@ def create_sub_activity(
         sub_activity_code=data.sub_activity_code,
         sub_activity_name=data.sub_activity_name,
         activity_id=activity.id,
+        vendor_id=vendor_id,
+        vendor_subcategory_id=vendor_subcategory_id,
         responsible_party=data.responsible_party,
         description=data.description,
     )
@@ -2852,27 +3138,57 @@ def update_sub_activity(
     )
     well = _well_for_sub_activity(db, well_id, user.organization_id, scope=record.scope)
     payload = data.model_dump(exclude_unset=True)
+    # The vendor, its service subcategory and the display text are validated as
+    # one unit: a subcategory may only come from the selected vendor, and the
+    # text follows the vendor whenever one is linked.
+    party_fields_requested = any(
+        field in payload for field in ("vendor_id", "vendor_subcategory_id", "responsible_party", "activity_id")
+    )
+    target_activity = record.activity
+    if "activity_id" in payload and payload["activity_id"]:
+        target_activity = _master_record_or_422(
+            db, Activity, payload["activity_id"], user.organization_id, "Activity"
+        )
+    resolved_vendor_id = record.vendor_id
+    resolved_subcategory_id = record.vendor_subcategory_id
+    resolved_party = record.responsible_party
+    if party_fields_requested or target_activity is not record.activity:
+        requested_vendor_id = payload.get("vendor_id", record.vendor_id)
+        requested_subcategory_id = payload.get("vendor_subcategory_id", record.vendor_subcategory_id)
+        if (
+            "vendor_id" in payload
+            and requested_vendor_id != record.vendor_id
+            and "vendor_subcategory_id" not in payload
+        ):
+            # Switching vendor drops the old vendor's service line instead of
+            # failing: its subcategory cannot belong to the new vendor.
+            requested_subcategory_id = None
+        resolved_vendor_id, resolved_subcategory_id, resolved_party = _resolve_responsible_party(
+            db,
+            user.organization_id,
+            classification=classify_activity(target_activity),
+            vendor_id=requested_vendor_id,
+            vendor_subcategory_id=requested_subcategory_id,
+            responsible_party=payload.get("responsible_party", record.responsible_party),
+            require_vendor=bool({"vendor_id", "vendor_subcategory_id"} & set(payload)),
+        )
     changed: list[str] = []
+    for field, value in (
+        ("vendor_id", resolved_vendor_id),
+        ("vendor_subcategory_id", resolved_subcategory_id),
+        ("responsible_party", resolved_party),
+    ):
+        if getattr(record, field) == value:
+            continue
+        setattr(record, field, value)
+        changed.append(field)
     for field, value in payload.items():
+        if field in ("vendor_id", "vendor_subcategory_id", "responsible_party"):
+            continue
         if value is None or getattr(record, field) == value:
             continue
         if field == "activity_id":
             _master_record_or_422(db, Activity, value, user.organization_id, "Activity")
-        elif field == "responsible_party":
-            target_act_id = payload.get("activity_id") or record.activity_id
-            target_act = _master_record_or_422(db, Activity, target_act_id, user.organization_id, "Activity")
-            classification = classify_activity(target_act)
-            party_str = str(value or "").strip()
-            if classification == "Planned":
-                if not party_str or party_str in ("-", "N/A", "n/a", "None"):
-                    party_str = "Not Applicable"
-            else:
-                if not party_str or party_str in ("Not Applicable", "N/A", "n/a", "None", "-"):
-                    raise HTTPException(
-                        status_code=422,
-                        detail=f"Responsible party / company is required for {classification} sub activities",
-                    )
-            value = party_str
         elif field == "sub_activity_code":
             duplicate = db.scalar(
                 select(WellSubActivity).where(
@@ -3089,6 +3405,11 @@ def import_sub_activities(
         responsible_party = _string(_row_value(row, "responsible_party", "responsible", "company"))
         description = _string(_row_value(row, "description", "remarks", "remark"))
         activity_ref = _row_value(row, "activity", "activity_code", "activity_name")
+        vendor_ref = _row_value(row, "vendor", "vendor_code", "vendor_name", "responsible_vendor")
+        subcategory_ref = _row_value(
+            row, "vendor_service_subcategory", "service_subcategory", "vendor_subcategory",
+            "subcategory", "service_line",
+        )
         raw_scope = _string(_row_value(row, "scope", "well_scope", "configuration_scope")).lower()
         row_scope = raw_scope if raw_scope else scope
         if row_scope not in ("drilling", "completion"):
@@ -3128,12 +3449,43 @@ def import_sub_activities(
             errors.append(f"Row {row_number} ({payload.sub_activity_code}): Activity '{_string(activity_ref) or '—'}' is missing, ambiguous, or inactive in Master Data")
             continue
         classification = classify_activity(activity)
+        vendor = None
+        if _string(vendor_ref):
+            vendor = _vendor_from_import(db, vendor_ref, user.organization_id)
+            if vendor is None:
+                errors.append(
+                    f"Row {row_number} ({payload.sub_activity_code}): Vendor "
+                    f"'{_string(vendor_ref)}' is missing, ambiguous, or inactive in Master Data"
+                )
+                continue
+        subcategory = None
+        if _string(subcategory_ref):
+            if vendor is None:
+                errors.append(
+                    f"Row {row_number} ({payload.sub_activity_code}): provide the vendor before its service subcategory"
+                )
+                continue
+            subcategory = _subcategory_from_import(
+                db, subcategory_ref, user.organization_id, vendor
+            )
+            if subcategory is None:
+                errors.append(
+                    f"Row {row_number} ({payload.sub_activity_code}): service subcategory "
+                    f"'{_string(subcategory_ref)}' is not an active subcategory of vendor {vendor.vendor_code}"
+                )
+                continue
         if classification == "Planned":
-            if not payload.responsible_party or payload.responsible_party in ("-", "N/A", "n/a", "None"):
-                payload.responsible_party = "Not Applicable"
+            payload.responsible_party = "Not Applicable"
+            vendor = None
+            subcategory = None
         else:
-            if not payload.responsible_party or payload.responsible_party in ("Not Applicable", "N/A", "n/a", "None", "-"):
-                errors.append(f"Row {row_number} ({payload.sub_activity_code}): Responsible party is required for {classification} sub activity")
+            if vendor is None:
+                # Accept a legacy free-text party that names an existing vendor.
+                vendor = _vendor_matching_text(db, user.organization_id, payload.responsible_party)
+            if vendor is not None:
+                payload.responsible_party = vendor.vendor_name
+            elif not payload.responsible_party or payload.responsible_party.casefold() in PARTY_PLACEHOLDERS:
+                errors.append(f"Row {row_number} ({payload.sub_activity_code}): Responsible party / vendor is required for {classification} sub activity")
                 continue
         existing = db.scalar(
             select(WellSubActivity).where(
@@ -3151,6 +3503,8 @@ def import_sub_activities(
                 sub_activity_code=payload.sub_activity_code,
                 sub_activity_name=payload.sub_activity_name,
                 activity_id=activity.id,
+                vendor_id=vendor.id if vendor else None,
+                vendor_subcategory_id=subcategory.id if subcategory else None,
                 responsible_party=payload.responsible_party,
                 description=payload.description,
             )
@@ -3161,6 +3515,8 @@ def import_sub_activities(
             action = "restore" if existing.is_deleted else "update"
             existing.sub_activity_name = payload.sub_activity_name
             existing.activity_id = activity.id
+            existing.vendor_id = vendor.id if vendor else None
+            existing.vendor_subcategory_id = subcategory.id if subcategory else None
             existing.responsible_party = payload.responsible_party
             existing.description = payload.description
             existing.is_deleted = False
