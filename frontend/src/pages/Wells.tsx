@@ -25,15 +25,20 @@ import {
   type WellPayload,
 } from '../lib/rigWell'
 
-type WellTab = 'configured' | 'final_review' | 'completed'
+type WellTab = 'upcoming' | 'configured' | 'final_review' | 'completed'
 
+// The register is segregated by the scope's own tracking flag first — Upcoming,
+// Active or Completed — and the plan workflow (draft → configured → final review)
+// splits the active wells inside it. Each tab reads one scope's status column, so
+// a well drilling with its completion still planned is listed in both buckets.
 const TABS: { key: WellTab; label: string }[] = [
+  { key: 'upcoming', label: 'Upcoming wells' },
   { key: 'configured', label: 'Configured wells' },
   { key: 'final_review', label: 'Wells for final review' },
   { key: 'completed', label: 'Completed wells' },
 ]
 
-type TransitionAction = 'configure' | 'draft' | 'final_review' | 'complete' | 'activate'
+type TransitionAction = 'configure' | 'draft' | 'final_review' | 'start' | 'defer' | 'complete' | 'activate'
 
 type ScopeRow = { well: Well; scope: WellConfigurationScope }
 
@@ -72,7 +77,10 @@ function planTone(config_status: string) {
 }
 
 function statusTone(status: string) {
-  return status === 'completed' ? 'neutral' : 'success'
+  if (status === 'completed') return 'neutral'
+  // A planned, never-spudded scope is not running yet, so it is not a success green.
+  if (status === 'upcoming') return 'info'
+  return 'success'
 }
 
 function WellActions({
@@ -131,11 +139,15 @@ function WellActions({
         <Button size="small" color="inherit" endIcon={<ArrowDropDownRounded/>} onClick={event => setAnchor(event.currentTarget)}>Status</Button>
         <Menu anchorEl={anchor} open={menuOpen} onClose={close}>
           {canEdit && plan.status === 'completed' && <MenuItem onClick={() => action('activate')}>Reactivate {label} scope</MenuItem>}
-          {canEdit && plan.status === 'active' && plan.config_status === 'draft' && plan.section_count > 0 && <MenuItem onClick={() => action('configure')}>Mark {label} configured</MenuItem>}
-          {canEdit && plan.status === 'active' && plan.config_status === 'draft' && plan.section_count === 0 && <MenuItem disabled>Save a {label.toLowerCase()} plan before configuring</MenuItem>}
-          {canEdit && plan.status === 'active' && plan.config_status === 'configured' && <MenuItem onClick={() => action('draft')}>Reopen {label} as Draft</MenuItem>}
-          {canEdit && plan.status === 'active' && plan.config_status === 'configured' && <MenuItem onClick={() => action('final_review')}>Mark {label} for final review</MenuItem>}
-          {canEdit && plan.status === 'active' && plan.config_status === 'final_review' && <MenuItem onClick={() => action('complete')}>Mark {label} completed</MenuItem>}
+          {canEdit && plan.status !== 'completed' && plan.config_status === 'draft' && plan.section_count > 0 && <MenuItem onClick={() => action('configure')}>Mark {label} configured</MenuItem>}
+          {canEdit && plan.status !== 'completed' && plan.config_status === 'draft' && plan.section_count === 0 && <MenuItem disabled>Save a {label.toLowerCase()} plan before configuring</MenuItem>}
+          {canEdit && plan.status !== 'completed' && plan.config_status === 'configured' && <MenuItem onClick={() => action('draft')}>Reopen {label} as Draft</MenuItem>}
+          {canEdit && plan.status !== 'completed' && plan.config_status === 'configured' && <MenuItem onClick={() => action('final_review')}>Mark {label} for final review</MenuItem>}
+          {canEdit && plan.status !== 'completed' && plan.config_status === 'final_review' && <MenuItem onClick={() => action('complete')}>Mark {label} completed</MenuItem>}
+          {/* Spud moment: the scope leaves the planning bucket and starts consuming the programme. */}
+          {canEdit && plan.status === 'upcoming' && plan.config_status !== 'draft' && <MenuItem onClick={() => action('start')}>Start {label} scope (mark active)</MenuItem>}
+          {canEdit && plan.status === 'upcoming' && plan.config_status === 'draft' && <MenuItem disabled>Mark the {label.toLowerCase()} plan configured before starting</MenuItem>}
+          {canEdit && plan.status === 'active' && <MenuItem onClick={() => action('defer')}>Move {label} back to Upcoming</MenuItem>}
           {canEdit && otherIsMissing && <MenuItem onClick={() => { close(); onActivateOtherScope(otherScope) }}>Add {scopeName(otherScope)} scope</MenuItem>}
           {canDelete && <MenuItem sx={{ color: 'error.main' }} onClick={() => { close(); onDelete() }}>Move {label} scope to Deleted Entries</MenuItem>}
         </Menu>
@@ -159,6 +171,16 @@ const transitionCopy: Record<TransitionAction, { title: (scope: string) => strin
     title: scope => `Mark ${scope} scope for final review?`,
     label: scope => `Mark ${scope} for final review`,
     description: 'The configured plan moves to final review. From there the scope can be marked completed.',
+  },
+  start: {
+    title: scope => `Start the ${scope} scope?`,
+    label: scope => `Start ${scope} scope`,
+    description: 'Operations have begun, so the scope leaves the Upcoming (planning) bucket and becomes Active. Budget and MIS reports start counting it against the programme.',
+  },
+  defer: {
+    title: scope => `Move ${scope} back to Upcoming?`,
+    label: scope => `Move ${scope} to Upcoming`,
+    description: 'Undo a start that was recorded too early. This is refused while the scope has AFEs, daily-cost sheets or a spud date & time, because those prove it ran.',
   },
   complete: {
     title: scope => `Mark ${scope} scope completed?`,
@@ -188,7 +210,7 @@ export default function Wells() {
   const { can } = useAuth()
   const [params, setParams] = useSearchParams()
   const requested = params.get('tab')
-  const active: WellTab = TABS.some(tab => tab.key === requested) ? (requested as WellTab) : 'configured'
+  const active: WellTab = TABS.some(tab => tab.key === requested) ? (requested as WellTab) : 'upcoming'
   const [rows, setRows] = useState<Well[]>([])
   const [rigs, setRigs] = useState<RigOption[]>([])
   const [blocks, setBlocks] = useState<BlockOption[]>([])
@@ -248,16 +270,19 @@ export default function Wells() {
 
   const tabRows = useMemo<ScopeRow[]>(() => scopeRows.filter(row => {
     const { status, config_status } = scopeState(row.well, row.scope)
+    if (active === 'upcoming') return status === 'upcoming'
     if (active === 'configured') return status === 'active' && (config_status === 'configured' || config_status === 'draft')
     if (active === 'final_review') return status === 'active' && config_status === 'final_review'
     return status === 'completed'
   }), [scopeRows, active])
 
   const counts = useMemo(() => {
-    const tally = { configured: 0, draft: 0, final_review: 0, completed: 0 }
+    const tally = { upcoming: 0, configured: 0, draft: 0, final_review: 0, completed: 0 }
     scopeRows.forEach(row => {
       const { status, config_status } = scopeState(row.well, row.scope)
       if (status === 'completed') tally.completed += 1
+      // Planning scopes are counted in their own bucket, whatever plan stage they reached.
+      else if (status === 'upcoming') tally.upcoming += 1
       else if (config_status === 'final_review') tally.final_review += 1
       else if (config_status === 'configured') tally.configured += 1
       else tally.draft += 1
@@ -489,7 +514,7 @@ export default function Wells() {
       <ErrorMessage message={error} />
 
       <Box borderBottom={1} borderColor="divider" mb={2}>
-        <Tabs value={active} onChange={(_event, value: WellTab) => setParams(value === 'configured' ? {} : { tab: value })} aria-label="Well register tabs">
+        <Tabs value={active} onChange={(_event, value: WellTab) => setParams(value === 'upcoming' ? {} : { tab: value })} aria-label="Well register tabs">
           {TABS.map(tab => <Tab key={tab.key} value={tab.key} label={tab.label} id={`wells-tab-${tab.key}`} aria-controls={`wells-panel-${tab.key}`} />)}
         </Tabs>
       </Box>
@@ -498,8 +523,11 @@ export default function Wells() {
           <Box display="flex" justifyContent="space-between" alignItems="center" gap={2} flexWrap="wrap">
             <Box>
               <Typography fontWeight={800} fontSize={15}>{TABS.find(tab => tab.key === active)?.label}</Typography>
+              {active === 'upcoming' && <Typography color="text.secondary" fontSize={11.5} mt={.25}>
+                Created and under planning — budgetable, not yet spudded. Starting a scope moves it to Active.
+              </Typography>}
               <Typography color="text.secondary" fontSize={12} mt={.35}>
-                {counts.configured} configured · {counts.draft} in draft · {counts.final_review} for final review · {counts.completed} completed
+                {counts.upcoming} upcoming · {counts.configured} configured · {counts.draft} in draft · {counts.final_review} for final review · {counts.completed} completed
                 {blockFilter ? ` · segregated to ${blocks.find(block => block.id === blockFilter)?.display_name ?? 'the selected block'}` : '.'}
               </Typography>
             </Box>

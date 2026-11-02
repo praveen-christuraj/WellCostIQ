@@ -389,24 +389,76 @@ def test_mud_chemicals_and_cement_additives_enforce_unique_names_and_unit_rates(
         assert revise.json()["current_revision_number"] == 2
 
 
-def test_fuel_has_fixed_types_and_only_price_updates():
+def test_fuel_types_are_a_user_managed_list_with_price_revisions():
+    """No fuel is hard-coded: the workspace names its own list and edits it."""
     with TestClient(app) as client:
         headers = login(client)
         _seed_masters(client, headers)
-        fuel = client.get("/api/v1/master-data/fuel-types", headers=headers).json()
-        assert sorted(row["fuel_code"] for row in fuel) == ["DIESEL", "JET-A1", "KEROSENE", "PETROL"]
-        assert all(row["uom"] == "L" for row in fuel)
+        # Litres are an ordinary unit of measure now — the fuel list points at it.
+        assert client.post(
+            "/api/v1/master-data/uom", headers=headers,
+            json={"code": "l", "name": "Litre", "symbol": "L"},
+        ).status_code == 201
+        assert client.get("/api/v1/master-data/fuel-types", headers=headers).json() == []
 
-        diesel = next(row for row in fuel if row["fuel_code"] == "DIESEL")
-        created_fuel = client.post("/api/v1/master-data/fuel-types", headers=headers, json={"fuel_code": "X"})
-        assert created_fuel.status_code >= 400  # fixed list: no create
-        assert len(client.get("/api/v1/master-data/fuel-types", headers=headers).json()) == 4
-        assert client.delete(f"/api/v1/master-data/fuel-types/{diesel['id']}", headers=headers).status_code in {404, 405}
-
-        price = client.post(f"/api/v1/master-data/fuel-types/{diesel['id']}/revise", headers=headers, json={"unit_rate": "1.25", "currency": "USD", "effective_date": "2026-06-01", "reason": "Weekly index"})
+        created = client.post(
+            "/api/v1/master-data/fuel-types",
+            headers=headers,
+            json={
+                "fuel_code": "ago",
+                "fuel_name": "High speed diesel (AGO)",
+                "uom": "l",
+                "unit_rate": "1.10",
+                "currency": "USD",
+                "effective_date": "2026-01-01",
+            },
+        )
+        assert created.status_code == 201, created.text
+        fuel = created.json()
+        assert fuel["fuel_code"] == "AGO"
+        assert Decimal(fuel["unit_rate"]) == Decimal("1.10")
+        url = f"/api/v1/master-data/fuel-types/{fuel['id']}"
+        duplicate = client.post(
+            "/api/v1/master-data/fuel-types",
+            headers=headers,
+            json={"fuel_code": "AGO", "fuel_name": "Other fuel", "unit_rate": "2", "currency": "USD"},
+        )
+        assert duplicate.status_code == 409
+        # The labels used to be fixed in code; renaming and re-unitting is normal now.
+        renamed = client.patch(url, headers=headers, json={"fuel_name": "Automotive Gas Oil", "uom": "mt"})
+        assert renamed.json()["fuel_name"] == "Automotive Gas Oil"
+        assert renamed.json()["uom"] == "MT"
+        # Prices keep the revision history the old fixed list had.
+        price = client.post(
+            f"{url}/revise", headers=headers,
+            json={"unit_rate": "1.25", "currency": "USD", "effective_date": "2026-06-01", "reason": "Weekly index"},
+        )
         assert price.status_code == 200, price.text
         assert Decimal(price.json()["unit_rate"]) == Decimal("1.25")
-        assert len(client.get(f"/api/v1/master-data/fuel-types/{diesel['id']}/revisions", headers=headers).json()) == 1
+        assert price.json()["current_revision_number"] == 2
+        # The rate at creation is revision 1; this new price is revision 2, and
+        # the history is what the fuel register prices each day from.
+        history = client.get(f"{url}/revisions", headers=headers).json()
+        assert len(history) == 2
+        assert Decimal(history[0]["unit_rate"]) == Decimal("1.25")
+        # An unused fuel is soft-deleted, listed in Deleted Entries, and restorable.
+        assert client.delete(url, headers=headers).status_code == 200
+        assert client.get("/api/v1/master-data/fuel-types", headers=headers).json() == []
+        deleted = client.get("/api/v1/master-data/fuel-types/deleted", headers=headers).json()
+        assert [row["fuel_code"] for row in deleted] == ["AGO"]
+        assert client.post(f"{url}/restore", headers=headers).status_code == 200
+        assert len(client.get("/api/v1/master-data/fuel-types", headers=headers).json()) == 1
+        # Import is the same list mechanism, so a fleet can be loaded from a sheet.
+        imported = client.post(
+            "/api/v1/master-data/fuel-types/import", headers=headers,
+            json={"rows": [
+                {"fuel_code": "jeta", "fuel_name": "Jet A-1", "uom": "l", "unit_rate": "0.95", "currency": "USD", "effective_date": "2026-01-01"},
+                {"fuel_code": "BAD", "fuel_name": "", "unit_rate": "1", "currency": "XYZ"},
+            ]},
+        )
+        assert imported.status_code == 200, imported.text
+        assert imported.json()["imported_count"] == 1, imported.text
+        assert imported.json()["error_count"] == 1
 
 
 def test_import_creates_lists_updates_existing_and_reports_row_errors():

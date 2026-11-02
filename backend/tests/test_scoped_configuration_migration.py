@@ -39,10 +39,13 @@ def test_scoped_configuration_migration_preserves_legacy_plans_and_afes(tmp_path
     migrate("head")
     with sqlite3.connect(database) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
+        # The Completion side never had a plan, an AFE or a spud — the 'active' it
+        # carried came from a column default, so the tracking migration re-flags it
+        # as upcoming. Drilling keeps its own completed/configured history.
         assert connection.execute(
             "SELECT status, config_status, depth_unit, completion_status, completion_config_status, completion_depth_unit, "
             "drilling_is_deleted, completion_is_deleted, drilling_purged, completion_purged FROM wells"
-        ).fetchone() == ("completed", "configured", "ft", "active", "draft", "m", 0, 0, 0, 0)
+        ).fetchone() == ("completed", "configured", "ft", "upcoming", "draft", "m", 0, 0, 0, 0)
         assert connection.execute("SELECT id, scope, to_depth FROM well_sections").fetchone() == ("section", "drilling", 100)
         assert connection.execute("SELECT section_id, days FROM well_phases").fetchone() == ("section", 10)
         assert connection.execute("SELECT id, scope, sub_activity_code FROM well_sub_activities").fetchone() == ("sub-drl", "drilling", "SA-01")

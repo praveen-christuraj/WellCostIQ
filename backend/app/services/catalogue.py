@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import Request
 from pydantic import BaseModel, ValidationError
@@ -110,7 +110,6 @@ class PricedSpec:
     unique_text_attr: str | None = None  # e.g. a serial number that must be unique
     breakdown_attr: str | None = None
     breakdown_label: str | None = None
-    lifecycle: bool = True  # False: no create/delete/import (fixed records such as fuel)
     create_model: type[BaseModel] | None = None
     update_model: type[BaseModel] | None = None
     revise_model: type[BaseModel] | None = None
@@ -119,7 +118,6 @@ class PricedSpec:
     import_optional: tuple[str, ...] = ()
     import_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
     sample_row: dict[str, str] = field(default_factory=dict)
-    seed: Callable[[Session, str], None] | None = None
 
     @property
     def priced_uplift(self) -> bool:
@@ -1142,19 +1140,3 @@ def import_rows(db: Session, spec: PricedSpec, organization_id: str, user: Any, 
     return imported, errors, created
 
 
-# ---------------------------------------------------------------------------
-# Fixed records (fuel)
-# ---------------------------------------------------------------------------
-
-
-def seed_fixed_records(db: Session, organization_id: str, *, model: type, code_attr: str, name_attr: str, seeds: tuple[tuple[str, str], ...], uom: str) -> int:
-    """Create missing fixed rows (for example the four fuel types) for a workspace."""
-    added = 0
-    for code, name in seeds:
-        exists = db.scalar(select(model.id).where(model.organization_id == organization_id, getattr(model, code_attr) == code))
-        if exists is None:
-            db.add(model(organization_id=organization_id, **{code_attr: code, name_attr: name, "uom": uom}))
-            added += 1
-    if added:
-        db.commit()
-    return added

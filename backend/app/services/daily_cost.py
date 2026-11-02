@@ -363,7 +363,7 @@ def _well_or_422(
             status_code=409,
             detail=f"Restore the {scope} scope on {well.well_code} in Rig & Well Management before entering daily costs.",
         )
-    if well.scope_value(scope, "status") != "active":
+    if well.scope_value(scope, "status") == "completed":
         raise HTTPException(status_code=409, detail=f"Daily costs cannot be started for a completed {scope} scope")
     if well.scope_value(scope, "config_status") != "configured" or not well.sections_for_scope(scope):
         raise HTTPException(
@@ -972,6 +972,20 @@ def create_entry(db: Session, organization_id: str, data: DailyCostEntryCreate, 
             ))
             if duplicate:
                 raise HTTPException(status_code=409, detail="A daily cost sheet already exists for this well, AFE and date")
+            # Costing a day is the moment operations start: an upcoming scope is
+            # promoted so the register, the dashboards and the budget plan against
+            # the same well without the operator remembering to press a button.
+            if well.scope_value(entry_scope, "status") == "upcoming":
+                well.set_scope_value(entry_scope, "status", "active")
+                audit.record(
+                    db, organization_id=organization_id, actor=user, action="update", entity_type="well",
+                    entity_label=well.well_code,
+                    summary=(
+                        f"Started well {well.well_code} {entry_scope} scope: the first daily cost sheet "
+                        f"moved it from upcoming to active"
+                    ),
+                    request=request,
+                )
             rate_baseline = _ensure_rate_baseline(db, organization_id, well, user)
             baseline = _ensure_afe_baseline(db, organization_id, well, afe, rate_baseline, user)
             entry_usd_fx = Decimal("1.000000")
@@ -3812,16 +3826,24 @@ def update_well_progress(
             setattr(well, attr_spud, new_spud)
             setattr(well, attr_completed, new_completed)
             setattr(well, attr_label, new_label)
+            # A recorded spud is the physical start of the scope, so an upcoming
+            # (planning) scope is flagged active here as well. The Well status
+            # register and the daily-cost register can never then disagree.
+            tracking_note = ""
+            if new_spud is not None and well.scope_value(data.scope, "status") == "upcoming":
+                well.set_scope_value(data.scope, "status", "active")
+                tracking_note = f"; the {scope_label.lower()} scope is now flagged active (spudged)"
             db.flush()
 
             label = f"{well.well_code} · {scope_label.lower()} progress"
             if spud_changed and current_spud is None:
                 summary = (f"Set the Well Spud Date & Time for {well.well_code} ({scope_label.lower()}) to "
-                           f"{_progress_datetime_text(new_spud)}; actual days now count from the spud instant")
+                           f"{_progress_datetime_text(new_spud)}; actual days now count from the spud instant"
+                           f"{tracking_note}")
             elif spud_changed:
                 summary = (f"Edited the Well Spud Date & Time for {well.well_code} ({scope_label.lower()}) from "
                            f"{_progress_datetime_text(current_spud)} to {_progress_datetime_text(new_spud)}; "
-                           "actual days recalculated from the edited date & time")
+                           f"actual days recalculated from the edited date & time{tracking_note}")
             elif completed_changed and new_completed is not None:
                 last_cost_date = _latest_cost_dates_by_scope(db, organization_id, well.id).get(data.scope)
                 row = _well_progress_row(db, organization_id, well, data.scope, as_of=last_cost_date)

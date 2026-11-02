@@ -180,7 +180,12 @@ def test_rigs_and_rig_scoped_wells_are_tenant_scoped_and_audited():
         well = create_well(client, north, rig["id"])
         assert well["rig_code"] == "RIG-A"
         assert well["rig_name"] == "Rig rig-a"
-        assert well["status"] == "active"
+        # A newly created well is *upcoming*: planned and budgetable, not yet started.
+        assert well["status"] == "upcoming"
+        assert well["completion_status"] == "upcoming"
+        assert well["tracking_status"] == "upcoming"
+        assert well["upcoming_scope_count"] == 2
+        assert well["active_scope_count"] == 0
         assert client.get("/api/v1/rig-well/wells", headers=north).json()[0]["id"] == well["id"]
         assert client.get("/api/v1/rig-well/wells", headers=south).json() == []
         assert client.post(
@@ -201,7 +206,15 @@ def test_rigs_and_rig_scoped_wells_are_tenant_scoped_and_audited():
         dashboard = client.get("/api/v1/rig-well/overview", headers=north)
         assert dashboard.status_code == 200, dashboard.text
         assert dashboard.json()["active_rigs"] == 1
-        assert dashboard.json()["active_wells"] == 1
+        # Segregated by tracking status: the new well is upcoming, not active.
+        assert dashboard.json()["upcoming_wells"] == 1
+        assert dashboard.json()["active_wells"] == 0
+        # An upcoming well still occupies its rig and block.
+        assert client.get("/api/v1/rig-well/rigs", headers=north).json()[0]["well_count"] == 1
+        assert client.get("/api/v1/rig-well/blocks", headers=north).json()[0]["well_count"] == 1
+        assert client.get("/api/v1/rig-well/wells?status=upcoming", headers=north).json()[0]["id"] == well["id"]
+        assert client.get("/api/v1/rig-well/wells?status=active", headers=north).json() == []
+        assert client.get("/api/v1/rig-well/wells?status=completed", headers=south).json() == []
         assert client.post(
             "/api/v1/rig-well/export-audit",
             headers=north,
@@ -271,6 +284,19 @@ def test_configuration_uses_workspace_master_data_and_enforces_lifecycle_and_dep
         )
         assert completed.status_code == 200, completed.text
         assert completed.json()["status"] == "completed"
+        # Only the Drilling scope has finished. The live Completion scope keeps the
+        # well itself active: the flag is per scope, and the well rolls up.
+        assert completed.json()["tracking_status"] == "active"
+        assert completed.json()["completed_scope_count"] == 1
+        mixed = client.get("/api/v1/rig-well/overview", headers=headers).json()
+        assert mixed["active_wells"] == 1
+        assert mixed["completed_wells"] == 0
+        assert mixed["upcoming_wells"] == 0
+        # With the never-planned Completion scope removed, Drilling alone decides
+        # the well, so it becomes a completed well for MIS reporting.
+        assert client.delete(
+            f"/api/v1/rig-well/wells/{well['id']}?scope=completion", headers=headers
+        ).status_code == 200
         lifecycle = client.get("/api/v1/rig-well/overview", headers=headers).json()
         assert lifecycle["active_wells"] == 0
         assert lifecycle["configured_wells"] == 0
@@ -631,3 +657,201 @@ def test_blocks_support_import_update_and_audited_export():
             assert {entry.action for entry in audit} >= {"create", "update"}
             export = db.query(AuditLog).filter_by(entity_type="rig_well_export").one()
             assert "Blocks" in export.summary
+
+
+def test_upcoming_wells_are_planned_started_and_can_return_to_planning():
+    """Upcoming → active is the spud moment, per scope, and is reversible while clean."""
+    with TestClient(app) as client:
+        headers = login(client)
+        rig = create_rig(client, headers)
+        well = create_well(client, headers, rig["id"], "WELL-PLAN")
+
+        def transition(action: str, scope: str = "drilling") -> object:
+            return client.post(
+                f"/api/v1/rig-well/wells/{well['id']}/transition", headers=headers,
+                json={"action": action, "scope": scope, "remarks": f"{action} from the register"},
+            )
+
+        # Nothing is saved yet, so the scope cannot leave the planning bucket.
+        assert transition("start").status_code == 409
+        assert "section and phase plan" in transition("start").json()["detail"]
+
+        hole = client.post(
+            "/api/v1/master-data/hole-sections", headers=headers,
+            json={"code": "17-1/2", "name": "Surface hole"},
+        ).json()
+        phase = client.post(
+            "/api/v1/master-data/phases", headers=headers, json={"code": "DRILL", "name": "Drilling"},
+        ).json()
+        saved = client.put(
+            f"/api/v1/rig-well/wells/{well['id']}/configuration", headers=headers,
+            json={"depth_unit": "m", "sections": [{
+                "hole_section_id": hole["id"], "from_depth": "0", "to_depth": "1200", "remarks": "",
+                "phases": [{"phase_id": phase["id"], "days": "12", "remarks": ""}],
+            }]},
+        )
+        assert saved.status_code == 200, saved.text
+        # A draft programme is still planning: budgetable, not started.
+        assert transition("start").status_code == 409
+        assert transition("configure").status_code == 200
+
+        started = transition("start")
+        assert started.status_code == 200, started.text
+        row = started.json()
+        assert (row["status"], row["completion_status"]) == ("active", "upcoming")
+        assert row["tracking_status"] == "active"
+        assert row["active_scope_count"] == 1 and row["upcoming_scope_count"] == 1
+
+        # The roll-up is active, yet the Completion scope is still an upcoming
+        # plan — which is exactly what the per-scope filter reports for MIS.
+        assert client.get("/api/v1/rig-well/wells?status=upcoming", headers=headers).json() == []
+        scoped = client.get(
+            "/api/v1/rig-well/wells?scope=completion&status=upcoming", headers=headers
+        ).json()
+        assert [item["well_code"] for item in scoped] == ["WELL-PLAN"]
+        lifecycle = client.get("/api/v1/rig-well/overview", headers=headers).json()
+        assert lifecycle["upcoming_wells"] == 0
+        assert lifecycle["active_wells"] == 1
+
+        # A recorded spud on the other scope starts it from the daily-cost
+        # register too, so the two registers can never disagree.
+        progress = client.put(
+            f"/api/v1/daily-cost/wells/{well['id']}/progress", headers=headers,
+            json={"scope": "completion", "spud_at": "2026-03-02T08:00"},
+        )
+        assert progress.status_code == 200, progress.text
+        current = client.get("/api/v1/rig-well/wells?search=WELL-PLAN", headers=headers).json()[0]
+        assert current["completion_status"] == "active"
+        assert current["upcoming_scope_count"] == 0
+
+        # Deferring is allowed only while nothing has been booked. A spud date is
+        # proof the scope ran, so that one stays active.
+        deferred = transition("defer", "completion")
+        assert deferred.status_code == 409
+        assert "spud date" in deferred.json()["detail"]
+        assert transition("defer", "drilling").status_code == 200
+        after = client.get("/api/v1/rig-well/wells?search=WELL-PLAN", headers=headers).json()[0]
+        assert (after["status"], after["completion_status"]) == ("upcoming", "active")
+        assert after["tracking_status"] == "active"
+        # An already-upcoming scope cannot be deferred again.
+        assert transition("defer", "drilling").status_code == 409
+
+
+def test_sub_activity_responsible_party_is_tracked_through_the_vendor_register():
+    """The typed party is linked to Master Data vendors instead of being free text."""
+    with TestClient(app) as client:
+        headers = login(client)
+        rig = create_rig(client, headers)
+        well = create_well(client, headers, rig["id"], "WELL-VND")
+        activity = create_activity(client, headers, "CID")
+
+        def add_vendor(code: str, name: str, **overrides) -> dict:
+            payload = {
+                "vendor_code": code, "vendor_name": name, "category": "Directional",
+                "status": "active", "description": "",
+            }
+            payload.update(overrides)
+            created = client.post("/api/v1/master-data/vendors", headers=headers, json=payload)
+            assert created.status_code == 201, created.text
+            return created.json()
+
+        vendor = add_vendor("VND-9", "Noble Directional")
+        add_vendor("VND-DUP", "Same Trading")
+        options = client.get("/api/v1/rig-well/sub-activities/vendor-options", headers=headers)
+        assert options.status_code == 200, options.text
+        assert [item["code"] for item in options.json()] == ["VND-9", "VND-DUP"]
+
+        def add_sub_activity(code: str, **overrides) -> dict:
+            payload = {
+                "well_id": well["id"], "sub_activity_code": code, "sub_activity_name": f"Step {code}",
+                "activity_id": activity["id"], "responsible_party": "Operations team",
+                "description": "Planned work step.",
+            }
+            payload.update(overrides)
+            created = client.post("/api/v1/rig-well/sub-activities", headers=headers, json=payload)
+            assert created.status_code == 201, created.text
+            return created.json()
+
+        linked = add_sub_activity("SA-VND", vendor_id=vendor["id"], responsible_party="")
+        # The vendor's own name is stored, so every report reads one column.
+        assert linked["responsible_party"] == "Noble Directional"
+        assert linked["vendor_id"] == vendor["id"]
+        assert linked["vendor_code"] == "VND-9"
+        assert linked["vendor_name"] == "Noble Directional"
+        assert linked["vendor_status"] == "active"
+        assert linked["responsible_party_source"] == "vendor"
+        typed = add_sub_activity("SA-TYPED")
+        assert typed["vendor_id"] == "" and typed["vendor_code"] == ""
+        assert typed["responsible_party"] == "Operations team"
+        assert typed["responsible_party_source"] == "manual"
+
+        assert client.post(
+            "/api/v1/rig-well/sub-activities", headers=headers,
+            json={
+                "well_id": well["id"], "sub_activity_code": "SA-BAD", "sub_activity_name": "Bad link",
+                "activity_id": activity["id"], "vendor_id": "missing-vendor", "description": "x",
+            },
+        ).status_code == 422
+
+        # An edit that does not touch the party keeps the link, even once the
+        # vendor is blocked, so history never fails to save.
+        assert client.patch(
+            f"/api/v1/rig-well/sub-activities/{linked['id']}?well_id={well['id']}", headers=headers,
+            json={"sub_activity_name": "Step SA-VND (renamed)"},
+        ).json()["vendor_id"] == vendor["id"]
+        blocked = client.patch(
+            f"/api/v1/master-data/vendors/{vendor['id']}", headers=headers, json={"status": "blocked"},
+        )
+        assert blocked.status_code == 200, blocked.text
+        assert client.patch(
+            f"/api/v1/rig-well/sub-activities/{linked['id']}?well_id={well['id']}", headers=headers,
+            json={"description": "Vendor re-negotiated the day rate."},
+        ).status_code == 200
+        # Editing a row that already carries the link still saves (history must
+        # stay correctable), but the blocked vendor cannot be assigned anywhere new.
+        assert client.patch(
+            f"/api/v1/rig-well/sub-activities/{typed['id']}?well_id={well['id']}", headers=headers,
+            json={"vendor_id": vendor["id"]},
+        ).status_code == 422
+
+        # Deleting the vendor leaves the sub activity and its party text intact.
+        assert client.delete(f"/api/v1/master-data/vendors/{vendor['id']}", headers=headers).status_code == 200
+        orphan = client.get(
+            f"/api/v1/rig-well/sub-activities?well_id={well['id']}", headers=headers
+        ).json()
+        assert next(item for item in orphan if item["id"] == linked["id"])["responsible_party"] == "Noble Directional"
+
+        # Import accepts a vendor code and links the row; unknown text is a row error.
+        imported = client.post(
+            f"/api/v1/rig-well/sub-activities/import?well_id={well['id']}&scope=drilling", headers=headers,
+            json={"rows": [
+                {
+                    "sub_activity_code": "SA-IMP", "sub_activity_name": "Casing run",
+                    "activity": "CID", "responsible_party": "Noble Directional",
+                    "vendor_code": "VND-DUP", "description": "Imported step.",
+                },
+                {
+                    "sub_activity_code": "SA-IMP2", "sub_activity_name": "Bad vendor",
+                    "activity": "CID", "responsible_party": "Someone", "vendor_code": "NOPE",
+                    "description": "Imported step.",
+                },
+                {
+                    "sub_activity_code": "SA-TYPED", "sub_activity_name": "Step SA-TYPED",
+                    "activity": "CID", "responsible_party": "Rig crew", "description": "Updated.",
+                },
+            ]},
+        )
+        assert imported.status_code == 200, imported.text
+        assert imported.json()["imported_count"] == 2, imported.json()
+        assert imported.json()["error_count"] == 1
+        assert "vendor" in imported.json()["errors"][0].lower()
+        rows = client.get(f"/api/v1/rig-well/sub-activities?well_id={well['id']}", headers=headers).json()
+        by_code = {row["sub_activity_code"]: row for row in rows}
+        assert by_code["SA-IMP"]["vendor_code"] == "VND-DUP"
+        assert by_code["SA-IMP"]["responsible_party"] == "Same Trading"
+        # A link resolved from the sheet is still a vendor link; only the text
+        # that no vendor matches is remembered as imported free text.
+        assert by_code["SA-IMP"]["responsible_party_source"] == "vendor"
+        assert by_code["SA-TYPED"]["vendor_id"] == ""
+        assert by_code["SA-TYPED"]["responsible_party"] == "Rig crew"
+        assert by_code["SA-TYPED"]["responsible_party_source"] == "import"

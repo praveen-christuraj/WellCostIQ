@@ -4,7 +4,7 @@ import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import {
   AddRounded, ArrowForwardRounded, BusinessOutlined, FactCheckOutlined, GridViewOutlined,
-  LanguageOutlined, RefreshRounded, TaskAltOutlined,
+  LanguageOutlined, RefreshRounded, ScheduleOutlined, TaskAltOutlined,
 } from '@mui/icons-material'
 import { Alert, Box, Button, List, ListItem, ListItemText, Typography, useTheme } from '@mui/material'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
@@ -106,6 +106,9 @@ export default function RigWellOverview() {
     }],
   }), [overview, theme, axisText, lifecycleColours])
 
+  // Block counts cover every well whose scope is still live (upcoming included),
+  // so each block's share is taken over that same population.
+  const openWells = (overview?.block_counts ?? []).reduce((total, block) => total + block.well_count, 0)
   const lifecycleTotal = (overview?.draft_wells ?? 0) + (overview?.configured_wells ?? 0)
     + (overview?.final_review_wells ?? 0) + (overview?.completed_wells ?? 0)
 
@@ -127,10 +130,11 @@ export default function RigWellOverview() {
       <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: 'repeat(4, minmax(0,1fr))' } }}>
         <StatCard label="Active blocks" value={overview.active_blocks.toLocaleString()} hint={`${overview.deleted_blocks} retained in Deleted entries`} icon={<GridViewOutlined fontSize="small"/>}/>
         <StatCard label="Active rigs" value={overview.active_rigs.toLocaleString()} hint={`${overview.deleted_rigs} retained in Deleted entries`} icon={<BusinessOutlined fontSize="small"/>}/>
+        <StatCard label="Upcoming wells" value={overview.upcoming_wells.toLocaleString()} hint="Created and under planning — not yet spudded" icon={<ScheduleOutlined fontSize="small"/>}/>
         <StatCard label="Active wells" value={overview.active_wells.toLocaleString()} hint={`${overview.deleted_wells} deleted wells`} icon={<LanguageOutlined fontSize="small"/>}/>
         <StatCard label="Sub activities" value={overview.active_sub_activities.toLocaleString()} hint={`${overview.deleted_sub_activities} retained in Deleted entries`} icon={<TaskAltOutlined fontSize="small"/>}/>
         <StatCard label="Configured" value={overview.configured_wells.toLocaleString()} hint={`${overview.completed_wells} completed wells`} icon={<TaskAltOutlined fontSize="small"/>} tone="positive"/>
-        <StatCard label="In planning" value={overview.draft_wells.toLocaleString()} hint="Active wells with a draft plan" icon={<FactCheckOutlined fontSize="small"/>} tone={overview.draft_wells ? 'warning' : 'default'}/>
+        <StatCard label="In planning" value={overview.draft_wells.toLocaleString()} hint="Live wells whose plan is still a draft" icon={<FactCheckOutlined fontSize="small"/>} tone={overview.draft_wells ? 'warning' : 'default'}/>
         <StatCard label="In final review" value={overview.final_review_wells.toLocaleString()} hint="Scopes marked for final review" icon={<FactCheckOutlined fontSize="small"/>} tone={overview.final_review_wells ? 'warning' : 'default'}/>
         <SectionCard bodyPadding={1.75} sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <Typography sx={{ fontSize: 9.5, fontWeight: 750, letterSpacing: '.11em', textTransform: 'uppercase', color: 'text.secondary' }}>Directory structure</Typography>
@@ -148,7 +152,7 @@ export default function RigWellOverview() {
       <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.15fr) minmax(0, 1fr)' } }}>
         <SectionCard
           title="Wells by block"
-          subtitle="Active wells segregated by the block they belong to."
+          subtitle="Wells segregated by the block they belong to, counted while any scope is still live."
           action={<Button component={RouterLink} to="/rig-well/wells" size="small" endIcon={<ArrowForwardRounded sx={{ fontSize: 15 }}/>}>Well register</Button>}
         >
           {overview.block_counts.length
@@ -161,10 +165,10 @@ export default function RigWellOverview() {
                 </Box>
                 <Box sx={{ width: 84, flex: '0 0 auto' }}>
                   <Box sx={{ height: 3, borderRadius: 2, bgcolor: 'divider', overflow: 'hidden' }}>
-                    <Box sx={{ height: '100%', width: `${overview.active_wells ? Math.min(100, (block.well_count / overview.active_wells) * 100) : 0}%`, bgcolor: 'primary.main' }}/>
+                    <Box sx={{ height: '100%', width: `${openWells ? Math.min(100, (block.well_count / openWells) * 100) : 0}%`, bgcolor: 'primary.main' }}/>
                   </Box>
                   <Typography color="text.secondary" fontSize={10} textAlign="right" sx={{ mt: .35 }}>
-                    {overview.active_wells ? Math.round((block.well_count / overview.active_wells) * 100) : 0}% of wells
+                    {openWells ? Math.round((block.well_count / openWells) * 100) : 0}% of wells
                   </Typography>
                 </Box>
               </Box>)}

@@ -2,7 +2,6 @@ import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import { ListAltOutlined } from '@mui/icons-material'
 import { Box, Button, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material'
 import { CatalogueItemRegister } from '../components/catalogue/CatalogueItemRegister'
-import { FuelRegister } from '../components/catalogue/FuelRegister'
 import { PageHeading } from '../components/Common'
 import { MasterDataTabs } from '../components/MasterDataTabs'
 import { CONSUMABLE_TYPES, type CatalogueTypeKey, type TypeConfig } from '../lib/catalogue'
@@ -12,7 +11,7 @@ const DEFAULT_TYPE: CatalogueTypeKey = 'mud-chemicals'
 const HINTS: Record<string, string> = {
   'mud-chemicals': 'Drilling fluid chemicals by group, with unit rates and price history.',
   'cement-additives': 'Cement additives by type, with unit rates and price history.',
-  'fuel-types': 'Fuel prices per litre. Update a price only when it changes.',
+  'fuel-types': 'The fuels this workspace buys, with the unit they are priced in and their price history.',
   'drill-bits': 'Drill bits by type, make and size, with unit rates and price history.',
 }
 
@@ -50,8 +49,6 @@ export default function Consumables() {
       <Typography color="text.secondary" fontSize={12.5}>{HINTS[config.key]}</Typography>
     </Box>
 
-    {config.key === 'fuel-types'
-      ? <FuelRegister key="fuel-types"/>
-      : <CatalogueItemRegister key={config.key} config={config}/>}
+    <CatalogueItemRegister key={config.key} config={config}/>
   </>
 }

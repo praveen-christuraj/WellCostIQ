@@ -4,6 +4,16 @@ A block groups wells by concession / field area, a rig owns wells, and each well
 may carry independent Drilling and Completion plans.  The configuration rows are
 replaced as a single audited draft, while blocks, rigs and wells use the common
 soft-delete lifecycle.
+
+Every configuration scope carries its own *tracking* status — ``upcoming``,
+``active`` or ``completed`` — next to its plan (configuration) status.  Tracking
+answers "when does this well consume budget?", the plan status answers "how far
+is the plan itself?".  A scope is created **upcoming** (the well exists on the
+programme and is being planned / costed, which is what makes budget plotting and
+MIS reporting possible before a rig moves), moves to **active** when operations
+start, and to **completed** when the scope is signed off.  ``Well.tracking_status``
+rolls the live scopes up into the single flag the registers and dashboards
+segregate on.
 """
 
 from datetime import datetime, timezone
@@ -25,6 +35,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.master_data import HoleSection, Phase
+
+
+# Per-scope well tracking status. Order matters: it is the lifecycle sequence.
+WELL_TRACKING_STATUSES: tuple[str, ...] = ("upcoming", "active", "completed")
+# Plan (configuration) status, independent of the tracking status above.
+WELL_PLAN_STATUSES: tuple[str, ...] = ("draft", "configured", "final_review")
+WELL_SCOPES: tuple[str, ...] = ("drilling", "completion")
 
 
 def uid() -> str:
@@ -94,9 +111,9 @@ class Well(RigWellRecord):
     __tablename__ = "wells"
     __table_args__ = (
         UniqueConstraint("organization_id", "well_code", name="uq_wells_org_code"),
-        CheckConstraint("status IN ('active', 'completed')", name="ck_wells_status"),
+        CheckConstraint("status IN ('upcoming', 'active', 'completed')", name="ck_wells_status"),
         CheckConstraint("config_status IN ('draft', 'configured', 'final_review')", name="ck_wells_config_status"),
-        CheckConstraint("completion_status IN ('active', 'completed')", name="ck_wells_completion_status"),
+        CheckConstraint("completion_status IN ('upcoming', 'active', 'completed')", name="ck_wells_completion_status"),
         CheckConstraint("completion_config_status IN ('draft', 'configured', 'final_review')", name="ck_wells_completion_config_status"),
         CheckConstraint("completion_depth_unit IN ('m', 'ft')", name="ck_wells_completion_depth_unit"),
         CheckConstraint("depth_unit IN ('m', 'ft')", name="ck_wells_depth_unit"),
@@ -116,14 +133,18 @@ class Well(RigWellRecord):
     well_location: Mapped[str] = mapped_column(String(300), nullable=False)
     objective: Mapped[str] = mapped_column(String(500), nullable=False)
     remarks: Mapped[str] = mapped_column(String(1000), default="", server_default="", nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="active", server_default="active", nullable=False)
+    # Tracking status of the Drilling scope. A well starts life as ``upcoming``:
+    # created and under planning, so it can be budgeted and reported before the
+    # rig moves. ``start`` promotes it to ``active``.
+    status: Mapped[str] = mapped_column(String(20), default="upcoming", server_default="upcoming", nullable=False)
     config_status: Mapped[str] = mapped_column(
         String(20), default="draft", server_default="draft", nullable=False
     )
     depth_unit: Mapped[str] = mapped_column(String(10), default="m", server_default="m", nullable=False)
 
-    # Existing columns and sections remain the Drilling baseline for compatibility.
-    completion_status: Mapped[str] = mapped_column(String(20), default="active", server_default="active", nullable=False)
+    # Independent tracking / plan status of the Completion scope, same lifecycle
+    # as Drilling so a well can be upcoming for completion while already drilling.
+    completion_status: Mapped[str] = mapped_column(String(20), default="upcoming", server_default="upcoming", nullable=False)
     completion_config_status: Mapped[str] = mapped_column(String(20), default="draft", server_default="draft", nullable=False)
     completion_depth_unit: Mapped[str] = mapped_column(String(10), default="m", server_default="m", nullable=False)
 
@@ -169,6 +190,26 @@ class Well(RigWellRecord):
         if self.is_deleted:
             return True
         return bool(self.completion_is_deleted if scope == "completion" else self.drilling_is_deleted)
+
+    @property
+    def live_scopes(self) -> list[str]:
+        """Scopes the well actually carries (a purged/removed scope is excluded)."""
+        return [scope for scope in WELL_SCOPES if not self.scope_is_deleted(scope)] or list(WELL_SCOPES)
+
+    @property
+    def tracking_status(self) -> str:
+        """Upcoming / active / completed roll-up of the well's live scopes.
+
+        Completed only when every live scope is completed, upcoming only while
+        every live scope is still under planning; a mix (for example drilling
+        already active with completion upcoming) is an active well.
+        """
+        statuses = [self.scope_value(scope, "status") for scope in self.live_scopes]
+        if statuses and all(value == "completed" for value in statuses):
+            return "completed"
+        if statuses and all(value == "upcoming" for value in statuses):
+            return "upcoming"
+        return "active"
 
     def scope_deleted_at(self, scope: str) -> datetime | None:
         return self.completion_deleted_at if scope == "completion" else self.drilling_deleted_at

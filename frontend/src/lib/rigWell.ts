@@ -43,8 +43,11 @@ export type RigOption = {
 
 export type WellConfigurationScope = 'drilling' | 'completion'
 
+/** How far a scope has travelled: planned, running, or finished. */
+export type WellStatus = 'upcoming' | 'active' | 'completed'
+
 export type Well = {
-  completion_status: 'active' | 'completed'
+  completion_status: WellStatus
   completion_config_status: 'draft' | 'configured' | 'final_review'
   /** The scope this row represents when the page lists scope-segregated wells. */
   scope?: WellConfigurationScope
@@ -64,8 +67,13 @@ export type Well = {
   block: string
   objective: string
   remarks: string
-  status: 'active' | 'completed'
+  status: WellStatus
   config_status: 'draft' | 'configured' | 'final_review'
+  /** Roll-up of the live scopes: the well's own Upcoming / Active / Completed flag. */
+  tracking_status?: WellStatus
+  upcoming_scope_count?: number
+  active_scope_count?: number
+  completed_scope_count?: number
   depth_unit: 'm' | 'ft'
   completion_depth_unit: 'm' | 'ft'
   standard_depth_unit?: 'm'
@@ -126,7 +134,7 @@ export type WellConfiguration = {
   well_name: string
   rig_code: string
   rig_name: string
-  status: 'active' | 'completed'
+  status: WellStatus
   config_status: 'draft' | 'configured' | 'final_review'
   depth_unit: 'm' | 'ft'
   completion_depth_unit?: 'm' | 'ft'
@@ -145,6 +153,14 @@ export type SubActivity = {
   sub_activity_name: string
   activity_id: string
   responsible_party: string
+  /** Master Data vendor behind the party, when the row was linked to one. */
+  vendor_id: string
+  vendor_code: string
+  vendor_name: string
+  vendor_status: string
+  vendor_is_deleted: boolean
+  /** Where the party text came from, so the register can show a link or a typed name. */
+  responsible_party_source: 'vendor' | 'manual' | 'import'
   description: string
   is_deleted: boolean
   deleted_at: string | null
@@ -194,6 +210,7 @@ export type RigWellOverview = {
   block_counts: RigWellBlockCount[]
   active_rigs: number
   deleted_rigs: number
+  upcoming_wells: number
   active_wells: number
   deleted_wells: number
   active_sub_activities: number
@@ -208,6 +225,15 @@ export type RigWellOverview = {
 
 export type ImportResult = { imported_count: number; error_count: number; errors: string[]; success: boolean }
 export type MasterActivity = { id: string; code: string; name: string }
+/** A vendor the responsible-party picker may offer for a sub activity. */
+export type SubActivityVendorOption = {
+  id: string
+  code: string
+  name: string
+  vendor_type: string
+  category: string
+  display_name: string
+}
 export type MasterConfigurationOption = { id: string; code: string; name: string }
 export type RigWellConfigurationOptions = {
   hole_sections: MasterConfigurationOption[]
@@ -233,6 +259,8 @@ export type SubActivityPayload = {
   sub_activity_name: string
   activity_id: string
   responsible_party: string
+  /** Empty means "no vendor": the typed party text is kept as typed. */
+  vendor_id: string
   description: string
 }
 
@@ -247,7 +275,8 @@ export const WELL_IMPORT_OPTIONAL_HEADERS = ['remarks']
 export const SUB_ACTIVITY_IMPORT_HEADERS = [
   'sub_activity_code', 'sub_activity_name', 'activity', 'responsible_party', 'description',
 ]
-export const SUB_ACTIVITY_IMPORT_OPTIONAL_HEADERS = ['scope']
+// `vendor_code` links the party to the vendor register when a sheet carries it.
+export const SUB_ACTIVITY_IMPORT_OPTIONAL_HEADERS = ['scope', 'vendor_code']
 
 export const emptyBlockForm = (): BlockPayload => ({ block_code: '', block_name: '', description: '' })
 export const emptyRigForm = (): RigPayload => ({ rig_code: '', rig_name: '', remarks: '' })
@@ -268,6 +297,7 @@ export const emptySubActivityForm = (wellId = '', scope: WellConfigurationScope 
   sub_activity_name: '',
   activity_id: '',
   responsible_party: '',
+  vendor_id: '',
   description: '',
 })
 
@@ -281,6 +311,27 @@ export function activeWellScopes(well: Pick<Well, 'drilling_is_deleted' | 'compl
 
 export function scopeLabel(scope: WellConfigurationScope): string {
   return scope === 'completion' ? 'Completion' : 'Drilling'
+}
+
+/** The tracking flag as every register prints it. */
+export function trackingLabel(status: WellStatus | string | undefined | null): string {
+  if (status === 'completed') return 'Completed'
+  if (status === 'upcoming') return 'Upcoming'
+  return 'Active'
+}
+
+/** The well's own flag, matching the backend roll-up over its live scopes. */
+export function wellTrackingStatus(
+  well: Pick<Well, 'status' | 'completion_status' | 'drilling_is_deleted' | 'completion_is_deleted'> | null | undefined,
+): WellStatus {
+  if (!well) return 'upcoming'
+  const scopes: WellStatus[] = []
+  if (!well.drilling_is_deleted) scopes.push(well.status)
+  if (!well.completion_is_deleted) scopes.push(well.completion_status)
+  const statuses = scopes.length ? scopes : [well.status, well.completion_status]
+  if (statuses.every((status) => status === 'completed')) return 'completed'
+  if (statuses.every((status) => status === 'upcoming')) return 'upcoming'
+  return 'active'
 }
 
 export function formatDepth(
