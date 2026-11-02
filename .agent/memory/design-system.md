@@ -97,6 +97,8 @@ reserved for eyebrows, table headers and tiny labels.
 displaces every popover. Design at 100% numbers and let the zoom fit the screen; keep
 `html, body { overflow-x: clip }` so wide content scrolls inside its own table instead of the page.
 
+Application working pages use the complete available width with no fixed maximum or centering margin. Full-height shells use the zoom-compensated `--wcp-screen-h`.
+
 Control heights: compact 30, standard 36, comfortable 44; AG Grid rows 42 with a 40 header
 (`control.*` in `designSystem.ts`), and plain MUI tables are padded to the same density
 (`MuiTableCell` in `theme.ts`). 42 is the floor, not a taste choice: the tallest cell content in

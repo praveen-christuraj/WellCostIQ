@@ -14,10 +14,10 @@ import {
   AssessmentOutlined, LocalGasStationOutlined, ScienceOutlined, Inventory2Outlined, ScheduleRounded,
   FactCheckOutlined, SecurityRounded, NotificationsOutlined, TuneRounded, BackupOutlined, HomeOutlined,
 } from '@mui/icons-material'
-import Brand from './Brand'
+import Brand, { BrandIcon } from './Brand'
 import { FormDialog, ErrorMessage } from './Common'
 import { api, body } from '../lib/api'
-import { pageTitle } from '../lib/appInfo'
+import { APP_NAME, pageTitle } from '../lib/appInfo'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import NotificationBell from './NotificationBell'
@@ -199,7 +199,7 @@ export default function Layout() {
     const showText = navExpanded || temporary
     return <Box component="nav" aria-label="Primary navigation" className="app-rail" display="flex" flexDirection="column" height="100%" sx={{ overflow: 'hidden' }}>
       <Box className="rail-brand" display="flex" alignItems="center" justifyContent={showText ? 'space-between' : 'center'} gap={1}>
-        {showText ? <Brand light/> : <Box component="img" src="/favicon.svg" alt="WellCostIQ" sx={{ width: 44, height: 44, objectFit: 'contain' }}/>}
+        {showText ? <Brand light compact/> : <Box role="img" aria-label={APP_NAME}><BrandIcon size={44}/></Box>}
         {!temporary && <Tooltip title={navExpanded ? 'Collapse navigation' : 'Expand navigation'} placement="right">
           <IconButton
             size="small" onClick={() => setNavExpanded(value => !value)}
@@ -281,7 +281,7 @@ export default function Layout() {
     </Box>
   }
 
-  return <Box display="flex" minHeight="100vh" sx={{ bgcolor: 'background.default' }}>
+  return <Box className="app-shell" display="flex" sx={{ bgcolor: 'background.default' }}>
     <a className="skip-link" href="#main-content">Skip to main content</a>
     {desktop ? <Box component="aside" sx={{ width: navWidth, flex: '0 0 auto', transition: 'width 160ms cubic-bezier(0.2, 0, 0, 1)' }}>
       <Box sx={{ position: 'fixed', inset: '0 auto 0 0', width: navWidth, zIndex: 1200, transition: 'width 160ms cubic-bezier(0.2, 0, 0, 1)' }}>{navigation()}</Box>

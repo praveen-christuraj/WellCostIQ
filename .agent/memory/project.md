@@ -1,5 +1,12 @@
 # Durable project memory
 
+## Full-width layout and shared brand assets (2026-11-02)
+- Remove the `.page-shell` 1680px cap and centering margin so working pages use the complete available width. Shells use the existing zoom-compensated `--wcp-screen-h`, with dynamic mobile viewport support.
+- Shared `BrandIcon` always uses `/favicon.svg` for login and expanded/collapsed/mobile navigation; the browser tab uses the same public asset. Remove the CSS-drawn abstract mark and `rigMark` variant; compact navigation branding wraps its subtitle instead of clipping.
+- Preserve the petrol/green design on current main, restore **Clarity at every depth.** and its original supporting copy, and use the supplied `public/login-bg.svg` as an uncropped decorative watermark. The new capability list and login form layout stay in place.
+- The original patch passed frontend build, 33 shared UI checks, responsive browser checks in both themes, and all 335 backend tests before integration. Main subsequently added the petrol redesign and reverted vendor-service-subcategory tracking; preserve both upstream changes when integrating this UI-only patch.
+- After integration with main: frontend production build, all 33 shared UI checks and 108 Chromium checks at 390–2560px in light/dark pass, including full-width working pages, restored login copy, loaded watermark and navigation branding. Import graph regenerated.
+
 ## Docker PostgreSQL version (2026-10-31)
 - Docker Compose uses `postgres:17-alpine`. Existing PostgreSQL 16 data volumes require a PostgreSQL major-version upgrade (for example, dump and restore into a fresh PostgreSQL 17 volume); changing the image does not migrate existing database files.
 

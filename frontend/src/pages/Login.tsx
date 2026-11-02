@@ -54,22 +54,17 @@ export default function Login() {
   }
   return <Box className="login-shell">
     <Box className="login-story" component="section" aria-label="About WellCostIQ">
-      <svg className="login-grid" aria-hidden="true" focusable="false">
-        <defs>
-          <pattern id="wcp-grid" width="48" height="48" patternUnits="userSpaceOnUse">
-            <path d="M48 0H0V48" fill="none" stroke="rgba(198, 234, 238, 0.10)" strokeWidth="1"/>
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#wcp-grid)"/>
-      </svg>
+      <Box className="story-bg" aria-hidden="true">
+        <img src="/login-bg.svg" alt="" className="login-bg-image"/>
+      </Box>
       <Box className="story-top">
         <Brand light/>
       </Box>
       <Box className="story-main">
-        <Typography className="story-eyebrow">WELL COST INTELLIGENCE</Typography>
-        <Typography className="story-headline">Every cost,<br/>from <em>AFE</em> to<br/>the daily sheet.</Typography>
+        <Typography className="story-eyebrow">BUILT FOR THE WAY YOU WORK</Typography>
+        <Typography component="h1" className="story-headline">Clarity at<br/>{' '}every <em>depth.</em></Typography>
         <Typography className="story-copy">
-          Plan the estimate. Capture the day. Reconcile the well. One auditable workspace for drilling and completion costing.
+          A more intelligent way to manage well costing
         </Typography>
         <Box className="story-points">
           {CAPABILITIES.map(item => <Box key={item.title} className="story-point">
@@ -95,7 +90,7 @@ export default function Login() {
       <Box className="login-form-wrap">
         <Typography className="eyebrow" sx={{ mb: 2.5 }}>Workspace sign-in</Typography>
         <Typography variant="h4" sx={{ fontSize: { xs: 28, sm: 32 }, letterSpacing: '-1.2px', lineHeight: 1.15 }}>Welcome back</Typography>
-        <Typography color="text.secondary" fontSize={13.5} sx={{ mt: 1 }}>Sign in with your workspace credentials to continue.</Typography>
+        <Typography color="text.secondary" fontSize={13.5} sx={{ mt: 1 }}>Sign in to continue.</Typography>
         <Box component="form" onSubmit={submit} sx={{ mt: 4 }}>
           <Typography component="label" htmlFor={orgField} className="field-label">WORKSPACE ID</Typography>
           <TextField id={orgField} name="organization" fullWidth required placeholder="e.g. acme-energy" value={organization} onChange={e => setOrganization(e.target.value)} autoComplete="organization" sx={{ mb: 2.2 }}/>
@@ -114,10 +109,10 @@ export default function Login() {
         </Box>
         <Box className="login-trust">
           <LockOutlined sx={{ color: 'primary.main', fontSize: 17 }}/>
-          <Typography fontSize={11.5} color="text.secondary">Workspace access is role-controlled and every action is recorded in the audit trail.</Typography>
+          <Typography fontSize={11.5} color="text.secondary">Your workspace is protected with secure access controls.</Typography>
         </Box>
       </Box>
-      <Typography className="login-help">Need help? Contact your workspace administrator.</Typography>
+      <Typography className="login-help">Need help? Reach out to your workspace administrator.</Typography>
     </Box>
 
     {/* Both recovery pop-ups use the shared FormDialog, so they close only via Cancel

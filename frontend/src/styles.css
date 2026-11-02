@@ -116,7 +116,9 @@ html[data-theme='dark'] {
    MUI measures anchors in viewport pixels; zooming html also zooms those portal
    coordinates and displaces every Menu/Select/Popover and fixed dialog.
    Body-level portals stay in the same unscaled coordinate space as the viewport. */
-#root { zoom: 0.875; }
+#root { zoom: 0.875; width: auto; max-width: none; margin: 0; }
+.app-shell, .login-shell { width: 100%; max-width: none; min-width: 0; min-height: var(--wcp-screen-h); }
+@supports (height: 100dvh) { :root { --wcp-screen-h: calc(100dvh / 0.875); } }
 /* Safety net: nothing may push the page sideways; wide content scrolls inside
    its own table/grid container instead. */
 html, body { overflow-x: clip; }
@@ -143,10 +145,6 @@ body {
 .mono { font-family: var(--wcp-font-mono); font-variant-numeric: tabular-nums; }
 .tnum { font-variant-numeric: tabular-nums; }
 
-.brand-mark { width: 46px; height: 46px; border-radius: 10px; background: var(--wcp-primary); position: relative; overflow: hidden; flex: none; }
-.brand-line { position: absolute; left: 11px; top: 11px; width: 23px; height: 26px; border: 3px solid white; border-bottom: 0; border-radius: 10px 10px 0 0; transform: rotate(18deg); }
-.brand-line:after { content: ''; position: absolute; width: 14px; height: 3px; background: white; left: 3px; top: 14px; transform: rotate(-35deg); border-radius: 2px; }
-.brand-dot { position: absolute; right: 8px; top: 10px; width: 6px; height: 6px; border-radius: 50%; background: #A9DDE3; }
 
 .topnav-item {
   display: inline-flex; align-items: center; gap: 6px;
@@ -239,7 +237,7 @@ html[data-theme='dark'] .app-topbar--scrolled { box-shadow: 0 4px 16px rgba(0, 0
 .breadcrumb-trail a:hover, .breadcrumb-trail button:hover { color: var(--wcp-primary); text-decoration: underline; text-underline-offset: 2px; }
 .breadcrumb-trail .current { color: var(--wcp-text); font-weight: 700; }
 .breadcrumb-trail .sep { color: var(--wcp-text-disabled); }
-.page-shell { width: 100%; max-width: 1680px; margin: 0 auto; }
+.page-shell { width: 100%; min-width: 0; }
 
 /* Where you are, one line under the navigation. */
 .context-bar { display: flex; align-items: center; gap: 7px; min-height: 30px; font-size: 12px; color: var(--wcp-text-muted); }
@@ -285,7 +283,8 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   padding: 38px clamp(30px, 4.4vw, 72px) 28px;
   background: var(--wcp-rail); color: var(--wcp-rail-text);
 }
-.login-grid { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5; pointer-events: none; }
+.story-bg { position: absolute; inset: 0; pointer-events: none; }
+.login-bg-image { width: 100%; height: 100%; object-fit: contain; object-position: right center; opacity: .35; mix-blend-mode: luminosity; }
 .story-top, .story-bottom { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 22px; }
 .story-bottom { border-top: 1px solid var(--wcp-rail-line); padding-top: 16px; }
 .story-main { position: relative; z-index: 1; margin: auto 0; padding: 44px 0 34px; max-width: 560px; }
