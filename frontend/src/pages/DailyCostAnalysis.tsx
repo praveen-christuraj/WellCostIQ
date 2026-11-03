@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom'
-import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import {
   AccountBalanceWalletOutlined, AnalyticsOutlined, ArrowForwardRounded, CalculateOutlined, CalendarMonthOutlined, DownloadOutlined,
@@ -13,11 +12,14 @@ import {
 } from '@mui/material'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
+import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { ErrorMessage, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
 import { WellProgressPanel } from '../components/daily-cost/WellProgressPanel'
 import { useAuth } from '../context/AuthContext'
+import { useColorMode } from '../context/ThemeContext'
 import { api, body } from '../lib/api'
+import { chartPalette } from '../designSystem'
 import {
   dailyMoney, displayDate, DAILY_COST_STATUSES, type DailyCostDailyRow, type DailyCostFactorGroup,
   type DailyCostFactorRow, type DailyCostWellOption, type DailyCostWellSummary, type WellProgressScope,
@@ -82,8 +84,10 @@ function factorColumns(group: DailyCostFactorGroup, currency: string): ColDef<Da
 export default function DailyCostAnalysis() {
   const { wellId = '' } = useParams()
   const { can } = useAuth()
+  const { mode } = useColorMode()
   const navigate = useNavigate()
   const theme = useTheme()
+  const palette = useMemo(() => chartPalette(mode), [mode])
   const [wells, setWells] = useState<DailyCostWellOption[]>([])
   const [summary, setSummary] = useState<DailyCostWellSummary | null>(null)
   // Register milestones (spud / progress completion) with their day counts.
@@ -163,27 +167,27 @@ export default function DailyCostAnalysis() {
       series: [
         {
           name: 'Cumulative actual', type: 'line', smooth: true, symbol: 'circle', symbolSize: 5,
-          itemStyle: { color: theme.palette.primary.main }, lineStyle: { width: 2.5 },
-          areaStyle: { color: `${theme.palette.primary.main}20` },
+          itemStyle: { color: palette.actual }, lineStyle: { width: 2.5, color: palette.actual },
+          areaStyle: { color: `${palette.actual}20` },
           data: summary.daily.map(row => Number(row.cumulative)),
         },
         {
           name: 'Daily actual', type: 'bar', barMaxWidth: 16,
-          itemStyle: { color: `${theme.palette.primary.main}55` }, data: summary.daily.map(row => Number(row.total)),
+          itemStyle: { color: palette.series[0], opacity: .65 }, data: summary.daily.map(row => Number(row.total)),
         },
         {
           name: 'AFE straight-line plan', type: 'line', symbol: 'none',
-          lineStyle: { width: 1.6, type: 'dashed', color: theme.palette.warning.main },
-          itemStyle: { color: theme.palette.warning.main }, data: plannedLine,
+          lineStyle: { width: 1.6, type: 'dashed', color: palette.planned },
+          itemStyle: { color: palette.planned }, data: plannedLine,
         },
         ...(adjustedLine ? [{
           name: 'Adjusted straight-line plan', type: 'line' as const, symbol: 'none',
-          lineStyle: { width: 1.6, type: 'dashed' as const, color: theme.palette.success.main },
-          itemStyle: { color: theme.palette.success.main }, data: adjustedLine,
+          lineStyle: { width: 1.6, type: 'dashed' as const, color: palette.adjusted },
+          itemStyle: { color: palette.adjusted }, data: adjustedLine,
         }] : []),
       ],
     }
-  }, [summary, currency, theme])
+  }, [summary, currency, theme, palette])
 
   const groupOption: EChartsOption = useMemo(() => {
     if (!summary) return {}
@@ -195,14 +199,14 @@ export default function DailyCostAnalysis() {
       xAxis: { type: 'category', data: summary.daily.map(row => row.cost_date.slice(5)), axisLabel: { color: theme.palette.text.secondary }, axisLine: { lineStyle: { color: theme.palette.divider } } },
       yAxis: { type: 'value', axisLabel: { color: theme.palette.text.secondary }, splitLine: { lineStyle: { color: theme.palette.divider } } },
       series: [
-        { name: 'Services', type: 'bar', stack: 'day', itemStyle: { color: theme.palette.primary.main }, data: summary.daily.map(row => Number(row.services)) },
-        { name: 'Consumables', type: 'bar', stack: 'day', itemStyle: { color: theme.palette.secondary.main }, data: summary.daily.map(row => Number(row.consumables)) },
-        { name: 'Tangibles', type: 'bar', stack: 'day', itemStyle: { color: theme.palette.info.main }, data: summary.daily.map(row => Number(row.tangibles)) },
-        { name: 'Other expenses', type: 'bar', stack: 'day', itemStyle: { color: theme.palette.warning.main }, data: summary.daily.map(row => Number(row.other_expenses)) },
-        { name: 'NPT', type: 'line', symbolSize: 5, itemStyle: { color: theme.palette.error.main }, data: summary.daily.map(row => Number(row.npt)) },
+        { name: 'Services', type: 'bar', stack: 'day', itemStyle: { color: palette.series[0] }, data: summary.daily.map(row => Number(row.services)) },
+        { name: 'Consumables', type: 'bar', stack: 'day', itemStyle: { color: palette.series[1] }, data: summary.daily.map(row => Number(row.consumables)) },
+        { name: 'Tangibles', type: 'bar', stack: 'day', itemStyle: { color: palette.series[4] }, data: summary.daily.map(row => Number(row.tangibles)) },
+        { name: 'Other expenses', type: 'bar', stack: 'day', itemStyle: { color: palette.series[5] }, data: summary.daily.map(row => Number(row.other_expenses)) },
+        { name: 'NPT', type: 'line', symbolSize: 5, itemStyle: { color: palette.series[3] }, lineStyle: { color: palette.series[3] }, data: summary.daily.map(row => Number(row.npt)) },
       ],
     }
-  }, [summary, currency, theme])
+  }, [summary, currency, theme, palette])
 
   const recordExport = async (format: 'csv' | 'xlsx' | 'pdf', recordCount: number) => {
     await api('/daily-cost/export-audit', {
@@ -363,14 +367,14 @@ export default function DailyCostAnalysis() {
             Running total from the first recorded day, with the straight-line AFE plan for the same period.
           </Typography>
           {summary.daily.length
-            ? <Box height={250} mt={1}><ReactECharts option={progressOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
+            ? <Box height={250} mt={1}><InteractiveChart option={progressOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No daily sheets match this filter.</Typography>}
         </Paper>
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, minWidth: 0 }}>
           <Typography fontWeight={800} fontSize={15}>Cost group by day</Typography>
           <Typography color="text.secondary" fontSize={11.5} mt={.25}>Services, consumables, tangibles and other expenses stacked per well-day, with NPT overlaid.</Typography>
           {summary.daily.length
-            ? <Box height={250} mt={1}><ReactECharts option={groupOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
+            ? <Box height={250} mt={1}><InteractiveChart option={groupOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No daily sheets match this filter.</Typography>}
         </Paper>
       </Box>

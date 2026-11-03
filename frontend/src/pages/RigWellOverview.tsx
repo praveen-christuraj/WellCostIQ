@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import {
   AddRounded, ArrowForwardRounded, BusinessOutlined, FactCheckOutlined, GridViewOutlined,
@@ -9,12 +8,13 @@ import {
 import { Alert, Box, Button, List, ListItem, ListItemText, Typography, useTheme } from '@mui/material'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { ChartPanel } from '../components/ui/ChartPanel'
+import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
-import { chartPalette, surface } from '../designSystem'
+import { chartPalette } from '../designSystem'
 import { api } from '../lib/api'
 import type { RigWellOverview as RigWellOverviewData } from '../lib/rigWell'
 
@@ -45,14 +45,13 @@ export default function RigWellOverview() {
 
   useEffect(() => { void load() }, [load])
 
-  const palette = chartPalette(mode)
+  const palette = useMemo(() => chartPalette(mode), [mode])
   const axisText = theme.palette.text.secondary
   // Lifecycle order reads as progress: planned → configured → review → complete.
-  // The completed slice uses the muted text token so live work stays visually first.
+  // Each state keeps a distinct visualization colour in both themes.
   const lifecycleColours = useMemo(() => {
-    const s = surface(mode)
-    return [s.textDisabled, palette.planned, palette.actual, s.dividerStrong]
-  }, [mode, palette])
+    return [palette.series[10], palette.series[0], palette.series[1], palette.series[2]]
+  }, [palette])
 
   const activities = [...(overview?.activity_counts ?? [])].reverse()
   const barOption: EChartsOption = useMemo(() => ({
@@ -78,7 +77,7 @@ export default function RigWellOverview() {
     series: [{
       type: 'bar', barMaxWidth: 18,
       data: activities.map(item => item.count),
-      itemStyle: { color: palette.planned, borderRadius: [0, 3, 3, 0] },
+      itemStyle: { color: palette.series[0], borderRadius: [0, 3, 3, 0] },
       label: { show: true, position: 'right', color: axisText, fontSize: 10 },
     }],
   }), [activities, theme, axisText, palette])
@@ -185,7 +184,7 @@ export default function RigWellOverview() {
           emptyMessage="No active wells to classify yet."
           caption="Counts come from the well configuration state the API reports; a well appears once in the stage it currently holds."
         >
-          <ReactECharts option={lifecycleOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart option={lifecycleOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
       </Box>
 
@@ -198,7 +197,7 @@ export default function RigWellOverview() {
           emptyMessage="Activity distribution appears once sub activities are entered under a well."
           caption="Sub activities are the classification every daily cost line is recorded under, so this is the shape of cost capture for the workspace."
         >
-          <ReactECharts option={barOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart option={barOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
       </Box>
 

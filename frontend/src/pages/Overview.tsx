@@ -2,12 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Avatar, Box, Button, Typography, useTheme } from '@mui/material'
 import { ArrowForwardRounded, AdminPanelSettingsOutlined, PeopleOutline, ShieldOutlined, VpnKeyOutlined } from '@mui/icons-material'
-import ReactEChartsCore from 'echarts-for-react/lib/core'
-import * as echarts from 'echarts/core'
-import { BarChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
-echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 import { api } from '../lib/api'
 import type { Overview as OverviewType } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
@@ -17,6 +11,7 @@ import { ChartPanel } from '../components/ui/ChartPanel'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
+import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { chartPalette, surface } from '../designSystem'
 
 function initials(name: string) {
@@ -33,7 +28,7 @@ export default function Overview() {
   const [error, setError] = useState('')
   useEffect(() => { api<OverviewType>('/overview').then(setData).catch((caught: unknown) => setError(caught instanceof Error ? caught.message : 'The workspace summary could not be loaded')) }, [])
 
-  const palette = chartPalette(mode)
+  const palette = useMemo(() => chartPalette(mode), [mode])
   const s = surface(mode)
   const axisText = theme.palette.text.secondary
   const activeShare = data && data.users ? Math.round((data.active_users / data.users) * 100) : 0
@@ -64,7 +59,7 @@ export default function Overview() {
     series: [{
       type: 'bar' as const, barMaxWidth: 18,
       data: roleRows.map(row => row.count),
-      itemStyle: { color: palette.planned, borderRadius: [0, 3, 3, 0] },
+      itemStyle: { color: palette.series[0], borderRadius: [0, 3, 3, 0] },
       label: { show: true, position: 'right' as const, color: axisText, fontSize: 10.5 },
     }],
   }), [roleRows, axisText, s.divider, theme.palette.background.paper, theme.palette.text.primary, palette])
@@ -96,7 +91,7 @@ export default function Overview() {
           emptyMessage="Create a role to see how members are distributed."
           caption="Counts come from the role assignments the API reports for this workspace."
         >
-          <ReactEChartsCore echarts={echarts} notMerge lazyUpdate option={roleOption} style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart notMerge lazyUpdate option={roleOption} style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
 
         <SectionCard

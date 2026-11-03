@@ -1,5 +1,18 @@
 # Durable project memory
 
+## Precise chart interaction and visualization palette (2026-11-03)
+- All 14 Apache ECharts visuals render through `components/ui/InteractiveChart.tsx`. The shared
+  host forces the SVG renderer because the app's `#root { zoom: 0.875 }` makes ZRender canvas
+  pointer coordinates diverge from its unzoomed scene; SVG maps viewport coordinates through the
+  element transform and keeps hover/click hit-testing on the exact bar, point, line or pie slice.
+  Tooltip transition duration is zero so content never appears to lag on an adjacent category.
+- `chartPalette(mode).series` is a visualization-only, colour-blind-aware sequence of 12 distinct
+  colours for both themes. Planned / actual / adjusted retain stable semantic colours. The wider
+  palette must not leak into navigation, actions, status chips or decorative application chrome.
+- Business, User, AFE, Rig & Well and Daily Cost dashboards, including well drill-through, use the
+  shared host. The UI contract rejects direct `echarts-for-react` imports outside that component
+  and asserts all 14 current charts plus both 12-colour theme palettes.
+
 ## Full-width layout and shared brand assets (2026-11-02)
 - Remove the `.page-shell` 1680px cap and centering margin so working pages use the complete available width. Shells use the existing zoom-compensated `--wcp-screen-h`, with dynamic mobile viewport support.
 - Shared `BrandIcon` always uses `/favicon.svg` for login and expanded/collapsed/mobile navigation; the browser tab uses the same public asset. Remove the CSS-drawn abstract mark and `rigMark` variant; compact navigation branding wraps its subtitle instead of clipping.

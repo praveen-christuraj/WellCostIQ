@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import {
   ArrowForwardRounded, DescriptionOutlined, FactCheckOutlined, LayersOutlined, RefreshRounded, TaskAltOutlined,
@@ -8,6 +7,7 @@ import {
 import { Alert, Box, Button, List, ListItem, ListItemText, Typography, useTheme } from '@mui/material'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { ChartPanel } from '../components/ui/ChartPanel'
+import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
@@ -49,13 +49,13 @@ export default function AfeOverview() {
 
   useEffect(() => { void load() }, [load])
 
-  const palette = chartPalette(mode)
+  const palette = useMemo(() => chartPalette(mode), [mode])
   const axisText = theme.palette.text.secondary
   const statusColours: Record<string, string> = {
-    draft: mode === 'dark' ? '#6B8490' : '#8CA0A8',
-    submitted: mode === 'dark' ? '#79B9C1' : '#2B7B87',
-    review: mode === 'dark' ? '#E9C583' : '#A9782B',
-    approval: mode === 'dark' ? '#84C9A4' : '#1B6B46',
+    draft: palette.series[10],
+    submitted: palette.series[0],
+    review: palette.series[1],
+    approval: palette.series[2],
   }
   const statusOption: EChartsOption = useMemo(() => ({
     animation: false,
@@ -172,7 +172,7 @@ export default function AfeOverview() {
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1.15fr) minmax(0, .85fr)' }, alignItems: 'center' }}>
             <Box sx={{ height: 292, px: 1 }}>
               {overview.statuses.some(row => row.count > 0)
-                ? <ReactECharts option={statusOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+                ? <InteractiveChart option={statusOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
                 : <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}><Typography fontSize={12.5} color="text.secondary">No AFEs to show yet.</Typography></Box>}
             </Box>
             <Box sx={{ px: 2, py: 1.5, borderLeft: { sm: '1px solid' }, borderTop: { xs: '1px solid', sm: 0 }, borderColor: 'divider', height: '100%' }}>
@@ -199,7 +199,7 @@ export default function AfeOverview() {
             ? `${wellGroups.otherWells} further well${wellGroups.otherWells === 1 ? '' : 's'} cost in another currency and cannot share this axis; open the AFE register to compare them.`
             : 'Bar length is the estimated value in each AFE\'s own standard currency; convert in the AFE estimate, never on this chart.'}
         >
-          <ReactECharts option={wellOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart option={wellOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
       </Box>
 

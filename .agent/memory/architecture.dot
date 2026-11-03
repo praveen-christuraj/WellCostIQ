@@ -180,6 +180,7 @@ digraph WellCostIQ {
   "frontend/src/components/ui/ContextBar.tsx";
   "frontend/src/components/ui/DatasetState.tsx";
   "frontend/src/components/ui/FinancialValue.tsx";
+  "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/components/ui/SectionCard.tsx";
   "frontend/src/components/ui/StatCard.tsx";
   "frontend/src/context/AuthContext.tsx";
@@ -771,7 +772,10 @@ digraph WellCostIQ {
   "frontend/src/components/afe/TangibleLineDialog.tsx" -> "frontend/src/components/afe/LinePickers.tsx";
   "frontend/src/components/afe/TangibleLineDialog.tsx" -> "frontend/src/lib/afe.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/context/AuthContext.tsx";
+  "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/context/ThemeContext.tsx";
+  "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/designSystem.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/businessDashboard.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/units.ts";
@@ -928,6 +932,7 @@ digraph WellCostIQ {
   "frontend/src/pages/AfeOverview.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/AfeOverview.tsx" -> "frontend/src/components/ui/ChartPanel.tsx";
   "frontend/src/pages/AfeOverview.tsx" -> "frontend/src/components/ui/DatasetState.tsx";
+  "frontend/src/pages/AfeOverview.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/pages/AfeOverview.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
   "frontend/src/pages/AfeOverview.tsx" -> "frontend/src/components/ui/StatCard.tsx";
   "frontend/src/pages/AfeOverview.tsx" -> "frontend/src/context/AuthContext.tsx";
@@ -960,9 +965,12 @@ digraph WellCostIQ {
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/components/business-dashboard/DrillThroughPanel.tsx";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/components/ui/ChartPanel.tsx";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/components/ui/DatasetState.tsx";
+  "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/components/ui/StatCard.tsx";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/context/AuthContext.tsx";
+  "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/context/ThemeContext.tsx";
+  "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/designSystem.ts";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/lib/businessDashboard.ts";
   "frontend/src/pages/CatalogueLists.tsx" -> "frontend/src/components/Common.tsx";
@@ -1000,7 +1008,10 @@ digraph WellCostIQ {
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/WellCostPrintDialog.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/WellProgressPanel.tsx";
+  "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/context/AuthContext.tsx";
+  "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/context/ThemeContext.tsx";
+  "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/designSystem.ts";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/lib/dailyCost.ts";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/lib/serviceGroups.ts";
@@ -1138,6 +1149,7 @@ digraph WellCostIQ {
   "frontend/src/pages/Overview.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/Overview.tsx" -> "frontend/src/components/ui/ChartPanel.tsx";
   "frontend/src/pages/Overview.tsx" -> "frontend/src/components/ui/DatasetState.tsx";
+  "frontend/src/pages/Overview.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/pages/Overview.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
   "frontend/src/pages/Overview.tsx" -> "frontend/src/components/ui/StatCard.tsx";
   "frontend/src/pages/Overview.tsx" -> "frontend/src/context/AuthContext.tsx";
@@ -1186,6 +1198,7 @@ digraph WellCostIQ {
   "frontend/src/pages/RigWellOverview.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/RigWellOverview.tsx" -> "frontend/src/components/ui/ChartPanel.tsx";
   "frontend/src/pages/RigWellOverview.tsx" -> "frontend/src/components/ui/DatasetState.tsx";
+  "frontend/src/pages/RigWellOverview.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/pages/RigWellOverview.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
   "frontend/src/pages/RigWellOverview.tsx" -> "frontend/src/components/ui/StatCard.tsx";
   "frontend/src/pages/RigWellOverview.tsx" -> "frontend/src/context/AuthContext.tsx";

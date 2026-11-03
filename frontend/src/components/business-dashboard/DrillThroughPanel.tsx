@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import {
   Box, Button, CircularProgress, Divider, Paper, Table, TableBody, TableCell, TableHead, TableRow,
@@ -8,8 +7,11 @@ import {
 } from '@mui/material'
 import { InsightsOutlined, OpenInNewRounded } from '@mui/icons-material'
 import { ErrorMessage, PanelDialog, Tag } from '../Common'
+import { InteractiveChart } from '../ui/InteractiveChart'
 import { useAuth } from '../../context/AuthContext'
+import { useColorMode } from '../../context/ThemeContext'
 import { api } from '../../lib/api'
+import { chartPalette } from '../../designSystem'
 import {
   AFE_STATUS_LABELS, CLASSIFICATION_TONES, dashboardQuery, decimal, displayDate, money, percent,
   type DashboardFilters, type DashboardDaySheet, type DashboardWellDetail, type Money,
@@ -45,7 +47,9 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
   onClose: () => void
 }) {
   const { can } = useAuth()
+  const { mode } = useColorMode()
   const theme = useTheme()
+  const palette = useMemo(() => chartPalette(mode), [mode])
   const [detail, setDetail] = useState<DashboardWellDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -94,22 +98,22 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
       series: [
         {
           name: 'Daily actual', type: 'bar', barMaxWidth: 14,
-          itemStyle: { color: `${theme.palette.primary.main}88` }, data: rows.map(row => Number(row.actual)),
+          itemStyle: { color: palette.series[0], opacity: .65 }, data: rows.map(row => Number(row.actual)),
         },
         {
           name: 'Cumulative actual', type: 'line', smooth: true, symbol: 'none',
-          itemStyle: { color: theme.palette.primary.main }, lineStyle: { width: 2.2 },
-          areaStyle: { color: `${theme.palette.primary.main}18` }, data: rows.map(row => Number(row.cumulative)),
+          itemStyle: { color: palette.actual }, lineStyle: { width: 2.2, color: palette.actual },
+          areaStyle: { color: `${palette.actual}20` }, data: rows.map(row => Number(row.cumulative)),
         },
       ],
     }
-  }, [detail, currency, theme])
+  }, [detail, currency, theme, palette])
 
   const timeOption: EChartsOption = useMemo(() => {
     const colors: Record<string, string> = {
-      Planned: theme.palette.success.main,
-      UPA: theme.palette.warning.main,
-      NPT: theme.palette.error.main,
+      Planned: palette.series[2],
+      UPA: palette.series[1],
+      NPT: palette.series[3],
     }
     return {
       animation: false,
@@ -122,11 +126,11 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
         label: { color: theme.palette.text.primary, fontSize: 10.5, formatter: '{b}\n{c} d' },
         itemStyle: { borderColor: theme.palette.background.paper, borderWidth: 2 },
         data: classification.map(row => ({
-          name: row.key, value: Number(row.days ?? 0), itemStyle: { color: colors[row.key] ?? theme.palette.primary.main },
+          name: row.key, value: Number(row.days ?? 0), itemStyle: { color: colors[row.key] ?? palette.series[0] },
         })),
       }],
     }
-  }, [classification, theme])
+  }, [classification, theme, palette])
 
   return <PanelDialog
     open={!!wellId}
@@ -177,14 +181,14 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
           <Typography fontWeight={800} fontSize={13.5}>Daily actual and cumulative cost</Typography>
           <Typography color="text.secondary" fontSize={11.5} mb={1}>Every saved sheet in the current date range, in {currency || 'the selected currency'}.</Typography>
           {detail.daily.length
-            ? <Box height={230}><ReactECharts option={dailyOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
+            ? <Box height={230}><InteractiveChart option={dailyOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No cost sheets in this range.</Typography>}
         </Paper>
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
           <Typography fontWeight={800} fontSize={13.5}>Recorded time split</Typography>
           <Typography color="text.secondary" fontSize={11.5} mb={1}>Distinct cost dates per classification.</Typography>
           {classification.length
-            ? <Box height={230}><ReactECharts option={timeOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
+            ? <Box height={230}><InteractiveChart option={timeOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No classified activity recorded.</Typography>}
         </Paper>
       </Box>

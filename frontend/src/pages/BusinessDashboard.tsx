@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import {
   AccountBalanceWalletOutlined, AlignVerticalBottomRounded, ArrowForwardRounded, CalendarMonthOutlined,
@@ -16,12 +15,15 @@ import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { ChartPanel } from '../components/ui/ChartPanel'
+import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
 import { DrillThroughPanel } from '../components/business-dashboard/DrillThroughPanel'
 import { useAuth } from '../context/AuthContext'
+import { useColorMode } from '../context/ThemeContext'
 import { api, body } from '../lib/api'
+import { chartPalette } from '../designSystem'
 import {
   AFE_STATUS_LABELS, currentYearFilters, EMPTY_FILTERS, compactMoney, count, dashboardQuery, decimal, displayDate,
   displayDateTime, money, percent, presetRange,
@@ -57,7 +59,9 @@ function DepthCell({ row }: { row: DashboardWellRow }) {
 
 export default function BusinessDashboard() {
   const { can } = useAuth()
+  const { mode } = useColorMode()
   const theme = useTheme()
+  const palette = useMemo(() => chartPalette(mode), [mode])
   const [filters, setFilters] = useState<DashboardFilters>(currentYearFilters())
   const [data, setData] = useState<BusinessDashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -143,13 +147,13 @@ export default function BusinessDashboard() {
     if (caps.budget) {
       series.push({
         name: 'AFE amount', type: 'bar', barMaxWidth: 12,
-        itemStyle: { color: `${theme.palette.primary.main}55` },
+        itemStyle: { color: palette.planned, opacity: .45 },
         data: rows.map(row => Number(row.afe_amount ?? 0)),
       })
       if (rows.some(row => row.has_sow_adjustment)) {
         series.push({
           name: 'SOW adjusted', type: 'bar', barMaxWidth: 12,
-          itemStyle: { color: theme.palette.info.main },
+          itemStyle: { color: palette.adjusted },
           data: rows.map(row => row.sow_adjusted_amount === null ? '-' : Number(row.sow_adjusted_amount)),
         })
       }
@@ -157,7 +161,7 @@ export default function BusinessDashboard() {
     if (caps.actuals) {
       series.push({
         name: 'Actual cost', type: 'bar', barMaxWidth: 12,
-        itemStyle: { color: theme.palette.primary.main },
+        itemStyle: { color: palette.actual },
         data: rows.map(row => Number(row.actual_amount ?? 0)),
       })
     }
@@ -178,7 +182,7 @@ export default function BusinessDashboard() {
       },
       series,
     }
-  }, [chartWells, caps, currency, theme, axis])
+  }, [chartWells, caps, currency, palette, axis])
 
   const daysOption: EChartsOption = useMemo(() => {
     const rows = [...daysWells].reverse()
@@ -200,27 +204,27 @@ export default function BusinessDashboard() {
       series: caps.actuals ? [
         {
           name: 'Productive days', type: 'bar', stack: 'days', barMaxWidth: 16,
-          itemStyle: { color: theme.palette.success.main },
+          itemStyle: { color: palette.series[2] },
           data: rows.map(row => Math.max((row.actual_days ?? 0) - Number(row.npt_days ?? 0) - Number(row.upa_days ?? 0), 0)),
         },
         {
           name: 'UPA days', type: 'bar', stack: 'days', barMaxWidth: 16,
-          itemStyle: { color: theme.palette.warning.main },
+          itemStyle: { color: palette.series[1] },
           data: rows.map(row => Number(row.upa_days ?? 0)),
         },
         {
           name: 'NPT days', type: 'bar', stack: 'days', barMaxWidth: 16,
-          itemStyle: { color: theme.palette.error.main },
+          itemStyle: { color: palette.series[3] },
           data: rows.map(row => Number(row.npt_days ?? 0)),
         },
         ...(caps.plan ? [{
           name: 'Planned days', type: 'scatter' as const, symbol: 'diamond', symbolSize: 11,
-          itemStyle: { color: theme.palette.primary.main },
+          itemStyle: { color: palette.planned },
           data: rows.map(row => Number(row.planned_days ?? 0)),
         }] : []),
       ] : [],
     }
-  }, [daysWells, caps, theme, axis])
+  }, [daysWells, caps, palette, axis])
 
   const trendOption: EChartsOption = useMemo(() => {
     const rows = data?.daily ?? []
@@ -239,26 +243,20 @@ export default function BusinessDashboard() {
       series: [
         {
           name: 'Daily actual', type: 'bar', barMaxWidth: 14,
-          itemStyle: { color: `${theme.palette.primary.main}88` },
+          itemStyle: { color: palette.series[0], opacity: .65 },
           data: rows.map(row => Number(row.actual)),
         },
         {
           name: 'Cumulative actual', type: 'line', smooth: true, symbol: 'none',
-          itemStyle: { color: theme.palette.primary.main }, lineStyle: { width: 2.2 },
-          areaStyle: { color: `${theme.palette.primary.main}16` },
+          itemStyle: { color: palette.actual }, lineStyle: { width: 2.2, color: palette.actual },
+          areaStyle: { color: `${palette.actual}20` },
           data: rows.map(row => Number(row.cumulative)),
         },
       ],
     }
-  }, [data, currency, theme, axis])
+  }, [data, currency, palette, axis])
 
   const mixOption: EChartsOption = useMemo(() => {
-    const colors = [
-      theme.palette.primary.main,
-      theme.palette.info.main,
-      theme.palette.secondary.main,
-      theme.palette.warning.main,
-    ]
     const rows = (data?.cost_groups ?? []).filter(row => Number(row.actual ?? 0) > 0)
     return {
       animation: false,
@@ -271,11 +269,11 @@ export default function BusinessDashboard() {
         label: { show: false },
         itemStyle: { borderColor: theme.palette.background.paper, borderWidth: 2 },
         data: rows.map((row, index) => ({
-          name: row.label, value: Number(row.actual ?? 0), itemStyle: { color: colors[index % colors.length] },
+          name: row.label, value: Number(row.actual ?? 0), itemStyle: { color: palette.series[index % palette.series.length] },
         })),
       }],
     }
-  }, [data, currency, theme, axis])
+  }, [data, currency, theme.palette.background.paper, palette, axis])
 
   const depthOption: EChartsOption = useMemo(() => {
     const rows = [...(data?.wells ?? [])]
@@ -305,14 +303,14 @@ export default function BusinessDashboard() {
         type: 'bar', barMaxWidth: 14,
         itemStyle: {
           color: (params: { dataIndex: number }) => Number(rows[params.dataIndex]?.depth_progress_percent ?? 0) >= 100
-            ? theme.palette.success.main : theme.palette.primary.main,
+            ? palette.series[2] : palette.series[0],
           borderRadius: [0, 3, 3, 0],
         },
         label: { show: true, position: 'right', color: axis.text, fontSize: 10.5, formatter: '{c}%' },
         data: rows.map(row => Number(row.depth_progress_percent ?? 0)),
       }],
     }
-  }, [data, theme, axis])
+  }, [data, palette, axis])
 
   const drillFromChart = (params: { dataIndex?: number }, rows: { well_id: string }[]) => {
     const row = rows[params.dataIndex ?? -1]
@@ -795,7 +793,7 @@ export default function BusinessDashboard() {
           emptyMessage="No AFE or actual cost to chart for this scope yet."
           caption={`AFE amount and actual cost in ${currency || 'the selected currency'}; SOW adjusted appears only where an approved adjustment exists.`}
         >
-          <ReactECharts
+          <InteractiveChart
             option={costOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
             onEvents={{ click: (params: { dataIndex?: number }) => drillFromChart(params, chartWells) }}
           />
@@ -809,7 +807,7 @@ export default function BusinessDashboard() {
           emptyMessage="No recorded cost to break down yet."
           caption="Shares of recorded actual cost in the selected currency; hover a slice for its exact amount."
         >
-          <ReactECharts option={mixOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart option={mixOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
       </Box>
 
@@ -823,7 +821,7 @@ export default function BusinessDashboard() {
           emptyMessage="No recorded cost in this range."
           caption={`Daily bars and the cumulative line are the same money counted differently — never add the two series. ${refreshedAt ? `Read at ${displayDateTime(refreshedAt.toISOString())}.` : ''}`}
         >
-          <ReactECharts option={trendOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart option={trendOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
         <ChartPanel
           title="Depth progress"
@@ -833,7 +831,7 @@ export default function BusinessDashboard() {
           emptyMessage="No depth progress available."
           caption="Progress uses the deepest configured hole section with recorded cost; depth is measured, never summed across sections."
         >
-          <ReactECharts option={depthOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart option={depthOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
       </Box>
 
@@ -847,7 +845,7 @@ export default function BusinessDashboard() {
           emptyMessage="No plan or recorded days to chart yet."
           caption="The diamond marks the planned duration. NPT and UPA are operational durations, not affected-date counts."
         >
-          <ReactECharts
+          <InteractiveChart
             option={daysOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
             onEvents={{ click: (params: { dataIndex?: number }) => drillFromChart(params, daysWells) }}
           />

@@ -221,8 +221,10 @@ export const semantic = (mode: Mode) =>
       }
 
 /**
- * Chart series colour order. Planned figures always take the first slot, actual
- * the second, adjustments the third; the order never changes between pages.
+ * Visualization-only colour order. Charts need more categorical separation than
+ * the application chrome: planned, actual and adjusted retain stable semantic
+ * colours, while multi-series visuals may use the extended colour-blind-aware
+ * sequence. These colours are not application action or status colours.
  */
 export const chartPalette = (mode: Mode) => {
   const s = surface(mode)
@@ -231,8 +233,14 @@ export const chartPalette = (mode: Mode) => {
     actual: mode === 'dark' ? brass[300] : brass[500],
     adjusted: mode === 'dark' ? brand[200] : brand[400],
     series: mode === 'dark'
-      ? [brand[300], brass[300], '#94A3B8', brand[200], '#84C9A4', '#E9C583', '#F1B5B1', '#6B8490']
-      : [brand[700], brass[500], '#64748B', brand[400], '#1B6B46', '#8A5A0B', '#A3211A', '#8CA0A8'],
+      ? [
+          '#79B9C1', '#F2C14E', '#5CD6B0', '#FF8A65', '#85C8F5', '#E59BC5',
+          '#B89AE8', '#B7D66B', '#FF9C86', '#70D6DF', '#AAB8C2', '#D6B271',
+        ]
+      : [
+          '#15515B', '#B87503', '#087F5B', '#C34A17', '#297DA6', '#A83F82',
+          '#6C4AB6', '#5B7F17', '#B23A48', '#087E8B', '#64748B', '#8A5F1F',
+        ],
     axis: s.textMuted,
     grid: s.divider,
     surface: s.paper,

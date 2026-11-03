@@ -13,7 +13,8 @@
 //
 // Exits non-zero when a rule fails, so it can gate a UI change.
 import { JSDOM } from 'jsdom'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 
 const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', { pretendToBeVisual: true, url: 'http://localhost/' })
 const w = dom.window
@@ -29,7 +30,9 @@ const { CacheProvider } = await import('@emotion/react')
 const { createRoot } = await import('react-dom/client')
 const { ThemeProvider, CssBaseline } = await import('@mui/material')
 const { buildTheme } = await import('../../frontend/src/theme')
+const { chartPalette } = await import('../../frontend/src/designSystem')
 const { FormDialog, PanelDialog, Tag, ErrorMessage } = await import('../../frontend/src/components/Common')
+const { InteractiveChart } = await import('../../frontend/src/components/ui/InteractiveChart')
 
 const results = []
 const check = (label, pass, detail = '') => results.push({ label, pass, detail })
@@ -96,6 +99,17 @@ await act(async () => {
   check('panel dialog has a close button', [...doc.querySelectorAll('[role="dialog"] button')].some(b => b.textContent === 'Close'))
 }
 
+// Render the real shared chart host, not only its source contract, so modular
+// ECharts registrations and SVG output are exercised by the UI check.
+await act(async () => {
+  root.render(<InteractiveChart
+    option={{ xAxis: { type: 'category', data: ['A'] }, yAxis: { type: 'value' }, tooltip: {}, series: [{ type: 'bar', data: [1] }] }}
+    opts={{ width: 240, height: 160 }}
+  />)
+  await new Promise(resolve => setTimeout(resolve, 0))
+})
+check('shared chart host renders an SVG scene', Boolean(w.document.querySelector('[data-chart-renderer="svg"] svg')))
+
 // Layout needs authenticated application context, so these source-level checks
 // protect the shared shell without duplicating a mock permission model here.
 const layoutSource = readFileSync('src/components/Layout.tsx', 'utf8')
@@ -105,6 +119,28 @@ check('desktop navigation can collapse and persists', layoutSource.includes('wcp
 check('mobile navigation uses a drawer', layoutSource.includes('<Drawer open={mobileOpen}'))
 check('main work area has no fixed width cap', !layoutSource.includes('maxWidth: 1600'))
 check('failed API actions emit visible feedback', apiSource.includes("CustomEvent('api-error'") && layoutSource.includes('<Snackbar open={!!apiNotice}'))
+
+// Every ECharts surface shares one zoom-aware SVG host. Canvas pointer
+// coordinates drift under the app shell's CSS zoom, so a direct renderer import
+// is a regression even when the individual chart options look correct.
+const sourceFiles = []
+const collectSources = directory => {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) collectSources(path)
+    else if (/\.tsx?$/.test(entry.name)) sourceFiles.push(path)
+  }
+}
+collectSources('src')
+const directEChartsUsers = sourceFiles.filter(path => path !== 'src/components/ui/InteractiveChart.tsx' && readFileSync(path, 'utf8').includes('echarts-for-react'))
+const chartHostSource = readFileSync('src/components/ui/InteractiveChart.tsx', 'utf8')
+const chartUsageCount = sourceFiles.reduce((count, path) => count + (readFileSync(path, 'utf8').match(/<InteractiveChart\b/g)?.length ?? 0), 0)
+check('all interactive charts use the shared precision host', directEChartsUsers.length === 0 && chartUsageCount === 14, `${chartUsageCount} charts; direct renderers: ${directEChartsUsers.join(',') || 'none'}`)
+check('chart host corrects zoomed pointer mapping with SVG', chartHostSource.includes("renderer: 'svg'") && chartHostSource.includes('transitionDuration: 0'))
+for (const mode of ['light', 'dark']) {
+  const colours = chartPalette(mode).series
+  check(`${mode}: visualization palette has 12 distinct series colours`, colours.length === 12 && new Set(colours).size === colours.length)
+}
 
 let failed = 0
 for (const r of results) { if (!r.pass) failed++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.label}${r.detail ? `  [${r.detail}]` : ''}`) }

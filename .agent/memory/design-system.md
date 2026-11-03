@@ -51,8 +51,11 @@ muted `#5B6B85` / `#A3B2C8`, disabled `#8A98AD` / `#7B8BA3`.
 
 - Never green branding; green is a status colour only.
 - Never pair one tone's foreground with another tone's background.
-- Charts use the navy ramp (`navy[800]`, `navy[600]`, `navy[400]`, `navy[500]`) plus the
-  semantic colours, in that order of preference; grid lines are the `divider` colour.
+- Charts are the deliberate colour exception. Planned / actual / adjusted values keep their
+  stable semantic positions, while categorical and multi-series visuals use the 12-colour,
+  colour-blind-aware `chartPalette(mode).series` sequence. Those colours belong only to data
+  visualization, never application actions, navigation, status chips or decoration. Grid lines
+  remain the `divider` colour.
 
 The text, muted text, primary action and status pairs are selected to clear WCAG AA in both
 themes; disabled text is exempt for inactive controls. Re-check contrast before changing a pair.
@@ -113,6 +116,10 @@ density is unchanged.
   collapsed module icons open the same links in a menu. Below `md`, the rail becomes a temporary
   drawer. The contextual top bar shows current module/page plus theme and account actions. The
   page's own `PageHeading` remains the only full title block.
+- **Interactive charts:** every ECharts visual renders through `InteractiveChart`. The shared SVG
+  renderer is mandatory because `#root` is zoomed: canvas hit-testing measures rendered pixels
+  against an unzoomed scene and can select adjacent points. Tooltip movement is immediate so the
+  displayed value never trails the pointer. Do not import `echarts-for-react` directly in a page.
 - **Page heading:** eyebrow → title → subtitle → actions on the right, `align-items: flex-end`.
 - **Lists:** `DataTable` is the only list surface — quick search, advanced filters, a separate
   date/date-range group, 20/50/100 pagination, CSV/XLSX/PDF export, checkbox selection, and the
