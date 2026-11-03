@@ -72,10 +72,37 @@ def test_csv_keeps_typed_numbers():
     assert safe_csv_cell('Normal text') == 'Normal text'
 
 
-@pytest.mark.parametrize('origin', ['*', 'https://*.example.com', 'https://example.com/path', 'null', 'https://user@example.com'])
+@pytest.mark.parametrize('origin', ['*', 'https://*.example.com', 'https://example.com/path', 'null', 'https://user@example.com',
+                                    'https://example.com/?q=1', 'https://example.com/#frag', 'https://example.com:99999',
+                                    'http://example.com:0', 'app.example.com', 'ftp://example.com'])
 def test_cors_rejects_non_origins(origin):
     with pytest.raises(ValidationError):
         Settings(cors_origins=origin)
+
+
+@pytest.mark.parametrize('configured,expected', [
+    # The Render dashboard value that used to abort a deploy: a trailing slash is
+    # what a browser never sends, so it is normalized rather than fatal.
+    ('https://well-costing-pro.vercel.app/', ['https://well-costing-pro.vercel.app']),
+    ('HTTPS://App.Example.COM', ['https://app.example.com']),
+    ('https://app.example.com:443/', ['https://app.example.com']),
+    ('http://localhost:5173/', ['http://localhost:5173']),
+    # A non-default port is kept: it is part of the origin.
+    ('https://app.example.com:8443/', ['https://app.example.com:8443']),
+    # Duplicates that differ only by spelling collapse to one entry.
+    ('https://app.example.com/, HTTPS://APP.EXAMPLE.COM:443', ['https://app.example.com']),
+])
+def test_cors_origins_are_stored_in_the_form_a_browser_sends(configured, expected):
+    assert Settings(environment='development', cors_origins=configured).cors_origin_list == expected
+
+
+def test_origin_guard_matches_a_normalized_origin_and_a_referer_url(fresh_database):
+    with TestClient(app) as client:
+        login(client)
+        assert client.post('/api/v1/auth/refresh', headers={'Origin': 'http://LOCALHOST:5173/'}).status_code == 200
+        assert client.post('/api/v1/auth/refresh', headers={'Referer': 'http://localhost:5173/wells?tab=costing'}).status_code == 200
+        assert client.post('/api/v1/auth/refresh', headers={'Referer': 'https://evil.example/wells'}).status_code == 403
+        assert client.post('/api/v1/auth/refresh', headers={'Referer': 'not-a-url'}).status_code == 403
 
 
 def test_production_fails_closed():

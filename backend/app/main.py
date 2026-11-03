@@ -1,6 +1,5 @@
 import logging
 from contextlib import asynccontextmanager
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
@@ -14,7 +13,7 @@ from app.api import afe, auth, audit, backup, business_dashboard, costing_sets, 
 from app.api.catalogue_items import ITEM_ROUTERS, catalogue_error_handler
 from app.api.catalogue_options import router as catalogue_options_router
 from app.bootstrap import bootstrap_admin
-from app.core.config import get_settings
+from app.core.config import canonical_origin, get_settings, origin_from_url
 from app.core.logging import configure_logging
 from app.services import backup as backup_service
 from app.services.catalogue import CatalogueError
@@ -76,8 +75,11 @@ async def origin_guard(request: Request, call_next):
     SameSite=Lax already blocks most cross-site form posts, but it is a browser
     default rather than an authorisation decision. Any request that carries an
     ``Origin`` (or, failing that, a ``Referer``) must match the configured
-    front-end origin exactly. Non-browser clients that send neither header — CLI
-    and integration callers — keep working.
+    front-end origin exactly. Both sides of that comparison are canonical
+    ``scheme://host[:port]`` values (see :mod:`app.core.config`), so a header
+    that differs only by case or a default port still matches, while anything
+    unparseable matches nothing. Non-browser clients that send neither header —
+    CLI and integration callers — keep working.
     """
     if request.method not in SAFE_METHODS and request.url.path.startswith(COOKIE_WRITE_PREFIX):
         allowed = set(settings.cors_origin_list)
@@ -85,14 +87,15 @@ async def origin_guard(request: Request, call_next):
         if site == "cross-site":
             return JSONResponse(status_code=403, content={"detail": "Cross-site requests are not accepted."})
         origin = request.headers.get("origin")
-        if origin and origin not in allowed:
+        if origin and canonical_origin(origin) not in allowed:
             return JSONResponse(status_code=403, content={"detail": "This origin is not allowed to call the API."})
         if not origin:
             referer = request.headers.get("referer")
             if referer:
-                parts = urlsplit(referer)
-                candidate = f"{parts.scheme}://{parts.netloc}"
-                if candidate not in allowed:
+                # A Referer names a page, not an origin: reduce it to
+                # scheme://host[:port] the same way the allow-list was
+                # normalized. Anything unparseable yields "" and is refused.
+                if origin_from_url(referer) not in allowed:
                     return JSONResponse(status_code=403, content={"detail": "This origin is not allowed to call the API."})
     return await call_next(request)
 

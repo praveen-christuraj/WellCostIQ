@@ -9,6 +9,9 @@ Security posture is decided here, once:
 * CORS entries are parsed into exact ``scheme://host[:port]`` origins. Wildcards,
   paths, credentials, ``null`` and opaque values are rejected at import time, so a
   misconfigured deployment fails loudly instead of reflecting an attacker origin.
+  The harmless copy/paste accidents — a trailing slash, mixed case, an explicit
+  default port — are normalized to the form a browser actually sends instead of
+  taking the deployment down; normalization can only ever narrow a match.
 * Password lifetime, history depth, lockout thresholds and request budgets are
   configuration, not constants hidden in the routers.
 
@@ -17,7 +20,7 @@ use them directly, but their values are masked by ``repr``/``str`` and by
 :meth:`Settings.safe_summary` so a settings object can be logged safely.
 """
 from functools import lru_cache
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,8 +37,16 @@ PLACEHOLDER_SECRETS = {
 }
 
 
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
 def _origin_problem(value: str) -> str | None:
-    """Return why ``value`` is not an exact browser origin, or ``None``."""
+    """Return why ``value`` is not a browser origin, or ``None`` if it is.
+
+    A trailing slash, host case and an explicit default port are accepted here
+    because :func:`canonical_origin` rewrites them into the exact form browsers
+    send; everything that would widen the allow-list is still refused.
+    """
     if not value or value == "null":
         return "an origin must name a scheme and a host"
     if "*" in value:
@@ -47,11 +58,59 @@ def _origin_problem(value: str) -> str | None:
         return "a host is required"
     if parts.username or parts.password:
         return "credentials must not be included"
-    if parts.path not in {"", "/"} or parts.query or parts.fragment:
+    if parts.path.rstrip("/") or parts.query or parts.fragment:
         return "only scheme://host[:port] is allowed"
-    if value != f"{parts.scheme}://{parts.netloc}":
-        return "the origin must be exact"
+    try:
+        port = parts.port
+    except ValueError:
+        return "the port must be a number between 1 and 65535"
+    if port is not None and not 1 <= port <= 65535:
+        return "the port must be a number between 1 and 65535"
     return None
+
+
+def _rebuild_origin(parts: SplitResult) -> str:
+    """Assemble ``scheme://host[:port]`` from parsed parts, dropping defaults."""
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    if ":" in host:  # IPv6 literal: the Origin header keeps the brackets
+        host = f"[{host}]"
+    try:
+        port = parts.port
+    except ValueError:
+        return ""
+    if port is not None and port != DEFAULT_PORTS[scheme]:
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}"
+
+
+def canonical_origin(value: str) -> str:
+    """Return ``value`` as the exact ``scheme://host[:port]`` a browser sends.
+
+    Trailing slashes, upper-case scheme/host and the scheme's default port are
+    normalized away; no path, query, fragment, credential or wildcard survives.
+    Anything that is not an http(s) origin returns ``""``, which cannot match an
+    allow-list entry — callers fail closed instead of raising on hostile input.
+    """
+    origin = (value or "").strip()
+    if _origin_problem(origin):
+        return ""
+    return _rebuild_origin(urlsplit(origin))
+
+
+def origin_from_url(value: str) -> str:
+    """Reduce an absolute http(s) URL to its origin, or ``""`` if it is not one.
+
+    This is the ``Referer`` counterpart of :func:`canonical_origin`: a Referer
+    names a page, so its path is expected and discarded rather than rejected.
+    """
+    url = (value or "").strip()
+    if not url or "*" in url:
+        return ""
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in {"http", "https"} or not parts.hostname:
+        return ""
+    return _rebuild_origin(parts)
 
 
 class Settings(BaseSettings):
@@ -117,17 +176,28 @@ class Settings(BaseSettings):
     @field_validator("cors_origins")
     @classmethod
     def validate_cors_origins(cls, value: str) -> str:
-        for origin in (item.strip() for item in value.split(",")):
+        """Validate every entry and store the allow-list in canonical form.
+
+        The stored string is what :attr:`cors_origin_list` hands to the CORS
+        middleware and the origin guard, so it must be byte-identical to the
+        ``Origin`` header a browser sends for the same site.
+        """
+        origins: list[str] = []
+        for item in value.split(","):
+            origin = item.strip()
             if not origin:
                 continue
             problem = _origin_problem(origin)
             if problem:
                 raise ValueError(f"CORS origin {origin!r} is invalid: {problem}")
-        return value
+            canonical = canonical_origin(origin)
+            if canonical not in origins:
+                origins.append(canonical)
+        return ",".join(origins)
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        return [origin for origin in self.cors_origins.split(",") if origin]
 
     @property
     def trusted_proxies(self) -> list[str]:
