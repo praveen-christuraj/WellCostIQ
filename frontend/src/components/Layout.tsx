@@ -6,8 +6,8 @@ import {
 } from '@mui/material'
 import {
   DashboardOutlined, PeopleOutline, AdminPanelSettingsOutlined, VpnKeyOutlined, KeyboardArrowDownRounded,
-  ChevronLeftRounded, ChevronRightRounded, LogoutRounded, AccountTreeOutlined, LightModeOutlined,
-  DarkModeOutlined, MenuRounded, HistoryOutlined, DataObjectOutlined, DeleteOutlineRounded, TableChartOutlined,
+  LogoutRounded, AccountTreeOutlined, LightModeOutlined, DarkModeOutlined, MenuRounded, HistoryOutlined,
+  DataObjectOutlined, DeleteOutlineRounded, TableChartOutlined,
   StorefrontOutlined, DescriptionOutlined, BuildOutlined, GridViewOutlined, PrecisionManufacturingOutlined,
   OpacityOutlined, ListAltOutlined, BusinessOutlined, PublicOutlined, TaskAltOutlined, RequestQuoteOutlined,
   InsightsOutlined, SettingsOutlined, StorageOutlined, PlaylistAddCheckRounded, WaterDropOutlined,
@@ -198,17 +198,21 @@ export default function Layout() {
   const navigation = (temporary = false) => {
     const showText = navExpanded || temporary
     return <Box component="nav" aria-label="Primary navigation" className="app-rail" display="flex" flexDirection="column" height="100%" sx={{ overflow: 'hidden' }}>
-      <Box className="rail-brand" display="flex" alignItems="center" justifyContent={showText ? 'space-between' : 'center'} gap={1}>
-        {showText ? <Brand light compact/> : <Box role="img" aria-label={APP_NAME}><BrandIcon size={44}/></Box>}
+      <Box className="rail-brand" display="flex" flexDirection="column" alignItems="stretch" gap={1.5}>
         {!temporary && <Tooltip title={navExpanded ? 'Collapse navigation' : 'Expand navigation'} placement="right">
-          <IconButton
-            size="small" onClick={() => setNavExpanded(value => !value)}
-            aria-label={navExpanded ? 'Collapse navigation' : 'Expand navigation'}
-            sx={{ color: 'var(--wcp-rail-muted)', ml: showText ? 0 : 'auto', '&:hover': { color: 'var(--wcp-rail-text)', bgcolor: 'var(--wcp-rail-hover)' } }}
-          >
-            {navExpanded ? <ChevronLeftRounded fontSize="small"/> : <ChevronRightRounded fontSize="small"/>}
-          </IconButton>
+          <Box display="flex" justifyContent={showText ? 'flex-end' : 'center'}>
+            <IconButton
+              size="small" onClick={() => setNavExpanded(value => !value)}
+              aria-label={navExpanded ? 'Collapse navigation' : 'Expand navigation'}
+              sx={{ color: 'var(--wcp-rail-muted)', '&:hover': { color: 'var(--wcp-rail-text)', bgcolor: 'var(--wcp-rail-hover)' } }}
+            >
+              <MenuRounded fontSize="small"/>
+            </IconButton>
+          </Box>
         </Tooltip>}
+        <Box display="flex" justifyContent={showText ? 'flex-start' : 'center'}>
+          {showText ? <Brand light compact/> : <Box role="img" aria-label={APP_NAME}><BrandIcon size={44}/></Box>}
+        </Box>
       </Box>
 
       {showText && <Box className="rail-workspace">
