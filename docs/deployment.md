@@ -172,7 +172,7 @@ service from `render.yaml`.
 | `MIGRATION_DATABASE_URL` | **Yes** | Distinct schema-owner migration-role URI for `start-hosted.sh`; removed before the API starts |
 | `SECRET_KEY` | **Yes** | Generate a unique key with `openssl rand -hex 32`; on Windows PowerShell, `py -c "import secrets; print(secrets.token_hex(32))"` also works. Use at least 32 characters per environment; the app rejects a missing, short, or default key with PostgreSQL. |
 | `SECURE_COOKIES` | **Yes** | `true` — Vercel serves HTTPS, and the refresh cookie is set with the `Secure` flag |
-| `CORS_ORIGINS` | **Yes** | Exact Vercel origin(s), comma-separated, e.g. `https://wellcostiq.vercel.app`. Add custom domains too. No paths or trailing slash. |
+| `CORS_ORIGINS` | **Yes** | Exact Vercel origin(s), comma-separated, e.g. `https://wellcostiq.vercel.app`. Add custom domains too. No paths, wildcards or credentials — a trailing slash, host capitalization and an explicit default port (`:443`/`:80`) are normalized for you. |
 | `BOOTSTRAP_ADMIN_ON_STARTUP` | No | `true` (default). Set `false` only if you seed manually. |
 | `SEED_ORG_SLUG` | First boot | Workspace ID, e.g. `my-company` |
 | `SEED_ORG_NAME` | First boot | Display name, e.g. `My Company` |
@@ -252,9 +252,9 @@ Notes:
    deployment URL) and record its origin, e.g.
    `https://wellcostiq.vercel.app`.
 7. Return to Render → service → **Environment**. Set `CORS_ORIGINS` to that
-   exact origin (scheme + hostname, with no path/trailing slash); include any
-   custom domain as another comma-separated origin. Save and redeploy. No
-   `VITE_*` variables are needed in Vercel.
+   exact origin (scheme + hostname, no path); include any custom domain as
+   another comma-separated origin. Save and redeploy. No `VITE_*` variables are
+   needed in Vercel.
 8. Open `https://<your-vercel-domain>/api/health`. It should return
    `{"status":"ok","api_version":"..."}` through Vercel's rewrite. Confirm that
    `https://<your-vercel-domain>/docs` returns **404** — that is the intended
@@ -355,7 +355,8 @@ In Supabase → **Connect → Session pooler**, copy the URI **as a whole**. Pre
 | Render logs show `password authentication failed for user "postgres"` on port `6543` | Render is using the Transaction pooler endpoint and/or a username that does not match the copied pooler URI. In Supabase **Connect → Session pooler**, copy the full connection URI; preserve its generated username (usually `postgres.<PROJECT_REF>`), host, and port `5432`. In Render → service → **Environment**, replace `DATABASE_URL` with that URI using the `postgresql+psycopg://` scheme and `sslmode=require`. URL-encode reserved password characters, save with **Save, rebuild, and deploy**, then inspect the new logs. Do not merely change `6543` to `5432` while keeping the old username or guessed host. |
 | Render logs show password authentication failed with another user/port | Re-copy the full connection URI from Supabase **Connect** and use its matching host, port, and username. Confirm the database password is current and reserved characters are URL-encoded. Update `DATABASE_URL` in Render's Environment page and redeploy. |
 | Render logs show missing tables / Alembic revision errors | Confirm the start command runs `alembic upgrade head` before Uvicorn, or on a paid instance configure it as Pre-Deploy Command; verify the Render root directory is `backend` |
-| Browser reports a CORS error | `CORS_ORIGINS` must contain the exact Vercel origin (scheme + host, no trailing slash); save and redeploy Render |
+| Browser reports a CORS error | `CORS_ORIGINS` must contain the exact Vercel origin (scheme + host, no path); save and redeploy Render |
+| Render deploy exits with `CORS origin '...' is invalid` | The API validates `CORS_ORIGINS` at import time, so the deploy stops before Uvicorn starts. Read the reason in the message: wildcards, paths (`/app`), query strings, credentials (`https://user@host`) and non-HTTP schemes must be removed. A trailing slash, host capitalization and `:443`/`:80` are normalized automatically — anything else needs editing in Render → **Environment**, then redeploy. |
 | Login succeeds but the next call is 401 | `SECURE_COOKIES` mismatch, or the cookie was set on the wrong domain — confirm you're browsing the Vercel URL, not calling Render directly |
 | Render deploy fails: `SECRET_KEY` error | Missing/short/default `SECRET_KEY` when using PostgreSQL |
 | First load very slow | The Free Render service may be waking from idle; this is expected for that plan |
