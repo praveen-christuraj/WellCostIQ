@@ -1,5 +1,11 @@
 # Durable project memory
 
+## Browser-compatible NDT client keys (2026-11-04)
+- NDT editor row keys are client-only and are removed before saving. Their generator uses
+  `crypto.randomUUID()` when it is callable, with a timestamp/random fallback for browsers that
+  do not expose it on plain HTTP LAN addresses. Do not call `crypto.randomUUID()` unguarded in
+  browser code: the API is restricted to secure contexts in affected browsers.
+
 ## Precise chart interaction and visualization palette (2026-11-03)
 - All 14 Apache ECharts visuals render through `components/ui/InteractiveChart.tsx`. The shared
   host forces the SVG renderer because the app's `#root { zoom: 0.875 }` makes ZRender canvas

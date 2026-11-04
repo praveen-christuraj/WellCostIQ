@@ -24,8 +24,14 @@ export const NDT_IMPORT_SAMPLE: ImportRow = {
   'Rig Code': 'RIG-01', 'Well Code': 'WELL-01', Scope: 'Drilling', Description: 'Drill pipe inspection',
   'Quantity Received': '20', 'Quantity Consumed': '18', 'Backloaded Good': '15', 'Backloaded Bad': '3', Remarks: 'Sample row',
 }
+const newClientKey = (): string => {
+  const randomUUID = globalThis.crypto?.randomUUID
+  return typeof randomUUID === 'function'
+    ? randomUUID.call(globalThis.crypto)
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
 export const newNdtLine = (): NdtLine => ({
-  key: crypto.randomUUID(), description: '', quantity_received: '0', quantity_consumed: '0',
+  key: newClientKey(), description: '', quantity_received: '0', quantity_consumed: '0',
   quantity_backloaded_good: '0', quantity_backloaded_bad: '0', remarks: '',
 })
 export const quantity = (value: string | number) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 10 })

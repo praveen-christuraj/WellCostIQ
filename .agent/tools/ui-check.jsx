@@ -31,11 +31,21 @@ const { createRoot } = await import('react-dom/client')
 const { ThemeProvider, CssBaseline } = await import('@mui/material')
 const { buildTheme } = await import('../../frontend/src/theme')
 const { chartPalette } = await import('../../frontend/src/designSystem')
+const { newNdtLine } = await import('../../frontend/src/lib/ndtInspection')
 const { FormDialog, PanelDialog, Tag, ErrorMessage } = await import('../../frontend/src/components/Common')
 const { InteractiveChart } = await import('../../frontend/src/components/ui/InteractiveChart')
 
 const results = []
 const check = (label, pass, detail = '') => results.push({ label, pass, detail })
+
+// crypto.randomUUID is unavailable in non-secure HTTP/LAN browser contexts.
+// Exercise the exact environment that previously crashed the NDT register.
+const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+Object.defineProperty(globalThis, 'crypto', { value: {}, configurable: true })
+const fallbackNdtKeys = [newNdtLine().key, newNdtLine().key]
+if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor)
+else delete globalThis.crypto
+check('NDT line keys work without crypto.randomUUID', fallbackNdtKeys.every(Boolean) && new Set(fallbackNdtKeys).size === fallbackNdtKeys.length, fallbackNdtKeys.join(','))
 
 const container = w.document.getElementById('root')
 const root = createRoot(container)
