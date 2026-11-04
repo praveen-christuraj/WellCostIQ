@@ -279,6 +279,7 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
       </Box>
     </Collapse>
     <Box ref={gridWrapRef} sx={{ height: gridHeight, width: '100%' }}>
+      {/* AG Grid positions popups from viewport measurements, so keep them outside the zoomed root. */}
       <AgGridReact<T>
         theme={gridTheme}
         onGridReady={event => { gridApi.current = event.api }}
@@ -290,6 +291,7 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
         pagination
         paginationPageSize={pageSize}
         paginationPageSizeSelector={[20, 50, 100]}
+        popupParent={typeof document === 'undefined' ? null : document.body}
         onPaginationChanged={e => setPageSize(e.api.paginationGetPageSize())}
         rowSelection={selectable ? { mode: 'multiRow', checkboxes: true, headerCheckbox: true, selectAll: 'filtered' } : undefined}
         onSelectionChanged={event => onSelectionChange?.(event.api.getSelectedRows())}

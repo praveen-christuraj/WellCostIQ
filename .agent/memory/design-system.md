@@ -124,6 +124,8 @@ density is unchanged.
 - **Lists:** `DataTable` is the only list surface — quick search, advanced filters, a separate
   date/date-range group, 20/50/100 pagination, CSV/XLSX/PDF export, checkbox selection, and the
   AG Grid skin from `gridThemeParams()`. Zebra striping comes from `oddRowBackgroundColor`.
+  AG Grid popups use `document.body` as their popup parent so the 20/50/100 pagination menu is
+  positioned in viewport coordinates outside the zoomed `#root`; do not remove that override.
   Register pages whose last (or only) content is the table pass `fillHeight` so the grid's bottom
   edge meets the bottom of the page (measured in `DataTable`, zoom-compensated); pages that stack
   several tables (AFE estimate, daily cost sheet) leave it off and size to content. A footnote

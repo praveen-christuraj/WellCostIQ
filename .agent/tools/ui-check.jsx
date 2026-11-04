@@ -114,11 +114,13 @@ check('shared chart host renders an SVG scene', Boolean(w.document.querySelector
 // protect the shared shell without duplicating a mock permission model here.
 const layoutSource = readFileSync('src/components/Layout.tsx', 'utf8')
 const apiSource = readFileSync('src/lib/api.ts', 'utf8')
+const dataTableSource = readFileSync('src/components/DataTable.tsx', 'utf8')
 check('shell uses permission-aware side navigation', layoutSource.includes('aria-label="Primary navigation"') && layoutSource.includes('modulesForUser'))
 check('desktop navigation can collapse and persists', layoutSource.includes('wcp-nav-expanded') && layoutSource.includes('Collapse navigation'))
 check('mobile navigation uses a drawer', layoutSource.includes('<Drawer open={mobileOpen}'))
 check('main work area has no fixed width cap', !layoutSource.includes('maxWidth: 1600'))
 check('failed API actions emit visible feedback', apiSource.includes("CustomEvent('api-error'") && layoutSource.includes('<Snackbar open={!!apiNotice}'))
+check('grid pagination menu escapes the zoomed coordinate space', dataTableSource.includes("popupParent={typeof document === 'undefined' ? null : document.body}"))
 
 // Every ECharts surface shares one zoom-aware SVG host. Canvas pointer
 // coordinates drift under the app shell's CSS zoom, so a direct renderer import
