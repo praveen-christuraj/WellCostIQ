@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.units import depth_to_meters, normalize_depth_unit
 from app.models import (
-    Activity, Afe, AuditLog, CementAdditive, Currency, DailyCostBaseline,
+    Activity, Afe, AfeServiceLine, AuditLog, CementAdditive, Currency, DailyCostBaseline,
     DailyCostBaselineBudgetLine, DailyCostBaselineExchangeRate, DailyCostBaselinePhase,
     DailyCostBaselineSection, DailyCostBaselineServiceRate, DailyCostCatalogueRateSnapshot,
     DailyCostConsumableLine, DailyCostEntry, DailyCostOtherExpenseLine, DailyCostServiceLine,
@@ -2437,6 +2437,47 @@ def _entry_out(
     )
 
 
+def _service_report_groups(
+    db: Session, organization_id: str, lines: Iterable[DailyCostBaselineBudgetLine],
+) -> dict[str, str]:
+    """Reporting group printed for each locked service allowance, keyed by budget key.
+
+    The Daily Cost report lists a service under the reporting group configured for
+    it in Master Data, exactly as the AFE estimate print does, so a group assigned
+    (or corrected) after the AFE was locked still places the service under the
+    right heading instead of leaving it in the default or unclassified bucket. The
+    group snapshotted with the locked allowance stays the fallback for a service
+    that no longer resolves to a Master Data row.
+
+    Only Services allowances need this: consumables, drill bits and tangibles have
+    no reporting group, and an unbudgeted actual keeps the group of its own daily
+    line.
+    """
+    service_lines = [line for line in lines if line.cost_group == "Services"]
+    if not service_lines:
+        return {}
+    source_ids = {line.source_afe_line_id for line in service_lines if line.source_afe_line_id}
+    live_by_line: dict[str, str] = {}
+    if source_ids:
+        live_by_line = {
+            str(row[0]): str(row[1] or "")
+            for row in db.execute(
+                select(AfeServiceLine.id, Service.service_group)
+                .join(Service, Service.id == AfeServiceLine.service_id)
+                .where(
+                    AfeServiceLine.organization_id == organization_id,
+                    AfeServiceLine.id.in_(source_ids),
+                )
+            ).all()
+        }
+    groups: dict[str, str] = {}
+    for line in service_lines:
+        group = live_by_line.get(line.source_afe_line_id, "") or line.service_group
+        if group:
+            groups[f"{line.budget_kind}:{line.item_key}"] = group
+    return groups
+
+
 def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = None) -> DailyCostComparison:
     """The locked AFE plan against every actual recorded through the sheet date.
 
@@ -2457,6 +2498,9 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
         planned_by_key[key] += planned_amount
         budget_meta.setdefault(key, row)
         planned_keys.add(key)
+    # Service groups to print with the plan, resolved from the configured
+    # reporting group so the report groups services like the AFE estimate.
+    report_groups = _service_report_groups(db, entry.organization_id, entry.baseline.budget_lines)
 
     entries = list(
         db.scalars(
@@ -2536,7 +2580,7 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
         if metadata:
             code, name = metadata.item_code_snapshot, metadata.item_name_snapshot
             kind = metadata.budget_kind
-            service_group = metadata.service_group
+            service_group = report_groups.get(key, metadata.service_group)
         else:
             code, name, service_group = unplanned_meta.get(
                 (group, key), ("", "Unbudgeted actual", "")
@@ -4401,7 +4445,11 @@ def well_cost_summary(
     group_by_key = {str(row[0] or ""): str(row[1] or "Services") for row in budget_rows}
     planned_by_key: dict[str, Decimal] = {}
     meta: dict[str, DailyCostBaselineBudgetLine] = {}
+    # Reporting group to print for every planned service allowance, resolved from
+    # Master Data so the report groups services exactly like the AFE estimate.
+    report_groups: dict[str, str] = {}
     for baseline in baselines:
+        report_groups.update(_service_report_groups(db, organization_id, baseline.budget_lines))
         for budget_line in baseline.budget_lines:
             key = f"{budget_line.budget_kind}:{budget_line.item_key}"
             planned_by_key[key] = planned_by_key.get(key, Decimal("0")) + Decimal(budget_line.planned_amount)
@@ -4430,7 +4478,7 @@ def well_cost_summary(
         if budget_line is not None:
             group = budget_line.cost_group
             code, name, kind = budget_line.item_code_snapshot, budget_line.item_name_snapshot, budget_line.budget_kind
-            service_group = budget_line.service_group
+            service_group = report_groups.get(key, budget_line.service_group)
         else:
             group = group_by_key.get(key, "Services")
             kind = key.split(":", 1)[0] if key else "unplanned"
