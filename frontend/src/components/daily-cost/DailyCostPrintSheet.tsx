@@ -129,6 +129,12 @@ function decimalText(value: string | number | null | undefined) {
     : '—'
 }
 
+function quantityText(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === '') return '—'
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'
+}
+
 /**
  * Report currency: "USD" prints as the "$" symbol. Currencies without a known
  * symbol keep their ISO code so a printed total is never ambiguous.
@@ -142,7 +148,7 @@ export function printMoney(value: string | number | null | undefined, currency =
   if (!Number.isFinite(amount)) return '—'
   const code = currency.trim().toUpperCase()
   const symbol = CURRENCY_SYMBOLS[code]
-  const formatted = Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const formatted = Math.abs(amount).toLocaleString(undefined, { maximumFractionDigits: 0 })
   const sign = amount < 0 ? '-' : ''
   return symbol ? `${sign}${symbol}${formatted}` : `${sign}${code ? `${code} ` : ''}${formatted}`
 }
@@ -557,19 +563,19 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const reportDate = summary?.as_of ?? latest.entry.cost_date
   type MudSection = typeof mudSections[number]
   const mudMatrixRows: { label: string; value: (row: MudSection) => string }[] = [
-    { label: 'Opening Stock', value: row => decimalText(mudBalances.get(row.section_id)?.opening_stock) },
-    { label: 'Receipt', value: row => decimalText(mudBalances.get(row.section_id)?.receipt) },
-    { label: 'Additions', value: row => decimalText(optionalText(row, 'additions') ?? mudBalances.get(row.section_id)?.additions) },
-    { label: 'Total Mud', value: row => decimalText(optionalText(row, 'total_mud') ?? asNumber(mudBalances.get(row.section_id)?.opening_stock) + asNumber(mudBalances.get(row.section_id)?.receipt) + asNumber(mudBalances.get(row.section_id)?.additions)) },
-    { label: 'Losses', value: row => decimalText(row.consumption_losses) },
-    { label: 'Closing Stock', value: row => decimalText(mudBalances.get(row.section_id)?.closing_stock) },
+    { label: 'Opening Stock', value: row => quantityText(mudBalances.get(row.section_id)?.opening_stock) },
+    { label: 'Receipt', value: row => quantityText(mudBalances.get(row.section_id)?.receipt) },
+    { label: 'Additions', value: row => quantityText(optionalText(row, 'additions') ?? mudBalances.get(row.section_id)?.additions) },
+    { label: 'Total Mud', value: row => quantityText(optionalText(row, 'total_mud') ?? asNumber(mudBalances.get(row.section_id)?.opening_stock) + asNumber(mudBalances.get(row.section_id)?.receipt) + asNumber(mudBalances.get(row.section_id)?.additions)) },
+    { label: 'Losses', value: row => quantityText(row.consumption_losses) },
+    { label: 'Closing Stock', value: row => quantityText(mudBalances.get(row.section_id)?.closing_stock) },
     { label: 'Meterage (current depth)', value: row => depthText(sectionDepths.get(optionalText(row, 'hole_section_id') ?? row.section_id), 'm') },
     { label: 'Cost / BBL', value: row => row.cost_per_bbl == null ? '—' : printMoney(row.cost_per_bbl, currency) },
     { label: 'Reconciled Cost', value: row => row.reconciled_cost == null ? '—' : printMoney(row.reconciled_cost, currency) },
   ]
   const lossMetricRows = MUD_COST_LOSS_METRICS.map(metric => ({
     ...metric,
-    value: (row: MudSection) => decimalText(optionalText(row, metric.key)),
+    value: (row: MudSection) => quantityText(optionalText(row, metric.key)),
   }))
   const surfaceLossPerMeter = (row: MudSection) => {
     const depth = asNumber(sectionDepths.get(optionalText(row, 'hole_section_id') ?? row.section_id))
@@ -658,10 +664,10 @@ function ReportCover({ report }: { report: CostPrintReport }) {
 
   const IncidentTable = ({ title, rows, total }: { title: string; rows: CoverIncident[]; total: number }) => <section className="dcr-panel dcr-incident">
     <h2>{title}</h2>
-    <table><thead><tr><th>Activity</th><th>Days</th><th>Cost</th><th>Responsible party</th><th>Remarks</th></tr></thead>
-      <tbody>{rows.slice(0, 4).map((row, index) => <tr key={`${row.label}-${index}`}><td>{row.label}</td><td className="num">{row.days ? decimalText(row.days) : '—'}</td><td className="num">{printMoney(row.amount, currency)}</td><td>{row.party}</td><td>{row.remarks}</td></tr>)}
-      {!rows.length && <tr><td colSpan={5} className="dcr-none">No {title.split(' ')[0]} cost recorded.</td></tr>}</tbody>
-      <tfoot><tr><th>Total</th><th className="num">{decimalText(rows.reduce((sum, row) => sum + row.days, 0))}</th><th className="num">{printMoney(total, currency)}</th><th colSpan={2}>{rows.length > 4 ? `${rows.length - 4} additional incident(s) are included in this total.` : ''}</th></tr></tfoot>
+    <table><thead><tr><th>Responsible party</th><th>Days</th><th>Cost</th><th>Remarks</th></tr></thead>
+      <tbody>{rows.slice(0, 4).map((row, index) => <tr key={`${row.label}-${index}`}><td>{row.party}</td><td className="num">{row.days ? decimalText(row.days) : '—'}</td><td className="num">{printMoney(row.amount, currency)}</td><td>{row.remarks}</td></tr>)}
+      {!rows.length && <tr><td colSpan={4} className="dcr-none">No {title.split(' ')[0]} cost recorded.</td></tr>}</tbody>
+      <tfoot><tr><th>Total</th><th className="num">{decimalText(rows.reduce((sum, row) => sum + row.days, 0))}</th><th className="num">{printMoney(total, currency)}</th><th>{rows.length > 4 ? `${rows.length - 4} additional incident(s) are included in this total.` : ''}</th></tr></tfoot>
     </table>
   </section>
 
@@ -680,7 +686,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
     <div className="dcr-layout">
       <div className="dcr-left">
         <div className="dcr-topline">
-          <section className="dcr-panel dcr-milestone"><h2>Reporting milestone</h2><dl><dt>{reportMilestoneLabel(report)}</dt><dd>{spud ? `${spud.replace('T', ' ').slice(0, 16)} hrs` : 'Not recorded'}</dd><dt>Current report date</dt><dd>{displayDate(reportDate)} · 24:00 hrs</dd></dl></section>
+          <section className="dcr-panel dcr-milestone"><h2>Reporting milestone</h2><dl><dt>{reportMilestoneLabel(report)}</dt><dd>{spud ? `${spud.replace('T', ' ').slice(0, 16)} hrs` : 'Not recorded'}</dd><dt>Current report date</dt><dd>{displayDate(reportDate)} · 23:59 hrs</dd></dl></section>
           <section className="dcr-panel dcr-depth"><h2>Section-wise planned depth &amp; current depth</h2><table><thead><tr><th>Section</th><th>Planned depth (m)</th><th>Current depth (m)</th></tr></thead><tbody>{sections.map(section => <tr key={section.hole_section_id}><td>{section.section_name}</td><td className="num">{depthText(section.to_depth, 'm')}</td><td className="num">{depthText(sectionDepths.get(section.hole_section_id), 'm')}</td></tr>)}</tbody></table></section>
           <section className="dcr-panel dcr-time"><h2>Time position</h2><dl><dt>Planned</dt><dd>{decimalText(plannedDays)} days</dd><dt>Actual</dt><dd>{decimalText(actualDays)} days</dd><dt>Actual against planned activities</dt><dd>{decimalText(plannedActivityDays)} days</dd><dt>NPT</dt><dd>{decimalText(nptDays)} days</dd><dt>UPA</dt><dd>{decimalText(upaDays)} days</dd></dl></section>
         </div>
@@ -720,7 +726,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
         <div className={`dcr-stack${ndtInspections.length ? ' dcr-stack--ndt' : ''}`}>
           <section className="dcr-panel dcr-lih"><h2>LIH cost · manual register deduction from the AFE</h2><div><span>LIH cost <strong>{printMoney(lihTotal, currency)}</strong></span><span className="dcr-lih-deduct">Deducted from AFE <strong>{printMoney(lihTotal, currency)}</strong></span><span>Actual incl. LIH <strong>{printMoney(actualIncludingLih, currency)}</strong></span><span>AFE available after LIH <strong>{printMoney(afeAvailable, currency)}</strong></span></div><p className="dcr-lih-note">{lihEntryCount ? `${lihLineCount} item${lihLineCount === 1 ? '' : 's'} across ${lihEntryCount} LIH register day${lihEntryCount === 1 ? '' : 's'} · item detail prints on the cumulative pages.` : 'No LIH cost recorded for this report.'}</p></section>
           <section className="dcr-panel dcr-overall"><h2>AFE vs actual summary</h2><table><tbody><tr><th>Services</th><td>{printMoney(servicePosition.planned, currency)}</td><td>{printMoney(servicePosition.actual, currency)}</td></tr><tr><th>Consumables</th><td>{printMoney(consumablePosition.planned, currency)}</td><td>{printMoney(consumableComparisonActual, currency)}</td></tr><tr><th>Tangibles</th><td>{printMoney(tangiblePosition.planned, currency)}</td><td>{printMoney(tangiblePosition.actual, currency)}</td></tr><tr><th>Other expenses</th><td>—</td><td>{printMoney(otherExpenses, currency)}</td></tr><tr><th>LIH cost · register</th><td>—</td><td>{printMoney(lihTotal, currency)}</td></tr><tr className="dcr-total"><th>Total</th><td>{printMoney(totalPlanned, currency)}</td><td>{printMoney(actualIncludingLih, currency)}</td></tr></tbody></table><p>AFE available = {printMoney(balance, currency)} · {percent(actualIncludingLih, totalPlanned)} used</p></section>
-          {ndtInspections.length > 0 && <section className="dcr-panel dcr-ndt"><h2>NDT Inspection Details</h2><table><colgroup><col/><col/><col/><col/><col/></colgroup><thead><tr><th rowSpan={2}>Description</th><th rowSpan={2}>Received</th><th rowSpan={2}>Consumed</th><th colSpan={2}>Backloads</th></tr><tr><th>Good</th><th>Bad</th></tr></thead><tbody>{ndtInspections.map(row => <tr key={row.id}><td>{row.description}</td><td className="num">{decimalText(row.quantity_received)}</td><td className="num">{decimalText(row.quantity_consumed)}</td><td className="num">{decimalText(row.quantity_backloaded_good)}</td><td className="num">{decimalText(row.quantity_backloaded_bad)}</td></tr>)}</tbody></table></section>}
+          {ndtInspections.length > 0 && <section className="dcr-panel dcr-ndt"><h2>NDT Inspection Details</h2><table><colgroup><col/><col/><col/><col/><col/></colgroup><thead><tr><th rowSpan={2}>Description</th><th rowSpan={2}>Received</th><th rowSpan={2}>Consumed</th><th colSpan={2}>Backloads</th></tr><tr><th>Good</th><th>Bad</th></tr></thead><tbody>{ndtInspections.map(row => <tr key={row.id}><td>{row.description}</td><td className="num">{quantityText(row.quantity_received)}</td><td className="num">{quantityText(row.quantity_consumed)}</td><td className="num">{quantityText(row.quantity_backloaded_good)}</td><td className="num">{quantityText(row.quantity_backloaded_bad)}</td></tr>)}</tbody></table></section>}
         </div>
         <IncidentTable title="UPA summary" rows={upa} total={asNumber(summary?.totals.upa ?? latestComparison.upa_to_date)}/>
         <IncidentTable title="NPT summary" rows={npt} total={asNumber(summary?.totals.npt ?? latestComparison.npt_to_date)}/>
@@ -768,7 +774,7 @@ function LihSchedule({ report }: { report: CostPrintReport }) {
                 <td>{lihMeasure(line.fish_neck_od)} × {lihMeasure(line.fish_neck_length)}</td>
                 <td>{line.serial_number || '—'}</td>
                 <td>{line.connection || '—'}</td>
-                <td className="num">{lihMeasure(line.no_of_units)} {line.unit}</td>
+                <td className="num">{quantityText(line.no_of_units)} {line.unit}</td>
                 <td className="num">{printMoney(line.unit_cost, currency)}</td>
                 <td className="num">{printMoney(line.total_cost, currency)}</td>
                 <td>{line.remarks || '—'}</td>

@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom'
 import { depthToMeters } from '../../lib/units'
-import { amountText, type AfeEstimate, type AfeStatusEvent, type CurrencySetup, type ServiceLineOut } from '../../lib/afe'
+import { type AfeEstimate, type AfeStatusEvent, type CurrencySetup, type ServiceLineOut } from '../../lib/afe'
 import { groupServiceOptions, sortServicesByGroup } from '../../lib/serviceGroups'
 import { APP_NAME } from '../../lib/appInfo'
 
@@ -11,8 +11,18 @@ import { APP_NAME } from '../../lib/appInfo'
 // Plain HTML tables (not the grid), so every line prints. Hidden on screen, shown only by the
 // @media print rules in styles.css, which Daily Cost printing reuses through .ps-* classes.
 
+// Formatting is confined to the print report; stored values retain their precision.
+const amountText = (value: string | number | null | undefined, currency = ''): string => {
+  if (value === null || value === undefined || value === '') return '—'
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '—'
+  const formatted = Math.abs(number).toLocaleString(undefined, { maximumFractionDigits: 0 })
+  const prefix = currency === 'USD' ? '$' : currency ? `${currency} ` : ''
+  return `${number < 0 ? '-' : ''}${prefix}${formatted}`
+}
+
 const quantityText = (value: string): string =>
-  Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })
 
 const daysText = (value: string | number | null | undefined): string => {
   const parsed = Number(value)
@@ -92,6 +102,7 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
   const consumableCategories = ['Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits'] as const
   const standard = summary.currency.standard_currency
   const multiCurrency = summary.currency.multi_currency
+  const amountHeading = standard === 'USD' && !multiCurrency ? 'Amount in USD' : 'Amount'
   const pending = 'Pending conversion'
 
   // Latest recorded move per workflow action. A reopen cancels the stages before it, so a
@@ -158,7 +169,7 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
           </colgroup>
           <thead>
             <tr>
-              <th>#</th><th>Service</th><th>Basis / entered rates</th><th className="num">Amount</th><th>Remarks</th>
+              <th>#</th><th>Service</th><th>Basis / entered rates</th><th className="num">{amountHeading}</th><th>Remarks</th>
             </tr>
           </thead>
           {printGroups.map(({ group, options: lines }, groupIndex) => {
@@ -182,7 +193,7 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
               ))}
               <tr className="ps-subtotal ps-total ps-service-group-total">
                 <td/>
-                <th colSpan={2} scope="row">Total {label}{standard ? ` (${standard})` : ''}</th>
+                <th colSpan={2} scope="row">Total {label}{standard && standard !== 'USD' ? ` (${standard})` : ''}</th>
                 <td className="num">{total === null ? pending : amountText(total, standard)}</td>
                 <td/>
               </tr>
@@ -191,7 +202,7 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
           <tbody>
             {services.length === 0 && <tr className="ps-line ps-services-empty"><td/><td colSpan={4} className="ps-empty">No service lines.</td></tr>}
             <tr className="ps-subtotal ps-services-total">
-              <td colSpan={3}>Services total{standard ? ` (${standard})` : ''}</td>
+              <td colSpan={3}>Services total{standard && standard !== 'USD' ? ` (${standard})` : ''}</td>
               <td className="num">{summary.services_total === null ? pending : amountText(summary.services_total, standard)}</td>
               <td>{multiCurrency ? 'converted at saved rates' : ''}</td>
             </tr>
@@ -214,7 +225,7 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
             })}
             <tr className="ps-subtotal ps-total ps-service-group-total ps-cost-group-total">
               <td/>
-              <th colSpan={2} scope="row">Total Consumables{standard ? ` (${standard})` : ''}</th>
+              <th colSpan={2} scope="row">Total Consumables{standard && standard !== 'USD' ? ` (${standard})` : ''}</th>
               <td className="num">{summary.consumables_total === null ? pending : amountText(summary.consumables_total, standard)}</td>
               <td>{multiCurrency ? 'converted at saved rates' : ''}</td>
             </tr>
@@ -233,14 +244,14 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
             </tr>
             <tr className="ps-subtotal ps-total ps-service-group-total ps-cost-group-total">
               <td/>
-              <th colSpan={2} scope="row">Total Tangibles{standard ? ` (${standard})` : ''}</th>
+              <th colSpan={2} scope="row">Total Tangibles{standard && standard !== 'USD' ? ` (${standard})` : ''}</th>
               <td className="num">{summary.tangibles_total === null ? pending : amountText(summary.tangibles_total, standard)}</td>
               <td>{multiCurrency ? 'converted at saved rates' : ''}</td>
             </tr>
           </tbody>
           <tfoot>
             <tr className="ps-total ps-grand">
-              <th colSpan={3}>Total AFE amount{standard ? ` (${standard})` : ''}</th>
+              <th colSpan={3}>Total AFE amount{standard && standard !== 'USD' ? ` (${standard})` : ''}</th>
               <td className="num">{summary.total === null ? pending : amountText(summary.total, standard)}</td>
               <td/>
             </tr>
@@ -286,11 +297,11 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
       {consumables.length === 0 ? <p className="ps-empty">No consumable lines.</p> : (
         <table className="ps-table">
           <colgroup>
-            <col style={{ width: '23%' }}/><col style={{ width: '12%' }}/><col style={{ width: '12%' }}/><col style={{ width: '8%' }}/><col style={{ width: '9%' }}/><col style={{ width: '6%' }}/><col style={{ width: '16%' }}/><col style={{ width: '14%' }}/>
+            <col style={{ width: '23%' }}/><col style={{ width: '12%' }}/><col style={{ width: '12%' }}/><col style={{ width: '8%' }}/><col style={{ width: '15%' }}/><col style={{ width: '16%' }}/><col style={{ width: '14%' }}/>
           </colgroup>
           <thead>
             <tr>
-              <th>Category / item</th><th>Section</th><th>Phase</th><th className="num">Quantity</th><th className="num">Rate</th><th>Ccy</th><th className="num">Amount</th><th>Remarks</th>
+              <th>Category / item</th><th>Section</th><th>Phase</th><th className="num">Quantity</th><th className="num">Rate</th><th className="num">{amountHeading}</th><th>Remarks</th>
             </tr>
           </thead>
           <tbody>
@@ -305,14 +316,13 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
                 <td>{nameOnly(line.section_label)}</td>
                 <td>{line.phase_label ? nameOnly(line.phase_label) : '—'}</td>
                 <td className="num">{line.category === 'Drill Bits' ? quantityText(line.quantity) : '—'}</td>
-                <td className="num">{line.effective_rate ? amountText(line.effective_rate) : '—'}</td>
-                <td>{line.currency}</td>
+                <td className="num">{line.effective_rate ? amountText(line.effective_rate, line.currency) : '—'}</td>
                 <td className="num">{amountText(line.amount, line.currency)}</td>
                 <td className="ps-notes">{line.remarks || '—'}</td>
               </tr>
             ))}
             <tr className="ps-subtotal">
-              <td colSpan={6}>Consumables total{standard ? ` (${standard})` : ''}</td>
+              <td colSpan={5}>Consumables total{standard && standard !== 'USD' ? ` (${standard})` : ''}</td>
               <td className="num">{summary.consumables_total === null ? pending : amountText(summary.consumables_total, standard)}</td>
               <td>{multiCurrency ? 'converted at saved rates' : ''}</td>
             </tr>
@@ -324,11 +334,11 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
       {tangibles.length === 0 ? <p className="ps-empty">No tangible lines.</p> : (
         <table className="ps-table">
           <colgroup>
-            <col style={{ width: '23%' }}/><col style={{ width: '12%' }}/><col style={{ width: '8%' }}/><col style={{ width: '8%' }}/><col style={{ width: '9%' }}/><col style={{ width: '6%' }}/><col style={{ width: '16%' }}/><col style={{ width: '18%' }}/>
+            <col style={{ width: '23%' }}/><col style={{ width: '12%' }}/><col style={{ width: '8%' }}/><col style={{ width: '8%' }}/><col style={{ width: '15%' }}/><col style={{ width: '16%' }}/><col style={{ width: '18%' }}/>
           </colgroup>
           <thead>
             <tr>
-              <th>Tangible</th><th>Manufacturer</th><th>UOM</th><th className="num">Quantity</th><th className="num">Rate</th><th>Ccy</th><th className="num">Amount</th><th>Remarks</th>
+              <th>Tangible</th><th>Manufacturer</th><th>UOM</th><th className="num">Quantity</th><th className="num">Rate</th><th className="num">{amountHeading}</th><th>Remarks</th>
             </tr>
           </thead>
           <tbody>
@@ -341,14 +351,13 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
                 <td>{line.manufacturer_name || '—'}</td>
                 <td>{line.uom || '—'}</td>
                 <td className="num">{quantityText(line.quantity)}</td>
-                <td className="num">{amountText(line.effective_rate)}{line.override_rate ? ' (override)' : ''}</td>
-                <td>{line.currency}</td>
+                <td className="num">{amountText(line.effective_rate, line.currency)}{line.override_rate ? ' (override)' : ''}</td>
                 <td className="num">{amountText(line.amount, line.currency)}</td>
                 <td className="ps-notes">{line.remarks || '—'}</td>
               </tr>
             ))}
             <tr className="ps-subtotal">
-              <td colSpan={6}>Tangibles total{standard ? ` (${standard})` : ''}</td>
+              <td colSpan={5}>Tangibles total{standard && standard !== 'USD' ? ` (${standard})` : ''}</td>
               <td className="num">{summary.tangibles_total === null ? pending : amountText(summary.tangibles_total, standard)}</td>
               <td>{multiCurrency ? 'converted at saved rates' : ''}</td>
             </tr>
