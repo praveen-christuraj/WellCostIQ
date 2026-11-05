@@ -27,6 +27,12 @@
   line's remarks. New set lines start with blank remarks, which remain blank unless the user enters
   them.
 
+## Draft daily-sheet date correction (2026-11-05)
+- **User directive.** A daily sheet saved as Draft could not correct a wrongly selected operating date. The sheet now shows a **Sheet date** strip with **Change date** for users holding `daily-cost:update`; submitted sheets and read-only drafts do not offer it.
+- **Dedicated endpoint.** `PATCH /api/v1/daily-cost/entries/{id}/date` (`DailyCostDateUpdate`) moves only `cost_date`. It keeps the sheet ID/code, cost lines, locked AFE budget and rate snapshots, rejects submitted sheets and duplicate active well+AFE+date combinations with **409**, and writes an audit summary naming the old → new date. Cumulative totals, depth sequencing, progress counts and reports recalculate from the new date through the normal `get_day` path. No migration or new permission.
+- **Unsaved edits are preserved.** The dialog updates the saved day/progress/comparison in place and leaves the cost payload untouched, so a date correction never discards typed lines or remarks; the preview recalculates against the new date. `FormDialog` supplies the standard cancel/save/discard guard.
+- **Verification.** Backend regression `test_draft_sheet_date_correction_keeps_costs_locks_and_reorders_cumulative_totals` covers cost/lock retention, cumulative reordering, register propagation, audit, duplicate/invalid/tenant/RBAC/submitted boundaries. Full backend suite **344 passed**; frontend production build, `make ui-check` (40), `make daily-cost-check` and the new `make daily-cost-date-check` pass.
+
 ## Browser-compatible NDT client keys (2026-11-04)
 - NDT editor row keys are client-only and are removed before saving. Their generator uses
   `crypto.randomUUID()` when it is callable, with a timestamp/random fallback for browsers that

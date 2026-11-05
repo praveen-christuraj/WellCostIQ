@@ -102,6 +102,10 @@ export default function DailyCostSheet() {
   const [statusRemarks, setStatusRemarks] = useState('')
   const [statusBusy, setStatusBusy] = useState(false)
   const [statusError, setStatusError] = useState('')
+  const [dateDialogOpen, setDateDialogOpen] = useState(false)
+  const [sheetDate, setSheetDate] = useState('')
+  const [dateBusy, setDateBusy] = useState(false)
+  const [dateError, setDateError] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
   const [importRows, setImportRows] = useState<ImportRow[]>([])
@@ -205,7 +209,7 @@ export default function DailyCostSheet() {
   const leadLagInvalid = Boolean(payload.lead_lag_kind) && !validLeadLagDays(payload.lead_lag_kind, payload.lead_lag_days)
   const hasPreviewForEdits = Boolean(preview && dirty)
   const canExport = can('daily-cost:export')
-  const saveDisabled = !dirty || saving || previewing || Boolean(previewError) || leadLagInvalid
+  const saveDisabled = !dirty || saving || previewing || dateBusy || Boolean(previewError) || leadLagInvalid
 
   useEffect(() => {
     if (!day || !dirty || !editable || loading || leadLagInvalid) {
@@ -322,6 +326,37 @@ export default function DailyCostSheet() {
       return false
     } finally {
       setSaving(false)
+    }
+  }
+
+  const openDateDialog = () => {
+    if (!day) return
+    setSheetDate(day.entry.cost_date)
+    setDateError('')
+    setDateDialogOpen(true)
+  }
+
+  const changeSheetDate = async () => {
+    if (!day || !editable || dateBusy || !sheetDate || sheetDate === day.entry.cost_date) return
+    const previousDate = day.entry.cost_date
+    setDateBusy(true)
+    setDateError('')
+    try {
+      const updated = await api<DailyCostDay>(`/daily-cost/entries/${entryId}/date`, {
+        method: 'PATCH', body: body({ cost_date: sheetDate }),
+      })
+      // Keep the in-progress cost payload untouched: a date correction must not
+      // discard unsaved line edits. The preview recalculates from the new date.
+      setDay(updated)
+      setProgress(updated.progress)
+      setPreview(null)
+      setPreviewError('')
+      setDateDialogOpen(false)
+      setNotice(`Sheet date changed from ${displayDate(previousDate)} to ${displayDate(updated.entry.cost_date)}. Costs and locked rates were kept${dirty ? '; your unsaved cost edits are still here' : ''}.`)
+    } catch (caught) {
+      setDateError(caught instanceof Error ? caught.message : 'The sheet date could not be changed')
+    } finally {
+      setDateBusy(false)
     }
   }
 
@@ -975,6 +1010,21 @@ export default function DailyCostSheet() {
       </Box>}
     />
 
+    <Paper variant="outlined" sx={{ p: 1.4, borderRadius: 2, mb: 1.6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, flexWrap: 'wrap' }}>
+      <Box display="flex" alignItems="baseline" gap={1} flexWrap="wrap">
+        <Typography fontSize={12} fontWeight={800} color="text.secondary">Sheet date</Typography>
+        <Typography fontSize={15} fontWeight={800}>{displayDate(entry.cost_date)}</Typography>
+        <Typography fontSize={11.5} color="text.secondary">
+          {editable
+            ? 'Draft — correct the operating date without re-entering costs.'
+            : entry.status === 'draft'
+              ? 'Draft — read-only without the Daily Cost update permission.'
+              : 'Submitted — the operating date is locked.'}
+        </Typography>
+      </Box>
+      {editable && <Button variant="outlined" size="small" startIcon={<EditOutlined/>} disabled={saving || dateBusy} onClick={openDateDialog}>Change date</Button>}
+    </Paper>
+
     {progress && <WellProgressPanel
       wellId={entry.well_id} scopes={[progress]} canEdit={can('daily-cost:update')}
       asOfLabel={`the sheet date (${displayDate(entry.cost_date)})`}
@@ -1296,6 +1346,31 @@ export default function DailyCostSheet() {
 
     {/* Intercepts navigation, the back button and tab close while the sheet has unsaved edits. */}
     {leaveGuard}
+
+    <FormDialog
+      open={dateDialogOpen && editable}
+      title="Change sheet date"
+      subtitle={`Current sheet date: ${displayDate(entry.cost_date)}. Choose the operating date these costs belong to.`}
+      onClose={() => { if (!dateBusy) setDateDialogOpen(false) }}
+      onSubmit={() => void changeSheetDate()}
+      busy={dateBusy}
+      busyLabel="Changing date…"
+      submitLabel="Save new date"
+      submitDisabled={!editable || dateBusy || !sheetDate || sheetDate === entry.cost_date}
+      dirty={sheetDate !== entry.cost_date}
+      maxWidth="xs"
+    >
+      <Box display="grid" gap={1.5}>
+        <TextField
+          autoFocus required type="date" label="New sheet date" value={sheetDate}
+          onChange={event => { setSheetDate(event.target.value); setDateError('') }}
+          InputLabelProps={{ shrink: true }}
+          helperText="The sheet keeps its ID, cost lines, locked rates and AFE budget. Cumulative totals and reports use the new date."
+        />
+        <Alert severity="info">Only Draft sheets can change date. A date already used by another active sheet for this well and AFE is rejected.</Alert>
+        {dateError && <Alert severity="error">{dateError}</Alert>}
+      </Box>
+    </FormDialog>
 
     <FormDialog open={Boolean(statusAction)} title={statusTitle} subtitle={statusSubtitle} onClose={() => { if (!statusBusy) setStatusAction(null) }} onSubmit={() => void completeStatusAction()} busy={statusBusy} submitLabel={statusAction === 'submit' ? 'Submit daily sheet' : 'Reopen as Draft'} submitDisabled={statusAction === 'reopen' && statusRemarks.trim().length < 3}>
       <Box display="grid" gap={1.5}>

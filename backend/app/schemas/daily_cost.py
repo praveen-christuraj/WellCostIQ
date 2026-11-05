@@ -84,6 +84,16 @@ class DailyCostEntryCreate(_Strict):
         return _blank_to_none(value)
 
 
+class DailyCostDateUpdate(_Strict):
+    """Draft-only operating-date correction.
+
+    Changing the date never rewrites the locked AFE budget, catalogue rates or
+    recorded cost lines; it only moves the sheet on the well's cost timeline.
+    """
+
+    cost_date: date
+
+
 class DailyCostLineInput(_Strict):
     """Common typed fields for each actual cost line.
 
