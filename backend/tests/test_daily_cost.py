@@ -1792,3 +1792,46 @@ def test_ndt_inspections_bulk_lines_filters_and_deleted_lifecycle():
 
         foreign = client.get("/api/v1/ndt-inspections/entries", headers=login(client, "south"))
         assert foreign.status_code == 200 and foreign.json() == []
+
+
+def test_cost_report_groups_services_by_the_configured_service_group():
+    """The Daily Cost report groups services exactly like the AFE estimate.
+
+    The reporting group is snapshotted when the AFE is locked, so a group assigned
+    (or corrected) in Master Data afterwards used to leave every service in the
+    default group: the printed schedule then showed all group headings and every
+    service on its own. The report now resolves the configured group and keeps the
+    locked snapshot only as the fallback, so each service prints under its group.
+    """
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup_daily_sheet(client, headers)
+        entry_id = setup["entry"]["id"]
+        baseline_line = next(
+            row for row in setup["baseline"]["budget_lines"] if row["budget_kind"] == "service"
+        )
+        assert baseline_line["service_group"] == "Formation Evaluation"
+
+        regrouped = client.patch(
+            f"/api/v1/master-data/services/{setup['service']['id']}", headers=headers,
+            json={"service_group": "Well Services"},
+        )
+        assert regrouped.status_code == 200, regrouped.text
+
+        day = client.get(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers)
+        assert day.status_code == 200, day.text
+        day_line = next(row for row in day.json()["comparison"]["budget_lines"] if row["budget_kind"] == "service")
+        assert day_line["service_group"] == "Well Services"
+
+        summary = client.get(f"/api/v1/daily-cost/wells/{setup['well']['id']}/cost-summary", headers=headers)
+        assert summary.status_code == 200, summary.text
+        summary_line = next(row for row in summary.json()["budget_lines"] if row["budget_kind"] == "service")
+        assert summary_line["service_group"] == "Well Services"
+
+        # Only the report resolves the live group; the locked allowance snapshot is
+        # untouched, so the daily sheet's rate and plan history cannot drift.
+        locked = client.get(f"/api/v1/daily-cost/entries/{entry_id}/baseline", headers=headers)
+        assert locked.status_code == 200, locked.text
+        assert next(
+            row for row in locked.json()["budget_lines"] if row["budget_kind"] == "service"
+        )["service_group"] == "Formation Evaluation"

@@ -326,6 +326,22 @@ assert.equal(denseCovers[0].querySelectorAll('.dcr-cost-group-row').length, 7, '
 assert.deepEqual(denseCovers.map(cover => cover.className.match(/dcr-density-(\d)/)[1]), ['4', '4', '4'],
   'density accounts for every item row, structural group heading and NDT row')
 
+// A locked allowance snapshot can carry an older spelling of its reporting group.
+// It must still print under that group rather than adding a second heading, so a
+// service always sits beneath the group it belongs to.
+const legacyGrouped = { ...second, comparison: { ...second.comparison, budget_lines: second.comparison.budget_lines.map(row =>
+  row.budget_key === 'service:land' ? { ...row, service_group: 'Land Facilities & Preparation' } : row) } }
+await act(async () => root.render(<DailyCostPrintSheet coversOnly reports={[
+  { title: 'Legacy grouping', period: 'Oct 11, 2026', days: [legacyGrouped] },
+]}/>))
+const legacyPanel = document.querySelector('.afe-print-sheet .dcr-cost-panel')
+assert.equal(legacyPanel.querySelectorAll('.dcr-cost-group-row').length, 7,
+  'a legacy group spelling never adds a second heading')
+const legacyLand = [...legacyPanel.querySelectorAll('tbody.dcr-cost-group')].find(
+  group => group.querySelector('.dcr-cost-group-row th').textContent === 'Land Facilities & Preparation')
+assert.ok(legacyLand && [...legacyLand.querySelectorAll('.dcr-cost-item-row')].some(row => row.cells[0].textContent === 'Site preparation'),
+  'a service whose snapshot uses the legacy spelling still prints beneath its own group heading')
+
 const afeEstimateSource = readFileSync('src/pages/AfeEstimate.tsx', 'utf8')
 const dailyCostSheetSource = readFileSync('src/pages/DailyCostSheet.tsx', 'utf8')
 for (const defaultRemark of ['Added from costing set', 'Prepared from costing set']) {
@@ -547,11 +563,11 @@ assert.match(styles, /\.dcr-density-4 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr
   'density 4 compresses the stack, mud cost and loss tables by name')
 assert.ok(!styles.includes('.dcr-bottomline .dcr-panel table'), 'density type sizes follow named panels, not the lower band, so moving a panel never changes its printed size')
 assert.ok(styles.includes('.dcr-cost-panel table { align-self: start; height: auto; font-size: 6.4pt'), 'the merged cost table uses intrinsic row and font sizing')
-assert.ok(styles.includes('.dcr-cost-panel td { padding: .855mm .34mm; }'), 'normal cost rows are another 1.5x taller')
-assert.ok(styles.includes('.dcr-density-2 .dcr-cost-panel td { padding: .4275mm .3mm; }'), 'density-2 cost rows retain the additional 1.5x increase')
-assert.ok(styles.includes('.dcr-density-3 .dcr-cost-panel td { padding: .2925mm .24mm; }'), 'density-3 cost rows retain the additional 1.5x increase')
-assert.ok(styles.includes('.dcr-density-4 .dcr-cost-panel td { padding: .18mm .18mm; }'), 'density-4 cost rows retain the additional 1.5x increase')
-assert.ok(styles.includes('.dcr-cost-group-row th { padding: .48mm .34mm;'), 'group names use dedicated full-width styled rows')
+assert.ok(styles.includes('.dcr-cost-panel td { padding: 1.71mm .34mm; }'), 'normal cost rows are twice as tall as the previous report')
+assert.ok(styles.includes('.dcr-density-2 .dcr-cost-panel td { padding: .855mm .3mm; }'), 'density-2 cost rows retain the same doubling')
+assert.ok(styles.includes('.dcr-density-3 .dcr-cost-panel td { padding: .585mm .24mm; }'), 'density-3 cost rows retain the same doubling')
+assert.ok(styles.includes('.dcr-density-4 .dcr-cost-panel td { padding: .36mm .18mm; }'), 'density-4 cost rows retain the same doubling')
+assert.ok(styles.includes('.dcr-cost-group-row th { padding: .96mm .34mm;'), 'group names use dedicated full-width styled rows, doubled in height with the item rows')
 assert.ok(!styles.includes('.dcr-cost-panel table { height: 100%; }'), 'the merged schedule is not stretched into oversized rows')
 
 // Verify scoped Well Sub Activities and per-scope Well lifecycle across UI sources and live dialog rendering.

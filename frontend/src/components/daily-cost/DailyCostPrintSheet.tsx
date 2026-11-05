@@ -8,7 +8,7 @@ import {
 import { MUD_COST_LOSS_METRICS, type MudCostMaterialBalance, type MudCostReconciliation } from '../../lib/mudCost'
 import { lihMeasure, type LihCostReport } from '../../lib/lihCost'
 import type { NdtEntry } from '../../lib/ndtInspection'
-import { compareServiceCodes, compareServiceGroups, serviceGroupLabel } from '../../lib/serviceGroups'
+import { SERVICE_GROUPS, compareServiceCodes, compareServiceGroups, serviceGroupLabel } from '../../lib/serviceGroups'
 import { depthToMeters } from '../../lib/units'
 import { APP_NAME } from '../../lib/appInfo'
 
@@ -209,6 +209,44 @@ type DailyCoverCostGroup = {
   rows: DailyCostComparisonLine[]
 }
 
+/**
+ * Reporting group a service line prints under. Values arrive from the locked AFE
+ * allowance snapshot, so the everyday spellings an older sheet can carry are
+ * matched to the canonical group instead of creating a second heading. An
+ * unknown value is returned untouched and stays visibly unclassified.
+ */
+const SERVICE_GROUP_ALIASES: Record<string, string> = {
+  rig: 'Rig Operations',
+  'rig ops': 'Rig Operations',
+  'rig operation': 'Rig Operations',
+  formation: 'Formation Evaluation',
+  'formation evaluation services': 'Formation Evaluation',
+  evaluation: 'Formation Evaluation',
+  'well service': 'Well Services',
+  'land facilities & preparation': 'Land Facilities and Preparation',
+  'land facilities and prep': 'Land Facilities and Preparation',
+  'land prep': 'Land Facilities and Preparation',
+  'land preparation': 'Land Facilities and Preparation',
+  'facilities and preparation': 'Land Facilities and Preparation',
+  misc: 'Miscellaneous Services',
+  'misc services': 'Miscellaneous Services',
+  miscellaneous: 'Miscellaneous Services',
+  'miscellaneous service': 'Miscellaneous Services',
+  micellaneous: 'Miscellaneous Services',
+  'micellaneous services': 'Miscellaneous Services',
+  supervision: 'Supervisions',
+  'supervision services': 'Supervisions',
+  supervisory: 'Supervisions',
+  'supervisory services': 'Supervisions',
+}
+
+function canonicalServiceGroup(value: string | null | undefined): string {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed) return ''
+  const canonical = SERVICE_GROUPS.find(group => group.toLowerCase() === trimmed.toLowerCase())
+  return canonical ?? SERVICE_GROUP_ALIASES[trimmed.toLowerCase()] ?? trimmed
+}
+
 function reportCostRows(budgetLines: DailyCostComparisonLine[]) {
   // Services print in the fixed reporting-group sequence, then by item code.
   const services = [...budgetLines]
@@ -273,15 +311,16 @@ function reportCostRows(budgetLines: DailyCostComparisonLine[]) {
  * never be silently presented as Miscellaneous.
  */
 function dailyCoverCostGroups(services: DailyCostComparisonLine[], consumables: DailyCostComparisonLine[]): DailyCoverCostGroup[] {
+  const groupOf = (line: DailyCostComparisonLine) => canonicalServiceGroup(line.service_group)
   const groups = DAILY_COVER_GROUP_ORDER.map(group => ({
     key: group,
     label: printedServiceGroup(group),
     rows: group === 'Consumables'
       ? consumables.map(line => ({ ...line, service_group: 'Consumables' }))
-      : services.filter(line => line.service_group?.trim() === group),
+      : services.filter(line => groupOf(line) === group),
   }))
   const recognized = new Set<string>(DAILY_COVER_GROUP_ORDER.filter(group => group !== 'Consumables'))
-  const unclassified = services.filter(line => !recognized.has(line.service_group?.trim() ?? ''))
+  const unclassified = services.filter(line => !recognized.has(groupOf(line)))
   return unclassified.length
     ? [...groups, { key: 'unclassified', label: 'Unclassified Services', rows: unclassified }]
     : groups
@@ -407,10 +446,13 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   // Page one has a fixed height. NDT Inspection Details stacks in the lower band
   // under LIH and the AFE vs actual summary, so its heading and rows draw on the
   // same height as Services rows (measured: each NDT row costs about 1.5 Services
-  // rows; the panel heading about 3.5). Thresholds keep a one-row margin.
+  // rows; the panel heading about 3.5). Thresholds keep a one-row margin, and
+  // they step down earlier than the previous report because every cost row and
+  // group heading is now twice as tall: the same page-one band therefore holds
+  // fewer rows before the density step has to compress it.
   const coverLoad = coverCostRows.length + coverCostGroups.length
     + (ndtInspections.length ? 3.5 + ndtInspections.length * 1.5 : 0)
-  const densityStep = coverLoad > 21 ? 4 : coverLoad > 18 ? 3 : coverLoad > 12 ? 2 : 1
+  const densityStep = coverLoad > 18 ? 4 : coverLoad > 15 ? 3 : coverLoad > 10 ? 2 : 1
   const actualIncludingLih = totalActual + lihTotal
   const afeAvailable = totalPlanned - lihTotal
   const balance = asNumber(
