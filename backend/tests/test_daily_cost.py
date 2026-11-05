@@ -308,6 +308,85 @@ def test_daily_cost_locks_rates_prices_bulk_actuals_and_tracks_submission():
             assert {"rate_override", "import", "submit", "reopen", "soft_delete", "restore"}.issubset(actions)
 
 
+def test_draft_sheet_date_correction_keeps_costs_locks_and_reorders_cumulative_totals():
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup_daily_sheet(client, headers)
+        entry_id = setup["entry"]["id"]
+        rate = setup["baseline"]["service_rates"][0]
+        service_line = {
+            "activity_id": setup["activity"]["id"], "hole_section_id": setup["hole"]["id"],
+            "phase_id": setup["phase"]["id"], "sub_activity_id": setup["sub1"]["id"],
+            "vendor_id": setup["vendor"]["id"], "quantity": "12", "quantity_unit": "hours",
+            "currency": "USD", "override_rate": None, "override_reason": "", "remarks": "Date correction",
+            "service_id": setup["service"]["id"], "baseline_service_rate_id": rate["id"],
+            "charging_basis": "Day Rate", "charge_category": "Operation",
+        }
+        saved = client.put(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers, json={
+            "remarks": "Original date", "services": [service_line], "consumables": [], "tangibles": [],
+        })
+        assert saved.status_code == 200, saved.text
+        before = saved.json()
+        assert Decimal(before["entry"]["total_cost"]) == Decimal("50.00")
+
+        # A later draft exists, but it is not yet part of this sheet's cumulative total.
+        later = _post(client, "/api/v1/daily-cost/entries", headers, {
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": "2026-10-11",
+        })
+        later_save = client.put(f"/api/v1/daily-cost/entries/{later['entry']['id']}", headers=headers, json={
+            "services": [{**service_line, "quantity": "24"}], "consumables": [], "tangibles": [],
+        })
+        assert later_save.status_code == 200, later_save.text
+        assert Decimal(before["comparison"]["actual_to_date"]) == Decimal("50.00")
+
+        moved = client.patch(f"/api/v1/daily-cost/entries/{entry_id}/date", headers=headers, json={"cost_date": "2026-10-12"})
+        assert moved.status_code == 200, moved.text
+        after = moved.json()
+        assert after["entry"]["cost_date"] == "2026-10-12"
+        assert after["entry"]["id"] == entry_id
+        assert after["entry"]["daily_cost_code"] == before["entry"]["daily_cost_code"]
+        assert after["entry"]["total_cost"] == before["entry"]["total_cost"]
+        assert [line["id"] for line in after["services"]] == [line["id"] for line in before["services"]]
+        assert after["entry"]["rate_baseline_locked_at"] == before["entry"]["rate_baseline_locked_at"]
+        assert after["entry"]["budget_baseline_locked_at"] == before["entry"]["budget_baseline_locked_at"]
+        assert after["comparison"]["effective_on"] == "2026-10-12"
+        assert Decimal(after["comparison"]["actual_to_date"]) == Decimal("150.00")
+
+        register = client.get(f"/api/v1/daily-cost/entries?well_id={setup['well']['id']}", headers=headers).json()
+        assert next(row for row in register if row["id"] == entry_id)["cost_date"] == "2026-10-12"
+        with SessionLocal() as db:
+            audit_row = db.query(AuditLog).filter(
+                AuditLog.entity_id == entry_id, AuditLog.action == "update",
+                AuditLog.summary.contains("Corrected daily cost sheet date"),
+            ).one()
+            assert "2026-10-10 → 2026-10-12" in audit_row.summary
+
+        duplicate = client.patch(f"/api/v1/daily-cost/entries/{entry_id}/date", headers=headers, json={"cost_date": "2026-10-11"})
+        assert duplicate.status_code == 409
+        assert client.get(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers).json()["entry"]["cost_date"] == "2026-10-12"
+        assert client.patch(f"/api/v1/daily-cost/entries/{entry_id}/date", headers=headers, json={"cost_date": "not-a-date"}).status_code == 422
+        assert client.patch(f"/api/v1/daily-cost/entries/{entry_id}/date", headers=login(client, "south"), json={"cost_date": "2026-10-14"}).status_code == 404
+
+        with SessionLocal() as db:
+            org = db.query(Organization).filter(Organization.slug == "north").one()
+            user = db.query(User).filter(User.email == "owner@example.com", User.organization_id == org.id).one()
+            role = user.roles[0]
+            role.is_owner = False
+            role.permissions = [permission for permission in role.permissions if permission.key != "daily-cost:update"]
+            db.commit()
+        assert client.patch(f"/api/v1/daily-cost/entries/{entry_id}/date", headers=headers, json={"cost_date": "2026-10-14"}).status_code == 403
+        with SessionLocal() as db:
+            org = db.query(Organization).filter(Organization.slug == "north").one()
+            role = db.query(Role).filter(Role.organization_id == org.id).one()
+            role.is_owner = True
+            db.commit()
+
+        assert client.post(f"/api/v1/daily-cost/entries/{entry_id}/submit", headers=headers, json={"remarks": "Reviewed"}).status_code == 200
+        submitted = client.patch(f"/api/v1/daily-cost/entries/{entry_id}/date", headers=headers, json={"cost_date": "2026-10-14"})
+        assert submitted.status_code == 409
+        assert client.get(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers).json()["entry"]["cost_date"] == "2026-10-12"
+
+
 def test_daily_cost_is_tenant_scoped_and_rejects_unjustified_upa():
     with TestClient(app) as client:
         north = login(client, "north")

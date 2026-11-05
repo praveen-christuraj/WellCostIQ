@@ -1,4 +1,4 @@
-.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check
+.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -40,6 +40,15 @@ daily-cost-scope-check:
 		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
 		--outfile=node_modules/.cache/daily-cost-scope-check.mjs --external:jsdom && \
 		node node_modules/.cache/daily-cost-scope-check.mjs
+
+# Draft daily-sheet date correction: dedicated PATCH, preserved unsaved edits,
+# duplicate-date conflict, submitted/read-only boundaries.
+daily-cost-date-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/daily-cost-date-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/daily-cost-date-check.mjs --external:jsdom && \
+		node node_modules/.cache/daily-cost-date-check.mjs
 
 # Mud type / Cost/BBL configuration dialog rules (section-scoped reconciliation).
 mud-cost-reconciliation-check:

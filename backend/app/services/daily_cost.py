@@ -50,7 +50,7 @@ from app.schemas.daily_cost import (
     DailyCostAfeOption, DailyCostAfePosition, DailyCostBaselineBudgetOut, DailyCostBaselineOut,
     DailyCostBudgetComparison, DailyCostCatalogueOption, DailyCostComparison,
     DailyCostComparisonGroup, DailyCostConsumableLineIn, DailyCostConsumableLineOut,
-    DailyCostDailyRow, DailyCostDayOut, DailyCostEntryCreate, DailyCostEntryOut, DailyCostExportAudit,
+    DailyCostDailyRow, DailyCostDateUpdate, DailyCostDayOut, DailyCostEntryCreate, DailyCostEntryOut, DailyCostExportAudit,
     DailyCostFactorGroup, DailyCostFactorRow, DailyCostGroupSummary, DailyCostIDs,
     DailyCostLihDay, DailyCostLihDeduction, DailyCostLihSummary,
     DailyCostImportRequest, DailyCostImportResponse, DailyCostOtherExpenseLineIn,
@@ -2865,6 +2865,77 @@ def get_day(
         warnings=_warnings(entry, comparison),
         progress=_entry_progress_row(db, entry, progress_cache),
     )
+
+
+def update_entry_date(
+    db: Session,
+    organization_id: str,
+    entry_id: str,
+    data: DailyCostDateUpdate,
+    user: User,
+    request: Request | None,
+) -> DailyCostDayOut:
+    """Correct a draft sheet's operating date without re-entering its costs.
+
+    The sheet keeps its identity, cost lines, locked AFE budget and rate
+    snapshots. Only the operating date moves, so cumulative totals, depth
+    sequencing and reports are recalculated against the new date. Submitted
+    sheets remain read-only until the authorized reopen workflow is used.
+    """
+    try:
+        with _WRITE_LOCK:
+            entry = _get_entry(db, entry_id, organization_id, deleted=False, lock=True)
+            if entry.status != "draft":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Only a Draft daily cost sheet can change date. Reopen a submitted sheet with the authorized workflow first.",
+                )
+            if entry.cost_date != data.cost_date:
+                duplicate = db.scalar(select(DailyCostEntry.id).where(
+                    DailyCostEntry.organization_id == organization_id,
+                    DailyCostEntry.well_id == entry.well_id,
+                    DailyCostEntry.afe_id == entry.afe_id,
+                    DailyCostEntry.cost_date == data.cost_date,
+                    DailyCostEntry.is_deleted.is_(False),
+                    DailyCostEntry.id != entry.id,
+                ))
+                if duplicate:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"A daily cost sheet already exists for {entry.well_code_snapshot}, "
+                            f"{entry.afe_code_snapshot} and {data.cost_date.isoformat()}. Choose another date."
+                        ),
+                    )
+                previous_date = entry.cost_date
+                entry.cost_date = data.cost_date
+                entry.updated_by = _actor_name(user)
+                entry.updated_at = _now()
+                _audit(
+                    db, user=user, action="update", entity_type="daily_cost", entity_id=entry.id,
+                    label=entry.daily_cost_code,
+                    summary=(
+                        f"Corrected daily cost sheet date for {entry.well_code_snapshot} under AFE {entry.afe_code_snapshot}: "
+                        f"{previous_date.isoformat()} → {data.cost_date.isoformat()}; "
+                        "cost lines, locked rates and AFE budget retained"
+                    ),
+                    request=request,
+                )
+                _commit(db)
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise _database_http_error(error, operation="changing a daily cost sheet date") from error
+    except Exception as error:  # noqa: BLE001 - keep the correction workflow from leaking an opaque 500
+        db.rollback()
+        log.exception("Unexpected Daily Cost date change failure for entry %s", entry_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The daily cost sheet date could not be changed right now. Refresh the sheet and retry; if it continues, contact the administrator.",
+        ) from error
+    return _created_day_or_503(db, organization_id, entry.id)
 
 
 def save_day(

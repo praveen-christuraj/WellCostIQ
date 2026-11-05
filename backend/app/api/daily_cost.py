@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from app.api.deps import Current, Db, require
 from app.schemas.daily_cost import (
     DailyCostBaselineOut,
+    DailyCostDateUpdate,
     DailyCostDayOut,
     DailyCostEntryCreate,
     DailyCostEntryOut,
@@ -170,6 +171,12 @@ def preview_entry(entry_id: str, data: DailyCostSaveIn, db: Db, user: Current) -
 @router.put("/entries/{entry_id}", response_model=DailyCostDayOut, dependencies=[Depends(require("daily-cost:update"))])
 def save_entry(entry_id: str, data: DailyCostSaveIn, request: Request, db: Db, user: Current) -> DailyCostDayOut:
     return service.save_day(db, user.organization_id, entry_id, data, user, request)
+
+
+@router.patch("/entries/{entry_id}/date", response_model=DailyCostDayOut, dependencies=[Depends(require("daily-cost:update"))])
+def update_entry_date(entry_id: str, data: DailyCostDateUpdate, request: Request, db: Db, user: Current) -> DailyCostDayOut:
+    """Correct the operating date of a Draft sheet without replacing its cost lines."""
+    return service.update_entry_date(db, user.organization_id, entry_id, data, user, request)
 
 
 @router.post("/entries/{entry_id}/import", response_model=DailyCostImportResponse, dependencies=[Depends(require("daily-cost:import"))])
