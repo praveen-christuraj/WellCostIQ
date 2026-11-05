@@ -1,5 +1,18 @@
 # Durable project memory
 
+## AFE and Daily Cost report corrections (2026-11-05)
+- The Daily Cost page-one cover has one combined **Services and consumables cost** schedule.
+  Consumables is a four-row reporting group immediately after Rig Operations, followed by
+  Formation Evaluation, Well Services, Land Facilities & Preparation, Supervisions and
+  Miscellaneous. Its footer sums every displayed service and consumable row; the AFE-vs-actual
+  summary and the separate cumulative Services, Consumables and Tangibles schedules are unchanged.
+- The AFE print title identity is `AFE type - AFE name - Rig name` on both pages. Its metadata
+  table contains only Rig, Well, Objective, Location / block, Depth and Planned days; AFE name and
+  type are not repeated there.
+- Applying a costing set in either AFE Estimate or Daily Cost never writes provenance text into a
+  line's remarks. New set lines start with blank remarks, which remain blank unless the user enters
+  them.
+
 ## Browser-compatible NDT client keys (2026-11-04)
 - NDT editor row keys are client-only and are removed before saving. Their generator uses
   `crypto.randomUUID()` when it is callable, with a timestamp/random fallback for browsers that

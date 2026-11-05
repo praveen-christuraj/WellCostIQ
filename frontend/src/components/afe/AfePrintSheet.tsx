@@ -85,6 +85,7 @@ function costGroupTotal(lines: { amount: string; currency: string; components: {
 
 export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
   const { afe, well, services, consumables, tangibles, summary } = estimate
+  const titleIdentity = [afe.afe_type, afe.afe_name, afe.rig_name].filter(Boolean).join(' - ')
   // Keep the existing group order and natural service-code order within each block.
   const printServices = sortServicesByGroup(services)
   const printGroups = groupServiceOptions(printServices)
@@ -127,7 +128,7 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
           <h1>AFE Cost Estimate</h1>
         </div>
         <div className="ps-titlemeta">
-          <span className="ps-titlecode">{afe.afe_name}</span>
+          <span className="ps-titlecode">{titleIdentity}</span>
         </div>
       </header>
 
@@ -138,15 +139,11 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
             <th>Well</th><td>{afe.well_name}</td>
           </tr>
           <tr>
-            <th>AFE</th><td>{afe.afe_name}</td>
-            <th>AFE type</th><td>{afe.afe_type}</td>
-          </tr>
-          <tr>
-            <th>Objective of the well</th><td colSpan={3} className="ps-notes">{well.objective || '—'}</td>
+            <th>Objective</th><td colSpan={3} className="ps-notes">{well.objective || '—'}</td>
           </tr>
           <tr>
             <th>Location / block</th><td>{[well.well_location, well.block].filter(Boolean).join(' / ') || '—'}</td>
-            <th>Total depth (m)</th><td>{depthText(well.total_depth, well.depth_unit)}</td>
+            <th>Depth</th><td>{depthText(well.total_depth, well.depth_unit)}</td>
           </tr>
           <tr>
             <th>Planned days</th><td colSpan={3}>{daysText(well.total_days)}</td>
@@ -281,7 +278,7 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
           <h1>AFE Cost Estimate</h1>
         </div>
         <div className="ps-titlemeta">
-          <span className="ps-titlecode">{afe.afe_name}</span>
+          <span className="ps-titlecode">{titleIdentity}</span>
         </div>
       </header>
 

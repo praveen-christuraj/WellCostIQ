@@ -81,7 +81,12 @@ assert.ok(pages[0].textContent.includes('1,000.13 m') && pages[0].textContent.in
 assert.ok(!pages[0].textContent.includes('Authorisation') && pages[1].textContent.includes('Authorisation'), 'sign-off is kept with supporting detail')
 assert.equal(pages[0].querySelector('h1').textContent, 'AFE Cost Estimate', 'the first-page title uses the requested short wording')
 assert.equal(pages[1].querySelector('h1').textContent, 'AFE Cost Estimate', 'the supporting page repeats the requested short report title')
-assert.equal(pages[0].querySelector('.ps-titlecode').textContent, 'Drilling estimate', 'the title block shows the AFE name')
+assert.equal(pages[0].querySelector('.ps-titlecode').textContent, 'Drilling - Drilling estimate - Rig one', 'the title block shows AFE type, AFE name and rig name')
+assert.equal(pages[1].querySelector('.ps-titlecode').textContent, 'Drilling - Drilling estimate - Rig one', 'the supporting page repeats the full AFE identity')
+const metadataLabels = [...pages[0].querySelectorAll('.ps-meta th')].map(cell => cell.textContent)
+assert.deepEqual(metadataLabels, ['Rig', 'Well', 'Objective', 'Location / block', 'Depth', 'Planned days'],
+  'metadata keeps only rig, well, objective, location/block, depth and planned days')
+assert.ok(!metadataLabels.includes('AFE') && !metadataLabels.includes('AFE type'), 'AFE name and type are not duplicated in metadata')
 for (const omitted of ['Configuration', 'Estimate saved', 'Well Plan', 'Status', 'Printed', 'AUTHORIZATION FOR EXPENDITURE']) {
   assert.ok(!pages[0].textContent.includes(omitted), `${omitted} is omitted from the first-page header and metadata`)
 }
@@ -286,5 +291,5 @@ assert.ok(styles.includes('.afe-cost-print-sheet .ps-service-group-total { break
 
 await act(async () => root.unmount())
 dom.window.close()
-console.log('AFE print checks passed: unified categorized cost table and first-page section plan; compact metadata and title; service ordering, group totals, saved FX, entered rates and compact layout.')
+console.log('AFE print checks passed: full title identity, compact metadata, unified categorized cost table and section plan; service ordering, group totals, saved FX, entered rates and compact layout.')
 process.exit(0)

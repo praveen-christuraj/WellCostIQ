@@ -436,7 +436,6 @@ export default function AfeEstimate() {
           ...emptyServiceLine(),
           service_id: item.item_id,
           currency,
-          remarks: `Added from costing set ${costingSet.name}`,
         })
         existingServices.add(item.item_id)
         addedCount += 1
@@ -448,7 +447,6 @@ export default function AfeEstimate() {
         nextTangibles.push({
           ...emptyTangibleLine(),
           tangible_id: item.item_id,
-          remarks: `Added from costing set ${costingSet.name}`,
         })
         existingTangibles.add(item.item_id)
         addedCount += 1
@@ -474,7 +472,6 @@ export default function AfeEstimate() {
             drill_bit_id: bit.id,
             quantity: '1',
             currency: bit.currency || currency,
-            remarks: `Added from costing set ${costingSet.name}`,
           })
           existingConsumables.add(duplicateKey)
           addedCount += 1
@@ -495,7 +492,6 @@ export default function AfeEstimate() {
             phase_id: scopeRow.phaseId,
             estimated_amount: '',
             currency,
-            remarks: `Prepared from costing set ${costingSet.name}`,
           })
           existingConsumables.add(duplicateKey)
           addedCount += 1

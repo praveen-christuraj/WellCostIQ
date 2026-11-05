@@ -514,7 +514,7 @@ export default function DailyCostSheet() {
           currency: snapshot.currency,
           override_rate: null,
           override_reason: '',
-          remarks: `Added from costing set ${costingSet.name}`,
+          remarks: '',
           tangible_id: catalogueItem.id,
         })
         duplicateCatalogueItems.add(duplicateKey)
@@ -588,7 +588,7 @@ export default function DailyCostSheet() {
         id: null, activity_id: activity.id, hole_section_id: section.hole_section_id,
         phase_id: phase?.phase_id ?? null, sub_activity_id: subActivity.id, vendor_id: null,
         party_name: subActivity.responsible_party || '', quantity: row.quantity, currency: snapshot.currency,
-        override_rate: null, override_reason: '', remarks: `Added from costing set ${pendingConsumableSet.name}`,
+        override_rate: null, override_reason: '', remarks: '',
         category: categoryByKind[kind], item_kind: kind, item_id: itemId,
       })
       existing.add(duplicateKey)

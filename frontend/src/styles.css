@@ -590,13 +590,13 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   .daily-cost-print-sheet .dcr-report-meta strong { color: #0B2A47; font-size: 8pt; }
   /* Page one follows MODEL REPORTS/REVISED DAILY REPORT TABLE PLACEMENTS.jpg:
      three bands over the model's two columns (737 : 286 px, i.e. 72 / 28).
-       upper  - milestone / depth / time strip over Services cost,
+       upper  - milestone / depth / time strip over Services + Consumables cost,
                 beside Mud cost analysis over Mud chemical cost
-       middle - Consumables over Tangibles, beside Consumption / losses
+       middle - Tangibles, beside Consumption / losses
        lower  - full width: LIH / AFE vs actual / NDT stack, UPA, NPT
-     One shared grid keeps the model's edges exact: Services ends on the Mud
-     chemical cost baseline, Consumables starts level with Consumption / losses
-     and Tangibles ends on its baseline. Every band is at least its content
+     One shared grid keeps the model's edges exact: the merged Services and
+     Consumables schedule ends on the Mud chemical cost baseline, and Tangibles
+     sits beside Consumption / losses. Every band is at least its content
      height, so no panel is clipped; spare height goes to the upper and lower
      bands in roughly the model's 305 : 231 px proportion. Only placement
      changes here: panel contents and each density level's type sizes are
@@ -616,15 +616,15 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   .daily-cost-print-sheet .dcr-upper,
   .daily-cost-print-sheet .dcr-mud-stack,
   .daily-cost-print-sheet .dcr-middle { min-width: 0; min-height: 0; display: grid; gap: 1.05mm; }
-  /* The strip keeps its content height; Services takes the rest of the band. */
+  /* The strip keeps its content height; the merged cost schedule takes the rest. */
   .daily-cost-print-sheet .dcr-upper { grid-area: upper; grid-template-rows: max-content minmax(0, 1fr); }
   /* Mud cost analysis over Mud chemical cost in the model's 163 : 139 px, never
      below content. Flex factors of at least 1 guarantee the pair fills the band,
-     so Mud chemical cost always ends on the Services baseline. */
+     so Mud chemical cost always ends on the merged cost-table baseline. */
   .daily-cost-print-sheet .dcr-mud-stack { grid-area: mud; grid-template-rows: minmax(max-content, 1.17fr) minmax(max-content, 1fr); }
-  /* Consumables absorbs whatever extra height the loss matrix needs, so
-     Tangibles keeps its content height and ends on the losses baseline. */
-  .daily-cost-print-sheet .dcr-middle { grid-area: middle; grid-template-rows: minmax(max-content, 1fr) max-content; }
+  /* Tangibles remains its own summary while the cost schedule above now owns
+     both services and consumables. */
+  .daily-cost-print-sheet .dcr-middle { grid-area: middle; grid-template-rows: max-content; align-content: start; }
   .daily-cost-print-sheet .dcr-layout > .dcr-loss { grid-area: loss; }
   .daily-cost-print-sheet .dcr-panel { min-width: 0; border: .55pt solid #B9CCE0; break-inside: avoid; overflow: hidden; }
   .daily-cost-print-sheet .dcr-panel h2 {

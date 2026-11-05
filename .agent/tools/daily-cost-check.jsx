@@ -61,6 +61,9 @@ const second = { ...day, entry: { ...day.entry, id: 'd2', afe_id: 'afe2', afe_co
     budget_lines: [
       { budget_key: 'service:20', budget_kind: 'service', item_code: 'SVC-20', item_name: 'Directional drilling', service_group: 'Rig Operations', cost_group: 'Services', planned: '2000', actual_to_date: '400', balance: '1600', is_planned: true,
         actual_prior: '250', actual_today: '150', actual_planned: '400', actual_upa: '0', actual_npt: '0' },
+      { budget_key: 'service:formation', budget_kind: 'service', item_code: 'SVC-FE', item_name: 'Formation logging', service_group: 'Formation Evaluation', cost_group: 'Services', planned: '0', actual_to_date: '0', balance: '0', is_planned: true },
+      { budget_key: 'service:well', budget_kind: 'service', item_code: 'SVC-WELL', item_name: 'Well testing', service_group: 'Well Services', cost_group: 'Services', planned: '0', actual_to_date: '0', balance: '0', is_planned: true },
+      { budget_key: 'service:land', budget_kind: 'service', item_code: 'SVC-LAND', item_name: 'Site preparation', service_group: 'Land Facilities and Preparation', cost_group: 'Services', planned: '0', actual_to_date: '0', balance: '0', is_planned: true },
       { budget_key: 'service:10', budget_kind: 'service', item_code: 'SVC-10', item_name: 'Wireline logging', service_group: 'Miscellaneous Services', cost_group: 'Services', planned: '0', actual_to_date: '0', balance: '0', is_planned: true,
         actual_prior: '0', actual_today: '0', actual_planned: '0', actual_upa: '0', actual_npt: '0' },
       { budget_key: 'service:03', budget_kind: 'service', item_code: 'SVC-03', item_name: 'Mud logging', service_group: 'Supervisions', cost_group: 'Services', planned: '1000', actual_to_date: '300', balance: '700', is_planned: true,
@@ -96,12 +99,26 @@ assert.ok(sheet.classList.contains('daily-cost-print-sheet'), 'daily costing opt
 assert.ok(sheet.querySelector('.daily-report-cover'), 'the model-report summary is page one')
 assert.ok(sheet.querySelector('.daily-report-details'), 'cumulative schedules follow the cover')
 const coverPanels = sheet.querySelectorAll('.daily-report-cover .dcr-cost-panel')
-const serviceNames = [...coverPanels[0].querySelectorAll('tbody tr')].map(row => row.cells[0].textContent)
-assert.deepEqual(serviceNames, ['Rig Operations · Directional drilling', 'Wireline logging', 'Supervisions · Mud logging'],
-  'services print in reporting-group order while suppressing the miscellaneous fallback caption')
-assert.ok(!coverPanels[0].textContent.includes('Miscellaneous'), 'services table never prints the miscellaneous fallback group')
-const consumableRows = [...coverPanels[1].querySelectorAll('tbody tr')]
-const consumableNames = consumableRows.map(row => row.cells[0].textContent)
+assert.equal(coverPanels.length, 1, 'the cover has one merged services and consumables cost table')
+const combinedRows = [...coverPanels[0].querySelectorAll('tbody tr')]
+const combinedNames = combinedRows.map(row => row.cells[0].textContent)
+assert.deepEqual(combinedNames, [
+  'Rig Operations · Directional drilling',
+  'Consumables · Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits',
+  'Formation Evaluation · Formation logging', 'Well Services · Well testing',
+  'Land Facilities & Preparation · Site preparation', 'Supervisions · Mud logging',
+  'Miscellaneous · Wireline logging',
+], 'the merged table follows the requested service/consumables reporting-group order')
+const printedGroups = combinedRows.flatMap(row => {
+  const label = row.querySelector('.dcr-group')?.textContent
+  return label ? [label.replace('·', '').trim()] : []
+})
+assert.deepEqual(printedGroups, [
+  'Rig Operations', 'Consumables', 'Formation Evaluation', 'Well Services',
+  'Land Facilities & Preparation', 'Supervisions', 'Miscellaneous',
+], 'every requested cover group is labelled once and in order')
+const consumableRows = combinedRows.filter(row => ['Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits'].some(name => row.cells[0].textContent.endsWith(name)))
+const consumableNames = consumableRows.map(row => row.cells[0].textContent.replace('Consumables · ', ''))
 assert.deepEqual(consumableNames, ['Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits'], 'consumables print the four fixed category totals only')
 assert.equal(consumableNames.filter(name => name === 'Drill Bits').length, 1, 'drill bits print as one cumulative row')
 
@@ -126,11 +143,9 @@ assert.deepEqual([...mudLoggingSplit.cells].map(cell => cell.textContent),
   'a service row prints planned, NPT and UPA activity costs beside its cumulative total')
 const serviceFooter = [...servicePanel.querySelectorAll('tfoot tr:last-child th')].map(cell => cell.textContent)
 assert.deepEqual(serviceFooter,
-  ['Group total', '€3,000.00', '€500.00', '€200.00', '€650.00', '€0.00', '€50.00', '€700.00', '€2,300.00', '23.33%'],
-  'the services footer totals each cumulative activity classification')
-assert.deepEqual([...coverPanels[1].querySelectorAll('thead tr:last-child th')].map(cell => cell.textContent),
-  ['Planned', 'NPT', 'UPA', 'Total'], 'consumables print the same four cumulative columns')
-const fuelRow = [...coverPanels[1].querySelectorAll('tbody tr')].find(row => row.cells[0].textContent === 'Fuel')
+  ['Services + consumables total', '€19,000.00', '€2,375.00', '€300.00', '€2,625.00', '€0.00', '€50.00', '€2,675.00', '€16,325.00', '14.08%'],
+  'the merged footer totals every service and consumable value, including each cumulative classification')
+const fuelRow = combinedRows.find(row => row.cells[0].textContent === 'Fuel')
 assert.deepEqual([...fuelRow.cells].map(cell => cell.textContent).slice(2, 8), ['€0.00', '€100.00', '€100.00', '€0.00', '€0.00', '€100.00'],
   'a consumable prints its day cost and planned/NPT/UPA/total cumulative values')
 assert.ok(!sheet.textContent.includes('USD '), 'the printed report uses the $ symbol instead of the USD code')
@@ -146,8 +161,8 @@ for (const hidden of ['SVC-03', 'SVC-20', 'Bit Alpha', 'Bit Beta', 'Mud Chemical
   assert.ok(!sheet.querySelector('.daily-report-cover').textContent.includes(hidden), `${hidden} is hidden from the summary`)
 }
 for (const heading of [
-  'Reporting milestone', 'Section-wise planned depth & current depth', 'Services cost · AFE vs last day, this day and cumulative',
-  'Consumables cost · AFE vs last day, this day and cumulative', 'Tangibles cost · AFE vs actual', 'AFE vs actual summary',
+  'Reporting milestone', 'Section-wise planned depth & current depth', 'Services and consumables cost · AFE vs last day, this day and cumulative',
+  'Tangibles cost · AFE vs actual', 'AFE vs actual summary',
   'Mud chemical cost · section-wise', 'Consumption / losses · cumulative', 'Mud cost analysis · section / mud type',
   'NPT summary', 'UPA summary',
 ]) assert.ok(sheet.textContent.includes(heading), `cover prints ${heading}`)
@@ -157,15 +172,15 @@ const panelTitle = node => node.querySelector('h2')?.textContent
 const coverLayout = sheet.querySelector('.daily-report-cover .dcr-layout')
 assert.deepEqual([...coverLayout.children].map(node => node.classList.contains('dcr-panel') ? panelTitle(node) : node.className),
   ['dcr-upper', 'dcr-mud-stack', 'dcr-middle', 'Consumption / losses · cumulative matrix', 'dcr-bottomline'],
-  'page one is an upper band (strip and Services | mud stack), a middle band (Consumables and Tangibles | losses) and a full-width lower band')
+  'page one is an upper band (strip and merged costs | mud stack), a middle band (Tangibles | losses) and a full-width lower band')
 assert.deepEqual([...coverLayout.querySelector('.dcr-upper > .dcr-topline').children].map(panelTitle),
   ['Reporting milestone', 'Section-wise planned depth & current depth', 'Time position'], 'the milestone, depth and time strip heads the left column')
-assert.equal(panelTitle(coverLayout.querySelector('.dcr-upper > .dcr-cost-panel')), 'Services cost · AFE vs last day, this day and cumulative',
-  'Services sits directly under the milestone, depth and time strip')
+assert.equal(panelTitle(coverLayout.querySelector('.dcr-upper > .dcr-cost-panel')), 'Services and consumables cost · AFE vs last day, this day and cumulative',
+  'the merged services and consumables schedule sits directly under the milestone, depth and time strip')
 assert.deepEqual([...coverLayout.querySelector('.dcr-mud-stack').children].map(panelTitle),
   ['Mud cost analysis · section / mud type', 'Mud chemical cost · section-wise'], 'Mud cost analysis sits over Mud chemical cost, beside Services')
 assert.deepEqual([...coverLayout.querySelector('.dcr-middle').children].map(panelTitle),
-  ['Consumables cost · AFE vs last day, this day and cumulative', 'Tangibles cost · AFE vs actual'], 'Consumables sits over Tangibles, beside Consumption / losses')
+  ['Tangibles cost · AFE vs actual'], 'Tangibles remains separate beside Consumption / losses')
 const lowerRow = sheet.querySelector('.dcr-bottomline')
 assert.deepEqual([...lowerRow.children].map(node => node.classList.contains('dcr-stack') ? 'stack' : panelTitle(node)),
   ['stack', 'UPA summary', 'NPT summary'], 'the full-width lower band places the LIH/AFE/NDT stack, then UPA summary, then NPT summary')
@@ -309,9 +324,16 @@ await act(async () => root.render(<DailyCostPrintSheet coversOnly reports={[
   { title: 'Short sheet', period: 'Oct 11, 2026', days: [withServiceLines(12)] },
 ]}/>))
 const denseCovers = [...document.querySelectorAll('.afe-print-sheet .daily-report-cover')]
-assert.equal(denseCovers[0].querySelectorAll('.dcr-cost-panel')[0].querySelectorAll('tbody tr').length, 20, 'the dense fixture prints all 20 service lines')
-assert.deepEqual(denseCovers.map(cover => cover.className.match(/dcr-density-(\d)/)[1]), ['3', '4', '1'],
-  'a 20-line schedule prints at density 3, one NDT row moves it to density 4, and 12 lines keep full size')
+assert.equal(denseCovers[0].querySelectorAll('.dcr-cost-panel')[0].querySelectorAll('tbody tr').length, 24, 'the dense fixture prints all 20 service lines and four consumable groups')
+assert.deepEqual(denseCovers.map(cover => cover.className.match(/dcr-density-(\d)/)[1]), ['4', '4', '2'],
+  'density accounts for every row in the merged schedule and for NDT rows')
+
+const afeEstimateSource = readFileSync('src/pages/AfeEstimate.tsx', 'utf8')
+const dailyCostSheetSource = readFileSync('src/pages/DailyCostSheet.tsx', 'utf8')
+for (const defaultRemark of ['Added from costing set', 'Prepared from costing set']) {
+  assert.ok(!afeEstimateSource.includes(defaultRemark), `AFE set additions do not inject “${defaultRemark}” into remarks`)
+  assert.ok(!dailyCostSheetSource.includes(defaultRemark), `Daily Cost set additions do not inject “${defaultRemark}” into remarks`)
+}
 await act(async () => root.unmount())
 
 // The shared advanced selector collects many priced items at once, refuses a checked
@@ -460,7 +482,7 @@ const register = readFileSync('../frontend/src/pages/DailyCostManagement.tsx', '
 for (const forbidden of ['daily-cost/overview', 'StatCard', 'ReactECharts', 'cumulativeById', 'ACTUAL TO DATE']) {
   assert.ok(!register.includes(forbidden), `register does not contain ${forbidden}`)
 }
-for (const retained of ['New daily sheet', 'Well cost analysis', 'Filter by well', 'Filter by AFE', '<DataTable', 'Print well costing sheet', 'exportAudit', 'Deleted entries', "headerName: 'CUMULATIVE TO DATE'", "field: 'cumulative_cost'"]) {
+for (const retained of ['New daily sheet', 'Well cost analysis', 'label="Well"', 'label="AFE"', '<DataTable', 'Print well costing sheet', 'exportAudit', 'Deleted entries', "headerName: 'CUMULATIVE TO DATE'", "field: 'cumulative_cost'"]) {
   assert.ok(register.includes(retained), `register retains ${retained}`)
 }
 assert.ok(register.includes("id={deletedView ? 'daily-cost-deleted-panel'"), 'deleted entries have their own rendered grid panel')
@@ -509,11 +531,11 @@ assert.match(styles, /grid-template-areas:\s*"upper mud"\s*"middle loss"\s*"lowe
 assert.ok(styles.includes('grid-template-columns: minmax(0, 2.58fr) minmax(0, 1fr);'), "the two columns keep the model's 737 : 286 px split")
 assert.ok(styles.includes('grid-template-rows: minmax(max-content, 1.3fr) max-content minmax(max-content, 1fr);'),
   'every band keeps at least its content height, the middle band is as tall as its tallest side and spare height goes to the upper and lower bands')
-assert.ok(styles.includes('.dcr-upper { grid-area: upper; grid-template-rows: max-content minmax(0, 1fr); }'), 'Services takes the upper band below the strip')
+assert.ok(styles.includes('.dcr-upper { grid-area: upper; grid-template-rows: max-content minmax(0, 1fr); }'), 'the merged Services and Consumables schedule takes the upper band below the strip')
 assert.ok(styles.includes('.dcr-mud-stack { grid-area: mud; grid-template-rows: minmax(max-content, 1.17fr) minmax(max-content, 1fr); }'),
-  'the mud pair always fills the upper band, so Mud chemical cost ends on the Services baseline')
-assert.ok(styles.includes('.dcr-middle { grid-area: middle; grid-template-rows: minmax(max-content, 1fr) max-content; }'),
-  'Consumables absorbs the extra middle-band height so Tangibles ends on the Consumption / losses baseline')
+  'the mud pair always fills the upper band, so Mud chemical cost ends on the merged cost-table baseline')
+assert.ok(styles.includes('.dcr-middle { grid-area: middle; grid-template-rows: max-content; align-content: start; }'),
+  'Tangibles keeps its own compact panel after Consumables moves into the merged schedule')
 assert.ok(styles.includes('.dcr-bottomline { grid-area: lower; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, .61fr) minmax(0, 1fr) minmax(0, 1fr);'),
   "the lower band keeps the model's 237 : 390 : 390 px stack, UPA and NPT columns")
 assert.ok(styles.includes('.dcr-stack { min-width: 0; min-height: 0; display: grid; grid-template-rows: max-content minmax(0, 1fr);'),
@@ -526,12 +548,12 @@ assert.match(styles, /\.dcr-density-3 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr
 assert.match(styles, /\.dcr-density-4 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr-density-4 \.dcr-panel\.dcr-mud-cost table,\s*\S+ \.dcr-density-4 \.dcr-panel\.dcr-loss-matrix table \{ font-size: 4\.4pt; \}/,
   'density 4 compresses the stack, mud cost and loss tables by name')
 assert.ok(!styles.includes('.dcr-bottomline .dcr-panel table'), 'density type sizes follow named panels, not the lower band, so moving a panel never changes its printed size')
-assert.ok(styles.includes('.dcr-cost-panel table { align-self: start; height: auto; font-size: 6.4pt'), 'service and consumable tables use the same intrinsic row and font sizing')
+assert.ok(styles.includes('.dcr-cost-panel table { align-self: start; height: auto; font-size: 6.4pt'), 'the merged cost table uses intrinsic row and font sizing')
 assert.ok(styles.includes('.dcr-cost-panel td { padding: .57mm .34mm; }'), 'normal cost rows use 1.5x their previous vertical padding')
 assert.ok(styles.includes('.dcr-density-2 .dcr-cost-panel td { padding: .285mm .3mm; }'), 'density-2 cost rows retain the same 1.5x increase')
 assert.ok(styles.includes('.dcr-density-3 .dcr-cost-panel td { padding: .195mm .24mm; }'), 'density-3 cost rows retain the same 1.5x increase')
 assert.ok(styles.includes('.dcr-density-4 .dcr-cost-panel td { padding: .12mm .18mm; }'), 'density-4 cost rows retain the same 1.5x increase')
-assert.ok(!styles.includes('.dcr-cost-panel table { height: 100%; }'), 'short consumable schedules are not stretched into oversized rows')
+assert.ok(!styles.includes('.dcr-cost-panel table { height: 100%; }'), 'the merged schedule is not stretched into oversized rows')
 
 // Verify scoped Well Sub Activities and per-scope Well lifecycle across UI sources and live dialog rendering.
 const { MemoryRouter } = await import('react-router-dom')
@@ -656,7 +678,7 @@ const rigWellDeletedPage = readFileSync('../frontend/src/pages/RigWellDeleted.ts
 for (const required of ['row => `${row.entity_type}:${row.id}:${row.scope ?? \'all\'}`', '? `?scope=${encodeURIComponent(target.scope)}`']) {
   assert.ok(rigWellDeletedPage.includes(required), `rig-well deleted page retains ${required}`)
 }
-console.log('Daily cost checks passed: single-window multi-activity and multi-charge entry, one-time charging, scoped activity depths, explicit bulk rate upgrades, advanced consumable/tangible bulk selection with required usage, locked prices and show-selected-only review, the same selector reused by the AFE tangible estimate, bulk depth/quantity/unit controls, AFE / last day / report day / cumulative cost columns with currency symbols, the milestone label and lead/lag read from the register, bulk first-page-only printing, scope-aware report titles, transposed mud and loss matrices, group-ordered/name-only services with every AFE allowance listed, four cumulative consumable categories, item-wise tangible cumulative costs, cumulative-only continuation pages, two-decimal presentation, landscape model-report cover, escaped remarks, synchronous print portal, cleanup and register wiring.')
+console.log('Daily cost checks passed: merged group-ordered Services/Consumables cover schedule and totals, blank costing-set remarks, separate cumulative schedules, multi-activity and multi-charge entry, one-time charging, scoped depths, bulk rate upgrades, advanced selection, report-day columns, saved milestone/lead-lag, bulk first-page printing, mud/loss matrices, two-decimal presentation, print portal cleanup and register wiring.')
 
 dom.window.close()
 process.exit(0)
