@@ -2,9 +2,12 @@
 
 ## AFE and Daily Cost report corrections (2026-11-05)
 - The Daily Cost page-one cover has one combined **Services and consumables cost** schedule.
+  Each group name occupies its own full-width heading row, with service/item rows beneath it;
   Consumables is a four-row reporting group immediately after Rig Operations, followed by
   Formation Evaluation, Well Services, Land Facilities & Preparation, Supervisions and
-  Miscellaneous. Its footer sums every displayed service and consumable row; the AFE-vs-actual
+  Miscellaneous. Unknown legacy service-group values appear separately as Unclassified Services
+  instead of being mislabeled as Miscellaneous. Item rows use the requested additional 1.5x height.
+  Its footer sums every displayed service and consumable row; the AFE-vs-actual
   summary and the separate cumulative Services, Consumables and Tangibles schedules are unchanged.
 - The AFE print title identity is `AFE type - AFE name - Rig name` on both pages. Its metadata
   table contains only Rig, Well, Objective, Location / block, Depth and Planned days; AFE name and

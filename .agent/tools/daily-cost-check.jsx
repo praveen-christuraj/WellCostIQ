@@ -100,25 +100,22 @@ assert.ok(sheet.querySelector('.daily-report-cover'), 'the model-report summary 
 assert.ok(sheet.querySelector('.daily-report-details'), 'cumulative schedules follow the cover')
 const coverPanels = sheet.querySelectorAll('.daily-report-cover .dcr-cost-panel')
 assert.equal(coverPanels.length, 1, 'the cover has one merged services and consumables cost table')
-const combinedRows = [...coverPanels[0].querySelectorAll('tbody tr')]
-const combinedNames = combinedRows.map(row => row.cells[0].textContent)
-assert.deepEqual(combinedNames, [
-  'Rig Operations · Directional drilling',
-  'Consumables · Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits',
-  'Formation Evaluation · Formation logging', 'Well Services · Well testing',
-  'Land Facilities & Preparation · Site preparation', 'Supervisions · Mud logging',
-  'Miscellaneous · Wireline logging',
-], 'the merged table follows the requested service/consumables reporting-group order')
-const printedGroups = combinedRows.flatMap(row => {
-  const label = row.querySelector('.dcr-group')?.textContent
-  return label ? [label.replace('·', '').trim()] : []
-})
-assert.deepEqual(printedGroups, [
+const costGroups = [...coverPanels[0].querySelectorAll('tbody.dcr-cost-group')]
+assert.deepEqual(costGroups.map(group => group.querySelector('.dcr-cost-group-row th').textContent), [
   'Rig Operations', 'Consumables', 'Formation Evaluation', 'Well Services',
   'Land Facilities & Preparation', 'Supervisions', 'Miscellaneous',
-], 'every requested cover group is labelled once and in order')
+], 'every requested group has its own full-width heading row in the requested order')
+assert.ok(costGroups.every(group => group.querySelector('.dcr-cost-group-row th').colSpan === 10),
+  'every group heading spans the complete cost table')
+const combinedRows = [...coverPanels[0].querySelectorAll('.dcr-cost-item-row')]
+const combinedNames = combinedRows.map(row => row.cells[0].textContent)
+assert.deepEqual(combinedNames, [
+  'Directional drilling',
+  'Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits',
+  'Formation logging', 'Well testing', 'Site preparation', 'Mud logging', 'Wireline logging',
+], 'service and consumable items sit beneath, rather than inline with, their group headings')
 const consumableRows = combinedRows.filter(row => ['Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits'].some(name => row.cells[0].textContent.endsWith(name)))
-const consumableNames = consumableRows.map(row => row.cells[0].textContent.replace('Consumables · ', ''))
+const consumableNames = consumableRows.map(row => row.cells[0].textContent)
 assert.deepEqual(consumableNames, ['Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits'], 'consumables print the four fixed category totals only')
 assert.equal(consumableNames.filter(name => name === 'Drill Bits').length, 1, 'drill bits print as one cumulative row')
 
@@ -135,11 +132,11 @@ assert.deepEqual(cumulativeHeaders, ['Planned', 'NPT', 'UPA', 'Total'], 'cumulat
 assert.equal(servicePanel.querySelectorAll('colgroup col').length, 10, 'the expanded report defines all ten leaf-column widths')
 assert.ok(primaryHeaders[2].startsWith('Up to') && primaryHeaders[3].startsWith('Cost on'),
   'the last-day and report-day columns are labelled with their dates')
-const serviceBodyRows = [...servicePanel.querySelectorAll('tbody tr')]
+const serviceBodyRows = [...servicePanel.querySelectorAll('.dcr-cost-item-row')]
 assert.equal(serviceBodyRows[0].cells.length, 10, 'a service row prints all ten cost columns')
-const mudLoggingSplit = serviceBodyRows.find(row => row.cells[0].textContent === 'Supervisions · Mud logging')
+const mudLoggingSplit = serviceBodyRows.find(row => row.cells[0].textContent === 'Mud logging')
 assert.deepEqual([...mudLoggingSplit.cells].map(cell => cell.textContent),
-  ['Supervisions · Mud logging', '€1,000.00', '€250.00', '€50.00', '€250.00', '€0.00', '€50.00', '€300.00', '€700.00', '30.00%'],
+  ['Mud logging', '€1,000.00', '€250.00', '€50.00', '€250.00', '€0.00', '€50.00', '€300.00', '€700.00', '30.00%'],
   'a service row prints planned, NPT and UPA activity costs beside its cumulative total')
 const serviceFooter = [...servicePanel.querySelectorAll('tfoot tr:last-child th')].map(cell => cell.textContent)
 assert.deepEqual(serviceFooter,
@@ -324,9 +321,10 @@ await act(async () => root.render(<DailyCostPrintSheet coversOnly reports={[
   { title: 'Short sheet', period: 'Oct 11, 2026', days: [withServiceLines(12)] },
 ]}/>))
 const denseCovers = [...document.querySelectorAll('.afe-print-sheet .daily-report-cover')]
-assert.equal(denseCovers[0].querySelectorAll('.dcr-cost-panel')[0].querySelectorAll('tbody tr').length, 24, 'the dense fixture prints all 20 service lines and four consumable groups')
-assert.deepEqual(denseCovers.map(cover => cover.className.match(/dcr-density-(\d)/)[1]), ['4', '4', '2'],
-  'density accounts for every row in the merged schedule and for NDT rows')
+assert.equal(denseCovers[0].querySelectorAll('.dcr-cost-panel')[0].querySelectorAll('.dcr-cost-item-row').length, 24, 'the dense fixture prints all 20 service lines and four consumable items')
+assert.equal(denseCovers[0].querySelectorAll('.dcr-cost-group-row').length, 7, 'the dense fixture retains every structural group heading')
+assert.deepEqual(denseCovers.map(cover => cover.className.match(/dcr-density-(\d)/)[1]), ['4', '4', '4'],
+  'density accounts for every item row, structural group heading and NDT row')
 
 const afeEstimateSource = readFileSync('src/pages/AfeEstimate.tsx', 'utf8')
 const dailyCostSheetSource = readFileSync('src/pages/DailyCostSheet.tsx', 'utf8')
@@ -549,10 +547,11 @@ assert.match(styles, /\.dcr-density-4 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr
   'density 4 compresses the stack, mud cost and loss tables by name')
 assert.ok(!styles.includes('.dcr-bottomline .dcr-panel table'), 'density type sizes follow named panels, not the lower band, so moving a panel never changes its printed size')
 assert.ok(styles.includes('.dcr-cost-panel table { align-self: start; height: auto; font-size: 6.4pt'), 'the merged cost table uses intrinsic row and font sizing')
-assert.ok(styles.includes('.dcr-cost-panel td { padding: .57mm .34mm; }'), 'normal cost rows use 1.5x their previous vertical padding')
-assert.ok(styles.includes('.dcr-density-2 .dcr-cost-panel td { padding: .285mm .3mm; }'), 'density-2 cost rows retain the same 1.5x increase')
-assert.ok(styles.includes('.dcr-density-3 .dcr-cost-panel td { padding: .195mm .24mm; }'), 'density-3 cost rows retain the same 1.5x increase')
-assert.ok(styles.includes('.dcr-density-4 .dcr-cost-panel td { padding: .12mm .18mm; }'), 'density-4 cost rows retain the same 1.5x increase')
+assert.ok(styles.includes('.dcr-cost-panel td { padding: .855mm .34mm; }'), 'normal cost rows are another 1.5x taller')
+assert.ok(styles.includes('.dcr-density-2 .dcr-cost-panel td { padding: .4275mm .3mm; }'), 'density-2 cost rows retain the additional 1.5x increase')
+assert.ok(styles.includes('.dcr-density-3 .dcr-cost-panel td { padding: .2925mm .24mm; }'), 'density-3 cost rows retain the additional 1.5x increase')
+assert.ok(styles.includes('.dcr-density-4 .dcr-cost-panel td { padding: .18mm .18mm; }'), 'density-4 cost rows retain the additional 1.5x increase')
+assert.ok(styles.includes('.dcr-cost-group-row th { padding: .48mm .34mm;'), 'group names use dedicated full-width styled rows')
 assert.ok(!styles.includes('.dcr-cost-panel table { height: 100%; }'), 'the merged schedule is not stretched into oversized rows')
 
 // Verify scoped Well Sub Activities and per-scope Well lifecycle across UI sources and live dialog rendering.
