@@ -26,7 +26,23 @@ export type DailyCostWellOption = {
   id: string; rig_id: string; well_code: string; well_name: string; display_name: string
   status: string; config_status: string; completion_status: string; completion_config_status: string
   drilling_is_deleted?: boolean; completion_is_deleted?: boolean
-  sections: DailyCostSectionOption[]
+  objective?: string
+  sections: DailyCostSectionOption[]; completion_sections?: DailyCostSectionOption[]
+}
+
+/** Configured sections for the scope(s) represented by a printed report. */
+export function reportSections(
+  well: DailyCostWellOption | null | undefined,
+  scopes: Array<WellScopeKey | null | undefined>,
+): DailyCostSectionOption[] {
+  if (!well) return []
+  const selected = new Set(scopes.filter((scope): scope is WellScopeKey => scope === 'drilling' || scope === 'completion'))
+  const candidates = selected.size === 1 && selected.has('completion')
+    ? well.completion_sections ?? []
+    : selected.size === 1 && selected.has('drilling')
+      ? well.sections
+      : [...well.sections, ...(well.completion_sections ?? [])]
+  return [...new Map(candidates.map(section => [section.hole_section_id, section])).values()]
 }
 export type WellScopeKey = 'drilling' | 'completion'
 export type DailyCostAfeOption = {
@@ -161,7 +177,8 @@ export type DailyCostSavePayload = {
 export type DailyCostLineOutput = DailyCostLineBase & {
   id: string; activity_code: string; activity_name: string; section_code: string; section_name: string
   phase_code: string; phase_name: string; sub_activity_code: string; sub_activity_name: string
-  sub_activity_party: string; vendor_code: string; vendor_name: string; quantity_unit: DailyQuantityUnit
+  sub_activity_party: string; sub_activity_remarks?: string
+  vendor_code: string; vendor_name: string; quantity_unit: DailyQuantityUnit
   /** Derived from the Master Data Activity; not entered on the line. */
   classification: CostClassification
   captured_rate: string; effective_rate: string; exchange_rate: string; amount: string; standard_amount: string

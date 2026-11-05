@@ -1,6 +1,9 @@
 # Durable project memory
 
 ## AFE and Daily Cost report corrections (2026-11-05)
+- API contract `0.3.1` adds the well objective, completion configuration sections and Well
+  Sub-Activity remarks to the typed Daily Cost reference/report payloads. The browser requires the
+  matching API so completion labels and report narratives cannot silently disappear on deployment.
 - The Daily Cost page-one cover has one combined **Services and consumables cost** schedule.
   Like the AFE Estimate print (`AfePrintSheet.tsx`), only populated groups emit a full-width
   heading row followed immediately by their respective services/items (sorted by canonical group
@@ -11,8 +14,10 @@
   flows resolve live Master Data `Service.service_group` across `AfeServiceLine`, locked
   `DailyCostBaselineServiceRate.service_id`, `service_code`/`service_name`, and unbudgeted
   `unplanned:service:<id>` lines so re-saving an AFE estimate never drops group resolution.
-- Page-one cost-schedule item rows revert PR #77's 2x height doubling back to `.855mm` (`.48mm`
-  for group headings), and `.dcr-left` spans the upper and middle bands (`min-height: 0`,
+- Page-one cost-schedule item and group rows are doubled again from the current height at every
+  cost-table density step (`1.71mm` base item padding and `.96mm` base group-heading padding).
+  The doubling remains scoped strictly to `.dcr-cost-panel`, and `.dcr-left` spans the upper and
+  middle bands (`min-height: 0`,
   anchoring the topline strip at top and `Tangibles cost · AFE vs actual` on the losses baseline at
   bottom) with cost-only density classes (`.dcr-cost-density-1..5`) scoped strictly to
   `.dcr-cost-panel`. Right-hand and bottom tables (`LIH`, `AFE vs actual summary`, `NDT`,
@@ -26,6 +31,14 @@
 - Applying a costing set in either AFE Estimate or Daily Cost never writes provenance text into a
   line's remarks. New set lines start with blank remarks, which remain blank unless the user enters
   them.
+- Daily Cost draft Services, Consumables and Tangibles tables reuse their checkbox selection for a
+  top-of-table **Delete selected** action. Bulk deletion remains an unsaved draft edit until the user
+  saves, uses the destructive confirmation dialog and clears the affected table's selection.
+- Daily/Well/Bulk cost prints choose drilling or completion configuration sections from the report's
+  actual AFE scope, so completion sections print their configured names rather than UUIDs. The depth
+  panel prints the well's saved objective between its title and column headings.
+- NPT and UPA print summaries use the selected Well Sub-Activity description (the remarks entered on
+  that page) as their remarks, before any daily-line fallback text.
 
 ## Draft daily-sheet date correction (2026-11-05)
 - **User directive.** A daily sheet saved as Draft could not correct a wrongly selected operating date. The sheet now shows a **Sheet date** strip with **Change date** for users holding `daily-cost:update`; submitted sheets and read-only drafts do not offer it.

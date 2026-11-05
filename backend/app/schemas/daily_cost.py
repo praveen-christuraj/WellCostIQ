@@ -373,7 +373,9 @@ class DailyCostWellOption(BaseModel):
     completion_config_status: str = "draft"
     drilling_is_deleted: bool = False
     completion_is_deleted: bool = False
+    objective: str = ""
     sections: list[DailyCostSectionOption]
+    completion_sections: list[DailyCostSectionOption] = Field(default_factory=list)
 
 
 class DailyCostAfeOption(BaseModel):
@@ -549,6 +551,7 @@ class DailyCostLineOut(BaseModel):
     sub_activity_code: str
     sub_activity_name: str
     sub_activity_party: str
+    sub_activity_remarks: str = ""
     classification: CostClassification
     vendor_id: str | None
     vendor_code: str

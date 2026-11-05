@@ -3,7 +3,8 @@ import { Alert, Box, FormControlLabel, MenuItem, Switch, TextField } from '@mui/
 import { ErrorMessage, FormDialog } from '../Common'
 import { api, body } from '../../lib/api'
 import {
-  costReportTitle, displayDate, localToday, type DailyCostDay, type DailyCostReference, type DailyCostWellOption, type DailyCostWellSummary,
+  costReportTitle, displayDate, localToday, reportSections,
+  type DailyCostDay, type DailyCostReference, type DailyCostWellOption, type DailyCostWellSummary,
 } from '../../lib/dailyCost'
 import type { MudCostMaterialBalance, MudCostReconciliation } from '../../lib/mudCost'
 import type { LihCostReport } from '../../lib/lihCost'
@@ -82,7 +83,8 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
         : allNdtInspections
       print({ title: costReportTitle('well', scopes, well?.well_name ?? days[0].entry.well_name),
         period: `${mode === 'range' ? displayDate(dateFrom) : 'Inception (first recorded cost)'} to ${displayDate(to)} · ${includeDraft ? 'Draft and submitted sheets' : 'Submitted sheets only'}`,
-        days, overviewDays: days, summary, mudReconciliation, mudBalance, lihReport, ndtInspections, sections: well?.sections,
+        days, overviewDays: days, summary, mudReconciliation, mudBalance, lihReport, ndtInspections,
+        sections: reportSections(well, scopes), wellObjective: well?.objective,
         services: reference?.services, reportKind: 'well' })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The costing sheet could not be printed')

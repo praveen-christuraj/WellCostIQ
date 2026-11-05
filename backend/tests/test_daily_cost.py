@@ -192,6 +192,45 @@ def _setup_daily_sheet(client, headers, *, with_sub_activities=True, create_entr
     return setup
 
 
+def test_daily_reports_follow_the_afe_service_group_configuration():
+    """Daily report groups stay aligned with the AFE Estimate report."""
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup_daily_sheet(client, headers)
+
+        baseline_service = next(
+            row for row in setup["baseline"]["budget_lines"] if row["cost_group"] == "Services"
+        )
+        assert baseline_service["service_group"] == "Formation Evaluation"
+
+        reclassified = client.patch(
+            f"/api/v1/master-data/services/{setup['service']['id']}",
+            headers=headers,
+            json={"service_group": "Well Services"},
+        )
+        assert reclassified.status_code == 200, reclassified.text
+
+        estimate = client.get(f"/api/v1/afe/afes/{setup['afe']['id']}/estimate", headers=headers)
+        assert estimate.status_code == 200, estimate.text
+        assert estimate.json()["services"][0]["service_group"] == "Well Services"
+
+        day = client.get(f"/api/v1/daily-cost/entries/{setup['entry']['id']}", headers=headers)
+        assert day.status_code == 200, day.text
+        report_service = next(
+            row for row in day.json()["comparison"]["budget_lines"] if row["cost_group"] == "Services"
+        )
+        assert report_service["service_group"] == "Well Services"
+
+        summary = client.get(
+            f"/api/v1/daily-cost/wells/{setup['well']['id']}/cost-summary", headers=headers,
+        )
+        assert summary.status_code == 200, summary.text
+        summary_service = next(
+            row for row in summary.json()["budget_lines"] if row["cost_group"] == "Services"
+        )
+        assert summary_service["service_group"] == "Well Services"
+
+
 def test_daily_cost_locks_rates_prices_bulk_actuals_and_tracks_submission():
     with TestClient(app) as client:
         headers = login(client)
@@ -238,6 +277,7 @@ def test_daily_cost_locks_rates_prices_bulk_actuals_and_tracks_submission():
         assert Decimal(result["comparison"]["actual_to_date"]) == Decimal("140.00")
         assert Decimal(result["comparison"]["balance"]) == Decimal("5860.00")
         assert result["services"][0]["rate_source"] == "daily_override"
+        assert result["services"][0]["sub_activity_remarks"] == "Execute the planned work step."
         assert Decimal(result["services"][0]["captured_rate"]) == Decimal("100.0000")
         assert Decimal(result["services"][0]["override_rate"]) == Decimal("80.0000")
         assert result["consumables"][0]["rate_revision_number"] == 1

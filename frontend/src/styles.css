@@ -672,12 +672,11 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   .daily-cost-print-sheet .dcr-panel tfoot td { font-weight: 800; background: #F3F6FA !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   /* AFE | up to last day | report day | cumulative by activity | balance | used. */
   .daily-cost-print-sheet .dcr-cost-panel { min-height: 0; display: grid; grid-template-rows: max-content minmax(0, 1fr); }
-  /* The merged schedule uses intrinsic rows, reverting the last commit's row
-     height doubling back to .855mm and scoping density steps strictly to this
-     panel so no other table on page one changes height or font size. */
+  /* The merged schedule uses intrinsic rows. The requested 2x row-height
+     increase is scoped strictly to this panel, so no right/bottom table moves. */
   .daily-cost-print-sheet .dcr-cost-panel table { align-self: start; height: auto; font-size: 7.4pt; line-height: 1.05; }
   .daily-cost-print-sheet .dcr-cost-panel th,
-  .daily-cost-print-sheet .dcr-cost-panel td { padding: .855mm .34mm; }
+  .daily-cost-print-sheet .dcr-cost-panel td { padding: 1.71mm .34mm; }
   .daily-cost-print-sheet .dcr-cost-panel thead th { font-size: 6.3pt; line-height: 1.02; padding-top: .3mm; padding-bottom: .3mm; }
   .daily-cost-print-sheet .dcr-cost-panel col:nth-child(1) { width: 22%; }
   .daily-cost-print-sheet .dcr-cost-panel col:nth-child(2) { width: 10%; }
@@ -689,31 +688,31 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   /* Every populated reporting group owns a full-width heading row directly above
      its respective service or consumable items, matching AFE Estimate print. */
   .daily-cost-print-sheet .dcr-cost-group-row { break-after: avoid; }
-  .daily-cost-print-sheet .dcr-cost-group-row th { padding: .48mm .34mm; background: #E8EEF6 !important; color: #123A63; font-size: 6.2pt; font-weight: 800; letter-spacing: .2pt; text-align: left; text-transform: uppercase; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .daily-cost-print-sheet .dcr-cost-group-row th { padding: .96mm .34mm; background: #E8EEF6 !important; color: #123A63; font-size: 6.2pt; font-weight: 800; letter-spacing: .2pt; text-align: left; text-transform: uppercase; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .daily-cost-print-sheet .dcr-cost-item-row td:first-child { padding-left: 1.4mm; }
   /* Long Services + Consumables schedules step down inside their own panel only. */
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-2 table { font-size: 6.9pt; line-height: 1; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-2 td,
-  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-2 tfoot th { padding: .4275mm .3mm; }
-  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-2 .dcr-cost-group-row th { padding: .32mm .3mm; font-size: 6pt; }
+  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-2 tfoot th { padding: .855mm .3mm; }
+  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-2 .dcr-cost-group-row th { padding: .64mm .3mm; font-size: 6pt; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-2 .dcr-cost-item-row td:first-child { padding-left: 1.2mm; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-2 thead th { padding-top: .26mm; padding-bottom: .26mm; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-3 table { font-size: 6.4pt; line-height: .98; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-3 td,
-  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-3 tfoot th { padding: .2925mm .24mm; }
-  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-3 .dcr-cost-group-row th { padding: .22mm .24mm; font-size: 5.8pt; }
+  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-3 tfoot th { padding: .585mm .24mm; }
+  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-3 .dcr-cost-group-row th { padding: .44mm .24mm; font-size: 5.8pt; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-3 .dcr-cost-item-row td:first-child { padding-left: 1.1mm; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-3 thead th { font-size: 5.7pt; padding-top: .22mm; padding-bottom: .22mm; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-4 table { font-size: 5.8pt; line-height: .95; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-4 td,
-  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-4 tfoot th { padding: .18mm .18mm; }
-  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-4 .dcr-cost-group-row th { padding: .15mm .18mm; font-size: 5.5pt; }
+  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-4 tfoot th { padding: .36mm .18mm; }
+  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-4 .dcr-cost-group-row th { padding: .3mm .18mm; font-size: 5.5pt; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-4 .dcr-cost-item-row td:first-child { padding-left: .95mm; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-4 thead th { font-size: 5.4pt; padding-top: .18mm; padding-bottom: .18mm; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 table { font-size: 5.3pt; line-height: .94; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 td,
-  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 tfoot th { padding: .09mm .15mm; }
-  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 .dcr-cost-group-row th { padding: .08mm .15mm; font-size: 5.2pt; }
+  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 tfoot th { padding: .18mm .15mm; }
+  .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 .dcr-cost-group-row th { padding: .16mm .15mm; font-size: 5.2pt; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 .dcr-cost-item-row td:first-child { padding-left: .85mm; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 thead th { font-size: 5.1pt; padding-top: .15mm; padding-bottom: .15mm; }
   /* A dense schedule also compresses the LIH / AFE / NDT stack, the section mud
@@ -731,6 +730,8 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   /* The reporting milestone, time position and depth tables are compact so the
      cost schedules keep the room they need. */
   .daily-cost-print-sheet .dcr-depth table { font-size: 6.3pt; }
+  .daily-cost-print-sheet .dcr-well-objective { margin: 0; padding: .42mm .65mm; border-bottom: .35pt solid #D9E0E8; color: #334E68; font-size: 5.2pt; line-height: 1.15; }
+  .daily-cost-print-sheet .dcr-well-objective strong { color: #123A63; margin-right: .8mm; }
   .daily-cost-print-sheet .dcr-depth th,
   .daily-cost-print-sheet .dcr-depth td { padding: .2mm .4mm; }
   .daily-cost-print-sheet .dcr-tangibles span { font-size: 6.2pt; }

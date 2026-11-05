@@ -15,7 +15,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { DailyCostPrintSheet, useCostPrint, validLeadLagDays } = await import('../../frontend/src/components/daily-cost/DailyCostPrintSheet')
-const { costReportTitle } = await import('../../frontend/src/lib/dailyCost')
+const { costReportTitle, reportSections } = await import('../../frontend/src/lib/dailyCost')
 const line = {
   service_id: 'service-1', activity_id: 'activity-1', sub_activity_id: 'sub-1', hole_section_id: 'section-1', phase_id: 'phase-1',
   quantity: '12.126', quantity_unit: 'hours', currency: 'USD', effective_rate: '100', captured_rate: '100',
@@ -25,6 +25,7 @@ const line = {
   activity_code: 'DRL', activity_name: 'Drilling', sub_activity_code: 'SA1', sub_activity_name: 'Logging',
   section_code: 'SURFACE', section_name: 'Surface hole', phase_code: 'DRILL', phase_name: 'Drilling',
   party_name: 'Operator', vendor_code: 'V1', vendor_name: 'Vendor', sub_activity_party: 'Operations',
+  sub_activity_remarks: 'Sub-activity operations remark',
   override_rate: null, override_reason: '', budget_name: 'Service budget', budget_key: 'service:1', remarks: 'Line notes',
 }
 const day = {
@@ -76,7 +77,7 @@ const second = { ...day, entry: { ...day.entry, id: 'd2', afe_id: 'afe2', afe_co
       { budget_key: 'drill-bit:BIT-B', budget_kind: 'drill_bit', item_code: 'BIT-B', item_name: 'Bit Beta', cost_group: 'Consumables', planned: '2500', actual_to_date: '700', balance: '1800', is_planned: true },
       { budget_key: 'tangible:T1', budget_kind: 'tangible', item_code: 'T1', item_name: 'Casing', cost_group: 'Tangibles', planned: '4000', actual_to_date: '900', balance: '3100', is_planned: true },
     ] },
-  services: [], other_expenses: [],
+  services: [{ ...line, id: 'second-npt', classification: 'NPT', currency: 'EUR', standard_amount: '25', remarks: 'Daily line remark' }], other_expenses: [],
   consumables: [{ ...line, id: 'chemical1', currency: 'EUR', category: 'Mud Chemicals', item_code: 'BAR', item_name: 'Barite', uom: 'MT', quantity_unit: 'unit', override_rate: '50', override_reason: 'Justified daily override' }],
   tangibles: [{ ...line, id: 'tangible1', tangible_code: 'T1', tangible_name: 'Casing', uom: 'm' }],
 }
@@ -91,7 +92,7 @@ const ndtInspections = [
   { id: 'ndt-2', description: 'BHA inspection', quantity_received: '4', quantity_consumed: '4', quantity_backloaded_good: '3', quantity_backloaded_bad: '1', remarks: '' },
 ]
 const root = createRoot(document.getElementById('root'))
-await act(async () => root.render(<DailyCostPrintSheet report={{ title: 'Well costing sheet', period: 'Inception to date', days: [day, second], mudReconciliation, mudBalance, ndtInspections, milestoneLabel: 'Side track on date / time', leadLagKind: 'LEAD', leadLagDays: '2.75' }}/>))
+await act(async () => root.render(<DailyCostPrintSheet report={{ title: 'Well costing sheet', period: 'Inception to date', days: [day, second], mudReconciliation, mudBalance, ndtInspections, milestoneLabel: 'Side track on date / time', leadLagKind: 'LEAD', leadLagDays: '2.75', wellObjective: 'Evaluate and develop the reservoir' }}/>))
 let sheet = document.querySelector('.afe-print-sheet')
 assert.ok(sheet, 'print sheet is a body portal')
 assert.equal(sheet.parentElement, document.body)
@@ -157,6 +158,12 @@ assert.equal(costReportTitle('well', ['drilling'], 'WELL-1'), 'Well Cost Report 
 assert.equal(costReportTitle('daily', ['completion'], 'WELL-1'), 'Daily Cost Report - Completions · WELL-1')
 assert.equal(costReportTitle('well', ['completion', 'drilling'], 'WELL-1'), 'Well Cost Report - Drilling & Completions · WELL-1')
 assert.equal(costReportTitle('daily', [], 'WELL-1'), 'Daily Cost Report · WELL-1', 'no scope keeps the plain title')
+const scopedWell = {
+  sections: [{ hole_section_id: 'drill-section', section_name: 'Surface hole' }],
+  completion_sections: [{ hole_section_id: 'completion-section', section_name: 'Completion interval' }],
+}
+assert.deepEqual(reportSections(scopedWell, ['completion']).map(section => section.section_name), ['Completion interval'],
+  'completion reports resolve configured completion section names instead of printing section UUIDs')
 const drillBitsRow = consumableRows.find(row => row.cells[0].textContent === 'Drill Bits')
 assert.ok(drillBitsRow.textContent.includes('€5,500') && drillBitsRow.textContent.includes('€1,500'), 'drill bit AFE and actual values are cumulative')
 for (const hidden of ['SVC-03', 'SVC-20', 'Bit Alpha', 'Bit Beta', 'Mud Chemicals allowance', 'Cement Additives allowance']) {
@@ -202,6 +209,10 @@ assert.equal(ndtTable.querySelectorAll('colgroup col').length, 5, 'the grouped h
 assert.equal(ndtTable.querySelectorAll('tbody tr')[0].cells.length, 5, 'an NDT row prints description, received, consumed and both backloads')
 assert.ok(!ndtTable.textContent.includes('Batch A') && !ndtTable.textContent.includes('Remarks'), 'NDT remarks are no longer printed')
 assert.ok(lowerRow.lastElementChild.classList.contains('dcr-incident') && panelTitle(lowerRow.lastElementChild) === 'NPT summary', 'NPT is the far-right lower panel, with UPA in the middle')
+assert.ok(lowerRow.lastElementChild.textContent.includes('Sub-activity operations remark'), 'NPT/UPA summaries use the Well Sub-Activity remark')
+const depthPanel = coverLayout.querySelector('.dcr-depth')
+assert.equal(depthPanel.querySelector('h2').nextElementSibling.className, 'dcr-well-objective', 'the well objective sits between the depth title and table header')
+assert.equal(depthPanel.querySelector('.dcr-well-objective').textContent, 'Well objective Evaluate and develop the reservoir', 'the depth panel prints the saved well objective')
 assert.ok(sheet.textContent.includes('Side track on date / time'), 'the report prints the user-edited milestone label')
 assert.ok(sheet.querySelector('.dcr-titlebar h1').textContent.endsWith('(LEAD: 2.75 days)'), 'selected decimal lead days print at the end of the title')
 assert.ok(validLeadLagDays('LAG', '0.125') && !validLeadLagDays('LAG', '') && !validLeadLagDays('LEAD', '-1'), 'lead/lag validation accepts non-negative decimals only')
@@ -399,6 +410,8 @@ for (const defaultRemark of ['Added from costing set', 'Prepared from costing se
   assert.ok(!afeEstimateSource.includes(defaultRemark), `AFE set additions do not inject “${defaultRemark}” into remarks`)
   assert.ok(!dailyCostSheetSource.includes(defaultRemark), `Daily Cost set additions do not inject “${defaultRemark}” into remarks`)
 }
+assert.equal([...dailyCostSheetSource.matchAll(/onBulkDelete=\{/g)].length, 3, 'services, consumables and tangibles expose bulk deletion from their selected rows')
+assert.ok(dailyCostSheetSource.includes('Delete selected ('), 'the selected-line delete action is shown above each enabled table')
 await act(async () => root.unmount())
 
 // The shared advanced selector collects many priced items at once, refuses a checked
@@ -613,13 +626,13 @@ assert.match(styles, /\.dcr-density-4 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr
   'density 4 compresses the stack, mud cost and loss tables by name')
 assert.ok(!styles.includes('.dcr-bottomline .dcr-panel table'), 'density type sizes follow named panels, not the lower band, so moving a panel never changes its printed size')
 assert.ok(styles.includes('.dcr-cost-panel table { align-self: start; height: auto; font-size: 7.4pt'), 'the merged cost table uses intrinsic row and font sizing')
-assert.ok(styles.includes('.dcr-cost-panel td { padding: .855mm .34mm; }'), 'normal cost rows revert the last commit doubling back to .855mm')
+assert.ok(styles.includes('.dcr-cost-panel td { padding: 1.71mm .34mm; }'), 'normal cost rows are doubled from their prior height')
 assert.ok(styles.includes('.dcr-cost-panel.dcr-cost-density-2 td,'), 'density-2 cost rows are scoped strictly to the cost panel')
-assert.ok(styles.includes('padding: .4275mm .3mm;'), 'density-2 cost rows revert back to .4275mm')
-assert.ok(styles.includes('padding: .2925mm .24mm;'), 'density-3 cost rows revert back to .2925mm')
-assert.ok(styles.includes('padding: .18mm .18mm;'), 'density-4 cost rows revert back to .18mm')
-assert.ok(styles.includes('.dcr-cost-group-row th { padding: .48mm .34mm;'), 'group heading rows revert the last commit doubling back to .48mm')
-assert.ok(!styles.includes('padding: 1.71mm .34mm;'), 'the 2x item-row padding from the last commit is removed')
+assert.ok(styles.includes('padding: .855mm .3mm;'), 'density-2 cost rows retain the 2x increase')
+assert.ok(styles.includes('padding: .585mm .24mm;'), 'density-3 cost rows retain the 2x increase')
+assert.ok(styles.includes('padding: .36mm .18mm;'), 'density-4 cost rows retain the 2x increase')
+assert.ok(styles.includes('.dcr-cost-group-row th { padding: .96mm .34mm;'), 'group-name rows are also doubled')
+assert.ok(styles.includes('dcr-cost-density-5 tfoot th { padding: .18mm .15mm;'), 'the densest cost rows remain scoped to the cost panel')
 assert.ok(!styles.includes('.dcr-cost-panel table { height: 100%; }'), 'the merged schedule is not stretched into oversized rows')
 
 // Verify scoped Well Sub Activities and per-scope Well lifecycle across UI sources and live dialog rendering.

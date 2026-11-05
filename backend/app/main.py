@@ -24,7 +24,7 @@ configure_logging()
 
 # Bumped when the API surface changes in a way a browser tab could notice; the
 # health probe and the error messages quote it so a stale deployment is obvious.
-API_VERSION = "0.3.0"
+API_VERSION = "0.3.1"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # Writes that authenticate with the refresh cookie are the only ones a cross-site
 # request could ride on; every other write needs a bearer token the browser does

@@ -28,6 +28,8 @@ export type CostPrintReport = {
   sections?: DailyCostSectionOption[]
   /** Live Master Data service catalogue so report groupings mirror AFE Estimate print. */
   services?: DailyCostServiceOption[]
+  /** Saved objective from the well register, printed above section depths. */
+  wellObjective?: string
   reportKind?: 'daily' | 'well'
   /**
    * Report wording overrides. Nothing is typed at print time any more: the
@@ -406,7 +408,7 @@ function incidentRows(days: DailyCostDay[], classification: 'NPT' | 'UPA'): Cove
     for (const line of [...(day.services ?? []), ...(day.consumables ?? []), ...(day.tangibles ?? []), ...(day.other_expenses ?? [])]) {
       if (line.classification !== classification) continue
       const party = line.party_name || line.vendor_name || line.sub_activity_party || '—'
-      const remarks = line.remarks || line.override_reason || '—'
+      const remarks = line.sub_activity_remarks?.trim() || line.remarks || line.override_reason || '—'
       const key = `${line.activity_code}|${line.activity_name}|${party}|${remarks}`
       const current = grouped.get(key) ?? {
         label: line.activity_name,
@@ -687,7 +689,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
       <div className="dcr-left">
         <div className="dcr-topline">
           <section className="dcr-panel dcr-milestone"><h2>Reporting milestone</h2><dl><dt>{reportMilestoneLabel(report)}</dt><dd>{spud ? `${spud.replace('T', ' ').slice(0, 16)} hrs` : 'Not recorded'}</dd><dt>Current report date</dt><dd>{displayDate(reportDate)} · 23:59 hrs</dd></dl></section>
-          <section className="dcr-panel dcr-depth"><h2>Section-wise planned depth &amp; current depth</h2><table><thead><tr><th>Section</th><th>Planned depth (m)</th><th>Current depth (m)</th></tr></thead><tbody>{sections.map(section => <tr key={section.hole_section_id}><td>{section.section_name}</td><td className="num">{depthText(section.to_depth, 'm')}</td><td className="num">{depthText(sectionDepths.get(section.hole_section_id), 'm')}</td></tr>)}</tbody></table></section>
+          <section className="dcr-panel dcr-depth"><h2>Section-wise planned depth &amp; current depth</h2><p className="dcr-well-objective"><strong>Well objective</strong> {report.wellObjective?.trim() || '—'}</p><table><thead><tr><th>Section</th><th>Planned depth (m)</th><th>Current depth (m)</th></tr></thead><tbody>{sections.map(section => <tr key={section.hole_section_id}><td>{section.section_name}</td><td className="num">{depthText(section.to_depth, 'm')}</td><td className="num">{depthText(sectionDepths.get(section.hole_section_id), 'm')}</td></tr>)}</tbody></table></section>
           <section className="dcr-panel dcr-time"><h2>Time position</h2><dl><dt>Planned</dt><dd>{decimalText(plannedDays)} days</dd><dt>Actual</dt><dd>{decimalText(actualDays)} days</dd><dt>Actual against planned activities</dt><dd>{decimalText(plannedActivityDays)} days</dd><dt>NPT</dt><dd>{decimalText(nptDays)} days</dd><dt>UPA</dt><dd>{decimalText(upaDays)} days</dd></dl></section>
         </div>
         <CostTable title="Services and consumables cost · AFE vs last day, this day and cumulative" groups={coverCostGroups}

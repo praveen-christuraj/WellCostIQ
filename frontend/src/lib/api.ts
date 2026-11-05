@@ -3,7 +3,7 @@ const ROOT = '/api/v1'
 // dashboard durations all belong to this API contract. A lower server version
 // means the frontend was deployed before its API and must not disguise missing
 // routes or old KPI semantics as a missing business record.
-export const REQUIRED_API_VERSION = '0.3.0'
+export const REQUIRED_API_VERSION = '0.3.1'
 let accessToken: string | null = null
 let refreshing: Promise<boolean> | null = null
 export const setAccessToken = (value: string | null) => { accessToken = value }

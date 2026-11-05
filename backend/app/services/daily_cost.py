@@ -801,6 +801,8 @@ def reference_data(db: Session, organization_id: str) -> DailyCostReference:
         select(Well).options(
             joinedload(Well.rig), selectinload(Well.sections).selectinload(WellSection.hole_section),
             selectinload(Well.sections).selectinload(WellSection.phases).joinedload(WellPhase.phase),
+            selectinload(Well.completion_sections).selectinload(WellSection.hole_section),
+            selectinload(Well.completion_sections).selectinload(WellSection.phases).joinedload(WellPhase.phase),
         ).where(Well.organization_id == organization_id, Well.is_deleted.is_(False)).order_by(Well.well_code)
     ).unique().all()
     activities = db.scalars(select(Activity).where(Activity.organization_id == organization_id, Activity.is_deleted.is_(False)).order_by(Activity.activity_code)).all()
@@ -875,6 +877,7 @@ def reference_data(db: Session, organization_id: str) -> DailyCostReference:
             completion_config_status=well.completion_config_status,
             drilling_is_deleted=well.drilling_is_deleted,
             completion_is_deleted=well.completion_is_deleted,
+            objective=well.objective,
             sections=[DailyCostSectionOption(
                 hole_section_id=section.hole_section_id, section_code=section.hole_section.section_code,
                 section_name=section.hole_section.section_name,
@@ -886,6 +889,17 @@ def reference_data(db: Session, organization_id: str) -> DailyCostReference:
                     "phase_name": phase.phase.phase_name, "days": Decimal(phase.days),
                 } for phase in section.phases],
             ) for section in well.sections],
+            completion_sections=[DailyCostSectionOption(
+                hole_section_id=section.hole_section_id, section_code=section.hole_section.section_code,
+                section_name=section.hole_section.section_name,
+                from_depth=depth_to_meters(section.from_depth, well.depth_unit) or Decimal("0.00"),
+                to_depth=depth_to_meters(section.to_depth, well.depth_unit) or Decimal("0.00"),
+                total_days=sum((Decimal(phase.days) for phase in section.phases), Decimal("0")),
+                phases=[{
+                    "phase_id": phase.phase_id, "phase_code": phase.phase.phase_code,
+                    "phase_name": phase.phase.phase_name, "days": Decimal(phase.days),
+                } for phase in section.phases],
+            ) for section in well.completion_sections],
         ) for well in wells if well.rig_id in rig_ids and well.rig and not well.rig.is_deleted],
         afes=afe_options,
         activities=[{"id": row.id, "activity_code": row.activity_code, "activity_name": row.activity_name, "display_name": _label(row.activity_code, row.activity_name)} for row in activities],
@@ -2156,6 +2170,7 @@ def _daily_line_common(line: Any, labels: dict[str, DailyCostBaselineBudgetLine]
         "sub_activity_code": line.sub_activity_code_snapshot,
         "sub_activity_name": line.sub_activity_name_snapshot,
         "sub_activity_party": line.sub_activity_party_snapshot,
+        "sub_activity_remarks": line.sub_activity.description if line.sub_activity else "",
         "classification": line.classification,
         "vendor_id": line.vendor_id,
         "vendor_code": line.vendor_code_snapshot,

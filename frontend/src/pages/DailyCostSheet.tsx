@@ -25,7 +25,7 @@ import { listEntryAmendments, type DailyCostAmendment } from '../lib/sowAdjustme
 import { downloadTemplate, parseImportFile, type ImportRow } from '../lib/export'
 import {
   DAILY_COST_STATUSES, DAILY_ONE_TIME_CATEGORIES, costReportTitle, dailyMoney, deriveClassification, displayDate,
-  entryQuery, leadLagText, otherExpenseLabel, saveFromDay, validLeadLagDays,
+  entryQuery, leadLagText, otherExpenseLabel, reportSections, saveFromDay, validLeadLagDays,
   type DailyCostBaseline, type DailyCostComparisonLine, type DailyCostDay, type DailyCostGroup,
   type AnyDailyCostLine, type DailyCostImportResult, type DailyCostPreview, type DailyCostReference,
   type DailyCostSavePayload, type DailyCostServiceInput, type WellProgressScope,
@@ -49,7 +49,7 @@ type GridLine = {
   amount: string; standardAmount: string; usdAmount: string; source: string; budget: string; overrideReason: string; remarks: string
 }
 type StatusAction = 'submit' | 'reopen'
-type LineDelete = { kind: DailyCostLineKind; index: number; label: string } | null
+type LineDelete = { kind: DailyCostLineKind; indices: number[]; label: string } | null
 
 function StatCard({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: 'good' | 'bad' }) {
   return <Paper variant="outlined" sx={{ p: 1.8, borderRadius: 2, minWidth: 0 }}>
@@ -121,14 +121,26 @@ export default function DailyCostSheet() {
   const [setPickerGroup, setSetPickerGroup] = useState<CostingSetGroup | null>(null)
   const [pendingConsumableSet, setPendingConsumableSet] = useState<CostingSet | null>(null)
   const [selectedServiceIndices, setSelectedServiceIndices] = useState<number[]>([])
+  const [selectedConsumableIndices, setSelectedConsumableIndices] = useState<number[]>([])
+  const [selectedTangibleIndices, setSelectedTangibleIndices] = useState<number[]>([])
   const [seedServiceIds, setSeedServiceIds] = useState<string[] | undefined>()
   const [serviceSelectionResetKey, setServiceSelectionResetKey] = useState(0)
+  const [consumableSelectionResetKey, setConsumableSelectionResetKey] = useState(0)
+  const [tangibleSelectionResetKey, setTangibleSelectionResetKey] = useState(0)
   const [bulkScopeOpen, setBulkScopeOpen] = useState(false)
   const [amendments, setAmendments] = useState<DailyCostAmendment[]>([])
   const fileInput = useRef<HTMLInputElement>(null)
   const clearServiceSelection = () => {
     setSelectedServiceIndices([])
     setServiceSelectionResetKey(value => value + 1)
+  }
+  const clearConsumableSelection = () => {
+    setSelectedConsumableIndices([])
+    setConsumableSelectionResetKey(value => value + 1)
+  }
+  const clearTangibleSelection = () => {
+    setSelectedTangibleIndices([])
+    setTangibleSelectionResetKey(value => value + 1)
   }
 
   const load = useCallback(async () => {
@@ -155,7 +167,11 @@ export default function DailyCostSheet() {
       setProgress(dayData.progress)
       setPayload(saveFromDay(dayData))
       setSelectedServiceIndices([])
+      setSelectedConsumableIndices([])
+      setSelectedTangibleIndices([])
       setServiceSelectionResetKey(value => value + 1)
+      setConsumableSelectionResetKey(value => value + 1)
+      setTangibleSelectionResetKey(value => value + 1)
       setPreview(null)
       setPreviewError('')
       setSaveError('')
@@ -276,6 +292,8 @@ export default function DailyCostSheet() {
       return { ...current, [group]: rows }
     })
     if (group === 'services') clearServiceSelection()
+    if (group === 'consumables') clearConsumableSelection()
+    if (group === 'tangibles') clearTangibleSelection()
     setPreview(null)
     setLineEditor(null)
     setSeedServiceIds(undefined)
@@ -287,12 +305,14 @@ export default function DailyCostSheet() {
   const removeLine = () => {
     if (!lineDelete) return
     const group = GROUP_KEY[lineDelete.kind]
-    const { index } = lineDelete
-    setPayload(current => ({ ...current, [group]: current[group].filter((_row, rowIndex) => rowIndex !== index) }))
+    const removed = new Set(lineDelete.indices)
+    setPayload(current => ({ ...current, [group]: current[group].filter((_row, rowIndex) => !removed.has(rowIndex)) }))
     if (group === 'services') clearServiceSelection()
+    if (group === 'consumables') clearConsumableSelection()
+    if (group === 'tangibles') clearTangibleSelection()
     setPreview(null)
     setLineDelete(null)
-    setNotice('Line removed from the draft. Save to commit the change.')
+    setNotice(`${removed.size} line${removed.size === 1 ? '' : 's'} removed from the draft. Save to commit the change.`)
   }
 
   const applyBulkServiceScope = (updates: { index: number; line: DailyCostServiceInput; lines?: DailyCostServiceInput[] }[]) => {
@@ -318,6 +338,9 @@ export default function DailyCostSheet() {
       setDay(updated)
       setProgress(current => updated.progress ?? current)
       setPayload(saveFromDay(updated))
+      clearServiceSelection()
+      clearConsumableSelection()
+      clearTangibleSelection()
       setPreview(null)
       setNotice('Daily cost sheet saved. Actual-to-date and remaining AFE balance have been refreshed.')
       return true
@@ -836,7 +859,7 @@ export default function DailyCostSheet() {
       headerName: 'ACTIONS', field: 'id', minWidth: 118, width: 118, sortable: false,
       cellRenderer: (params: ICellRendererParams<GridLine>) => params.data ? <Box display="flex" alignItems="center" height="100%" gap={.2}>
         <Tooltip title="Edit line"><Button size="small" aria-label={`Edit ${params.data.item}`} onClick={() => setLineEditor({ kind, index: params.data!.lineIndex })}><EditOutlined sx={{ fontSize: 16 }}/></Button></Tooltip>
-        <Tooltip title="Remove line"><Button size="small" color="error" aria-label={`Remove ${params.data.item}`} onClick={() => setLineDelete({ kind, index: params.data!.lineIndex, label: params.data!.item })}><DeleteOutlineRounded sx={{ fontSize: 17 }}/></Button></Tooltip>
+        <Tooltip title="Remove line"><Button size="small" color="error" aria-label={`Remove ${params.data.item}`} onClick={() => setLineDelete({ kind, indices: [params.data!.lineIndex], label: params.data!.item })}><DeleteOutlineRounded sx={{ fontSize: 17 }}/></Button></Tooltip>
       </Box> : null,
     })
     return columns
@@ -966,7 +989,8 @@ export default function DailyCostSheet() {
         title: costReportTitle('daily', [saved.progress?.scope ?? progress?.scope], entry.well_name),
         period: displayDate(entry.cost_date), days: [saved],
         overviewDays, summary, mudReconciliation, mudBalance, lihReport, ndtInspections,
-        sections: well?.sections ?? baseline?.sections,
+        sections: baseline?.sections?.length ? baseline.sections : reportSections(well, [reportScope]),
+        wellObjective: well?.objective,
         services: reference?.services,
         reportKind: 'daily',
       })
@@ -1196,6 +1220,7 @@ export default function DailyCostSheet() {
         selectable selectedCount={selectedServiceLines.length} selectionResetKey={serviceSelectionResetKey}
         onSelectionChange={rows => setSelectedServiceIndices(rows.map(row => row.lineIndex))}
         onBulkEdit={() => setBulkScopeOpen(true)} bulkEditLabel="Assign scope / depth / quantity"
+        onBulkDelete={() => setLineDelete({ kind: 'service', indices: selectedServiceIndices, label: `${selectedServiceIndices.length} selected services` })}
         onAddFromSet={canReadCostingSets ? () => setSetPickerGroup('services') : undefined}
         total={tableTotal('services')}
       />
@@ -1203,6 +1228,9 @@ export default function DailyCostSheet() {
         title="Consumables" subtitle="Itemized chemical, additive, fuel and drill-bit usage, reconciled to either item or category-level AFE allowances."
         count={payload.consumables.length} rows={consumables} columns={makeColumns('consumable')} editable={editable} canExport={canExport}
         onExport={recordExport} onAdd={() => setLineEditor({ kind: 'consumable', index: null })} onImport={openImport}
+        selectable selectedCount={selectedConsumableIndices.length} selectionResetKey={consumableSelectionResetKey}
+        onSelectionChange={rows => setSelectedConsumableIndices(rows.map(row => row.lineIndex))}
+        onBulkDelete={() => setLineDelete({ kind: 'consumable', indices: selectedConsumableIndices, label: `${selectedConsumableIndices.length} selected consumables` })}
         onAddFromSet={canReadCostingSets ? () => setSetPickerGroup('consumables') : undefined}
         total={tableTotal('consumables')}
       />
@@ -1210,6 +1238,9 @@ export default function DailyCostSheet() {
         title="Tangibles" subtitle="Actual tangible usage priced from the locked catalogue or a justified daily override."
         count={payload.tangibles.length} rows={tangibles} columns={makeColumns('tangible')} editable={editable} canExport={canExport}
         onExport={recordExport} onAdd={() => setLineEditor({ kind: 'tangible', index: null })} onImport={openImport}
+        selectable selectedCount={selectedTangibleIndices.length} selectionResetKey={tangibleSelectionResetKey}
+        onSelectionChange={rows => setSelectedTangibleIndices(rows.map(row => row.lineIndex))}
+        onBulkDelete={() => setLineDelete({ kind: 'tangible', indices: selectedTangibleIndices, label: `${selectedTangibleIndices.length} selected tangibles` })}
         onAddFromSet={canReadCostingSets ? () => setSetPickerGroup('tangibles') : undefined}
         total={tableTotal('tangibles')}
       />
@@ -1340,7 +1371,7 @@ export default function DailyCostSheet() {
       onClose={() => { setLineEditor(null); setSeedServiceIds(undefined) }} onSave={addOrEditLine}
     />
 
-    <FormDialog open={Boolean(lineDelete)} title={`Remove ${lineDelete?.label ?? 'line'}?`} subtitle="This removes the line from this unsaved daily sheet. A saved line is deleted only after you save the sheet." onClose={() => setLineDelete(null)} onSubmit={removeLine} submitLabel="Remove line">
+    <FormDialog open={Boolean(lineDelete)} title={`Remove ${lineDelete?.label ?? 'line'}?`} subtitle="This removes the selected line(s) from this unsaved daily sheet. Saved lines are deleted only after you save the sheet." onClose={() => setLineDelete(null)} onSubmit={removeLine} submitLabel={lineDelete && lineDelete.indices.length > 1 ? 'Remove selected lines' : 'Remove line'} danger>
       <Alert severity="warning">This change will affect the AFE actual-to-date and remaining balance after you save.</Alert>
     </FormDialog>
 
@@ -1405,7 +1436,7 @@ export default function DailyCostSheet() {
 
 function LineGroup({
   title, subtitle, count, rows, columns, editable, canExport, onExport, onAdd, onImport, addLabel,
-  onAddFromSet, selectable = false, selectedCount = 0, onSelectionChange, onBulkEdit, bulkEditLabel,
+  onAddFromSet, selectable = false, selectedCount = 0, onSelectionChange, onBulkEdit, bulkEditLabel, onBulkDelete,
   selectionResetKey, total,
 }: {
   title: string; subtitle: string; count: number; rows: GridLine[]; columns: ColDef<GridLine>[]; editable: boolean
@@ -1413,6 +1444,7 @@ function LineGroup({
   onAdd: () => void; onImport: () => void; addLabel?: string; onAddFromSet?: () => void
   selectable?: boolean; selectedCount?: number; onSelectionChange?: (rows: GridLine[]) => void
   onBulkEdit?: () => void; bulkEditLabel?: string; selectionResetKey?: number
+  onBulkDelete?: () => void
   total?: string
 }) {
   return <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
@@ -1422,6 +1454,7 @@ function LineGroup({
         <Button size="small" onClick={onImport} startIcon={<CloudUploadOutlined sx={{ fontSize: 17 }}/>}>Import</Button>
         {onAddFromSet && <Button size="small" variant="outlined" onClick={onAddFromSet} startIcon={<PlaylistAddRounded sx={{ fontSize: 17 }}/>}>Add from set</Button>}
         {onBulkEdit && selectedCount > 0 && <Button size="small" variant="outlined" onClick={onBulkEdit} startIcon={<EditOutlined sx={{ fontSize: 16 }}/>}>{bulkEditLabel ?? 'Bulk edit'} ({selectedCount})</Button>}
+        {onBulkDelete && selectedCount > 0 && <Button size="small" color="error" variant="outlined" onClick={onBulkDelete} startIcon={<DeleteOutlineRounded sx={{ fontSize: 17 }}/>}>Delete selected ({selectedCount})</Button>}
         <Button size="small" variant="contained" onClick={onAdd} startIcon={<AddRounded sx={{ fontSize: 17 }}/>}>Add {addLabel ?? (title === 'Services' ? 'service' : title === 'Consumables' ? 'usage' : 'tangible')}</Button>
       </Box>}
     </Box>

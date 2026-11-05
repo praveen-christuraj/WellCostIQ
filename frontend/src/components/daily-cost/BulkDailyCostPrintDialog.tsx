@@ -4,7 +4,7 @@ import { Alert, Box, LinearProgress, Typography } from '@mui/material'
 import { ErrorMessage, FormDialog } from '../Common'
 import { api, body } from '../../lib/api'
 import {
-  costReportTitle, displayDate,
+  costReportTitle, displayDate, reportSections,
   type DailyCostDay, type DailyCostEntry, type DailyCostReference, type DailyCostWellOption, type DailyCostWellSummary,
 } from '../../lib/dailyCost'
 import type { MudCostMaterialBalance, MudCostReconciliation } from '../../lib/mudCost'
@@ -120,7 +120,8 @@ export function BulkDailyCostPrintDialog({ open, onClose, entries, wells }: {
           mudBalance: context.mudBalance,
           lihReport: context.lihReport,
           ndtInspections: context.ndtInspections,
-          sections: well?.sections,
+          sections: reportSections(well, [saved.progress?.scope]),
+          wellObjective: well?.objective,
           services: reference?.services,
           reportKind: 'daily',
         })
