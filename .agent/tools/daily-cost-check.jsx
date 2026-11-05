@@ -98,6 +98,11 @@ assert.equal(sheet.parentElement, document.body)
 assert.ok(sheet.classList.contains('daily-cost-print-sheet'), 'daily costing opts into the landscape report page')
 assert.ok(sheet.querySelector('.daily-report-cover'), 'the model-report summary is page one')
 assert.ok(sheet.querySelector('.daily-report-details'), 'cumulative schedules follow the cover')
+assert.ok(sheet.querySelector('.dcr-milestone').textContent.includes('23:59 hrs'), 'report milestone uses end-of-day time')
+for (const incident of sheet.querySelectorAll('.dcr-incident')) {
+  assert.deepEqual([...incident.querySelectorAll('thead th')].map(th => th.textContent), ['Responsible party', 'Days', 'Cost', 'Remarks'])
+  assert.equal(incident.querySelector('tfoot tr').cells.length, 4)
+}
 const coverPanels = sheet.querySelectorAll('.daily-report-cover .dcr-cost-panel')
 assert.equal(coverPanels.length, 1, 'the cover has one merged services and consumables cost table')
 const costGroups = [...coverPanels[0].querySelectorAll('tbody.dcr-cost-group')]
@@ -136,14 +141,14 @@ const serviceBodyRows = [...servicePanel.querySelectorAll('.dcr-cost-item-row')]
 assert.equal(serviceBodyRows[0].cells.length, 10, 'a service row prints all ten cost columns')
 const mudLoggingSplit = serviceBodyRows.find(row => row.cells[0].textContent === 'Mud logging')
 assert.deepEqual([...mudLoggingSplit.cells].map(cell => cell.textContent),
-  ['Mud logging', '€1,000.00', '€250.00', '€50.00', '€250.00', '€0.00', '€50.00', '€300.00', '€700.00', '30.00%'],
+  ['Mud logging', '€1,000', '€250', '€50', '€250', '€0', '€50', '€300', '€700', '30.00%'],
   'a service row prints planned, NPT and UPA activity costs beside its cumulative total')
 const serviceFooter = [...servicePanel.querySelectorAll('tfoot tr:last-child th')].map(cell => cell.textContent)
 assert.deepEqual(serviceFooter,
-  ['Services + consumables total', '€19,000.00', '€2,375.00', '€300.00', '€2,625.00', '€0.00', '€50.00', '€2,675.00', '€16,325.00', '14.08%'],
+  ['Services + consumables total', '€19,000', '€2,375', '€300', '€2,625', '€0', '€50', '€2,675', '€16,325', '14.08%'],
   'the merged footer totals every service and consumable value, including each cumulative classification')
 const fuelRow = combinedRows.find(row => row.cells[0].textContent === 'Fuel')
-assert.deepEqual([...fuelRow.cells].map(cell => cell.textContent).slice(2, 8), ['€0.00', '€100.00', '€100.00', '€0.00', '€0.00', '€100.00'],
+assert.deepEqual([...fuelRow.cells].map(cell => cell.textContent).slice(2, 8), ['€0', '€100', '€100', '€0', '€0', '€100'],
   'a consumable prints its day cost and planned/NPT/UPA/total cumulative values')
 assert.ok(!sheet.textContent.includes('USD '), 'the printed report uses the $ symbol instead of the USD code')
 
@@ -153,7 +158,7 @@ assert.equal(costReportTitle('daily', ['completion'], 'WELL-1'), 'Daily Cost Rep
 assert.equal(costReportTitle('well', ['completion', 'drilling'], 'WELL-1'), 'Well Cost Report - Drilling & Completions · WELL-1')
 assert.equal(costReportTitle('daily', [], 'WELL-1'), 'Daily Cost Report · WELL-1', 'no scope keeps the plain title')
 const drillBitsRow = consumableRows.find(row => row.cells[0].textContent === 'Drill Bits')
-assert.ok(drillBitsRow.textContent.includes('€5,500.00') && drillBitsRow.textContent.includes('€1,500.00'), 'drill bit AFE and actual values are cumulative')
+assert.ok(drillBitsRow.textContent.includes('€5,500') && drillBitsRow.textContent.includes('€1,500'), 'drill bit AFE and actual values are cumulative')
 for (const hidden of ['SVC-03', 'SVC-20', 'Bit Alpha', 'Bit Beta', 'Mud Chemicals allowance', 'Cement Additives allowance']) {
   assert.ok(!sheet.querySelector('.daily-report-cover').textContent.includes(hidden), `${hidden} is hidden from the summary`)
 }
@@ -185,7 +190,7 @@ assert.deepEqual([...lowerRow.querySelector('.dcr-stack').children].map(node => 
   ['LIH', 'AFE', 'NDT'], 'NDT follows LIH and AFE at the bottom-left only when records exist')
 const ndtTable = lowerRow.querySelector('.dcr-ndt')
 assert.ok(sheet.querySelector('.daily-report-cover').classList.contains('dcr-has-ndt'), 'NDT-bearing cover keeps its dcr-has-ndt state hook')
-assert.ok(ndtTable.textContent.includes('Drill pipe inspection') && ndtTable.textContent.includes('20.00') && ndtTable.textContent.includes('18.00') && ndtTable.textContent.includes('15.00') && ndtTable.textContent.includes('3.00'), 'NDT table prints received, consumed and good/bad backloaded quantities')
+assert.ok(ndtTable.textContent.includes('Drill pipe inspection') && ndtTable.textContent.includes('20') && ndtTable.textContent.includes('18') && ndtTable.textContent.includes('15') && ndtTable.textContent.includes('3'), 'NDT table prints received, consumed and good/bad backloaded quantities')
 assert.equal(ndtTable.querySelector('h2').textContent, 'NDT Inspection Details', 'the schedule is titled NDT Inspection Details')
 const ndtHeaderRows = [...ndtTable.querySelectorAll('thead tr')]
 assert.deepEqual([...ndtHeaderRows[0].querySelectorAll('th')].map(cell => cell.textContent),
@@ -205,13 +210,13 @@ for (const heading of ['Service-wise cumulative cost', 'Consumables cumulative c
   assert.ok(sheet.textContent.includes(heading), `cumulative pages print ${heading}`)
 }
 const matrix = sheet.querySelector('.dcr-mud-analysis')
-for (const text of ['Surface hole', 'OBM', 'Opening Stock', 'Receipt', 'Additions', 'Total Mud', 'Losses', 'Closing Stock', 'Meterage (current depth)', 'Cost / BBL', 'Reconciled Cost', '20.00', '30.00', '60.00', '90.00', '15.00', '95.00', '1,234.57 m', '€12.50', '€187.50']) {
+for (const text of ['Surface hole', 'OBM', 'Opening Stock', 'Receipt', 'Additions', 'Total Mud', 'Losses', 'Closing Stock', 'Meterage (current depth)', 'Cost / BBL', 'Reconciled Cost', '20', '30', '60', '90', '15', '95', '1,234.57 m', '€13', '€188']) {
   assert.ok(matrix.textContent.includes(text), `mud matrix prints ${text}`)
 }
 assert.equal(matrix.querySelector('thead th:nth-child(2)').textContent, 'Surface holeOBM', 'mud analysis header prints only section and mud type')
 const lossMatrix = sheet.querySelector('.dcr-loss-matrix')
 assert.ok(lossMatrix, 'consumption and losses print as a matrix')
-for (const text of ['Surface hole', 'OBM', 'Surface losses', 'Verti-G/Mud on Cuttings', 'Centrifuge', 'By-Pass', 'Evaporation', 'Trips', 'Surface losses total', 'Loss (bbl/m)', '0.01', 'Other losses', 'Mud Cleaner', 'Formation/Seepage', 'Pit Cleaning/Dump', 'Left-In-Hole', '10.00', 'Other losses total', 'Total losses', '15.00', '40.00', '55.00']) {
+for (const text of ['Surface hole', 'OBM', 'Surface losses', 'Verti-G/Mud on Cuttings', 'Centrifuge', 'By-Pass', 'Evaporation', 'Trips', 'Surface losses total', 'Loss (bbl/m)', '0.01', 'Other losses', 'Mud Cleaner', 'Formation/Seepage', 'Pit Cleaning/Dump', 'Left-In-Hole', '10', 'Other losses total', 'Total losses', '15', '40', '55']) {
   assert.ok(lossMatrix.textContent.includes(text), `loss matrix prints ${text}`)
 }
 const lossLabels = [...lossMatrix.querySelectorAll('tbody tr th')].map(cell => cell.textContent)
@@ -221,22 +226,22 @@ assert.equal(lossMatrix.querySelector('thead th:nth-child(2)').textContent, 'Sur
 assert.equal(sheet.querySelector('.dcr-mud-cost tbody tr td').textContent, 'Surface hole · OBM', 'mud chemical row prints only section and mud type')
 const mudCostPanel = sheet.querySelector('.dcr-mud-cost')
 assert.equal(mudCostPanel.querySelector('thead th:nth-child(2)').textContent, 'Planned (AFE)', 'planned mud chemicals are labelled as the section AFE allowance')
-assert.equal(mudCostPanel.querySelector('tbody tr td:nth-child(2)').textContent, '€3,500.00', 'planned mud chemicals print the section AFE allowance instead of the section plan')
+assert.equal(mudCostPanel.querySelector('tbody tr td:nth-child(2)').textContent, '€3,500', 'planned mud chemicals print the section AFE allowance instead of the section plan')
 const mudCostTotal = mudCostPanel.querySelector('tfoot tr')
-assert.deepEqual([...mudCostTotal.cells].map(cell => cell.textContent), ['Total', '€3,500.00', '€200.00', '€187.50'], 'mud chemical totals print planned, actual and reconciled for every section')
+assert.deepEqual([...mudCostTotal.cells].map(cell => cell.textContent), ['Total', '€3,500', '€200', '€188'], 'mud chemical totals print planned, actual and reconciled for every section')
 assert.equal(mudCostPanel.querySelector('.dcr-mud-note'), null, 'the mud chemical panel no longer prints the AFE allowance note')
-assert.equal(sheet.querySelector('.dcr-tangibles span:first-child strong').textContent, '€4,000.00', 'daily report reads the tangible AFE amount from its locked budget line')
+assert.equal(sheet.querySelector('.dcr-tangibles span:first-child strong').textContent, '€4,000', 'daily report reads the tangible AFE amount from its locked budget line')
 const afeSummaryRows = [...sheet.querySelectorAll('.dcr-overall tbody tr')].map(row => [...row.cells].map(cell => cell.textContent))
-assert.deepEqual(afeSummaryRows[1], ['Consumables', '€16,000.00', '€100.00'],
+assert.deepEqual(afeSummaryRows[1], ['Consumables', '€16,000', '€100'],
   'without a well summary the bulk print keeps its own AFE-scoped consumables actual')
 const afeSummaryNote = sheet.querySelector('.dcr-overall p').textContent
-assert.equal(afeSummaryNote, 'AFE available = €6,900.00 · 1.43% used', 'AFE summary labels the final balance as the available amount')
+assert.equal(afeSummaryNote, 'AFE available = €6,900 · 1.43% used', 'AFE summary labels the final balance as the available amount')
 assert.ok(!afeSummaryNote.includes('after LIH') && !afeSummaryNote.includes('Balance'), 'AFE summary removes the old after-LIH and duplicate balance wording')
 for (const code of ['DC-1', 'DC-2', 'AFE-1', 'AFE-2', 'WELL-1', 'RIG-1', 'SVC', 'SURFACE', 'DRL', 'DRILL', 'SA1', 'V1', 'T1', 'BAR']) {
   assert.ok(!sheet.textContent.includes(code), `${code} is omitted in favour of its name`)
 }
 assert.ok(sheet.textContent.includes('1,234.57 m'), 'printed depth rounds to two decimals')
-assert.ok(sheet.textContent.includes('Casing') && sheet.textContent.includes('€900.00'), 'tangible items and cumulative prices print')
+assert.ok(sheet.textContent.includes('Casing') && sheet.textContent.includes('€900'), 'tangible items and cumulative prices print')
 assert.equal(sheet.querySelector('script'), null, 'remarks remain escaped')
 
 // A well summary's factor rows are actual-driven, so a planned tangible with
@@ -264,17 +269,17 @@ await act(async () => root.render(<DailyCostPrintSheet coversOnly report={{
   summary: summaryWithoutTangibleFactor,
 }}/>))
 const summarySheet = document.querySelector('.afe-print-sheet')
-assert.equal(summarySheet.querySelector('.dcr-tangibles span:first-child strong').textContent, '€4,000.00',
+assert.equal(summarySheet.querySelector('.dcr-tangibles span:first-child strong').textContent, '€4,000',
   'well-summary printing falls back to the locked tangible AFE budget when its actual factor is absent')
 const summaryMud = summarySheet.querySelector('.dcr-mud-cost')
-assert.equal(summaryMud.querySelector('tbody tr td:nth-child(2)').textContent, '€9,000.00',
+assert.equal(summaryMud.querySelector('tbody tr td:nth-child(2)').textContent, '€9,000',
   'well-summary printing reads planned mud cost from the section AFE allowance on the summary payload')
 assert.equal(summaryMud.querySelector('.dcr-mud-note'), null,
   'the well-summary mud chemical panel prints no AFE allowance note')
 const summaryAfeRows = [...summarySheet.querySelectorAll('.dcr-overall tbody tr')].map(row => [...row.cells].map(cell => cell.textContent))
-assert.deepEqual(summaryAfeRows[1], ['Consumables', '€16,000.00', '€87.50'],
+assert.deepEqual(summaryAfeRows[1], ['Consumables', '€16,000', '€88'],
   'the AFE vs actual summary compares consumables at the reconciled mud chemicals cost, not the recorded actual')
-assert.deepEqual(summaryAfeRows.at(-1), ['Total', '€23,000.00', '€800.00'],
+assert.deepEqual(summaryAfeRows.at(-1), ['Total', '€23,000', '€800'],
   'the summary total keeps the API comparison actual that already includes the reconciled mud chemicals')
 let trigger
 function PrintHarness() { const hook = useCostPrint(); trigger = hook.print; return hook.printSheet }
@@ -602,12 +607,12 @@ assert.ok(styles.includes('.dcr-stack { min-width: 0; min-height: 0; display: gr
 assert.ok(styles.includes('.dcr-stack--ndt { grid-template-rows: max-content max-content minmax(0, 1fr); }'),
   'the NDT triple decker sizes LIH and the AFE summary to their content and pulls NDT up to fill the lower band')
 assert.ok(!styles.includes('--dcr-lower-row-height') && !/\.dcr-(main|side)\b/.test(styles), 'the fixed lower-row height and the old main/side columns are retired')
-assert.match(styles, /\.dcr-density-3 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr-density-3 \.dcr-panel\.dcr-mud-cost table,\s*\S+ \.dcr-density-3 \.dcr-panel\.dcr-loss-matrix table \{ font-size: 4\.8pt; \}/,
+assert.match(styles, /\.dcr-density-3 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr-density-3 \.dcr-panel\.dcr-mud-cost table,\s*\S+ \.dcr-density-3 \.dcr-panel\.dcr-loss-matrix table \{ font-size: 5\.8pt; \}/,
   'density 3 compresses the stack, mud cost and loss tables by name')
-assert.match(styles, /\.dcr-density-4 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr-density-4 \.dcr-panel\.dcr-mud-cost table,\s*\S+ \.dcr-density-4 \.dcr-panel\.dcr-loss-matrix table \{ font-size: 4\.4pt; \}/,
+assert.match(styles, /\.dcr-density-4 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr-density-4 \.dcr-panel\.dcr-mud-cost table,\s*\S+ \.dcr-density-4 \.dcr-panel\.dcr-loss-matrix table \{ font-size: 5\.4pt; \}/,
   'density 4 compresses the stack, mud cost and loss tables by name')
 assert.ok(!styles.includes('.dcr-bottomline .dcr-panel table'), 'density type sizes follow named panels, not the lower band, so moving a panel never changes its printed size')
-assert.ok(styles.includes('.dcr-cost-panel table { align-self: start; height: auto; font-size: 6.4pt'), 'the merged cost table uses intrinsic row and font sizing')
+assert.ok(styles.includes('.dcr-cost-panel table { align-self: start; height: auto; font-size: 7.4pt'), 'the merged cost table uses intrinsic row and font sizing')
 assert.ok(styles.includes('.dcr-cost-panel td { padding: .855mm .34mm; }'), 'normal cost rows revert the last commit doubling back to .855mm')
 assert.ok(styles.includes('.dcr-cost-panel.dcr-cost-density-2 td,'), 'density-2 cost rows are scoped strictly to the cost panel')
 assert.ok(styles.includes('padding: .4275mm .3mm;'), 'density-2 cost rows revert back to .4275mm')

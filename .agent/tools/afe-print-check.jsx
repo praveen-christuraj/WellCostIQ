@@ -77,7 +77,12 @@ assert.ok(firstPageCostTable.textContent.includes('Total AFE amount'), 'the unif
 assert.equal(sheet.querySelectorAll('.ps-grand').length, 1, 'the AFE grand total appears only in the unified first-page table')
 assert.ok(pages[0].textContent.includes('Sections and depths') && !pages[1].textContent.includes('Sections and depths'), 'section detail follows the cost table on page one')
 assert.ok(pages[1].textContent.includes('Casing'), 'tangible name remains visible without its code')
-assert.ok(pages[0].textContent.includes('1,000.13 m') && pages[0].textContent.includes('10.13 d') && pages[1].textContent.includes('1.13'), 'depths, days and quantities round to two decimals')
+const tangibleTable = [...pages[1].querySelectorAll('table')].find(table => table.textContent.includes('Casing'))
+assert.equal(tangibleTable.querySelector('tbody tr').cells[3].textContent, '1', 'tangible quantity is rounded to zero places')
+assert.equal(tangibleTable.querySelector('tbody tr').cells[4].textContent, '$30', 'USD rate prints with a dollar symbol')
+assert.ok(![...tangibleTable.querySelectorAll('thead th')].some(th => th.textContent === 'Ccy'), 'currency column is omitted')
+
+assert.ok(pages[0].textContent.includes('1,000.13 m') && pages[0].textContent.includes('10.13 d') && pages[1].textContent.includes('1'), 'depths and days retain precision while quantities round to whole units')
 assert.ok(!pages[0].textContent.includes('Authorisation') && pages[1].textContent.includes('Authorisation'), 'sign-off is kept with supporting detail')
 assert.equal(pages[0].querySelector('h1').textContent, 'AFE Cost Estimate', 'the first-page title uses the requested short wording')
 assert.equal(pages[1].querySelector('h1').textContent, 'AFE Cost Estimate', 'the supporting page repeats the requested short report title')
@@ -122,9 +127,9 @@ const groupBlocks = [...document.querySelectorAll('.ps-afe-summary .ps-service-g
 assert.deepEqual(groupBlocks.map(block => block.querySelector('.ps-service-group-heading th').textContent),
   ['Rig Operations', 'Well Services'], 'each group has its own heading, as in the model AFE')
 assert.deepEqual(groupBlocks.map(block => block.querySelector('.ps-service-group-total th').textContent),
-  ['Total Rig Operations (USD)', 'Total Well Services (USD)'], 'each group ends with its own labelled subtotal')
+  ['Total Rig Operations', 'Total Well Services'], 'each group ends with its own labelled subtotal')
 assert.deepEqual(groupBlocks.map(block => block.querySelector('.ps-service-group-total .num').textContent),
-  ['USD 100.00', 'USD 100.00'], 'group subtotals include only their own service lines')
+  ['$100', '$100'], 'group subtotals include only their own service lines')
 assert.deepEqual(groupBlocks.map(block => [...block.rows].map(row => row.cells[0].textContent)),
   [['1.0', '1.1', ''], ['2.0', '2.1', '']], 'group and service numbering mirrors the model')
 assert.ok(!document.querySelector('.ps-afe-summary .ps-line .ps-group'), 'group labels no longer run into service names')
@@ -146,16 +151,16 @@ sectionEstimate.services = [
 await act(async () => root.render(<AfePrintSheet estimate={sectionEstimate}/>))
 const servicesTable = document.querySelector('.ps-afe-summary .ps-table')
 assert.deepEqual([...servicesTable.querySelectorAll('thead th')].map(cell => cell.textContent),
-  ['#', 'Service', 'Basis / entered rates', 'Amount', 'Remarks'], 'the first-page schedule has five columns without Scope or Currency')
+  ['#', 'Service', 'Basis / entered rates', 'Amount in USD', 'Remarks'], 'the first-page schedule has five columns without Scope or Currency')
 assert.equal(servicesTable.querySelectorAll('colgroup col').length, 5, 'column widths match the five headers')
 const serviceRows = servicesTable.querySelectorAll('.ps-service-group-block tr.ps-line')
 assert.equal(serviceRows[0].cells.length, 5, 'section-rate row has no extra scope or currency cells')
-assert.ok(serviceRows[0].cells[2].textContent.includes('Surface · Drilling: EUR 75.00'), 'first section and phase names show their entered rate')
-assert.ok(serviceRows[0].cells[2].textContent.includes('Intermediate: EUR 100.00'), 'second section name and rate show separately')
-assert.equal(serviceRows[0].cells[3].textContent, 'EUR 175.00', 'service amount still identifies its entered currency')
-assert.ok(serviceRows[1].cells[2].textContent.includes('Operation USD 40.00 × 2.13 days'), 'day rates retain currency and two-decimal quantity')
+assert.ok(serviceRows[0].cells[2].textContent.includes('Surface · Drilling: EUR 75'), 'first section and phase names show their entered rate')
+assert.ok(serviceRows[0].cells[2].textContent.includes('Intermediate: EUR 100'), 'second section name and rate show separately')
+assert.equal(serviceRows[0].cells[3].textContent, 'EUR 175', 'service amount still identifies its entered currency')
+assert.ok(serviceRows[1].cells[2].textContent.includes('Operation $40 × 2 days'), 'day rates retain currency and whole-unit quantity')
 assert.ok(serviceRows[1].cells[2].textContent.includes('Surface · Drilling'), 'scoped day rates retain section and phase names in Basis')
-assert.ok(serviceRows[2].cells[2].textContent.includes('Fixed USD 100.00'), 'fixed rates retain their currency')
+assert.ok(serviceRows[2].cells[2].textContent.includes('Fixed $100'), 'fixed rates retain their currency')
 assert.equal(servicesTable.querySelector('.ps-services-total').cells[0].colSpan, 3, 'services total spans the remaining label columns')
 
 const allGroupsEstimate = structuredClone(estimate)
@@ -179,7 +184,7 @@ assert.deepEqual(allBlocks.map(block => block.querySelector('.ps-service-group-h
 assert.deepEqual([...allBlocks[0].querySelectorAll('.ps-line strong')].map(node => node.textContent),
   ['RIG-2 name', 'RIG-10 name'], 'natural service order is preserved inside a group')
 assert.deepEqual(allBlocks.map(block => block.querySelector('.ps-service-group-total .num').textContent),
-  ['USD 10.00', 'USD 20.00', 'USD 30.00', 'USD 15.00', 'USD 5.00', 'USD 20.00'], 'repeated service lines contribute to just one subtotal per group')
+  ['$10', '$20', '$30', '$15', '$5', '$20'], 'repeated service lines contribute to just one subtotal per group')
 assert.equal(JSON.stringify(allGroupsEstimate.services), sourceServices, 'printing never mutates saved services or grouping assignments')
 assert.equal(document.querySelector('.ps-afe-summary .ps-meta').outerHTML, originalMetadata, 'well and AFE metadata are unchanged')
 assert.deepEqual([...document.querySelectorAll('.ps-consumable-group-block .num')].map(node => node.textContent), originalConsumables,
@@ -189,7 +194,7 @@ assert.deepEqual([...document.querySelectorAll('.ps-tangible-group-block .num')]
 assert.equal(document.querySelector('.ps-section-plan').outerHTML, originalSectionPlan, 'the first-page section plan is unchanged by service grouping')
 assert.equal(document.querySelectorAll('.afe-cost-print-sheet > .ps-page')[1].outerHTML, originalSupportingPage,
   'the entire supporting-detail page, warnings and sign-off remain unchanged')
-assert.equal(document.querySelector('.ps-services-total .num').textContent, 'USD 100.00',
+assert.equal(document.querySelector('.ps-services-total .num').textContent, '$100',
   'the existing Services total is retained after all group subtotals')
 
 const convertedEstimate = structuredClone(estimate)
@@ -206,11 +211,11 @@ convertedEstimate.summary.currency = {
 }
 await act(async () => root.render(<AfePrintSheet estimate={convertedEstimate}/>))
 assert.deepEqual([...document.querySelectorAll('.ps-service-group-block .ps-service-group-total .num')].map(node => node.textContent),
-  ['USD 34.73', 'USD 45.00'], 'mixed-currency group subtotals use saved FX rates and round only for display')
-assert.equal(document.querySelector('.ps-services-total .num').textContent, 'USD 79.73',
+  ['$35', '$45'], 'mixed-currency group subtotals use saved FX rates and round only for display')
+assert.equal(document.querySelector('.ps-services-total .num').textContent, '$80',
   'mixed-currency group amounts reconcile to the unchanged Services total')
 assert.deepEqual([...document.querySelectorAll('.ps-afe-summary .ps-service-group-block .ps-line td.num')].map(node => node.textContent),
-  ['USD 10.13', 'EUR 20.50', 'GBP 30.00'], 'entered-currency line amounts remain unchanged')
+  ['$10', 'EUR 21', 'GBP 30'], 'entered-currency line amounts remain unchanged')
 
 const componentEstimate = structuredClone(convertedEstimate)
 componentEstimate.services = [{
@@ -219,7 +224,7 @@ componentEstimate.services = [{
 }]
 componentEstimate.summary.services_total = '0.0050000000'
 await act(async () => root.render(<AfePrintSheet estimate={componentEstimate}/>))
-assert.equal(document.querySelector('.ps-service-group-total .num').textContent, 'USD 0.01',
+assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$0',
   'component-by-component ten-place half-up conversion matches the existing backend summary at a rounding boundary')
 
 const precisionEstimate = structuredClone(estimate)
@@ -227,10 +232,10 @@ precisionEstimate.services = ['0.0024999999', '0.0025'].map((amount, index) => (
   ...estimate.services[0], id: `precision-${index}`, service_group: 'Rig Operations', amount,
 }))
 await act(async () => root.render(<AfePrintSheet estimate={precisionEstimate}/>))
-assert.equal(document.querySelector('.ps-service-group-total .num').textContent, 'USD 0.00', 'subtotals retain ten-place precision rather than rounding each line to cents')
+assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$0', 'subtotals retain ten-place precision rather than rounding each line to cents')
 precisionEstimate.services[0].amount = '0.0025'
 await act(async () => root.render(<AfePrintSheet estimate={precisionEstimate}/>))
-assert.equal(document.querySelector('.ps-service-group-total .num').textContent, 'USD 0.01', 'the final subtotal rounds to two places at the cent boundary')
+assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$0', 'the final subtotal rounds to whole units')
 
 const pendingEstimate = structuredClone(convertedEstimate)
 pendingEstimate.summary.currency.converted = false
@@ -254,11 +259,11 @@ euroEstimate.summary.currency = {
   ...estimate.summary.currency, standard_currency: 'EUR', currencies: ['EUR'], exchange_rates: [],
 }
 await act(async () => root.render(<AfePrintSheet estimate={euroEstimate}/>))
-assert.equal(document.querySelector('.ps-service-group-total .num').textContent, 'EUR 100.13',
+assert.equal(document.querySelector('.ps-service-group-total .num').textContent, 'EUR 100',
   'a single non-USD currency remains its own standard without an FX rate')
 euroEstimate.services[0].amount = '0.0000000000'
 await act(async () => root.render(<AfePrintSheet estimate={euroEstimate}/>))
-assert.equal(document.querySelector('.ps-service-group-total .num').textContent, 'EUR 0.00', 'zero-cost service groups still print a zero subtotal')
+assert.equal(document.querySelector('.ps-service-group-total .num').textContent, 'EUR 0', 'zero-cost service groups still print a zero subtotal')
 
 const legacyEstimate = structuredClone(estimate)
 legacyEstimate.services = [
@@ -268,7 +273,7 @@ legacyEstimate.services = [
 await act(async () => root.render(<AfePrintSheet estimate={legacyEstimate}/>))
 assert.equal(document.querySelectorAll('.ps-service-group-block').length, 1, 'legacy missing and empty groups still form one block')
 assert.equal(document.querySelector('.ps-service-group-heading th').textContent, 'Unclassified services', 'unclassified service lines remain visible without recategorization')
-assert.equal(document.querySelector('.ps-service-group-total .num').textContent, 'USD 100.00', 'legacy unclassified lines are still included in a subtotal')
+assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$100', 'legacy unclassified lines are still included in a subtotal')
 
 const emptyEstimate = structuredClone(estimate)
 emptyEstimate.services = []
