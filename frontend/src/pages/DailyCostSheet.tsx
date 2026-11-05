@@ -932,6 +932,7 @@ export default function DailyCostSheet() {
         period: displayDate(entry.cost_date), days: [saved],
         overviewDays, summary, mudReconciliation, mudBalance, lihReport, ndtInspections,
         sections: well?.sections ?? baseline?.sections,
+        services: reference?.services,
         reportKind: 'daily',
       })
     } catch (caught) {

@@ -2,13 +2,24 @@
 
 ## AFE and Daily Cost report corrections (2026-11-05)
 - The Daily Cost page-one cover has one combined **Services and consumables cost** schedule.
-  Each group name occupies its own full-width heading row, with service/item rows beneath it;
-  Consumables is a four-row reporting group immediately after Rig Operations, followed by
-  Formation Evaluation, Well Services, Land Facilities & Preparation, Supervisions and
-  Miscellaneous. Unknown legacy service-group values appear separately as Unclassified Services
-  instead of being mislabeled as Miscellaneous. Item rows use the requested additional 1.5x height.
-  Its footer sums every displayed service and consumable row; the AFE-vs-actual
-  summary and the separate cumulative Services, Consumables and Tangibles schedules are unchanged.
+  Like the AFE Estimate print (`AfePrintSheet.tsx`), only populated groups emit a full-width
+  heading row followed immediately by their respective services/items (sorted by canonical group
+  and natural `service_code`); empty service groups never emit phantom headings. Consumables is a
+  four-row reporting group immediately after Rig Operations, followed by Formation Evaluation,
+  Well Services, Land Facilities & Preparation, Supervisions and Miscellaneous (with unknown
+  legacy values under Unclassified Services). Both backend comparisons/summaries and frontend print
+  flows resolve live Master Data `Service.service_group` across `AfeServiceLine`, locked
+  `DailyCostBaselineServiceRate.service_id`, `service_code`/`service_name`, and unbudgeted
+  `unplanned:service:<id>` lines so re-saving an AFE estimate never drops group resolution.
+- Page-one cost-schedule item rows revert PR #77's 2x height doubling back to `.855mm` (`.48mm`
+  for group headings), and `.dcr-left` spans the upper and middle bands (`min-height: 0`,
+  anchoring the topline strip at top and `Tangibles cost · AFE vs actual` on the losses baseline at
+  bottom) with cost-only density classes (`.dcr-cost-density-1..5`) scoped strictly to
+  `.dcr-cost-panel`. Right-hand and bottom tables (`LIH`, `AFE vs actual summary`, `NDT`,
+  `UPA summary`, `NPT summary`) retain their `2981f91` positions, heights and typography
+  regardless of `Services + Consumables` row count. Its footer sums every displayed service and
+  consumable row; the AFE-vs-actual summary and the separate cumulative Services, Consumables and
+  Tangibles schedules are unchanged.
 - The AFE print title identity is `AFE type - AFE name - Rig name` on both pages. Its metadata
   table contains only Rig, Well, Objective, Location / block, Depth and Planned days; AFE name and
   type are not repeated there.

@@ -168,16 +168,16 @@ for (const heading of [
 const panelTitle = node => node.querySelector('h2')?.textContent
 const coverLayout = sheet.querySelector('.daily-report-cover .dcr-layout')
 assert.deepEqual([...coverLayout.children].map(node => node.classList.contains('dcr-panel') ? panelTitle(node) : node.className),
-  ['dcr-upper', 'dcr-mud-stack', 'dcr-middle', 'Consumption / losses · cumulative matrix', 'dcr-bottomline'],
-  'page one is an upper band (strip and merged costs | mud stack), a middle band (Tangibles | losses) and a full-width lower band')
-assert.deepEqual([...coverLayout.querySelector('.dcr-upper > .dcr-topline').children].map(panelTitle),
+  ['dcr-left', 'dcr-mud-stack', 'Consumption / losses · cumulative matrix', 'dcr-bottomline'],
+  'page one spans the left stack across rows 1-2 beside mud and losses, above the full-width lower band')
+assert.deepEqual([...coverLayout.querySelector('.dcr-left > .dcr-topline').children].map(panelTitle),
   ['Reporting milestone', 'Section-wise planned depth & current depth', 'Time position'], 'the milestone, depth and time strip heads the left column')
-assert.equal(panelTitle(coverLayout.querySelector('.dcr-upper > .dcr-cost-panel')), 'Services and consumables cost · AFE vs last day, this day and cumulative',
+assert.equal(panelTitle(coverLayout.querySelector('.dcr-left > .dcr-cost-panel')), 'Services and consumables cost · AFE vs last day, this day and cumulative',
   'the merged services and consumables schedule sits directly under the milestone, depth and time strip')
+assert.equal(panelTitle(coverLayout.querySelector('.dcr-left > .dcr-tangibles')), 'Tangibles cost · AFE vs actual',
+  'Tangibles anchors the bottom of the left column so adjustments stay strictly inside Services + Consumables and Tangibles')
 assert.deepEqual([...coverLayout.querySelector('.dcr-mud-stack').children].map(panelTitle),
   ['Mud cost analysis · section / mud type', 'Mud chemical cost · section-wise'], 'Mud cost analysis sits over Mud chemical cost, beside Services')
-assert.deepEqual([...coverLayout.querySelector('.dcr-middle').children].map(panelTitle),
-  ['Tangibles cost · AFE vs actual'], 'Tangibles remains separate beside Consumption / losses')
 const lowerRow = sheet.querySelector('.dcr-bottomline')
 assert.deepEqual([...lowerRow.children].map(node => node.classList.contains('dcr-stack') ? 'stack' : panelTitle(node)),
   ['stack', 'UPA summary', 'NPT summary'], 'the full-width lower band places the LIH/AFE/NDT stack, then UPA summary, then NPT summary')
@@ -322,9 +322,55 @@ await act(async () => root.render(<DailyCostPrintSheet coversOnly reports={[
 ]}/>))
 const denseCovers = [...document.querySelectorAll('.afe-print-sheet .daily-report-cover')]
 assert.equal(denseCovers[0].querySelectorAll('.dcr-cost-panel')[0].querySelectorAll('.dcr-cost-item-row').length, 24, 'the dense fixture prints all 20 service lines and four consumable items')
-assert.equal(denseCovers[0].querySelectorAll('.dcr-cost-group-row').length, 7, 'the dense fixture retains every structural group heading')
-assert.deepEqual(denseCovers.map(cover => cover.className.match(/dcr-density-(\d)/)[1]), ['4', '4', '4'],
-  'density accounts for every item row, structural group heading and NDT row')
+assert.deepEqual(
+  [...denseCovers[0].querySelectorAll('.dcr-cost-group-row th')].map(cell => cell.textContent),
+  ['Rig Operations', 'Consumables'],
+  'like AFE Estimate print, empty service groups never emit phantom headings above populated services',
+)
+assert.deepEqual(denseCovers.map(cover => cover.className.match(/dcr-density-(\d)/)[1]), ['1', '1', '1'],
+  'Services + Consumables density never compresses the cover or the bottom tables')
+assert.deepEqual(
+  denseCovers.map(cover => cover.querySelector('.dcr-cost-panel').className.match(/dcr-cost-density-(\d)/)[1]),
+  ['4', '4', '2'],
+  'cost-table density scales strictly inside Services + Consumables',
+)
+
+// Services resolve their live Master Data reporting group when report.services
+// is supplied, and sort naturally by service code inside each group just like
+// AfePrintSheet, even when locked snapshots still hold Miscellaneous Services.
+const staleSnapshotDay = {
+  ...second,
+  comparison: {
+    ...second.comparison,
+    budget_lines: [
+      { budget_key: 'service:late', budget_kind: 'service', item_code: 'SVC-10', item_name: 'Later rig service', service_group: 'Miscellaneous Services', sort_order: 0, cost_group: 'Services', planned: '500', actual_to_date: '0', balance: '500', is_planned: true },
+      { budget_key: 'service:early', budget_kind: 'service', item_code: 'SVC-2', item_name: 'Earlier rig service', service_group: 'Miscellaneous Services', sort_order: 1, cost_group: 'Services', planned: '500', actual_to_date: '0', balance: '500', is_planned: true },
+      { budget_key: 'service:well-svc', budget_kind: 'service', item_code: 'SVC-9', item_name: 'Cementing service', service_group: 'Miscellaneous Services', sort_order: 2, cost_group: 'Services', planned: '500', actual_to_date: '0', balance: '500', is_planned: true },
+      ...second.comparison.budget_lines.filter(row => row.cost_group !== 'Services'),
+    ],
+  },
+}
+await act(async () => root.render(<DailyCostPrintSheet coversOnly reports={[{
+  title: 'Master data grouped', period: 'Oct 11, 2026', days: [staleSnapshotDay],
+  services: [
+    { id: 's10', service_code: 'SVC-10', service_name: 'Later rig service', service_group: 'Rig Operations' },
+    { id: 's2', service_code: 'SVC-2', service_name: 'Earlier rig service', service_group: 'Rig Operations' },
+    { id: 's9', service_code: 'SVC-9', service_name: 'Cementing service', service_group: 'Well Services' },
+  ],
+}]}/>))
+const masterGroupedBlocks = [...document.querySelectorAll('.afe-print-sheet .dcr-cost-panel tbody.dcr-cost-group')]
+assert.deepEqual(
+  masterGroupedBlocks.map(block => [
+    block.querySelector('.dcr-cost-group-row th').textContent,
+    [...block.querySelectorAll('.dcr-cost-item-row')].map(row => row.cells[0].textContent),
+  ]),
+  [
+    ['Rig Operations', ['Earlier rig service', 'Later rig service']],
+    ['Consumables', ['Mud Chemicals', 'Cement Additives', 'Fuel', 'Drill Bits']],
+    ['Well Services', ['Cementing service']],
+  ],
+  'each populated group header lists its respective services in natural service-code order and omits empty groups',
+)
 
 // A locked allowance snapshot can carry an older spelling of its reporting group.
 // It must still print under that group rather than adding a second heading, so a
@@ -541,15 +587,14 @@ assert.ok(styles.includes('overflow: visible !important'), 'print removes dialog
 assert.ok(styles.includes('@page daily-cost-report'), 'daily reports define a dedicated landscape print page')
 assert.ok(styles.includes('size: A4 landscape'), 'daily reports print in landscape')
 assert.ok(styles.includes('margin: 4mm'), 'daily reports use minimal print margins')
-assert.match(styles, /grid-template-areas:\s*"upper mud"\s*"middle loss"\s*"lower lower";/, 'page one grid follows the model: upper | mud, middle | loss, then a full-width lower band')
+assert.match(styles, /grid-template-areas:\s*"left mud"\s*"left loss"\s*"lower lower";/, 'page one grid spans the left column across rows 1-2 beside mud and loss, above the full-width lower band')
 assert.ok(styles.includes('grid-template-columns: minmax(0, 2.58fr) minmax(0, 1fr);'), "the two columns keep the model's 737 : 286 px split")
 assert.ok(styles.includes('grid-template-rows: minmax(max-content, 1.3fr) max-content minmax(max-content, 1fr);'),
   'every band keeps at least its content height, the middle band is as tall as its tallest side and spare height goes to the upper and lower bands')
-assert.ok(styles.includes('.dcr-upper { grid-area: upper; grid-template-rows: max-content minmax(0, 1fr); }'), 'the merged Services and Consumables schedule takes the upper band below the strip')
+assert.ok(styles.includes('.dcr-left { grid-area: left; grid-template-rows: max-content minmax(0, 1fr) max-content; }'),
+  'the left column anchors the strip at top, Tangibles at bottom, and Services + Consumables in between')
 assert.ok(styles.includes('.dcr-mud-stack { grid-area: mud; grid-template-rows: minmax(max-content, 1.17fr) minmax(max-content, 1fr); }'),
-  'the mud pair always fills the upper band, so Mud chemical cost ends on the merged cost-table baseline')
-assert.ok(styles.includes('.dcr-middle { grid-area: middle; grid-template-rows: max-content; align-content: start; }'),
-  'Tangibles keeps its own compact panel after Consumables moves into the merged schedule')
+  'the mud pair always fills the upper band')
 assert.ok(styles.includes('.dcr-bottomline { grid-area: lower; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, .61fr) minmax(0, 1fr) minmax(0, 1fr);'),
   "the lower band keeps the model's 237 : 390 : 390 px stack, UPA and NPT columns")
 assert.ok(styles.includes('.dcr-stack { min-width: 0; min-height: 0; display: grid; grid-template-rows: max-content minmax(0, 1fr);'),
@@ -563,11 +608,13 @@ assert.match(styles, /\.dcr-density-4 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr
   'density 4 compresses the stack, mud cost and loss tables by name')
 assert.ok(!styles.includes('.dcr-bottomline .dcr-panel table'), 'density type sizes follow named panels, not the lower band, so moving a panel never changes its printed size')
 assert.ok(styles.includes('.dcr-cost-panel table { align-self: start; height: auto; font-size: 6.4pt'), 'the merged cost table uses intrinsic row and font sizing')
-assert.ok(styles.includes('.dcr-cost-panel td { padding: 1.71mm .34mm; }'), 'normal cost rows are twice as tall as the previous report')
-assert.ok(styles.includes('.dcr-density-2 .dcr-cost-panel td { padding: .855mm .3mm; }'), 'density-2 cost rows retain the same doubling')
-assert.ok(styles.includes('.dcr-density-3 .dcr-cost-panel td { padding: .585mm .24mm; }'), 'density-3 cost rows retain the same doubling')
-assert.ok(styles.includes('.dcr-density-4 .dcr-cost-panel td { padding: .36mm .18mm; }'), 'density-4 cost rows retain the same doubling')
-assert.ok(styles.includes('.dcr-cost-group-row th { padding: .96mm .34mm;'), 'group names use dedicated full-width styled rows, doubled in height with the item rows')
+assert.ok(styles.includes('.dcr-cost-panel td { padding: .855mm .34mm; }'), 'normal cost rows revert the last commit doubling back to .855mm')
+assert.ok(styles.includes('.dcr-cost-panel.dcr-cost-density-2 td,'), 'density-2 cost rows are scoped strictly to the cost panel')
+assert.ok(styles.includes('padding: .4275mm .3mm;'), 'density-2 cost rows revert back to .4275mm')
+assert.ok(styles.includes('padding: .2925mm .24mm;'), 'density-3 cost rows revert back to .2925mm')
+assert.ok(styles.includes('padding: .18mm .18mm;'), 'density-4 cost rows revert back to .18mm')
+assert.ok(styles.includes('.dcr-cost-group-row th { padding: .48mm .34mm;'), 'group heading rows revert the last commit doubling back to .48mm')
+assert.ok(!styles.includes('padding: 1.71mm .34mm;'), 'the 2x item-row padding from the last commit is removed')
 assert.ok(!styles.includes('.dcr-cost-panel table { height: 100%; }'), 'the merged schedule is not stretched into oversized rows')
 
 // Verify scoped Well Sub Activities and per-scope Well lifecycle across UI sources and live dialog rendering.

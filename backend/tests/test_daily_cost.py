@@ -1828,6 +1828,80 @@ def test_cost_report_groups_services_by_the_configured_service_group():
         summary_line = next(row for row in summary.json()["budget_lines"] if row["budget_kind"] == "service")
         assert summary_line["service_group"] == "Well Services"
 
+        # Re-saving the AFE estimate replaces every AfeServiceLine row with a new
+        # UUID, so source_afe_line_id on the locked baseline no longer matches
+        # afe_service_lines.id. The report must still resolve the live Master Data
+        # service_group (just like AFE Estimate print) via the locked service_id /
+        # code links, and must also resolve unbudgeted daily service lines.
+        resaved = client.put(f"/api/v1/afe/afes/{setup['afe']['id']}/estimate", headers=headers, json={
+            "services": [{
+                "client_key": "service-day-resaved", "service_id": setup["service"]["id"],
+                "charging_basis": "Day Rate", "hole_section_id": None, "phase_id": None,
+                "currency": "USD", "service_amount": "0", "remarks": "Resaved estimate",
+                "rates": [{"category": "Operation", "unit_rate": "100"}],
+                "charges": [{"category": "Operation", "quantity": "10", "quantity_unit": "days"}],
+                "section_rates": [],
+            }],
+            "consumables": [{
+                "client_key": "bulk-mud", "category": "Mud Chemicals", "hole_section_id": setup["hole"]["id"],
+                "phase_id": setup["phase"]["id"], "drill_bit_id": None, "quantity": "1", "override_rate": None,
+                "estimated_amount": "5000", "currency": "USD", "remarks": "Bulk chemicals allowance",
+            }],
+            "tangibles": [], "standard_currency": "", "exchange_rates": [],
+        })
+        assert resaved.status_code == 200, resaved.text
+
+        extra_service = _post(client, "/api/v1/master-data/services", headers, {
+            "service_code": "UNPL-SVC", "service_name": "Unbudgeted Supervision",
+            "service_category": "Drilling Services", "service_group": "Miscellaneous Services",
+            "provider_type": "Third Party Services", "vendor_id": setup["vendor"]["id"], "description": "",
+        })
+        saved_day = client.put(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers, json={
+            "usd_exchange_rate": None, "remarks": "With unbudgeted service",
+            "services": [{
+                "service_id": extra_service["id"], "activity_id": setup["activity_upa"]["id"],
+                "sub_activity_id": setup["sub_upa"]["id"], "hole_section_id": setup["hole"]["id"],
+                "phase_id": setup["phase"]["id"], "charging_basis": "Per Service Rate",
+                "charge_category": "Operation", "quantity": "1", "quantity_unit": "service",
+                "currency": "USD", "override_rate": "250", "override_reason": "Unbudgeted callout",
+                "vendor_id": setup["vendor"]["id"], "party_name": "Acme Services",
+                "remarks": "",
+            }],
+            "consumables": [], "tangibles": [], "other_expenses": [],
+        })
+        assert saved_day.status_code == 200, saved_day.text
+
+        assert client.patch(
+            f"/api/v1/master-data/services/{setup['service']['id']}", headers=headers,
+            json={"service_group": "Rig Operations"},
+        ).status_code == 200
+        assert client.patch(
+            f"/api/v1/master-data/services/{extra_service['id']}", headers=headers,
+            json={"service_group": "Supervisions"},
+        ).status_code == 200
+
+        day_after_resave = client.get(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers)
+        assert day_after_resave.status_code == 200, day_after_resave.text
+        day_groups = {
+            row["budget_key"]: row["service_group"]
+            for row in day_after_resave.json()["comparison"]["budget_lines"]
+            if row["cost_group"] == "Services"
+        }
+        assert day_groups[day_line["budget_key"]] == "Rig Operations"
+        assert day_groups[f"unplanned:service:{extra_service['id']}"] == "Supervisions"
+
+        summary_after_resave = client.get(
+            f"/api/v1/daily-cost/wells/{setup['well']['id']}/cost-summary", headers=headers
+        )
+        assert summary_after_resave.status_code == 200, summary_after_resave.text
+        summary_groups = {
+            row["budget_key"]: row["service_group"]
+            for row in summary_after_resave.json()["budget_lines"]
+            if row["cost_group"] == "Services"
+        }
+        assert summary_groups[day_line["budget_key"]] == "Rig Operations"
+        assert summary_groups[f"unplanned:service:{extra_service['id']}"] == "Supervisions"
+
         # Only the report resolves the live group; the locked allowance snapshot is
         # untouched, so the daily sheet's rate and plan history cannot drift.
         locked = client.get(f"/api/v1/daily-cost/entries/{entry_id}/baseline", headers=headers)

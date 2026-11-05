@@ -27,7 +27,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
-from sqlalchemy import Select, case, func, literal, select, union_all
+from sqlalchemy import Select, case, func, literal, or_, select, union_all
 from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -2438,25 +2438,43 @@ def _entry_out(
 
 
 def _service_report_groups(
-    db: Session, organization_id: str, lines: Iterable[DailyCostBaselineBudgetLine],
+    db: Session,
+    organization_id: str,
+    lines: Iterable[DailyCostBaselineBudgetLine],
+    service_rates: Iterable[DailyCostBaselineServiceRate] = (),
 ) -> dict[str, str]:
     """Reporting group printed for each locked service allowance, keyed by budget key.
 
     The Daily Cost report lists a service under the reporting group configured for
     it in Master Data, exactly as the AFE estimate print does, so a group assigned
-    (or corrected) after the AFE was locked still places the service under the
-    right heading instead of leaving it in the default or unclassified bucket. The
-    group snapshotted with the locked allowance stays the fallback for a service
-    that no longer resolves to a Master Data row.
+    (or corrected) after the AFE was locked—or after the AFE estimate was saved
+    again with fresh line IDs—still places the service under the right heading
+    instead of leaving it in the default or unclassified bucket. The group
+    snapshotted with the locked allowance stays the fallback for a service that no
+    longer resolves to a Master Data row.
 
     Only Services allowances need this: consumables, drill bits and tangibles have
-    no reporting group, and an unbudgeted actual keeps the group of its own daily
-    line.
+    no reporting group.
     """
     service_lines = [line for line in lines if line.cost_group == "Services"]
     if not service_lines:
         return {}
     source_ids = {line.source_afe_line_id for line in service_lines if line.source_afe_line_id}
+    rate_service_by_source = {
+        rate.source_afe_line_id: rate.service_id
+        for rate in service_rates
+        if rate.source_afe_line_id and rate.service_id
+    }
+    codes = {
+        line.item_code_snapshot.strip().upper()
+        for line in service_lines
+        if line.item_code_snapshot and line.item_code_snapshot.strip()
+    }
+    names = {
+        line.item_name_snapshot.strip().lower()
+        for line in service_lines
+        if line.item_name_snapshot and line.item_name_snapshot.strip()
+    }
     live_by_line: dict[str, str] = {}
     if source_ids:
         live_by_line = {
@@ -2470,12 +2488,80 @@ def _service_report_groups(
                 )
             ).all()
         }
+    live_by_service_id: dict[str, str] = {}
+    rate_service_ids = set(rate_service_by_source.values())
+    if rate_service_ids:
+        live_by_service_id = {
+            str(row[0]): str(row[1] or "")
+            for row in db.execute(
+                select(Service.id, Service.service_group).where(
+                    Service.organization_id == organization_id,
+                    Service.id.in_(rate_service_ids),
+                )
+            ).all()
+        }
+    live_by_code: dict[str, str] = {}
+    live_by_name: dict[str, str] = {}
+    if codes or names:
+        match_clauses = []
+        if codes:
+            match_clauses.append(func.upper(Service.service_code).in_(codes))
+        if names:
+            match_clauses.append(func.lower(Service.service_name).in_(names))
+        for svc_code, svc_name, svc_group in db.execute(
+            select(Service.service_code, Service.service_name, Service.service_group)
+            .where(
+                Service.organization_id == organization_id,
+                or_(*match_clauses),
+            )
+            .order_by(Service.is_deleted.asc())
+        ).all():
+            resolved = str(svc_group or "")
+            if not resolved:
+                continue
+            if svc_code:
+                live_by_code.setdefault(str(svc_code).strip().upper(), resolved)
+            if svc_name:
+                live_by_name.setdefault(str(svc_name).strip().lower(), resolved)
     groups: dict[str, str] = {}
     for line in service_lines:
-        group = live_by_line.get(line.source_afe_line_id, "") or line.service_group
+        rate_service_id = rate_service_by_source.get(line.source_afe_line_id, "")
+        code_key = (line.item_code_snapshot or "").strip().upper()
+        name_key = (line.item_name_snapshot or "").strip().lower()
+        group = (
+            live_by_line.get(line.source_afe_line_id, "")
+            or live_by_service_id.get(rate_service_id, "")
+            or live_by_code.get(code_key, "")
+            or live_by_name.get(name_key, "")
+            or line.service_group
+        )
         if group:
             groups[f"{line.budget_kind}:{line.item_key}"] = group
     return groups
+
+
+def _live_unplanned_service_groups(
+    db: Session, organization_id: str, budget_keys: Iterable[str],
+) -> dict[str, str]:
+    """Live Master Data service groups for unbudgeted ``unplanned:service:<id>`` keys."""
+    prefix = "unplanned:service:"
+    service_ids = {
+        key[len(prefix):]
+        for key in budget_keys
+        if key.startswith(prefix) and key[len(prefix):]
+    }
+    if not service_ids:
+        return {}
+    return {
+        f"{prefix}{row[0]}": str(row[1] or "")
+        for row in db.execute(
+            select(Service.id, Service.service_group).where(
+                Service.organization_id == organization_id,
+                Service.id.in_(service_ids),
+            )
+        ).all()
+        if row[1]
+    }
 
 
 def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = None) -> DailyCostComparison:
@@ -2500,7 +2586,9 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
         planned_keys.add(key)
     # Service groups to print with the plan, resolved from the configured
     # reporting group so the report groups services like the AFE estimate.
-    report_groups = _service_report_groups(db, entry.organization_id, entry.baseline.budget_lines)
+    report_groups = _service_report_groups(
+        db, entry.organization_id, entry.baseline.budget_lines, entry.baseline.service_rates
+    )
 
     entries = list(
         db.scalars(
@@ -2573,6 +2661,9 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
 
     comparison_lines: list[DailyCostBudgetComparison] = []
     keys = set(planned_keys) | set(actual_by_key)
+    unplanned_live_groups = _live_unplanned_service_groups(
+        db, entry.organization_id, (key for _, key in unplanned_meta)
+    )
     for group, key in sorted(keys, key=lambda item: (group_names.index(item[0]), item[1])):
         metadata = budget_meta.get((group, key))
         actual = _money(actual_by_key[(group, key)])
@@ -2582,9 +2673,10 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
             kind = metadata.budget_kind
             service_group = report_groups.get(key, metadata.service_group)
         else:
-            code, name, service_group = unplanned_meta.get(
+            code, name, fallback_group = unplanned_meta.get(
                 (group, key), ("", "Unbudgeted actual", "")
             )
+            service_group = unplanned_live_groups.get(key, fallback_group)
             kind = key.split(":", 1)[0]
         comparison_lines.append(
             DailyCostBudgetComparison(
@@ -4449,7 +4541,9 @@ def well_cost_summary(
     # Master Data so the report groups services exactly like the AFE estimate.
     report_groups: dict[str, str] = {}
     for baseline in baselines:
-        report_groups.update(_service_report_groups(db, organization_id, baseline.budget_lines))
+        report_groups.update(
+            _service_report_groups(db, organization_id, baseline.budget_lines, baseline.service_rates)
+        )
         for budget_line in baseline.budget_lines:
             key = f"{budget_line.budget_kind}:{budget_line.item_key}"
             planned_by_key[key] = planned_by_key.get(key, Decimal("0")) + Decimal(budget_line.planned_amount)
@@ -4472,6 +4566,9 @@ def well_cost_summary(
     ).all():
         unplanned_names[(str(row[0]), str(row[1]))] = f"Unbudgeted {row[0].lower()} — {row[2] or row[3] or UNASSIGNED}"
         unplanned_groups[(str(row[0]), str(row[1]))] = str(row[4] or "")
+    unplanned_live_groups = _live_unplanned_service_groups(
+        db, organization_id, (key for _, key in unplanned_groups)
+    )
     budget_lines: list[DailyCostBudgetComparison] = []
     for key in sorted(set(planned_by_key) | set(actual_by_key), key=lambda value: -abs(actual_by_key.get(value, Decimal("0")))):
         budget_line = meta.get(key)
@@ -4484,7 +4581,7 @@ def well_cost_summary(
             kind = key.split(":", 1)[0] if key else "unplanned"
             code = "" if key.startswith("unplanned:") else key.split(":", 1)[-1][:50]
             name = unplanned_names.get((str(group), key), f"Unbudgeted {str(group).lower()}")
-            service_group = unplanned_groups.get((str(group), key), "")
+            service_group = unplanned_live_groups.get(key) or unplanned_groups.get((str(group), key), "")
         planned_value = planned_by_key.get(key)
         actual_value = _money(actual_by_key.get(key, Decimal("0")))
         split_planned, split_upa, split_npt = class_by_key.get(key, (Decimal("0"),) * 3)
