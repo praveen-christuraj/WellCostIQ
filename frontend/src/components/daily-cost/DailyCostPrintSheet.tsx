@@ -3,7 +3,7 @@ import { createPortal, flushSync } from 'react-dom'
 import {
   displayDate, leadLagText, validLeadLagDays as isValidLeadLagDays,
   type AnyDailyCostLine, type DailyCostComparisonLine, type DailyCostDay, type DailyCostSectionOption,
-  type DailyCostWellSummary, type DailyLeadLagKind,
+  type DailyCostServiceOption, type DailyCostWellSummary, type DailyLeadLagKind,
 } from '../../lib/dailyCost'
 import { MUD_COST_LOSS_METRICS, type MudCostMaterialBalance, type MudCostReconciliation } from '../../lib/mudCost'
 import { lihMeasure, type LihCostReport } from '../../lib/lihCost'
@@ -26,6 +26,8 @@ export type CostPrintReport = {
   /** Active manual NDT inspection lines for the printed well/scope. */
   ndtInspections?: NdtEntry[]
   sections?: DailyCostSectionOption[]
+  /** Live Master Data service catalogue so report groupings mirror AFE Estimate print. */
+  services?: DailyCostServiceOption[]
   reportKind?: 'daily' | 'well'
   /**
    * Report wording overrides. Nothing is typed at print time any more: the
@@ -247,15 +249,53 @@ function canonicalServiceGroup(value: string | null | undefined): string {
   return canonical ?? SERVICE_GROUP_ALIASES[trimmed.toLowerCase()] ?? trimmed
 }
 
-function reportCostRows(budgetLines: DailyCostComparisonLine[]) {
-  // Services print in the fixed reporting-group sequence, then by item code.
-  const services = [...budgetLines]
+function resolveServiceLineGroup(
+  line: DailyCostComparisonLine,
+  byId: ReadonlyMap<string, string>,
+  byCode: ReadonlyMap<string, string>,
+  byName: ReadonlyMap<string, string>,
+): string {
+  const unplannedPrefix = 'unplanned:service:'
+  const unplannedId = line.budget_key.startsWith(unplannedPrefix)
+    ? line.budget_key.slice(unplannedPrefix.length)
+    : ''
+  const codeKey = (line.item_code ?? '').trim().toUpperCase()
+  const nameKey = (line.item_name ?? '').trim().toLowerCase()
+  const fromCatalog = (unplannedId && byId.get(unplannedId))
+    || (codeKey && byCode.get(codeKey))
+    || (nameKey && byName.get(nameKey))
+    || ''
+  return canonicalServiceGroup(fromCatalog || line.service_group)
+}
+
+function reportCostRows(
+  budgetLines: DailyCostComparisonLine[],
+  serviceCatalog?: DailyCostServiceOption[],
+) {
+  const catalogById = new Map<string, string>()
+  const catalogByCode = new Map<string, string>()
+  const catalogByName = new Map<string, string>()
+  for (const service of serviceCatalog ?? []) {
+    const group = canonicalServiceGroup(service.service_group)
+    if (!group) continue
+    if (service.id) catalogById.set(service.id, group)
+    const codeKey = (service.service_code ?? '').trim().toUpperCase()
+    if (codeKey && !catalogByCode.has(codeKey)) catalogByCode.set(codeKey, group)
+    const nameKey = (service.service_name ?? '').trim().toLowerCase()
+    if (nameKey && !catalogByName.has(nameKey)) catalogByName.set(nameKey, group)
+  }
+  // Resolve each service's live reporting group first, then sort by group and
+  // natural service code just like AFE Estimate print (AfePrintSheet).
+  const services = budgetLines
     .filter(line => line.cost_group === 'Services')
-    // The AFE estimate's reporting groups and line sequence define the print
-    // order; the item code is only the tie-break.
+    .map(line => ({
+      ...line,
+      service_group: resolveServiceLineGroup(line, catalogById, catalogByCode, catalogByName),
+    }))
     .sort((left, right) => compareServiceGroups(left.service_group, right.service_group)
+      || (left.item_code && right.item_code ? compareServiceCodes(left.item_code, right.item_code) : 0)
       || (left.sort_order ?? 0) - (right.sort_order ?? 0)
-      || compareServiceCodes(left.item_code, right.item_code))
+      || left.item_name.localeCompare(right.item_name, undefined, { numeric: true, sensitivity: 'base' }))
   const consumableGroups = new Map<string, DailyCostComparisonLine>()
   for (const line of budgetLines.filter(item => item.cost_group === 'Consumables')) {
     const source = `${line.budget_kind} ${line.budget_key} ${line.item_code} ${line.item_name}`.toLowerCase()
@@ -305,10 +345,11 @@ function reportCostRows(budgetLines: DailyCostComparisonLine[]) {
 }
 
 /**
- * Page-one cost groups. Group headings are structural rows rather than text
- * prefixed to the first item, so a long service list cannot visually run into
- * the next group. Unknown legacy values stay visibly unclassified; they must
- * never be silently presented as Miscellaneous.
+ * Page-one cost groups, matching the AFE Estimate print model: each populated
+ * group owns a full-width heading row followed immediately by its respective
+ * services/items, and empty service groups are omitted so phantom headings
+ * never stack without rows beneath them. Unknown legacy values stay visibly
+ * unclassified rather than being mislabeled as Miscellaneous.
  */
 function dailyCoverCostGroups(services: DailyCostComparisonLine[], consumables: DailyCostComparisonLine[]): DailyCoverCostGroup[] {
   const groupOf = (line: DailyCostComparisonLine) => canonicalServiceGroup(line.service_group)
@@ -318,7 +359,7 @@ function dailyCoverCostGroups(services: DailyCostComparisonLine[], consumables: 
     rows: group === 'Consumables'
       ? consumables.map(line => ({ ...line, service_group: 'Consumables' }))
       : services.filter(line => groupOf(line) === group),
-  }))
+  })).filter(group => group.rows.length > 0)
   const recognized = new Set<string>(DAILY_COVER_GROUP_ORDER.filter(group => group !== 'Consumables'))
   const unclassified = services.filter(line => !recognized.has(groupOf(line)))
   return unclassified.length
@@ -400,7 +441,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const latestComparison = latest.comparison
   const budgetLines = summary?.budget_lines ?? latestComparison.budget_lines
   // Codes define business order but remain hidden; consumables are four category totals.
-  const costRows = reportCostRows(budgetLines)
+  const costRows = reportCostRows(budgetLines, report.services)
   // Every AFE allowance prints, in its reporting group, including lines with no
   // cost yet (they show 0). The density step (below) keeps a long schedule on page one.
   const services = costRows.services
@@ -443,16 +484,10 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const lihLineCount = summary?.totals.lih_line_count ?? lihBucket?.line_count ?? 0
   const lihEntryCount = summary?.totals.lih_entries ?? lihBucket?.entry_count ?? 0
   const ndtInspections = report.ndtInspections ?? []
-  // Page one has a fixed height. NDT Inspection Details stacks in the lower band
-  // under LIH and the AFE vs actual summary, so its heading and rows draw on the
-  // same height as Services rows (measured: each NDT row costs about 1.5 Services
-  // rows; the panel heading about 3.5). Thresholds keep a one-row margin, and
-  // they step down earlier than the previous report because every cost row and
-  // group heading is now twice as tall: the same page-one band therefore holds
-  // fewer rows before the density step has to compress it.
-  const coverLoad = coverCostRows.length + coverCostGroups.length
-    + (ndtInspections.length ? 3.5 + ndtInspections.length * 1.5 : 0)
-  const densityStep = coverLoad > 18 ? 4 : coverLoad > 15 ? 3 : coverLoad > 10 ? 2 : 1
+  // Cover-level density only reacts to an unusually long NDT register in the
+  // bottom-left stack, so Services + Consumables row count never alters the
+  // heights or font sizes of LIH, AFE vs actual, NDT, UPA, NPT, mud or losses.
+  const densityStep = ndtInspections.length > 8 ? 4 : ndtInspections.length > 6 ? 3 : ndtInspections.length > 4 ? 2 : 1
   const actualIncludingLih = totalActual + lihTotal
   const afeAvailable = totalPlanned - lihTotal
   const balance = asNumber(
@@ -470,6 +505,17 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const sections = report.sections?.length ? report.sections : [...sectionDepths.entries()].map(([key, depth]) => ({
     hole_section_id: key, section_code: key, section_name: key, from_depth: '0', to_depth: depth, total_days: '0', phases: [],
   }))
+  // Scoped density for the Services + Consumables panel only: fits long schedules
+  // and wrapped item names inside the left-column space above Tangibles without
+  // affecting any other panel on page one.
+  const wrappedItemLines = coverCostRows.reduce(
+    (extra, row) => extra + Math.floor(Math.max(0, costName(row.item_name).length - 1) / 38),
+    0,
+  )
+  const costLoad = coverCostRows.length + wrappedItemLines
+    + coverCostGroups.length * 0.75
+    + Math.max(0, sections.length - 3)
+  const costDensityStep = costLoad > 31 ? 5 : costLoad > 25 ? 4 : costLoad > 20 ? 3 : costLoad > 15 ? 2 : 1
   const mudSections = report.mudReconciliation?.sections ?? summary?.mud_cost?.sections ?? []
   /*
    * Planned mud chemicals are the AFE's own "Mud Chemicals" allowance for each
@@ -539,10 +585,11 @@ function ReportCover({ report }: { report: CostPrintReport }) {
    * always reconciles to the AFE.
    */
   const priorDate = previousDate(String(reportDate))
-  const CostTable = ({ title, groups, totalLabel = 'Group total' }: {
+  const CostTable = ({ title, groups, totalLabel = 'Group total', costDensity = 1 }: {
     title: string
     groups: DailyCoverCostGroup[]
     totalLabel?: string
+    costDensity?: number
   }) => {
     const rows = groups.flatMap(group => group.rows)
     const totals = rows.reduce((sum, row) => {
@@ -557,7 +604,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
       sum.actual += cost.total
       return sum
     }, { afe: 0, prior: 0, today: 0, planned: 0, npt: 0, upa: 0, actual: 0 })
-    return <section className="dcr-panel dcr-cost-panel">
+    return <section className={`dcr-panel dcr-cost-panel dcr-cost-density-${costDensity}`}>
       <h2>{title}</h2>
       <table>
         <colgroup>{Array.from({ length: 10 }, (_, index) => <col key={index}/>)}</colgroup>
@@ -592,6 +639,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
           </tr>
         })}
       </tbody>)}
+      {!groups.length && <tbody><tr><td colSpan={10} className="dcr-none">No AFE allowance recorded.</td></tr></tbody>}
       <tfoot><tr>
         <th>{rows.length ? totalLabel : 'No cost lines recorded'}</th>
         <th className="num">{printMoney(totals.afe, currency)}</th>
@@ -623,20 +671,29 @@ function ReportCover({ report }: { report: CostPrintReport }) {
       <div className="dcr-report-meta"><strong>{latest.entry.well_name}</strong><span>{latest.entry.rig_name}</span><span>{report.period}</span></div>
     </header>
     {/* Page-one placement follows MODEL REPORTS/REVISED DAILY REPORT TABLE
-        PLACEMENTS.jpg: three bands over two columns. Upper band: milestone,
-        depth and time strip over the merged Services + Consumables cost | Mud
-        cost analysis over Mud chemical cost. Middle band: Tangibles | Consumption /
-        losses. Lower band, full width: LIH / AFE vs actual / NDT stack | UPA
-        summary | NPT summary. Only placement changes; panel contents do not. */}
+        PLACEMENTS.jpg: right column keeps Mud cost analysis + Mud chemical cost
+        over Consumption / losses, and the full-width lower band keeps LIH / AFE
+        vs actual / NDT | UPA summary | NPT summary at their exact positions and
+        heights. The left column spans the upper and middle bands so Services +
+        Consumables and Tangibles share their allocated left-side space without
+        ever shifting or compressing any right-hand or bottom table. */}
     <div className="dcr-layout">
-      <div className="dcr-upper">
+      <div className="dcr-left">
         <div className="dcr-topline">
           <section className="dcr-panel dcr-milestone"><h2>Reporting milestone</h2><dl><dt>{reportMilestoneLabel(report)}</dt><dd>{spud ? `${spud.replace('T', ' ').slice(0, 16)} hrs` : 'Not recorded'}</dd><dt>Current report date</dt><dd>{displayDate(reportDate)} · 24:00 hrs</dd></dl></section>
           <section className="dcr-panel dcr-depth"><h2>Section-wise planned depth &amp; current depth</h2><table><thead><tr><th>Section</th><th>Planned depth (m)</th><th>Current depth (m)</th></tr></thead><tbody>{sections.map(section => <tr key={section.hole_section_id}><td>{section.section_name}</td><td className="num">{depthText(section.to_depth, 'm')}</td><td className="num">{depthText(sectionDepths.get(section.hole_section_id), 'm')}</td></tr>)}</tbody></table></section>
           <section className="dcr-panel dcr-time"><h2>Time position</h2><dl><dt>Planned</dt><dd>{decimalText(plannedDays)} days</dd><dt>Actual</dt><dd>{decimalText(actualDays)} days</dd><dt>Actual against planned activities</dt><dd>{decimalText(plannedActivityDays)} days</dd><dt>NPT</dt><dd>{decimalText(nptDays)} days</dd><dt>UPA</dt><dd>{decimalText(upaDays)} days</dd></dl></section>
         </div>
         <CostTable title="Services and consumables cost · AFE vs last day, this day and cumulative" groups={coverCostGroups}
-          totalLabel="Services + consumables total"/>
+          totalLabel="Services + consumables total" costDensity={costDensityStep}/>
+        <section className="dcr-panel dcr-tangibles"><h2>Tangibles cost · AFE vs actual</h2><div>
+          <span>AFE <strong>{printMoney(tangiblePosition.planned, currency)}</strong></span>
+          <span>Up to {displayDate(priorDate)} <strong>{printMoney(tangibleDay.prior, currency)}</strong></span>
+          <span>Cost on {displayDate(String(reportDate))} <strong>{printMoney(tangibleDay.today, currency)}</strong></span>
+          <span>Actual <strong>{printMoney(tangiblePosition.actual, currency)}</strong></span>
+          <span>Balance <strong>{printMoney(tangiblePosition.planned - tangiblePosition.actual, currency)}</strong></span>
+          <span>Used <strong>{percent(tangiblePosition.actual, tangiblePosition.planned)}</strong></span>
+        </div></section>
       </div>
       <div className="dcr-mud-stack">
         <section className="dcr-panel dcr-mud-analysis"><h2>Mud cost analysis · section / mud type</h2><table><thead><tr><th>Measure</th>{mudSections.map(row => <th key={row.section_id}>{sectionNameOnly(row.section_label)}<span>{row.mud_type ?? 'Not configured'}</span></th>)}</tr></thead><tbody>
@@ -647,16 +704,6 @@ function ReportCover({ report }: { report: CostPrintReport }) {
           <tr key={row.section_id}><td>{sectionNameOnly(row.section_label)} · {row.mud_type ?? 'Not configured'}</td><td className="num">{mudPlanned(row)}</td><td className="num">{printMoney(row.actual_cost, currency)}</td><td className="num">{row.reconciled_cost == null ? '—' : printMoney(row.reconciled_cost, currency)}</td></tr>
         ))}{!mudSections.length && <tr><td colSpan={4} className="dcr-none">No mud reconciliation data.</td></tr>}</tbody>
         {mudSections.length > 0 && <tfoot><tr><th>Total{mudSections.length > mudRowLimit ? ` · all ${mudSections.length} sections` : ''}</th><th className="num">{mudPlannedTotal == null ? '—' : printMoney(mudPlannedTotal, currency)}</th><th className="num">{printMoney(mudActualTotal, currency)}</th><th className="num">{mudReconciledTotal == null ? '—' : printMoney(mudReconciledTotal, currency)}</th></tr></tfoot>}</table></section>
-      </div>
-      <div className="dcr-middle">
-        <section className="dcr-panel dcr-tangibles"><h2>Tangibles cost · AFE vs actual</h2><div>
-          <span>AFE <strong>{printMoney(tangiblePosition.planned, currency)}</strong></span>
-          <span>Up to {displayDate(priorDate)} <strong>{printMoney(tangibleDay.prior, currency)}</strong></span>
-          <span>Cost on {displayDate(String(reportDate))} <strong>{printMoney(tangibleDay.today, currency)}</strong></span>
-          <span>Actual <strong>{printMoney(tangiblePosition.actual, currency)}</strong></span>
-          <span>Balance <strong>{printMoney(tangiblePosition.planned - tangiblePosition.actual, currency)}</strong></span>
-          <span>Used <strong>{percent(tangiblePosition.actual, tangiblePosition.planned)}</strong></span>
-        </div></section>
       </div>
       <section className="dcr-panel dcr-loss dcr-loss-matrix"><h2>Consumption / losses · cumulative matrix</h2><table><thead><tr><th>Loss measure</th>{mudSections.map(row => <th key={row.section_id}>{sectionNameOnly(row.section_label)}<span>{row.mud_type ?? 'Not configured'}</span></th>)}</tr></thead><tbody>
         <tr className="dcr-matrix-group"><th colSpan={Math.max(2, mudSections.length + 1)}>Surface losses</th></tr>
@@ -756,7 +803,7 @@ function CumulativeReportDetails({ report }: { report: CostPrintReport }) {
       <p>These schedules consolidate saved daily sheets. Daily line-by-line breakdowns are intentionally omitted; currencies and incompatible AFEs remain separate.</p>
     </header>
     {scopes.map(scope => {
-      const rows = reportCostRows(scope.rows)
+      const rows = reportCostRows(scope.rows, report.services)
       return <section className="dcr-cumulative-scope" key={scope.key}>
         <h1>{scope.label} ({scope.currency})</h1>
         <CumulativeSchedule title="Service-wise cumulative cost" rows={rows.services.filter(row => asNumber(row.actual_to_date) !== 0)} currency={scope.currency}/>

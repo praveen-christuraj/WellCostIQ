@@ -5,7 +5,7 @@ import { ErrorMessage, FormDialog } from '../Common'
 import { api, body } from '../../lib/api'
 import {
   costReportTitle, displayDate,
-  type DailyCostDay, type DailyCostEntry, type DailyCostWellOption, type DailyCostWellSummary,
+  type DailyCostDay, type DailyCostEntry, type DailyCostReference, type DailyCostWellOption, type DailyCostWellSummary,
 } from '../../lib/dailyCost'
 import type { MudCostMaterialBalance, MudCostReconciliation } from '../../lib/mudCost'
 import type { LihCostReport } from '../../lib/lihCost'
@@ -85,6 +85,7 @@ export function BulkDailyCostPrintDialog({ open, onClose, entries, wells }: {
       // One saved-sheet history per well: every selected day is a row of it.
       const wellIds = [...new Set(ordered.map(entry => entry.well_id))]
       const historyByWell = new Map<string, DailyCostDay[]>()
+      const referencePromise = api<DailyCostReference>('/daily-cost/reference', { silent: true }).catch(() => null)
       for (const wellId of wellIds) {
         const to = ordered.filter(entry => entry.well_id === wellId).map(entry => entry.cost_date).sort().at(-1)!
         const days = await api<DailyCostDay[]>(`/daily-cost/wells/${wellId}/cost-report?${new URLSearchParams({
@@ -92,6 +93,7 @@ export function BulkDailyCostPrintDialog({ open, onClose, entries, wells }: {
         })}`)
         historyByWell.set(wellId, days)
       }
+      const reference = await referencePromise
 
       const reports: CostPrintReport[] = []
       const skipped: string[] = []
@@ -119,6 +121,7 @@ export function BulkDailyCostPrintDialog({ open, onClose, entries, wells }: {
           lihReport: context.lihReport,
           ndtInspections: context.ndtInspections,
           sections: well?.sections,
+          services: reference?.services,
           reportKind: 'daily',
         })
       }
