@@ -154,7 +154,7 @@ def login(data: LoginInput, request: Request, response: Response, db: Db):
     set_cookie(response, token)
     return {
         "access_token": access_token(user.id, user.organization_id, user.token_version),
-        "token_type": "bearer",
+        "token_type": "bearer",  # nosec B105  # OAuth token-type label, not a credential.
         "expires_in": settings.access_token_minutes * 60,
         **_session_facts(user),
     }
@@ -206,7 +206,7 @@ def refresh(request: Request, response: Response, db: Db):
     set_cookie(response, new_token)
     return {
         "access_token": access_token(user.id, user.organization_id, user.token_version),
-        "token_type": "bearer",
+        "token_type": "bearer",  # nosec B105  # OAuth token-type label, not a credential.
         **_session_facts(user),
     }
 

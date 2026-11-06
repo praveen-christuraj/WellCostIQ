@@ -15,6 +15,10 @@ RUN sed -i '/^user[[:space:]]/d; s@^pid[[:space:]].*;@pid /tmp/nginx.pid;@' /etc
 USER nginx
 COPY --chmod=0644 proxy_params_wcp.conf /etc/nginx/proxy_params_wcp.conf
 COPY --chmod=0644 nginx.conf /etc/nginx/conf.d/default.conf
+# Exact public hostnames are deployment configuration, not a wildcard. The
+# localhost defaults preserve container/CI health probes.
+ARG NGINX_SERVER_NAMES="localhost 127.0.0.1"
+RUN sed -i "s|__NGINX_SERVER_NAMES__|${NGINX_SERVER_NAMES}|g" /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080
 # Probe loopback directly even when Docker injects an outbound HTTP proxy.

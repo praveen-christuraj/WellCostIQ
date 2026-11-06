@@ -1,0 +1,2198 @@
+diff --git a/.agent/memory/project.md b/.agent/memory/project.md
+index 2c9d1ee..253c1b6 100644
+--- a/.agent/memory/project.md
++++ b/.agent/memory/project.md
+@@ -1,5 +1,14 @@
+ # Durable project memory
+ 
++## IT Security observation remediation (2026-11-06)
++- **Detailed plan:** `docs/IT_SECURITY_REMEDIATION_2026-11-06.md` maps all 29 latest IT Security observations to repository work, verification and operator-owned residual actions. Keep its current-state corrections in mind: API response headers and `docs/SECURITY_MANUAL.md` already exist; `start-hosted.sh` is correct; the real audit table is `public.audit_logs`; existing request budgets are database-backed.
++- **UAT data preservation is mandatory.** No existing users, password hashes/history, sessions, organisations, audit entries or business rows may be deleted, rewritten, moved or reseeded. Do not remove/replace PostgreSQL volumes. The audit hardening migration must be permission-only and leave `public.audit_logs` and its rows in place; an audit-schema move is a separate Phase 2 design. Existing-role CONNECTION LIMIT changes require a DBA/capacity review, while application connection timeouts can be applied portably by SQLAlchemy.
++- **Implementation scope:** aligned nginx/Vercel HSTS and CSP, nginx method/proxy/real-IP/backup-import/Host controls, Compose resource/tmpfs/capability/network/log isolation, Render manual Docker deploys and pinned auth policy, application Host allowlist and hosted PostgreSQL TLS enforcement, fresh-role and existing-audit append-only grants, CI action pins + full-history secret/image scans, traceable evidence collection, README correction and expanded security operations documentation.
++- **Do not overclaim provider/governance controls.** Dashboard settings captures, GitHub required checks, provider WAF/PITR, live file-secret migration with unchanged existing values, restore/rotation/incident rehearsals, named monitoring ownership and signed MFA risk acceptance require the organisation's operators. RLS/per-tenant roles and native MFA/SSO remain separate phases. Record these as pending rather than implemented.
++- **Compatibility decisions:** retain the existing 2048 MB backup-import limit until actual archive sizing is known; retain current UI/routes/RBAC/tenant/business behavior. Render becomes manual-deploy-only after passing security checks. Real hostnames are required deployment configuration (`NGINX_SERVER_NAMES` for Compose and `ALLOWED_HOSTS` for the API). The hardened Docker image reuses `start-hosted.sh` unchanged; Compose explicitly overrides its entrypoint for the existing migrate/API commands.
++- **Database head and static gate:** migration `f2a6c8d41e07` follows `f1d7a4c95b23`, revoking only UPDATE/DELETE on the existing audit table for `wellcosting_app` on PostgreSQL and preserving every row. Bandit has exactly 20 line-scoped reviewed `nosec` justifications documented in `docs/SECURITY_STATIC_ANALYSIS.md`; any new/unmarked finding must fail and CI retains an `--ignore-nosec` report. Never broaden suppression without review.
++- **Local verification:** 361 backend tests, frontend security/build/npm audit and 40 shared UI checks passed; pip-audit found no known vulnerabilities. Shell/Python/JSON/YAML and evidence-collector checks passed. Docker, live nginx/PostgreSQL, Gitleaks and Trivy must be confirmed in branch CI because local Docker is unavailable. Full execution and pending-provider evidence are recorded in the dated remediation plan.
++
+ ## AFE and Daily Cost report corrections (2026-11-05)
+ - API contract `0.3.1` adds the well objective, completion configuration sections and Well
+   Sub-Activity remarks to the typed Daily Cost reference/report payloads. The browser requires the
+diff --git a/.env.example b/.env.example
+index e139be0..f51df19 100644
+--- a/.env.example
++++ b/.env.example
+@@ -10,6 +10,11 @@ DB_APP_PASSWORD=replace-with-a-different-random-application-password
+ DB_MIGRATION_PASSWORD=replace-with-a-different-random-migration-password
+ APP_IMAGE_TAG=local
+ WEB_BIND_ADDRESS=127.0.0.1
++# Exact Compose public hostnames (space-separated, no schemes/ports); localhost
++# entries preserve health checks. Rebuild web after changing this value.
++NGINX_SERVER_NAMES=localhost 127.0.0.1
++# Optional API defence in depth (comma-separated exact hostnames, no ports).
++ALLOWED_HOSTS=
+ SECRET_KEY=replace-with-a-random-key-of-at-least-32-characters
+ SECURE_COOKIES=false
+ CORS_ORIGINS=http://localhost:8080
+@@ -17,13 +22,17 @@ CORS_ORIGINS=http://localhost:8080
+ # API is reachable directly (the transport address is then used).
+ TRUSTED_PROXY_IPS=172.28.0.0/16
+ 
+-# Password lifecycle and sign-in budgets.
++# Token/password lifecycle and sign-in budgets.
++ACCESS_TOKEN_MINUTES=15
++REFRESH_TOKEN_DAYS=7
+ PASSWORD_MAX_AGE_DAYS=90
+ PASSWORD_EXPIRY_WARNING_DAYS=14
+ PASSWORD_HISTORY_LIMIT=5
+ MAX_FAILED_LOGINS=5
+ LOCKOUT_MINUTES=15
+ FORCE_PASSWORD_CHANGE_ON_CREATE=true
++# Keep aligned with frontend/nginx.conf backup-import client_max_body_size.
++BACKUP_MAX_UPLOAD_MB=2048
+ 
+ # Optional unattended first boot: the API seeds this administrator if the database has none.
+ # Leave blank to be asked interactively (`docker compose exec -it api python -m app.seed`).
+diff --git a/.github/dependabot.yml b/.github/dependabot.yml
+new file mode 100644
+index 0000000..ab982c5
+--- /dev/null
++++ b/.github/dependabot.yml
+@@ -0,0 +1,17 @@
++version: 2
++updates:
++  - package-ecosystem: github-actions
++    directory: /
++    schedule:
++      interval: weekly
++    open-pull-requests-limit: 10
++  - package-ecosystem: pip
++    directory: /backend
++    schedule:
++      interval: weekly
++    open-pull-requests-limit: 10
++  - package-ecosystem: npm
++    directory: /frontend
++    schedule:
++      interval: weekly
++    open-pull-requests-limit: 10
+diff --git a/.github/workflows/security.yml b/.github/workflows/security.yml
+index 7dd7dfe..ae3021f 100644
+--- a/.github/workflows/security.yml
++++ b/.github/workflows/security.yml
+@@ -6,12 +6,25 @@ on:
+ permissions:
+   contents: read
+ jobs:
++  secret-scan:
++    runs-on: ubuntu-24.04
++    timeout-minutes: 15
++    steps:
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
++        with:
++          fetch-depth: 0
++      - name: Scan full Git history for committed secrets
++        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
++        env:
++          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          GITLEAKS_ENABLE_SUMMARY: "true"
++
+   backend:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     timeout-minutes: 30
+     steps:
+-      - uses: actions/checkout@v4
+-      - uses: actions/setup-python@v5
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
++      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+         with:
+           python-version-file: .python-version
+           cache: pip
+@@ -28,26 +41,28 @@ jobs:
+       - name: Audit production Python dependencies
+         run: '"$RUNNER_TEMP/security-tools/bin/pip-audit" -r backend/requirements.txt -f json -o pip-audit-report.json'
+       - name: Static security analysis
+-        run: '"$RUNNER_TEMP/security-tools/bin/bandit" -r backend/app -lll'
+-      - name: Capture all static findings for review
++        run: '"$RUNNER_TEMP/security-tools/bin/bandit" -r backend/app -l'
++      - name: Capture all static findings, including scoped reviewed suppressions
+         if: always()
+-        run: '"$RUNNER_TEMP/security-tools/bin/bandit" -r backend/app -f json -o bandit-results.json --exit-zero'
+-      - uses: actions/upload-artifact@v4
++        run: '"$RUNNER_TEMP/security-tools/bin/bandit" -r backend/app -f json -o bandit-results.json --exit-zero --ignore-nosec'
++      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+         if: always()
+         with:
+           name: python-security-reports
+           path: |
+             pip-audit-report.json
+             bandit-results.json
++          retention-days: 14
+       - run: sh -n backend/start-hosted.sh
+       - run: python -m pytest -q
+         working-directory: backend
++
+   frontend:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     timeout-minutes: 15
+     steps:
+-      - uses: actions/checkout@v4
+-      - uses: actions/setup-node@v4
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
++      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+         with:
+           node-version-file: .node-version
+           cache: npm
+@@ -57,21 +72,23 @@ jobs:
+       - name: Audit all frontend dependencies
+         run: npm audit --audit-level=low --json > npm-audit-report.json
+         working-directory: frontend
+-      - uses: actions/upload-artifact@v4
++      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+         if: always()
+         with:
+           name: npm-audit-report
+           path: frontend/npm-audit-report.json
++          retention-days: 14
+       - run: npm run test:security
+         working-directory: frontend
+       - run: npm run build
+         working-directory: frontend
++
+   containers:
+-    needs: [backend, frontend]
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 30
++    needs: [secret-scan, backend, frontend]
++    runs-on: ubuntu-24.04
++    timeout-minutes: 45
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+       - name: Create disposable test credentials outside the checkout
+         run: |
+           python3 - <<'PY'
+@@ -82,25 +99,45 @@ jobs:
+           path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
+           path.chmod(0o600)
+           PY
+-      - name: Build pinned images and start the isolated stack
+-        run: |
+-          docker compose -p cybersec-ci --env-file "$RUNNER_TEMP/compose.env" build
+-          docker compose -p cybersec-ci --env-file "$RUNNER_TEMP/compose.env" up -d --wait --wait-timeout 180
++      - name: Build pinned images
++        run: docker compose -p cybersec-ci --env-file "$RUNNER_TEMP/compose.env" build
++      - name: Scan API image for high and critical vulnerabilities
++        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
++        with:
++          image-ref: wellcostiq-api:ci-${{ github.sha }}
++          format: table
++          exit-code: '1'
++          severity: HIGH,CRITICAL
++          ignore-unfixed: true
++      - name: Scan web image for high and critical vulnerabilities
++        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
++        with:
++          image-ref: wellcostiq-web:ci-${{ github.sha }}
++          format: table
++          exit-code: '1'
++          severity: HIGH,CRITICAL
++          ignore-unfixed: true
++      - name: Start the isolated stack
++        run: docker compose -p cybersec-ci --env-file "$RUNNER_TEMP/compose.env" up -d --wait --wait-timeout 180
+       - name: Verify non-root runtimes and Nginx configuration
+         run: |
+           test "$(docker compose -p cybersec-ci --env-file "$RUNNER_TEMP/compose.env" exec -T api id -u)" -ne 0
+           test "$(docker compose -p cybersec-ci --env-file "$RUNNER_TEMP/compose.env" exec -T web id -u)" -ne 0
+           docker compose -p cybersec-ci --env-file "$RUNNER_TEMP/compose.env" exec -T web nginx -t
+           curl --fail --silent http://127.0.0.1:8080/api/health
++          curl --fail --silent --head http://127.0.0.1:8080/ | grep -i '^Strict-Transport-Security: max-age=31536000; includeSubDomains'
++          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --request TRACE http://127.0.0.1:8080/api/v1/auth/login)" = 403
++          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --header 'Host: invalid.example' http://127.0.0.1:8080/)" = 000
+       - name: Record built image identifiers
+         run: |
+           docker image inspect --format '{{.Id}} {{json .RepoDigests}}' "wellcostiq-api:ci-$GITHUB_SHA" > api-image-identifier.txt
+           docker image inspect --format '{{.Id}} {{json .RepoDigests}}' "wellcostiq-web:ci-$GITHUB_SHA" > web-image-identifier.txt
+-      - uses: actions/upload-artifact@v4
++      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+         if: always()
+         with:
+           name: container-identifiers
+           path: '*-image-identifier.txt'
+-      - name: Stop the disposable stack
++          retention-days: 14
++      - name: Stop the disposable stack without deleting volumes
+         if: always()
+         run: docker compose -p cybersec-ci --env-file "$RUNNER_TEMP/compose.env" down
+diff --git a/.gitignore b/.gitignore
+index fbe8d72..2e355a6 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -19,6 +19,26 @@ coverage/
+ *.key
+ *.p12
+ *.pfx
++id_rsa
++id_ecdsa
++id_ed25519
++id_dsa
++.netrc
++*.ovpn
++*.jks
++*.keystore
++*.ppk
++*.dump
++*.sql.gz
++*.bak
++kubeconfig*
++*.tfstate
++*.tfstate.*
++*.tfvars
++docker-compose.override.yml
++.aws/
++.ssh/
++.secrets/
+ security-evidence/
+ *-audit-report.json
+ *-audit-q.json
+diff --git a/README.md b/README.md
+index e5ecc88..1867dcf 100644
+--- a/README.md
++++ b/README.md
+@@ -46,13 +46,13 @@ A fresh clone has an empty database, so nobody can sign in. Rather than shipping
+ - **From the CLI** — `python -m app.seed` runs that same flow. `python -m app.seed --check` only reports status for scripts and container entrypoints: exit `0` an administrator exists, `1` none exists, `2` the schema is not migrated, `3` provisioning failed.
+ - **Unattended** — set `SEED_ORG_SLUG`, `SEED_ORG_NAME`, `SEED_OWNER_NAME`, `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`; the first start seeds from them (`python -m app.seed --from-env` does it explicitly). Clear the password again afterwards.
+ - **Explicit** — `python -m app.seed --slug my-company --name "My Company" --email owner@example.com --owner-name "Jane Smith"` prompts only for the password. Add `--attach-existing` to give a workspace whose owner was lost a new administrator.
+-- **In the UI** — `GET /api/health` returns `admin_seeded`, and the sign-in page explains what to run when it is `false`.
++- **In the UI** — `GET /api/health` returns only `{"status":"ok","api_version":"..."}`. It deliberately does not disclose setup state. Confirm first-run setup from the Render logs (`Seeded administrator ...`) and by signing in.
+ 
+ Seeding is idempotent (it never touches an existing owner), never creates tables behind Alembic, and is switched off entirely by `BOOTSTRAP_ADMIN_ON_STARTUP=false`. Non-interactive processes are never blocked waiting for input.
+ 
+ ## API and policy
+ 
+-- `GET /api/health` reports liveness plus `admin_seeded`; `POST /api/v1/auth/login`, `/refresh`, `/logout`, `/change-password`; `GET /auth/me`.
++- `GET /api/health` reports liveness only (`{"status":"ok","api_version":"..."}`); `POST /api/v1/auth/login`, `/refresh`, `/logout`, `/change-password`; `GET /auth/me`.
+ - `GET /api/v1/overview`; `GET /api/v1/security/overview`, `/security/users`, `/security/password-reset-requests`, `POST /security/users/{id}/reset-code|force-password-change|revoke-sessions|lock|unlock`, `POST /security/users/bulk`; `GET /api/v1/notifications` (+ `/overview`, `/announcements`, read/unread/dismiss, recall), `GET /api/v1/tasks` (+ `/overview`, `/{id}`, `/{id}/events`, `/{id}/comments`, `POST /tasks/bulk`); list/create/update/delete users, roles, permissions; assign roles to users and permissions to roles. `DELETE /api/v1/users/{id}` requires `users:delete` (granted to owners by default), permanently removes a non-owner workspace account and its private saved costing sets/sessions, and retains audit history. Self-deletion and owner-account deletion are blocked. See `/docs` for complete request schemas.
+ - Master Data Management covers UOM, Currency, Phases, Hole Sections, Activities, and a typed Services register. Services receive manually entered, workspace-unique codes and carry a category (Drilling Services or Completion Services), a reporting group (Rig Operations, Formation Evaluation, Well Services, Land Facilities and Preparation, Miscellaneous Services, or Supervisions), provider type (In House Services or Third Party Services), vendor link, and description. The reporting group is chosen when a service is added, can be reclassified for any selection of services in one audited bulk action, and drives the printed order of the AFE cost estimate and Daily Cost reports; existing services are classified as Miscellaneous Services until assigned. The register also groups and filters by reporting group and shows a six-group KPI strip; both provider types must reference a non-deleted vendor in the same workspace. Vendors have an Inhouse or Third party type. Service imports require service_code and vendor_code and update by code. Existing vendor rows default to Third party; legacy in-house services without vendors remain visible and require assignment when edited or restored. Names are unique case-insensitively per workspace, and active service assignments protect vendors from soft deletion. The service register includes category/provider KPIs, quick and advanced filters, date-range filtering, import preview for xlsx/csv (including legacy Inhouse/3rd Party labels), and csv/xlsx/PDF export. Each organization gets isolated records, an overview dashboard, checkbox-based bulk actions, and a Deleted Entries view. Normal deletion is soft-only; restore or permanently delete from Deleted Entries. The `master-data:read`, `master-data:create`, `master-data:update`, `master-data:delete`, `master-data:restore`, `master-data:permanent-delete`, `master-data:import`, and `master-data:export` capabilities guard the API.
+ - Currencies carry a **workspace default**: set it from Master Data → Currency (DEFAULT column, "Set default" action, or the checkbox in the add/edit form). Exactly one active currency per workspace can be the default, the first currency of a workspace becomes it automatically, and every currency dropdown in the app (catalogue priced records, AFE service/consumable lines, bulk estimate, the AFE standard currency) preloads it.
+@@ -89,7 +89,7 @@ Master Data workflows — including the legacy Services, Vendors/Suppliers and P
+ 
+ ### Production follow-ups
+ 
+-This is a **foundation**, not a claim of complete production readiness: add invitations and approved-channel reset-code delivery, MFA/SSO, distributed rate limiting, backup/restore automation, observability and PostgreSQL integration tests before a public SaaS launch. Use HTTPS, strong unique secrets, secure cookies and deployment-specific CORS; review RLS/tenant isolation strategy for multi-tenant compliance needs.
++This is a **foundation**, not a claim of complete production readiness: add invitations and approved-channel reset-code delivery, native MFA/SSO, provider-managed edge rate limiting/WAF, off-service backup automation with tested PITR/restore, central observability and PostgreSQL integration tests before a public SaaS launch. `GET /api/health` intentionally exposes liveness/version only. Use HTTPS, strong unique secrets, secure cookies and deployment-specific CORS; review RLS/tenant isolation strategy for multi-tenant compliance needs. The dated remediation plan and operator-owned residual actions are in `docs/IT_SECURITY_REMEDIATION_2026-11-06.md`.
+ 
+ ## CyberSec review downloads
+ 
+diff --git a/backend/.env.example b/backend/.env.example
+index 9261e50..b2ab9fa 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -7,6 +7,8 @@ DATABASE_URL=postgresql+psycopg://wellcosting_app:replace-with-a-url-encoded-pas
+ SECRET_KEY=replace-with-a-long-cryptographically-random-secret
+ SECURE_COOKIES=false
+ CORS_ORIGINS=http://localhost:5173
++# Optional comma-separated exact Host names (no schemes, ports or wildcards).
++ALLOWED_HOSTS=
+ # Comma-separated proxy addresses/CIDRs whose X-Forwarded-For may be believed.
+ TRUSTED_PROXY_IPS=
+ 
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 2cbf1ee..d54f897 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -20,4 +20,7 @@ COPY --chmod=0755 . ./
+ EXPOSE 8000
+ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+     CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"
+-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]
++# Hosted Docker deployments use the same reviewed migration/credential-removal
++# wrapper as Render's former Python runtime. Compose overrides this entrypoint
++# for its separate migration and already-migrated API services.
++ENTRYPOINT ["/app/start-hosted.sh"]
+diff --git a/backend/alembic/versions/f2a6c8d41e07_append_only_audit_grants.py b/backend/alembic/versions/f2a6c8d41e07_append_only_audit_grants.py
+new file mode 100644
+index 0000000..b6ea0a8
+--- /dev/null
++++ b/backend/alembic/versions/f2a6c8d41e07_append_only_audit_grants.py
+@@ -0,0 +1,67 @@
++"""Make existing audit history append-only without moving or changing rows.
++
++Revision ID: f2a6c8d41e07
++Revises: f1d7a4c95b23
++Create Date: 2026-11-06 00:00:00.000000
++"""
++from typing import Sequence, Union
++
++from alembic import op
++
++
++revision: str = "f2a6c8d41e07"  # pragma: allowlist secret - Alembic revision ID, not a credential.
++down_revision: Union[str, None] = "f1d7a4c95b23"  # pragma: allowlist secret - Parent revision ID.
++branch_labels: Union[str, Sequence[str], None] = None
++depends_on: Union[str, Sequence[str], None] = None
++
++
++def upgrade() -> None:
++    if op.get_bind().dialect.name != "postgresql":
++        return
++
++    # This migration intentionally contains no data DML and no table move. The
++    # migration role owns public.audit_logs in the supported deployment. Hosted
++    # databases with differently named roles are left for their DBA runbook.
++    op.execute(
++        """
++        DO $$
++        BEGIN
++            IF to_regclass('public.audit_logs') IS NOT NULL
++               AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'wellcosting_app') THEN
++                REVOKE UPDATE, DELETE ON TABLE public.audit_logs FROM wellcosting_app;
++            END IF;
++
++            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'wellcosting_app')
++               AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'wellcosting_migrator') THEN
++                CREATE SCHEMA IF NOT EXISTS audit;
++                GRANT USAGE, CREATE ON SCHEMA audit TO wellcosting_migrator;
++                GRANT USAGE ON SCHEMA audit TO wellcosting_app;
++                ALTER DEFAULT PRIVILEGES FOR ROLE wellcosting_migrator IN SCHEMA audit
++                    GRANT SELECT, INSERT ON TABLES TO wellcosting_app;
++                ALTER DEFAULT PRIVILEGES FOR ROLE wellcosting_migrator IN SCHEMA audit
++                    GRANT USAGE, SELECT ON SEQUENCES TO wellcosting_app;
++            END IF;
++        END
++        $$;
++        """
++    )
++
++
++def downgrade() -> None:
++    if op.get_bind().dialect.name != "postgresql":
++        return
++
++    # Restore only the former table grants. Never drop the audit schema: a later
++    # migration may have placed data there, and downgrade must not destroy it.
++    op.execute(
++        """
++        DO $$
++        BEGIN
++            IF to_regclass('public.audit_logs') IS NOT NULL
++               AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'wellcosting_app') THEN
++                GRANT UPDATE, DELETE ON TABLE public.audit_logs TO wellcosting_app;
++            END IF;
++        END
++        $$;
++        """
++    )
+diff --git a/backend/app/api/auth.py b/backend/app/api/auth.py
+index 985e316..5f6f9bc 100644
+--- a/backend/app/api/auth.py
++++ b/backend/app/api/auth.py
+@@ -154,7 +154,7 @@ def login(data: LoginInput, request: Request, response: Response, db: Db):
+     set_cookie(response, token)
+     return {
+         "access_token": access_token(user.id, user.organization_id, user.token_version),
+-        "token_type": "bearer",
++        "token_type": "bearer",  # nosec B105  # OAuth token-type label, not a credential.
+         "expires_in": settings.access_token_minutes * 60,
+         **_session_facts(user),
+     }
+@@ -206,7 +206,7 @@ def refresh(request: Request, response: Response, db: Db):
+     set_cookie(response, new_token)
+     return {
+         "access_token": access_token(user.id, user.organization_id, user.token_version),
+-        "token_type": "bearer",
++        "token_type": "bearer",  # nosec B105  # OAuth token-type label, not a credential.
+         **_session_facts(user),
+     }
+ 
+diff --git a/backend/app/api/deps.py b/backend/app/api/deps.py
+index dc85cdc..18ba241 100644
+--- a/backend/app/api/deps.py
++++ b/backend/app/api/deps.py
+@@ -21,7 +21,7 @@ PASSWORD_CHANGE_ALLOWED = {
+     "/api/v1/auth/logout-all",
+     "/api/v1/auth/refresh",
+ }
+-WRONG_TOKEN = "Invalid or expired access token"
++WRONG_TOKEN = "Invalid or expired access token"  # nosec B105  # Public error text, not a credential.
+ 
+ 
+ def _unauthorized(detail: str = WRONG_TOKEN) -> HTTPException:
+diff --git a/backend/app/api/rig_well.py b/backend/app/api/rig_well.py
+index cf5263a..1caf0cb 100644
+--- a/backend/app/api/rig_well.py
++++ b/backend/app/api/rig_well.py
+@@ -398,7 +398,7 @@ def _master_record_or_422(db: Session, model: Any, record_id: str, organization_
+     if record is None:
+         raise HTTPException(
+             status_code=422,
+-            detail=f"Select an active {label} from this workspace's Master Data",
++            detail=f"Select an active {label} from this workspace's Master Data",  # nosec B608  # Validation text, not SQL.
+         )
+     return record
+ 
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index b7c1cbd..457f19e 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -20,12 +20,13 @@ use them directly, but their values are masked by ``repr``/``str`` and by
+ :meth:`Settings.safe_summary` so a settings object can be logged safely.
+ """
+ from functools import lru_cache
+-from urllib.parse import SplitResult, urlsplit
++import re
++from urllib.parse import SplitResult, parse_qs, urlsplit
+ 
+ from pydantic import field_validator, model_validator
+ from pydantic_settings import BaseSettings, SettingsConfigDict
+ 
+-DEV_SECRET = "development-only-change-this-secret-before-deploying"
++DEV_SECRET = "development-only-change-this-secret-before-deploying"  # nosec B105  # Rejected outside local development.
+ ENVIRONMENTS = ("development", "test", "staging", "production")
+ PLACEHOLDER_SECRETS = {
+     DEV_SECRET,
+@@ -151,6 +152,9 @@ class Settings(BaseSettings):
+     # Vendors/PO-SO attachments are stored in the workspace database; this caps one file.
+     document_max_size_mb: int = 15
+     cors_origins: str = "http://localhost:5173"
++    # Optional application-layer Host allowlist. Nginx is the primary Compose
++    # control; Render sets its exact service hostname to protect direct access.
++    allowed_hosts: str = ""
+     # Uvicorn's --forwarded-allow-ips is the real control; this list decides which
+     # peers' X-Forwarded-For / X-Real-IP headers are believed by the application.
+     trusted_proxy_ips: str = ""
+@@ -173,6 +177,29 @@ class Settings(BaseSettings):
+     seed_admin_password: str = ""
+ 
+     # ------------------------------------------------------------------ helpers
++    @field_validator("allowed_hosts")
++    @classmethod
++    def validate_allowed_hosts(cls, value: str) -> str:
++        """Store exact hostnames only; never ports, schemes, paths or wildcards."""
++        hosts: list[str] = []
++        for item in value.split(","):
++            host = item.strip().lower().rstrip(".")
++            if not host:
++                continue
++            valid_hostname = re.fullmatch(
++                r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?",
++                host,
++            )
++            if not valid_hostname or ".." in host or any(
++                label.startswith("-") or label.endswith("-") for label in host.split(".")
++            ):
++                raise ValueError(
++                    f"ALLOWED_HOSTS entry {item!r} is invalid; use an exact hostname without scheme, port or wildcard"
++                )
++            if host not in hosts:
++                hosts.append(host)
++        return ",".join(hosts)
++
+     @field_validator("cors_origins")
+     @classmethod
+     def validate_cors_origins(cls, value: str) -> str:
+@@ -199,6 +226,10 @@ class Settings(BaseSettings):
+     def cors_origin_list(self) -> list[str]:
+         return [origin for origin in self.cors_origins.split(",") if origin]
+ 
++    @property
++    def allowed_host_list(self) -> list[str]:
++        return [host for host in self.allowed_hosts.split(",") if host]
++
+     @property
+     def trusted_proxies(self) -> list[str]:
+         return [item.strip() for item in self.trusted_proxy_ips.split(",") if item.strip()]
+@@ -255,6 +286,14 @@ class Settings(BaseSettings):
+         elif not self.database_url.startswith("sqlite"):
+             if self.secret_key.startswith("development-only") or len(self.secret_key) < 32:
+                 raise ValueError("Set a unique SECRET_KEY of at least 32 characters before using PostgreSQL")
++
++        if self.environment in {"staging", "production"} and self.database_url.startswith("postgresql"):
++            sslmodes = parse_qs(urlsplit(self.database_url).query, keep_blank_values=True).get("sslmode", [])
++            if len(sslmodes) != 1 or sslmodes[0] not in {"require", "verify-ca", "verify-full"}:
++                raise ValueError(
++                    "DATABASE_URL must contain exactly one secure sslmode=require, verify-ca or verify-full "
++                    "outside development/test"
++                )
+         return self
+ 
+     # ------------------------------------------------------------------ masking
+diff --git a/backend/app/core/database.py b/backend/app/core/database.py
+index 995696d..a0a086c 100644
+--- a/backend/app/core/database.py
++++ b/backend/app/core/database.py
+@@ -15,6 +15,20 @@ if url.startswith("sqlite"):
+         cursor = dbapi_connection.cursor()
+         cursor.execute("PRAGMA foreign_keys=ON")
+         cursor.close()
++elif url.startswith("postgresql"):
++    @event.listens_for(engine, "connect")
++    def bound_postgresql_session(dbapi_connection, connection_record):
++        """Bound stuck work without requiring ALTER ROLE administrator rights.
++
++        These session limits also protect hosted databases whose pooler role
++        cannot alter role defaults. Imports still have their existing request
++        window; an individual SQL statement is capped at 120 seconds by design.
++        """
++        cursor = dbapi_connection.cursor()
++        cursor.execute("SET SESSION statement_timeout = 120000")
++        cursor.execute("SET SESSION idle_in_transaction_session_timeout = 60000")
++        cursor.execute("SET SESSION lock_timeout = 10000")
++        cursor.close()
+ 
+ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+ 
+diff --git a/backend/app/core/security.py b/backend/app/core/security.py
+index 11944f7..4858935 100644
+--- a/backend/app/core/security.py
++++ b/backend/app/core/security.py
+@@ -25,7 +25,7 @@ ALGORITHM = "HS256"
+ # ``aud`` is intentionally not asserted: this API has a single audience, and
+ # adding a claim that consumers must supply would break existing integrations.
+ REQUIRED_CLAIMS = ("exp", "iat", "nbf", "sub", "org", "type", "ver", "iss")
+-ACCESS_TOKEN_TYPE = "access"
++ACCESS_TOKEN_TYPE = "access"  # nosec B105  # JWT claim discriminator, not a credential.
+ 
+ # Deliberately small and dependency-free: a blocklist of the passwords that
+ # dominate credential-stuffing lists, plus structural rules below. A breached
+diff --git a/backend/app/main.py b/backend/app/main.py
+index 63a6a9e..5bf003a 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -1,5 +1,6 @@
+ import logging
+ from contextlib import asynccontextmanager
++from urllib.parse import urlsplit
+ from uuid import uuid4
+ 
+ from fastapi import FastAPI, Request
+@@ -68,6 +69,30 @@ app.add_middleware(
+ )
+ 
+ 
++@app.middleware("http")
++async def host_guard(request: Request, call_next):
++    """Refuse unexpected Host values when a deployment configures an allowlist.
++
++    Compose enforces names at nginx as well. Render has no configurable nginx in
++    its request path, so this protects direct service-host access and Vercel
++    rewrites without trusting an attacker-supplied wildcard or forwarded header.
++    """
++    allowed = settings.allowed_host_list
++    if allowed:
++        header = request.headers.get("host", "")
++        try:
++            parts = urlsplit("//" + header)
++            invalid = bool(parts.username or parts.password or parts.path or parts.query or parts.fragment)
++            _ = parts.port  # Validate a supplied port even though policy keys on hostname.
++            host = (parts.hostname or "").lower().rstrip(".")
++        except ValueError:
++            invalid = True
++            host = ""
++        if invalid or host not in allowed:
++            return JSONResponse(status_code=400, content={"detail": "This hostname is not allowed to call the API."})
++    return await call_next(request)
++
++
+ @app.middleware("http")
+ async def origin_guard(request: Request, call_next):
+     """Reject cross-site writes that rely on the browser's refresh cookie.
+diff --git a/backend/app/schemas/afe.py b/backend/app/schemas/afe.py
+index 5c41405..71e167f 100644
+--- a/backend/app/schemas/afe.py
++++ b/backend/app/schemas/afe.py
+@@ -25,9 +25,9 @@ ChargingBasis = Literal["Day Rate", "Per Service Rate", "Per Section Rate"]
+ ConsumableCategory = Literal["Mud Chemicals", "Cement Additives", "Fuel", "Drill Bits"]
+ QuantityUnit = Literal["days", "hours"]
+ 
+-assert set(CHARGE_CATEGORIES) == set(ChargeCategory.__args__)  # keep Literal in step with the engine
+-assert set(CHARGING_BASES) == set(ChargingBasis.__args__)
+-assert set(CONSUMABLE_CATEGORIES) == set(ConsumableCategory.__args__)
++assert set(CHARGE_CATEGORIES) == set(ChargeCategory.__args__)  # nosec B101  # Import-time Literal invariant.
++assert set(CHARGING_BASES) == set(ChargingBasis.__args__)  # nosec B101  # Import-time Literal invariant.
++assert set(CONSUMABLE_CATEGORIES) == set(ConsumableCategory.__args__)  # nosec B101  # Import-time Literal invariant.
+ 
+ MAX_LINES = 500
+ 
+diff --git a/backend/app/services/afe.py b/backend/app/services/afe.py
+index 8e4b0da..69377e5 100644
+--- a/backend/app/services/afe.py
++++ b/backend/app/services/afe.py
+@@ -557,7 +557,7 @@ def _validate_request(
+         where = f"Service line {index}"
+         service = lookups.services.get(line.service_id)
+         if service is None or service.organization_id != organization_id:
+-            errors.append(f"{where}: select a service from Master Data.")
++            errors.append(f"{where}: select a service from Master Data.")  # nosec B608  # Validation text, not SQL.
+             continue
+         if service.is_deleted:
+             errors.append(f"{where}: {service.service_code} is inactive in Master Data. Select an active service.")
+@@ -663,7 +663,7 @@ def _validate_request(
+         if line.category == engine.CONSUMABLE_DRILL_BITS:
+             drill_bit = lookups.drill_bits.get(line.drill_bit_id or "")
+             if drill_bit is None or drill_bit.organization_id != organization_id:
+-                errors.append(f"{where}: select a drill bit from Master Data.")
++                errors.append(f"{where}: select a drill bit from Master Data.")  # nosec B608  # Validation text, not SQL.
+                 continue
+             if drill_bit.is_deleted:
+                 errors.append(f"{where}: {drill_bit.bit_code} is inactive in Master Data. Select an active drill bit.")
+@@ -729,7 +729,7 @@ def _validate_request(
+         where = f"Tangible line {index}"
+         tangible = lookups.tangibles.get(line.tangible_id)
+         if tangible is None or tangible.organization_id != organization_id:
+-            errors.append(f"{where}: select a tangible from Master Data.")
++            errors.append(f"{where}: select a tangible from Master Data.")  # nosec B608  # Validation text, not SQL.
+             continue
+         if tangible.is_deleted:
+             errors.append(f"{where}: {tangible.tangible_code} is inactive in Master Data. Select an active tangible.")
+diff --git a/backend/app/services/catalogue.py b/backend/app/services/catalogue.py
+index a8881da..90ba91d 100644
+--- a/backend/app/services/catalogue.py
++++ b/backend/app/services/catalogue.py
+@@ -301,7 +301,7 @@ def validate_option_parent(db: Session, organization_id: str, list_key: str, par
+             raise CatalogueError(f"{list_label(list_key)} do not have a parent value")
+         return None
+     if not parent_id:
+-        raise CatalogueError(f"Select a parent value from {list_label(parent_list)} first")
++        raise CatalogueError(f"Select a parent value from {list_label(parent_list)} first")  # nosec B608  # Validation text, not SQL.
+     parent = db.scalar(
+         select(CatalogueOption).where(
+             CatalogueOption.id == parent_id,
+@@ -526,7 +526,7 @@ def _master_values(
+             continue
+         target = db.get(CatalogueOption, chosen)
+         if target is None or target.organization_id != organization_id or target.list_key != option.list_key:
+-            raise CatalogueError(f"Select a {option.label.lower()} from Catalogue Lists")
++            raise CatalogueError(f"Select a {option.label.lower()} from Catalogue Lists")  # nosec B608  # Validation text, not SQL.
+         unchanged = existing is not None and getattr(existing, option.attr) == chosen
+         if not unchanged and target.is_deleted:
+             raise CatalogueError(f"'{target.value}' was removed from {list_label(option.list_key)}; choose another {option.label.lower()}")
+diff --git a/backend/app/services/daily_cost.py b/backend/app/services/daily_cost.py
+index c69608a..19f787d 100644
+--- a/backend/app/services/daily_cost.py
++++ b/backend/app/services/daily_cost.py
+@@ -331,7 +331,7 @@ def _section_option(section: DailyCostBaselineSection) -> DailyCostSectionOption
+ def _active_master(db: Session, model: Any, record_id: str, organization_id: str, label: str, *, allow_deleted: bool = False) -> Any:
+     row = db.scalar(select(model).where(model.id == record_id, model.organization_id == organization_id))
+     if row is None:
+-        raise HTTPException(status_code=422, detail=f"Select a {label} from this workspace")
++        raise HTTPException(status_code=422, detail=f"Select a {label} from this workspace")  # nosec B608  # Validation text, not SQL.
+     if row.is_deleted and not allow_deleted:
+         raise HTTPException(status_code=422, detail=f"{label.capitalize()} is in Deleted Entries; choose an active record")
+     return row
+@@ -1732,7 +1732,7 @@ def _normalise_catalogue_line(
+             }
+         )
+     else:
+-        assert isinstance(line, DailyCostConsumableLineIn)
++        assert isinstance(line, DailyCostConsumableLineIn)  # nosec B101  # Internal type narrowing only.
+         base.update(
+             {
+                 "category": line.category,
+@@ -3284,7 +3284,7 @@ def reopen_entry(
+             from app.services.sow_adjustment import AMENDMENT_THRESHOLD_DAYS
+ 
+             amendment_threshold = AMENDMENT_THRESHOLD_DAYS
+-        except Exception:  # noqa: BLE001 - fall back to the default window
++        except Exception:  # nosec B110  # Legacy amendment-window fallback.  # noqa: BLE001
+             pass
+         if days_old > amendment_threshold and not _has_permission(db, user, "daily-cost:amend"):
+             raise HTTPException(
+@@ -3310,7 +3310,7 @@ def reopen_entry(
+             record_amendment(db, entry=entry, user=user, reason=data.remarks)
+         except HTTPException:
+             raise
+-        except Exception:  # noqa: BLE001 - unmigrated database has no amendment table yet
++        except Exception:  # nosec B110  # Optional legacy amendment-history fallback.  # noqa: BLE001
+             pass
+         _commit(db)
+     return _created_day_or_503(db, organization_id, entry.id)
+@@ -3896,7 +3896,7 @@ def _well_progress_row(
+         if completed is not None:
+             end = completed
+         else:
+-            assert as_of is not None
++            assert as_of is not None  # nosec B101  # Internal populated-date invariant only.
+             end = datetime.combine(as_of + timedelta(days=1), dt_time.min)
+         actual_days = _fractional_days(end - spud) if end > spud else Decimal("0.000")
+         days_variance = (actual_days - planned_days).quantize(PROGRESS_DAY_QUANT, rounding=ROUND_HALF_UP)
+diff --git a/backend/app/services/dependencies.py b/backend/app/services/dependencies.py
+index e1cc82b..157f604 100644
+--- a/backend/app/services/dependencies.py
++++ b/backend/app/services/dependencies.py
+@@ -85,7 +85,7 @@ def dependency_counts(db: Session, record: Any, organization_id: str) -> dict[st
+             for foreign_key in column.foreign_keys:
+                 try:
+                     target_column = foreign_key.column
+-                except Exception:  # An unrelated unresolved optional FK should not block this check.
++                except Exception:  # nosec B112  # Unresolved optional FK is not a resolved dependency.
+                     continue
+                 if target_column.table is not target_table:
+                     continue
+diff --git a/backend/tests/test_audit_grant_migration.py b/backend/tests/test_audit_grant_migration.py
+new file mode 100644
+index 0000000..d7a82d7
+--- /dev/null
++++ b/backend/tests/test_audit_grant_migration.py
+@@ -0,0 +1,68 @@
++"""The audit grant revision must preserve existing UAT-style data exactly."""
++
++import os
++from pathlib import Path
++import sqlite3
++import subprocess
++import sys
++
++
++PREVIOUS_HEAD = "f1d7a4c95b23"  # pragma: allowlist secret - Alembic parent revision ID.
++
++
++def test_audit_grant_migration_preserves_users_passwords_and_audit_rows(tmp_path):
++    database = tmp_path / "audit-grants.sqlite3"
++    environment = {**os.environ, "DATABASE_URL": f"sqlite:///{database}"}
++    backend = Path(__file__).resolve().parents[1]
++
++    def migrate(operation: str, target: str) -> None:
++        result = subprocess.run(
++            [sys.executable, "-m", "alembic", operation, target],
++            cwd=backend,
++            env=environment,
++            capture_output=True,
++            text=True,
++        )
++        assert result.returncode == 0, result.stderr
++
++    migrate("upgrade", PREVIOUS_HEAD)
++    with sqlite3.connect(database) as connection:
++        connection.execute(
++            "INSERT INTO organizations (id, name, slug, created_at) "
++            "VALUES ('org-preserved', 'Preserved workspace', 'preserved', '2026-01-01 00:00:00')"
++        )
++        connection.execute(
++            "INSERT INTO users (id, organization_id, email, full_name, password_hash, is_active, "
++            "token_version, failed_logins, must_change_password, created_at) "
++            "VALUES ('user-preserved', 'org-preserved', 'owner@preserved.example', 'Owner', "
++            "'existing-argon2-hash-not-a-password', 1, 7, 0, 0, '2026-01-01 00:00:00')"
++        )
++        connection.execute(
++            "INSERT INTO audit_logs (id, organization_id, actor_user_id, actor_email, actor_name, action, "
++            "entity_type, entity_id, entity_label, summary, ip_address, user_agent, created_at) "
++            "VALUES ('audit-preserved', 'org-preserved', 'user-preserved', 'owner@preserved.example', "
++            "'Owner', 'update', 'well', 'well-1', 'Historic well', 'Original audit summary', "
++            "'192.0.2.1', 'historic-agent', '2026-01-02 00:00:00')"
++        )
++        before = connection.execute(
++            "SELECT users.id, users.password_hash, users.token_version, audit_logs.summary "
++            "FROM users JOIN audit_logs ON audit_logs.actor_user_id = users.id"
++        ).fetchall()
++
++    migrate("upgrade", "head")
++    with sqlite3.connect(database) as connection:
++        after = connection.execute(
++            "SELECT users.id, users.password_hash, users.token_version, audit_logs.summary "
++            "FROM users JOIN audit_logs ON audit_logs.actor_user_id = users.id"
++        ).fetchall()
++        assert after == before
++        assert connection.execute("SELECT COUNT(*) FROM organizations").fetchone() == (1,)
++        assert connection.execute("SELECT COUNT(*) FROM users").fetchone() == (1,)
++        assert connection.execute("SELECT COUNT(*) FROM audit_logs").fetchone() == (1,)
++
++    migrate("downgrade", PREVIOUS_HEAD)
++    with sqlite3.connect(database) as connection:
++        assert connection.execute(
++            "SELECT users.id, users.password_hash, users.token_version, audit_logs.summary "
++            "FROM users JOIN audit_logs ON audit_logs.actor_user_id = users.id"
++        ).fetchall() == before
+diff --git a/backend/tests/test_security_hardening.py b/backend/tests/test_security_hardening.py
+index 283dadb..d76a8c6 100644
+--- a/backend/tests/test_security_hardening.py
++++ b/backend/tests/test_security_hardening.py
+@@ -29,6 +29,12 @@ def test_origin_guard_and_no_store():
+         response = client.get('/api/v1/auth/me', headers=headers)
+         assert response.headers['cache-control'] == 'no-store'
+         assert response.headers['x-content-type-options'] == 'nosniff'
++        for path in ('/api/health', '/api/v1/route-that-does-not-exist'):
++            secured = client.get(path)
++            assert secured.headers['x-content-type-options'] == 'nosniff'
++            assert secured.headers['x-frame-options'] == 'DENY'
++            assert secured.headers['referrer-policy'] == 'no-referrer'
++            assert "default-src 'none'" in secured.headers['content-security-policy']
+         assert client.post('/api/v1/auth/refresh', headers={'Origin': 'https://evil.example'}).status_code == 403
+         assert client.post('/api/v1/auth/refresh', headers={'Origin': 'http://localhost:5173'}).status_code == 200
+         assert 'admin_seeded' not in client.get('/api/health').json()
+@@ -113,6 +119,47 @@ def test_production_fails_closed():
+     assert Settings(environment='production', secret_key='a' * 48, secure_cookies=True, cors_origins='https://app.example.com')
+ 
+ 
++def test_host_allowlist_protects_health_and_every_api_route(fresh_database, monkeypatch):
++    from app.main import settings
++    monkeypatch.setattr(settings, 'allowed_hosts', 'wellcosting-api.onrender.com')
++    with TestClient(app, base_url='http://wellcosting-api.onrender.com') as client:
++        assert client.get('/api/health').status_code == 200
++        rejected = client.get('/api/health', headers={'Host': 'attacker.example'})
++        assert rejected.status_code == 400
++        assert rejected.headers['x-content-type-options'] == 'nosniff'
++        assert 'attacker.example' not in rejected.text
++
++
++@pytest.mark.parametrize('host', ['*', '*.example.com', 'https://api.example.com', 'api.example.com:443', 'api.example.com/path'])
++def test_host_allowlist_rejects_non_hostnames(host):
++    with pytest.raises(ValidationError):
++        Settings(allowed_hosts=host)
++
++
++@pytest.mark.parametrize('environment', ['staging', 'production'])
++@pytest.mark.parametrize('suffix', ['', '?sslmode=disable', '?sslmode=require&sslmode=disable'])
++def test_hosted_postgresql_requires_secure_tls(environment, suffix):
++    with pytest.raises(ValidationError, match='sslmode'):
++        Settings(
++            environment=environment,
++            database_url='postgresql+psycopg://app@db.example.com/wellcosting' + suffix,
++            secret_key='a' * 48,
++            secure_cookies=True,
++            cors_origins='https://app.example.com',
++        )
++
++
++@pytest.mark.parametrize('sslmode', ['require', 'verify-ca', 'verify-full'])
++def test_hosted_postgresql_accepts_explicit_secure_tls(sslmode):
++    assert Settings(
++        environment='production',
++        database_url=f'postgresql+psycopg://app@db.example.com/wellcosting?sslmode={sslmode}',
++        secret_key='a' * 48,
++        secure_cookies=True,
++        cors_origins='https://app.example.com',
++    )
++
++
+ def test_database_integrity_errors_are_generic_conflicts():
+     import asyncio
+     from sqlalchemy.exc import IntegrityError
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 9eff1e7..ffb7a0b 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -20,6 +20,22 @@ services:
+       - ./scripts/postgres-init-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+     networks: [backend_net]
+     security_opt: ["no-new-privileges:true"]
++    cap_drop: ["ALL"]
++    # Required by the official image to initialise/chown PGDATA and then drop
++    # from root to the postgres user. No other capabilities are retained.
++    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
++    deploy:
++      resources:
++        limits:
++          cpus: "1.0"
++          memory: 1g
++    # max_connections=100 plus background, health and autovacuum workers.
++    pids_limit: 300
++    logging:
++      driver: json-file
++      options:
++        max-size: "10m"
++        max-file: "3"
+     healthcheck:
+       test: ["CMD-SHELL", "pg_isready -U postgres -d wellcosting"]
+       interval: 5s
+@@ -38,11 +54,19 @@ services:
+         condition: service_healthy
+     networks: [backend_net]
+     read_only: true
+-    tmpfs: [/tmp]
++    tmpfs:
++      - /tmp:rw,noexec,nosuid,nodev,size=512m
+     security_opt: ["no-new-privileges:true"]
+     cap_drop: ["ALL"]
+-    command: ["alembic", "upgrade", "head"]
++    # The image's hosted entrypoint migrates and starts Uvicorn; this one-shot
++    # service deliberately runs only the existing Alembic command instead.
++    entrypoint: ["alembic", "upgrade", "head"]
+     restart: "no"
++    logging:
++      driver: json-file
++      options:
++        max-size: "10m"
++        max-file: "3"
+ 
+   api:
+     build: ./backend
+@@ -54,10 +78,15 @@ services:
+       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+       SECURE_COOKIES: ${SECURE_COOKIES:-false}
+       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
++      # Optional defence in depth behind nginx; hosted Render sets its exact name.
++      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+       # nginx is the only client on this private network, so its forwarded address
+       # is believable. Never widen this to a public range.
+       TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-172.28.0.0/16}
+       BACKUP_DIRECTORY: /app/backups
++      BACKUP_MAX_UPLOAD_MB: ${BACKUP_MAX_UPLOAD_MB:-2048}
++      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
++      REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
+       # Password lifecycle: age in days, reuse depth and sign-in lockout.
+       PASSWORD_MAX_AGE_DAYS: ${PASSWORD_MAX_AGE_DAYS:-90}
+       PASSWORD_EXPIRY_WARNING_DAYS: ${PASSWORD_EXPIRY_WARNING_DAYS:-14}
+@@ -81,10 +110,23 @@ services:
+     networks: [backend_net]
+     read_only: true
+     tmpfs:
+-      - /tmp
++      - /tmp:rw,noexec,nosuid,nodev,size=512m
+     security_opt: ["no-new-privileges:true"]
+     cap_drop: ["ALL"]
+-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]
++    deploy:
++      resources:
++        limits:
++          cpus: "1.0"
++          memory: 1g
++    pids_limit: 256
++    logging:
++      driver: json-file
++      options:
++        max-size: "10m"
++        max-file: "3"
++    # Override the hosted migration/Uvicorn wrapper; Compose migrations have
++    # already completed in the separate least-privilege migrate service.
++    entrypoint: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]
+     healthcheck:
+       test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"]
+       interval: 30s
+@@ -93,26 +135,51 @@ services:
+       start_period: 40s
+ 
+   web:
+-    build: ./frontend
++    build:
++      context: ./frontend
++      args:
++        # Space-separated exact hostnames, without schemes or ports. Keep the
++        # local names for health checks and add the public/fronting-proxy names.
++        NGINX_SERVER_NAMES: ${NGINX_SERVER_NAMES:-localhost 127.0.0.1}
+     image: wellcostiq-web:${APP_IMAGE_TAG:-local}
+     restart: unless-stopped
+     ports:
++      # Must stay loopback-only while nginx trusts edge_net for X-Forwarded-For.
++      # Changing this to 0.0.0.0 would let direct clients spoof rate-limit keys.
+       - "${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080"
+     depends_on:
+       api:
+         condition: service_started
+     networks: [backend_net, edge_net]
+     read_only: true
+-    tmpfs: [/tmp]
++    tmpfs:
++      - /tmp:rw,noexec,nosuid,nodev,size=512m
+     security_opt: ["no-new-privileges:true"]
+     cap_drop: ["ALL"]
++    deploy:
++      resources:
++        limits:
++          cpus: "1.0"
++          memory: 1g
++    pids_limit: 256
++    logging:
++      driver: json-file
++      options:
++        max-size: "10m"
++        max-file: "3"
+ 
+ networks:
++  # No runtime internet egress for the database or API. A future SMTP/integration
++  # facility needs a deliberate separate network, not a public backend_net.
+   backend_net:
++    internal: true
+     ipam:
+       config:
+         - subnet: 172.28.0.0/16
+   edge_net:
++    ipam:
++      config:
++        - subnet: 172.29.0.0/16
+ 
+ volumes:
+   postgres18_data:
+diff --git a/docs/HOSTED_SETTINGS_EVIDENCE.md b/docs/HOSTED_SETTINGS_EVIDENCE.md
+new file mode 100644
+index 0000000..f6c5910
+--- /dev/null
++++ b/docs/HOSTED_SETTINGS_EVIDENCE.md
+@@ -0,0 +1,61 @@
++# Hosted settings evidence capture
++
++No live hosted dashboard was accessed from the repository workspace. The captures
++below are **pending**, not asserted values. Store redacted plain-text output under
++`evidence/` outside the delivered source bundle when that directory is used for
++local review; never include environment values, session cookies, tokens,
++connection URLs, password fingerprints or unredacted screenshots with secrets.
++
++Each capture must include UTC timestamp, source commit, CI run URL/ID, operator,
++tool/source (dashboard page), and an explicit comparison with the committed file.
++
++## `evidence/vercel-dashboard-settings.txt`
++
++Capture from **Settings → General**:
++
++- Root Directory (expected `frontend`)
++- Build Command (`npm run build`)
++- Install Command (`npm ci`)
++- Node.js version (`22.x`; deployed patch consistent with the project engine)
++- Production branch and Auto-Deploy behavior
++- Deployment Protection for preview deployments
++- Actual production domains (safe to record; no DNS credentials)
++
++Compare with `frontend/vercel.json`, including the exact Render rewrite hostname,
++one-year HSTS and the CSP ending in `upgrade-insecure-requests`.
++
++## `evidence/render-dashboard-settings.txt`
++
++Capture from **Build & Deploy** and **Environment**:
++
++- Runtime Docker, Root Directory `backend`, Dockerfile Path `./Dockerfile`
++- Auto-Deploy **off**; record the manually deployed commit and passing CI run
++- Health Check `/api/health`
++- Plan/region and whether the instance sleeps
++- Environment **key names only**, with values redacted and secret flags visible:
++  `DATABASE_URL`, `MIGRATION_DATABASE_URL`, `SECRET_KEY`, `ALLOWED_HOSTS`,
++  `SECURE_COOKIES`, `CORS_ORIGINS`, token/password policy keys and bootstrap keys
++- Confirm `BOOTSTRAP_ADMIN_ON_STARTUP=false` and `SEED_ADMIN_PASSWORD` absent
++  after first successful setup
++- Deployed image identifier/digest if the provider supplies one; otherwise say
++  explicitly that image-by-digest provenance is not available
++
++Compare with `render.yaml`. Do not paste environment export output.
++
++## `evidence/supabase-settings.txt`
++
++Capture without credentials:
++
++- Connection pool mode (expected Session pooler for this application)
++- Port/host type and dedicated role names only, not complete URLs
++- Whether both runtime and migration URLs carry `sslmode=require` (yes/no)
++- PITR/snapshot enabled state and retention
++- Network restrictions and database version/extensions
++- Latest restore rehearsal date/result and elapsed time
++
++## GitHub branch/release evidence
++
++Record that the Security workflow is a required status check on the protected
++production branch, review is required, and direct pushes cannot bypass it. Render
++manual deploy must reference a passing run. This setting cannot be established by
++`render.yaml` alone.
+diff --git a/docs/IT_SECURITY_REMEDIATION_2026-11-06.md b/docs/IT_SECURITY_REMEDIATION_2026-11-06.md
+new file mode 100644
+index 0000000..7e4cc28
+--- /dev/null
++++ b/docs/IT_SECURITY_REMEDIATION_2026-11-06.md
+@@ -0,0 +1,196 @@
++# IT Security observation remediation plan — 2026-11-06
++
++## Objective and release constraints
++
++Address the latest IT Security observations with the smallest reversible changes that fit the
++current Compose, Render/Vercel/Supabase and FastAPI architecture. Preserve the existing UI,
++routes, RBAC rules, tenant boundaries, business calculations and API contracts.
++
++**UAT data safety is a hard release gate.** This work must not delete, rewrite, move or reseed
++users, password hashes/history, sessions, organisations, audit entries or business records. No
++volume is removed or replaced. The audit-table change is permission-only and leaves the existing
++`public.audit_logs` table and every row in place. New-cluster role initialization is not replayed
++against an existing cluster. Hosted dashboard changes, credential rotation and restore exercises
++are operational tasks and must not be simulated in code.
++
++The implementation is divided into repository changes that can be tested now and provider or
++governance actions that require named owners, dashboards or production access. A checkbox in this
++plan means repository implementation, not provider verification.
++
++## Current-state corrections to the review
++
++- Item 10 is already implemented by `security_headers` middleware in `backend/app/main.py`;
++  regression coverage will be strengthened rather than adding duplicate middleware.
++- Item 23 is correct as reviewed. `backend/start-hosted.sh` will be reused unchanged as the Docker
++  entrypoint; its migration credential assignment and `unset` will not be altered.
++- Item 25 is partially implemented: `docs/SECURITY_MANUAL.md` already exists and is linked. It
++  needs the more specific proxy, ownership, monitoring, incident and rotation procedures.
++- The audit table is `public.audit_logs`, not `public.audit_log`. It will remain in place to avoid
++  breaking ORM queries and historic data. Append-only grants are the safe immediate control; an
++  audit-schema move is not part of this release.
++- Existing request budgets are database-backed in `core/request_security.py`, so process sleep does
++  not erase their ledger. Account lockout is also persisted. Edge throttling remains necessary to
++  stop abuse before it reaches the API.
++- The report's suggested backup-import verification conflicts with `burst=2`: the queued retry is
++  not necessarily the second immediate request. Implementation will test sustained over-budget
++  traffic rather than claim that every second request receives 429.
++- The existing 2048 MB backup-import application/nginx limit will be retained. Reducing it without
++  the largest real archive size would break a supported recovery workflow.
++
++## Workstreams and item disposition
++
++### A. Edge and hosted request hardening (items 1–10, 17, 22b, 29)
++
++1. **Nginx transport and response policy (1, 2.5).** Add the same one-year HSTS policy used by
++   Vercel, without `preload`, and append `upgrade-insecure-requests` to both CSP definitions.
++2. **Nginx request handling (2.1–2.4).** Reuse the shared proxy parameters for health; permit only
++   GET/HEAD for assets and the SPA; allow only the API's existing GET/POST/PUT/PATCH/DELETE verbs;
++   retain same-origin behaviour by denying OPTIONS at this layer.
++3. **Real client address (3).** Pin `edge_net`, trust only that subnet for `X-Forwarded-For`, enable
++   recursive resolution, and keep `WEB_BIND_ADDRESS=127.0.0.1` coupled to that trust. Preserve the
++   existing overwrite—not append—proxy header behaviour.
++4. **Backup-import throttle (4).** Add a dedicated 1 request/minute zone with burst 2 and the
++   existing 600 second timeouts and 2048 MB limit. Keep the application limit aligned.
++5. **Host allowlists (5, 7).** Make nginx's real server names an explicit Compose build setting,
++   keep localhost/127.0.0.1 for health checks, and reject all unnamed hosts. Add optional
++   application-layer `ALLOWED_HOSTS` enforcement and configure Render's actual hostname. Direct
++   hosted requests with an unexpected Host must fail without changing normal Vercel rewrites.
++6. **Controlled Render deployment (6).** Set `autoDeploy: false`; document deployment only after a
++   passing Security workflow and review. GitHub required-check/branch-protection configuration is
++   an administrator verification step, not something this file can prove.
++7. **Hosted edge limitation (7).** Document that Compose nginx controls do not protect Render.
++   Application Host enforcement is immediate; provider edge rate limiting/WAF remains a required
++   hosted action. Prefer a paid always-on service for production and retain database-backed budgets.
++8. **Hardened Render image (8).** Switch the Blueprint to Docker with `rootDir: backend` and
++   `dockerfilePath: ./Dockerfile`. Reuse `start-hosted.sh` as entrypoint so `PORT`, migrations and
++   credential removal behave exactly as they do today. Override that entrypoint explicitly in
++   Compose migration/API services so their existing commands remain unchanged. Registry digest
++   deployment is a later supply-chain improvement; no unverified digest claim will be made.
++9. **Applied settings evidence (9).** Supply a redacted capture checklist. Actual Vercel, Render and
++   Supabase dashboard captures remain pending because repository access does not provide them.
++10. **API headers (10).** Keep the existing middleware and add assertions for health and 404/error
++    responses, including CSP, nosniff, frame-deny and referrer policy.
++11. **Pinned authentication policy (17).** Add token lifetime and all missing password policy keys
++    to Render and Compose examples. Document disabling bootstrap and deleting the seed password
++    after first successful setup; do not change current credentials or users.
++12. **Database TLS (22b).** In staging/production, reject PostgreSQL URLs without an explicit secure
++    `sslmode` (`require`, `verify-ca` or `verify-full`). Apply this to both runtime and migration
++    startup through the existing Settings load. Local development/test behaviour is unchanged.
++13. **Health documentation (29).** Remove stale `admin_seeded` statements and align the readiness
++    list with the implemented liveness-only endpoint and remaining controls.
++
++### B. Compose runtime containment (items 11–16, 18)
++
++1. **Resource/process limits (11).** Add CPU/memory/PID limits to db/api/web; db receives PID 300
++   for PostgreSQL workers. Add bounded JSON logs to every service, including one-shot migrations
++   (15).
++2. **Temporary filesystems (12).** Add 512 MB `rw,noexec,nosuid,nodev` tmpfs mounts. Disable nginx
++   disk buffering of proxied responses so large exports are not truncated by the tmpfs cap. No
++   application feature executes files from `/tmp`.
++3. **Database capabilities (13).** Drop all capabilities and add only the official PostgreSQL
++   entrypoint's CHOWN/DAC_OVERRIDE/FOWNER/SETGID/SETUID set.
++4. **Network isolation (3, 14).** Make `backend_net` internal with its existing pinned subnet and
++   pin `edge_net`; web retains egress through `edge_net`. Document that future SMTP or other API
++   egress needs a deliberate separate network design.
++5. **Credential files (16).** Add `.secrets/` to ignore rules and write a non-destructive migration
++   procedure. Switching a live UAT stack to file secrets is deferred to an operator maintenance
++   window: the same existing secret values must be copied into 0600 files and verified before env
++   values are removed. Application `_FILE` support and Compose rewiring are not silently forced in
++   this patch. Environment-based exposure remains an acknowledged residual risk.
++6. **Ignore credential formats (18).** Add private-key, VPN, keystore, dump, cloud/Kubernetes and
++   Terraform patterns. Do not ignore public keys/certificates. This supplements—not replaces—the
++   full-history scanner.
++
++### C. Database safeguards without business-data changes (items 19–22)
++
++1. **Fresh-cluster roles (19).** Add application connection limit 20, 120 s statement timeout,
++   60 s idle-in-transaction timeout and 10 s lock timeout. Preserve distinct passwords and existing
++   role separation. Add audit-schema default SELECT/INSERT and sequence grants for future use.
++2. **Existing application connections (19).** Apply the same safe statement/idle/lock timeouts on
++   PostgreSQL connections in SQLAlchemy, avoiding an assumption that the migration role may ALTER
++   another role on Supabase. Existing-role CONNECTION LIMIT remains a DBA runbook action because it
++   requires administrator privilege and worker/pool capacity review.
++3. **Existing audit grants (20).** Add one PostgreSQL-only Alembic revision after current head
++   `f1d7a4c95b23`. It performs no INSERT/UPDATE/DELETE and no table move/copy; it only creates the
++   optional audit schema/default grants where supported and revokes UPDATE/DELETE on the existing
++   `public.audit_logs` from `wellcosting_app`. SELECT and INSERT continue unchanged. SQLite tests
++   skip these PostgreSQL privilege statements.
++4. **Backups and retention (21).** Record proposed RPO/RTO, provider PITR/snapshot requirements,
++   retention/tenant-deletion decisions and a restore-rehearsal template. State that Render's local
++   backup directory is ephemeral and is not a database backup. Actual provider setup and restore
++   evidence are pending operator execution.
++5. **Tenant isolation (22a).** Keep existing authorization semantics. PostgreSQL RLS or per-tenant
++   roles require a dedicated design/migration/UAT release and are not folded into this patch.
++
++### D. Pipeline, evidence and governance (items 24–28)
++
++1. **Reproducible CI (24a,b,f,g).** Pin action commits with version comments, use Ubuntu 24.04,
++   retain artifacts for 14 days, and add Dependabot for Actions/pip/npm.
++2. **Secret and image scanning (24c,d).** Add a blocking full-history Gitleaks job and blocking
++   high/critical Trivy scans of both built images. No auto-suppression baseline is introduced.
++3. **Static analysis (24e).** Gate Bandit at low severity and above. Review any finding and fix or
++   document it with exact line-scoped justification; retain an unsuppressed report and do not hide
++   existing findings behind an unreviewed baseline.
++4. **Security operations manual (25, 27).** Extend the existing manual with proxy/HSTS ownership,
++   real-IP coupling, hosted log drains and alert cadence, incident first actions, audit
++   preservation, responsibility assignments and credential rotation order/consequences. Named
++   staff, notification delivery and rehearsal evidence must be supplied by the organisation.
++5. **MFA risk acceptance (26).** Add a risk-register entry that accurately lists implemented
++   compensating controls and residual exposure. Until an owner, expiry, approver and date are
++   supplied it remains **pending acceptance**, never an asserted approval.
++6. **Traceable evidence (28).** Enhance the collector with source commit, CI run ID, tool/version,
++   per-command UTC timestamp/command/exit code, expected-file validation and a SHA-256 manifest
++   written outside the evidence directory. Signing and live dashboard/restore evidence remain
++   operational steps.
++
++## Test and release plan
++
++1. Run focused Settings, middleware, security and migration tests; then the complete backend suite.
++2. Run frontend security tests and the production build even though no UI source is changing.
++3. Validate nginx syntax and Compose configuration/image runtime where Docker is available. Check
++   GET/HEAD success, unsupported methods, unknown Host rejection, HSTS/CSP on `/` and assets,
++   health proxy headers and backup throttling. If Docker is unavailable, report that limitation.
++4. Test Alembic upgrade from the previous head on a disposable database, including preservation of
++   sentinel user/password/audit/business rows. Test downgrade only on that disposable database.
++5. Run Gitleaks/Bandit/Trivy in CI and resolve findings without ignoring them silently.
++6. Before UAT deployment: take a provider snapshot, set actual nginx/Render hostnames, confirm
++   `ALLOWED_HOSTS`, preserve existing secret values, and confirm the migration role owns
++   `public.audit_logs`. Deploy manually only after checks pass.
++7. After UAT deployment: verify response headers/methods/Host handling, application login and audit
++   writes, read-only audit history, imports/exports, existing user sign-in/password flows and a
++   representative business read/write in a disposable UAT record. Do not run destructive restore
++   tests against UAT.
++
++## Repository implementation and validation record
++
++Implemented in this branch: workstreams A1–A8 and A10–A13; B1–B4 and B6; C1–C5's
++non-destructive repository/runbook controls; and D1–D6. Item 10 already existed and
++now has explicit health/404 regression assertions. Item 16's live conversion and
++all provider/named-owner actions remain pending as listed below.
++
++Local validation completed on 2026-11-06:
++
++- **361 backend tests passed**, including the new Host/TLS/security-header cases
++  and the audit migration's user/password/audit data-preservation round trip.
++- Frontend security checks, production build, npm audit (**0 vulnerabilities**)
++  and **40 shared UI checks** passed. No UI source or design changed.
++- `pip-audit` reported **no known vulnerabilities**. Bandit passes with 20 exact,
++  line-scoped reviewed `nosec` justifications; a deliberately added new finding
++  failed the gate and was removed. CI retains an `--ignore-nosec` report and the
++  rationale is in `docs/SECURITY_STATIC_ANALYSIS.md`.
++- Shell/Python/JSON/YAML syntax checks, Compose volume/bind invariants, nginx
++  placeholder substitution, evidence provenance/expected-file/external-manifest
++  smoke checks and `git diff --check` passed.
++- Docker/nginx live runtime, real PostgreSQL privilege verification, Gitleaks and
++  Trivy require the CI/container environment; local Docker is unavailable. Their
++  successful execution must be confirmed from this branch's CI run before UAT.
++
++## Deferred/operator-owned items (explicitly not claimed complete)
++
++- Provider edge WAF/rate limiting, paid always-on hosting and image-by-digest deployment.
++- Live Render/Vercel/Supabase settings capture and GitHub required-check settings.
++- Live file-secret migration using unchanged existing values; no forced rotation in this release.
++- Managed PITR/snapshot configuration, retention approval and timed disposable restore rehearsal.
++- Named monitoring owner/deputy, functioning alerts/log drain, incident and rotation rehearsals.
++- Signed MFA risk acceptance with owner/expiry and native MFA/SSO implementation.
++- PostgreSQL RLS/per-tenant roles and any optional audit-schema data migration (Phase 2 design).
+diff --git a/docs/SECURITY_MANUAL.md b/docs/SECURITY_MANUAL.md
+index 224288c..1deaa1d 100644
+--- a/docs/SECURITY_MANUAL.md
++++ b/docs/SECURITY_MANUAL.md
+@@ -111,8 +111,8 @@ The migration grants these permissions to existing Owner roles. For separation o
+ 
+ 1. Set a unique, randomly generated `SECRET_KEY` of at least 32 bytes. Never reuse development or test values. Store it in the platform secret manager, not source control.
+ 2. Use PostgreSQL with a dedicated least-privilege database role. Restrict database network access to the API service and authorised backup/operations systems.
+-3. Run `cd backend && alembic upgrade head` before starting the updated application. Back up the database first and confirm the migration reaches revision **`b7c1d9e4f2a8`** (password expiry and refresh-token replay detection; its parent is `f9a2c7d4e611`).
+-4. Terminate TLS at the approved reverse proxy/load balancer, redirect HTTP to HTTPS, set `SECURE_COOKIES=true`, and ensure proxy forwarding headers are overwritten—not appended from untrusted clients. Set `TRUSTED_PROXY_IPS` to that proxy’s private address/CIDR only (the bundled compose file uses `172.28.0.0/16`); leave it empty when the API is directly reachable and never use `*`.
++3. Run `cd backend && alembic upgrade head` before starting the updated application. Back up the database first and confirm the migration reaches revision **`f2a6c8d41e07`** (permission-only audit grants; parent `f1d7a4c95b23`). It leaves `public.audit_logs` and every user, password, audit and business row in place. Render's pinned Docker entrypoint performs this automatically.
++4. Terminate TLS at the approved reverse proxy/load balancer, redirect HTTP to HTTPS, set `SECURE_COOKIES=true`, and ensure proxy forwarding headers are overwritten—not appended from untrusted clients. Set `TRUSTED_PROXY_IPS` to that proxy’s private address/CIDR only (the bundled compose file uses `172.28.0.0/16`); leave it empty when the API is directly reachable and never use `*`. Configure exact `NGINX_SERVER_NAMES` for Compose and `ALLOWED_HOSTS` for Render; hosted PostgreSQL URLs must carry `sslmode=require`, `verify-ca` or `verify-full`.
+ 5. Set `CORS_ORIGINS` to exact approved HTTPS frontend origins. Do not use `*` with credentialed requests.
+ 6. Keep the API and database on private networks where possible. Allow public ingress only to the reverse proxy; restrict administrative consoles by VPN or identity-aware access.
+ 7. Configure central log collection and alert on repeated `login_failed`, password reset requests, account unlocks, role/permission changes, owner changes and unusual export volume. Application logs must not collect passwords, reset codes, JWTs or cookies.
+@@ -138,6 +138,135 @@ Preserve the original client address only from trusted proxies. Strip inbound `X
+ 
+ Use a non-production workspace to confirm that an unknown account and a known account receive the same forgot-password response; the sixth request within 15 minutes is throttled; an unapproved, expired or reused code fails; a valid reset signs out every session; an administrator-issued code works without a prior request; a forced change closes the workspace until the new password is saved; a reused password is refused; an account whose `password_expires_at` has passed is confined to the password screen until it is changed; replaying a rotated refresh token ends every session and writes `refresh_reuse`; locking blocks sign-in and unlocking restores it; recalling an announcement removes unread copies only; users cannot see cross-tenant records; non-authorised users receive HTTP 403; and AFE review/approval tasks do not bypass existing transitions.
+ 
++### Proxy, TLS and Host ownership contract
++
++| Control | Owner component | Required configuration / verification |
++|---|---|---|
++| Public TLS certificate and HTTP→HTTPS redirect | Customer's fronting TLS proxy or Vercel/Render edge | Only the public proxy terminates TLS. Record certificate/renewal ownership in the responsibility matrix below. |
++| HSTS | nginx on Compose; Vercel/API middleware on hosted paths | `max-age=31536000; includeSubDomains`; do not add `preload` until every subdomain is HTTPS-only. |
++| Forwarded scheme/client | Fronting proxy → nginx → API | Proxy overwrites `X-Forwarded-Proto`, `X-Forwarded-For` and `X-Real-IP`; never append an untrusted client chain. |
++| nginx real IP | `edge_net` only | nginx trusts `172.29.0.0/16`. This is safe only while `WEB_BIND_ADDRESS=127.0.0.1`; if nginx is directly exposed, remove `set_real_ip_from` rather than trusting LAN clients. |
++| API proxy trust | `TRUSTED_PROXY_IPS` | Compose uses `172.28.0.0/16`. Render leaves it blank unless Render supplies a verified static proxy range. |
++| Host allowlist | nginx and API | Compose builds exact space-separated `NGINX_SERVER_NAMES` and retains `localhost 127.0.0.1` for probes. Render sets its actual `ALLOWED_HOSTS`. Unknown hosts must fail; do not use `*`. |
++| Browser/API verbs | nginx/API | Assets and SPA accept GET/HEAD; API accepts only implemented verbs. Same-origin OPTIONS is denied at nginx until a real cross-origin caller requires it. |
++
++The API adds its own CSP, nosniff, frame-deny and referrer policy so direct hosted
++responses and error pages do not depend on an edge rule. Health checks return only
++liveness and API version; they never disclose whether an owner exists.
++
++### Backup, restore and retention targets
++
++The repository's in-app archives are operational workspace recovery tools, not a
++substitute for provider database snapshots. Render's `/app/backups` filesystem is
++ephemeral and must not be treated as a backup. Until the business approves tighter
++objectives, the proposed targets for approval are **RPO 24 hours** and **RTO 4
++hours**; they are targets, not evidence that a provider is configured.
++
++1. The database owner must enable Supabase PITR or automated encrypted snapshots
++   with retention that meets the approved RPO. Store one independent copy outside
++   the service instance and restrict restore credentials.
++2. Restore the latest copy into a disposable database, run Alembic and application
++   smoke tests, and record start/end UTC, source snapshot, operator, result and
++   commit. Never rehearse by replacing UAT or production data.
++3. The data controller must approve commercial-data and client-PII retention and
++   tenant-deletion handling. Until that decision is recorded, do not invent a
++   purge interval or claim compliance.
++4. Save restore evidence with the collection metadata required by the evidence
++   procedure. A screenshot of enabled backups is not a restore rehearsal.
++
++### Monitoring, alerting and ownership
++
++Ship Render and nginx/application logs to the organisation's approved central log
++drain; Compose's 10 MB × 3 rotation is only local disk protection. Alert on
++repeated `login_failed`, recovery/request throttles, lockout storms, new-location
++Owner sign-in, role/permission/Owner changes, bulk deletes, unusual export/backup
++volume, migration failures and audit-write failures. Logs must never contain
++passwords, reset codes, cookies, tokens or database URLs.
++
++| Responsibility | Primary / deputy (organisation must name both) | Cadence |
++|---|---|---|
++| Infrastructure, TLS, proxy, image deploys | **UNASSIGNED — production release blocker** | Deploy review; quarterly configuration comparison |
++| Application and API security | **UNASSIGNED — production release blocker** | Weekly alerts; each release |
++| Database roles, PITR and restore | **UNASSIGNED — production release blocker** | Daily backup check; quarterly restore |
++| Audit/log review and incident coordination | **UNASSIGNED — production release blocker** | Daily triage; quarterly access review |
++
++Replace every UNASSIGNED entry with a person and deputy before production. A
++synthetic lockout storm must produce a notification to that named reviewer; the
++repository cannot prove that external notification path.
++
++### Incident response — first actions
++
++1. **Contain:** deactivate the affected account or isolate the affected service;
++   revoke sessions/force a password change where appropriate. Do not delete the
++   account, audit rows, database or logs to make the symptom disappear.
++2. **Preserve and assess:** snapshot/ship logs and audit history, record UTC and
++   affected tenants, and open the incident with the named owner and deputy.
++3. **Eradicate/recover:** rotate only confirmed affected credentials using the
++   procedure below, deploy a reviewed fix, restore into a clean environment when
++   required, and validate access/tenant boundaries before reopening service.
++
++The incident owner must assess contractual and legal client-notification duties
++with the data controller/legal contact. Record who decided, when, and what was
++communicated. Do not include secret values in the incident record.
++
++### Credential rotation procedure (rehearse in a disposable environment)
++
++- **`SECRET_KEY`:** generate `openssl rand -hex 32`, deploy the new value through
++  the secret manager, and restart the API. This invalidates every access/refresh
++  token and forces all users to sign in again; schedule and communicate that
++  effect. It does not change passwords or business rows.
++- **`wellcosting_app` password:** during a maintenance window, change the role
++  password as DBA, update only `DATABASE_URL`, then rolling-restart the API.
++  Verify existing sign-in and audit writes. Do not drop/recreate the role.
++- **`wellcosting_migrator` password:** change the role password, update only
++  `MIGRATION_DATABASE_URL`, then deploy within the migration window. Verify the
++  migration credential is unset before Uvicorn starts. Do not run migrations as
++  the restricted application role.
++- **PostgreSQL administrator password:** DBA-only operation; update
++  `POSTGRES_PASSWORD` only for fresh-cluster initialization. On an existing
++  cluster, rotate the role using provider tooling and preserve the same data
++  volume. Never re-run initialization scripts against UAT.
++- **Supabase pooler credential:** regenerate/copy it in Supabase's approved
++  connection settings, identify every Render service/operator store holding it,
++  update both role-specific URLs independently and verify TLS. Never paste it in
++  tickets, evidence or source control.
++
++Only the named database/infrastructure owners may perform these rotations; a
++second approver is required for production except during the incident owner's
++declared emergency containment. Record rehearsal date, operator, elapsed time and
++rollback outcome. No rehearsal is claimed by this document.
++
++### Non-destructive file-secret migration (Compose maintenance window)
++
++The current Compose file remains environment-compatible for UAT. Moving to file
++secrets must not rotate credentials or initialise a new database:
++
++1. Snapshot the database and record current secret fingerprints privately. Create
++   `.secrets/` outside Git with mode 0700 and each file mode 0600, containing the
++   **same existing values** (no trailing newline unless the reader trims it).
++2. Deploy application/entrypoint support that reads `POSTGRES_PASSWORD_FILE`,
++   `DB_APP_PASSWORD_FILE`, `DB_MIGRATION_PASSWORD_FILE`, `SECRET_KEY_FILE` and a
++   seed-password file. Do not remove the old environment values first.
++3. Start against the existing `postgres18_data` volume and verify the original
++   users, password login, roles, audit and business data. Inspect metadata/logs
++   without printing secrets. Only then remove superseded environment values.
++4. Set `BOOTSTRAP_ADMIN_ON_STARTUP=false` after first-run setup and delete the
++   seed password from the dashboard. Entrypoint exports reduce Compose metadata
++   exposure but do not remove `/proc` environment exposure; native application
++   file readers are required to close that residual risk.
++
++### Existing-cluster audit and role runbook
++
++The new Alembic revision revokes UPDATE/DELETE on `public.audit_logs` from
++`wellcosting_app` while preserving SELECT/INSERT and all rows. The migration role
++must own that table. Verify with `scripts/postgres-inventory.sql`; do not move or
++copy the table in this release. Runtime SQLAlchemy connections set 120 s statement,
++60 s idle-in-transaction and 10 s lock timeouts without requiring ALTER ROLE.
++Fresh clusters also receive application CONNECTION LIMIT 20. Existing clusters
++need a DBA to review worker/pool counts before applying that limit manually; a
++21st connection can otherwise interrupt UAT. One Uvicorn worker with the current
++pool fits the default budget.
++
+ ### Current boundaries and recommended next phase
+ 
+ WellCostIQ currently provides password authentication and tenant-aware RBAC; it does not yet claim MFA, SAML/OIDC single sign-on, SCIM provisioning, breached-password intelligence, tamper-evident external audit storage or whole-platform SIEM integration. Organisations requiring those controls should place identity-aware access at the edge now and plan native MFA/SSO as a separately tested security release. Do not describe those controls as implemented until UAT and security review are complete.
+diff --git a/docs/SECURITY_RISK_REGISTER.md b/docs/SECURITY_RISK_REGISTER.md
+new file mode 100644
+index 0000000..776d770
+--- /dev/null
++++ b/docs/SECURITY_RISK_REGISTER.md
+@@ -0,0 +1,60 @@
++# Security risk register
++
++This register records only controls visible in the repository. Provider settings,
++named ownership and rehearsals remain pending until evidence is attached. Do not
++convert a pending risk into an acceptance by adding a date without an approver.
++
++## R-2026-001 — Administrator MFA/SSO deferred
++
++**Status:** PENDING FORMAL ACCEPTANCE — not accepted yet.
++
++MFA/SSO for administrator accounts is deferred. Compensating controls implemented
++in the application/configuration are:
++
++- password maximum age 90 days;
++- reuse of the last five passwords blocked using one-way password-history hashes;
++- lockout after five failed sign-ins for 15 minutes;
++- database-backed per-client login/recovery request budgets;
++- session revocation from the Security Centre;
++- mandatory password change on newly created accounts in production; and
++- application-role UPDATE/DELETE revoked on existing `public.audit_logs` by the
++  permission-only migration (verify on the deployed cluster before relying on it).
++
++Residual exposure: a stolen Owner password is sufficient to sign in. Detection
++still depends on an external log drain, alert delivery and a named reviewer that
++are not yet evidenced. Append-only database grants do not make audit storage
++external or tamper-evident. Free-tier cold starts and the absence of a provider
++edge limiter increase availability/abuse concerns.
++
++- **Owner:** UNASSIGNED (required before acceptance)
++- **Expires:** UNASSIGNED (required; must appear in quarterly review)
++- **Accepted by:** UNASSIGNED — name and date required
++- **Review evidence required:** native MFA/SSO plan or compensating-control test,
++  provider log alert test, deployed audit-grant inventory, and a named reviewer.
++
++## R-2026-002 — Hosted edge and recovery controls require provider evidence
++
++**Status:** OPEN — operator action required.
++
++Render's direct hostname has application Host enforcement, but the Compose nginx
++rate limits do not sit in front of it. Provider WAF/rate limiting, always-on
++hosting, managed PITR/snapshots and an actual timed restore are not proven by
++source code. `/app/backups` on Render is ephemeral.
++
++- **Owner:** UNASSIGNED
++- **Target/expiry:** UNASSIGNED
++- **Closure evidence:** redacted dashboard captures, edge throttle test, restore
++  into a disposable database with elapsed time, and source commit/CI identifiers.
++
++## R-2026-003 — PostgreSQL row-level tenant isolation deferred
++
++**Status:** DEFERRED TO DEDICATED DESIGN/UAT RELEASE.
++
++Tenant filters and RBAC are enforced in the API. PostgreSQL RLS or per-tenant
++roles are not implemented. Adding them requires query/session-role design,
++migration replay, performance tests and tenant-isolation verification; it must
++not be mixed into the permission-only audit patch.
++
++- **Owner:** UNASSIGNED
++- **Review:** Next architecture/security design cycle, with a dated decision before
++  public SaaS launch.
+diff --git a/docs/SECURITY_STATIC_ANALYSIS.md b/docs/SECURITY_STATIC_ANALYSIS.md
+new file mode 100644
+index 0000000..4f1e809
+--- /dev/null
++++ b/docs/SECURITY_STATIC_ANALYSIS.md
+@@ -0,0 +1,65 @@
++# Bandit baseline review — 2026-11-06
++
++CI runs `bandit -r backend/app -l`. Exactly the 20 findings below carry a scoped
++`# nosec Bxxx` comment on the reviewed line, with a short justification; there is
++no file-wide or global suppression and no `continue-on-error`. Any new or unmarked
++finding fails the job. CI separately runs `--ignore-nosec` and uploads the complete
++report so these 20 remain visible for review.
++
++Keep each suppression scoped to its exact reviewed line and update this document
++with every intentional change. Prefer fixing real findings over adding `nosec`.
++
++## B608 — seven user-facing validation messages, not SQL
++
++Bandit's heuristic interprets strings beginning with “Select” as SQL. Each of
++these f-strings is returned in an HTTP/domain validation error and none is passed
++to SQLAlchemy `execute`, `text`, a driver cursor or any other query interface.
++Values remain ordinary application error text.
++
++| Location | Reviewed purpose |
++|---|---|
++| `app/api/rig_well.py:401` | Ask the user to select active Master Data. |
++| `app/services/afe.py:560` | Missing AFE service validation. |
++| `app/services/afe.py:666` | Missing AFE drill-bit validation. |
++| `app/services/afe.py:732` | Missing AFE tangible validation. |
++| `app/services/catalogue.py:304` | Missing catalogue parent validation. |
++| `app/services/catalogue.py:529` | Missing catalogue option validation. |
++| `app/services/daily_cost.py:334` | Missing scoped Daily Cost reference validation. |
++
++There is no SQL construction or injection sink at these locations.
++
++## B105 — protocol labels, public errors and a rejected development placeholder
++
++| Location | Why it is not a credential |
++|---|---|
++| `app/api/auth.py:157,209` | OAuth `token_type: bearer` protocol label; no token value. |
++| `app/api/deps.py:24` | Public “Invalid or expired access token” error text. |
++| `app/core/config.py:29` | Deliberate development-only placeholder. Production rejects it and non-SQLite non-development configurations require a unique 32+ character key. |
++| `app/core/security.py:28` | JWT `type=access` claim discriminator, not a secret. |
++
++## B101 — internal invariants/type narrowing
++
++- `app/schemas/afe.py:28–30` verifies at import that Python constants and their
++  `Literal` type definitions remain aligned. These are developer invariants, not
++  validation or authorization of attacker-controlled input.
++- `app/services/daily_cost.py:1735` is a type-narrowing invariant after the line
++  kind has already been selected; persistence rules do not rely on `assert`.
++- `app/services/daily_cost.py:3899` proves the date has been populated in the
++  branch that needs an end date; it is not an authorization boundary.
++
++Production does not use `python -O`; regardless, no permission or tenant check is
++implemented by these assertions.
++
++## B110/B112 — deliberate compatibility/reflection fallbacks
++
++- `app/services/daily_cost.py:3287` falls back to the standard amendment window
++  when optional legacy amendment metadata cannot be read.
++- `app/services/daily_cost.py:3313` preserves compatibility with a database that
++  predates the optional amendment-history table. Actual business commits and
++  database errors are not silently discarded by this fallback.
++- `app/services/dependencies.py:88` ignores an unrelated unresolved optional
++  foreign key during metadata reflection. It does not skip a resolved dependency
++  or change tenant authorization; the database remains the final FK guard.
++
++These sites should be narrowed to concrete driver/ORM exceptions in future
++maintenance where feasible, rather than broadening the baseline.
+diff --git a/docs/deployment.md b/docs/deployment.md
+index 65e6c3c..4f2b134 100644
+--- a/docs/deployment.md
++++ b/docs/deployment.md
+@@ -1,4 +1,4 @@
+-> Current repository baseline: [CYBERSEC_BASELINE.md](CYBERSEC_BASELINE.md). Use Python 3.12.16, Node 22.23.4 and hash-verified Python installs. Configure separate restricted-runtime `DATABASE_URL` and schema-owner `MIGRATION_DATABASE_URL` secrets, then use `sh start-hosted.sh` as the Render start command. The wrapper removes the migration credential before starting the API. Provision and verify both roles/grants with the database administrator before deploying. The Compose PostgreSQL 18.6 baseline does not upgrade a managed Supabase/Render database; confirm its live version and extensions with the provider.
++> Current repository baseline: [CYBERSEC_BASELINE.md](CYBERSEC_BASELINE.md). Use the pinned Docker image (Python 3.12.16), Node 22.23.4 and hash-verified Python installs. Configure separate restricted-runtime `DATABASE_URL` and schema-owner `MIGRATION_DATABASE_URL` secrets, both with `sslmode=require`. Render runs `backend/Dockerfile`; its entrypoint reuses `start-hosted.sh` to migrate, remove the migration credential and bind the assigned `PORT`. Provision and verify both roles/grants with the database administrator before deploying. The Compose PostgreSQL 18.6 baseline does not upgrade a managed Supabase/Render database; confirm its live version and extensions with the provider.
+ 
+ # Deploying WellCostIQ: Vercel + Render + Supabase
+ 
+@@ -31,9 +31,9 @@ Estimated setup time: 30–60 minutes, excluding time spent troubleshooting prov
+ - `frontend/vercel.json` must contain the actual Render hostname. If the Render
+   service is renamed, update every external rewrite and redeploy Vercel.
+ - `GET /api/health` is a **liveness** check that returns only `{"status":"ok","api_version":"..."}`. It deliberately does not disclose whether an administrator exists, and it is not a database-readiness check. Confirm first-run setup from the Render logs (`Seeded administrator ...`) and by signing in.
+-- The migration head is **`b7c1d9e4f2a8`** (password expiry and refresh-token replay detection). Render's start command must run `alembic upgrade head` before Uvicorn.
++- The migration head is **`f2a6c8d41e07`** (append-only grants for the existing audit table; no row/table data changes). Render's Docker entrypoint runs `alembic upgrade head` before Uvicorn.
+ - The browser sends an `Origin` header through the Vercel rewrite, so `CORS_ORIGINS` must list the exact Vercel origin (or custom domain) even though the browser sees a same-origin URL.
+-- Render's current default Python runtime may differ from the one used during development. **Pin Python 3.12** as shown below rather than relying on Render's default.
++- Render uses `runtime: docker`, `rootDir: backend`, `dockerfilePath: ./Dockerfile` and `autoDeploy: false`. Deploy manually only after review and a passing **Security and regression checks** run. The repository cannot prove GitHub required-check/branch-protection settings; an administrator must configure and verify them. Items 1–5 of the dated remediation plan harden Compose/nginx, not Render's direct edge.
+ 
+ ---
+ 
+@@ -122,13 +122,13 @@ service from `render.yaml`.
+    |---|---|
+    | Name | `wellcosting-api` (or another available name; copy the actual URL Render assigns) |
+    | Region | Same region as the Supabase project, or the nearest available region |
+-   | Environment | **Python 3** |
+-   | Python version | Set environment variable `PYTHON_VERSION=3.12.16` (pin for first deploy) |
++   | Environment | **Docker** |
+    | Root Directory | `backend` |
+-   | Build Command | `pip install --require-hashes -r requirements.txt` |
+-   | Start Command (Free plan) | `sh start-hosted.sh` |
++   | Dockerfile Path | `./Dockerfile` (relative to the Root Directory) |
++   | Build/Start Command | Leave unset; the image installs locked requirements and enters `start-hosted.sh` |
++   | Auto-Deploy | **Disabled**; deploy manually after the Security workflow passes |
+    | Health Check Path | `/api/health` |
+-   | Instance plan | Free for testing (sleeps when idle); choose a paid instance for an always-on service |
++   | Instance plan | Free for UAT only (sleeps when idle); choose a paid always-on instance for production |
+ 
+    Render provides `PORT`; the startup wrapper binds Uvicorn to that port.
+    The wrapper runs migrations using `MIGRATION_DATABASE_URL`, removes that
+@@ -136,7 +136,7 @@ service from `render.yaml`.
+    on both Free and paid plans. Do not also configure a duplicate migration
+    command. A separate paid pre-deploy job is another option only when it has
+    its own migration secret and the API job does not receive that secret.
+-4. In the service form's **Advanced** section, set `PYTHON_VERSION=3.12.16` and add the environment variables
++4. In the service form's **Advanced** section, add the environment variables
+    from the next section before creating the service. In particular, set the
+    `DATABASE_URL` and `MIGRATION_DATABASE_URL` for the two dedicated roles, a `SECRET_KEY`, and `CORS_ORIGINS` to the production
+    Vercel origin you plan to use. If you have not created the Vercel project
+@@ -151,9 +151,10 @@ service from `render.yaml`.
+ 1. Push the latest repository changes to GitHub. In Render choose **New →
+    Blueprint**, connect this repository and branch, and confirm that Render
+    found `render.yaml` in the repository root.
+-2. Review the proposed `wellcosting-api` service and click **Deploy Blueprint**.
+-   The Blueprint uses the Free-compatible migration/start command described
+-   above.
++2. Review the proposed `wellcosting-api` Docker service and click **Deploy Blueprint**.
++   The Blueprint uses the same migration/start wrapper on Free and paid plans.
++   Later repository pushes do not deploy automatically: use **Manual Deploy**
++   only after the relevant Security workflow has passed.
+ 3. During initial Blueprint creation, enter the `sync: false` values when
+    prompted. For `CORS_ORIGINS`, use the expected production Vercel origin and
+    correct it after Vercel's first deployment if needed. Render prompts only on
+@@ -167,11 +168,11 @@ service from `render.yaml`.
+ 
+ | Variable | Required | Value / how to generate |
+ |---|---|---|
+-| `PYTHON_VERSION` | **Yes for reproducible first deploy** | `3.12.16` (pin a supported Python 3.12 patch release; Render currently defaults new services to Python 3.14) |
+ | `DATABASE_URL` | **Yes** | Restricted application-role Session pooler URI, `postgresql+psycopg://`, `sslmode=require`; never the cluster administrator |
+ | `MIGRATION_DATABASE_URL` | **Yes** | Distinct schema-owner migration-role URI for `start-hosted.sh`; removed before the API starts |
+ | `SECRET_KEY` | **Yes** | Generate a unique key with `openssl rand -hex 32`; on Windows PowerShell, `py -c "import secrets; print(secrets.token_hex(32))"` also works. Use at least 32 characters per environment; the app rejects a missing, short, or default key with PostgreSQL. |
+ | `SECURE_COOKIES` | **Yes** | `true` — Vercel serves HTTPS, and the refresh cookie is set with the `Secure` flag |
++| `ALLOWED_HOSTS` | **Yes** | `wellcosting-api.onrender.com`, or the actual assigned Render service hostname. Exact hostname only; no scheme, port or wildcard. Update it with every Vercel rewrite if renamed. |
+ | `CORS_ORIGINS` | **Yes** | Exact Vercel origin(s), comma-separated, e.g. `https://wellcostiq.vercel.app`. Add custom domains too. No paths, wildcards or credentials — a trailing slash, host capitalization and an explicit default port (`:443`/`:80`) are normalized for you. |
+ | `BOOTSTRAP_ADMIN_ON_STARTUP` | No | `true` (default). Set `false` only if you seed manually. |
+ | `SEED_ORG_SLUG` | First boot | Workspace ID, e.g. `my-company` |
+@@ -179,8 +180,13 @@ service from `render.yaml`.
+ | `SEED_OWNER_NAME` | First boot | Administrator's name, e.g. `Jane Smith` |
+ | `SEED_ADMIN_EMAIL` | First boot | Administrator e-mail, e.g. `owner@example.com` |
+ | `SEED_ADMIN_PASSWORD` | First boot | Password, **12+ characters**. **Delete this variable only after logs confirm seeding and a login succeeds** (see §4). |
+-| `ACCESS_TOKEN_MINUTES` | No | Default `15` |
+-| `REFRESH_TOKEN_DAYS` | No | Default `7` |
++| `ACCESS_TOKEN_MINUTES` | **Yes** | `15` — explicitly pinned by the Blueprint |
++| `REFRESH_TOKEN_DAYS` | **Yes** | `7` — explicitly pinned by the Blueprint |
++| `PASSWORD_MAX_AGE_DAYS` | **Yes** | `90` |
++| `PASSWORD_EXPIRY_WARNING_DAYS` | **Yes** | `14` |
++| `PASSWORD_HISTORY_LIMIT` | **Yes** | `5` |
++| `FORCE_PASSWORD_CHANGE_ON_CREATE` | **Yes** | `true` |
++| `MAX_FAILED_LOGINS` / `LOCKOUT_MINUTES` | **Yes** | `5` / `15` |
+ | `APP_NAME` | No | Default `WellCostIQ` |
+ | `APP_TAGLINE` | No | Default `Well Cost Estimation & Tracking`; shown as the API description in `/docs` and OpenAPI |
+ 
+@@ -191,6 +197,13 @@ Notes:
+ - **Free-tier cold starts:** Render spins down a Free web service after 15
+   minutes without inbound traffic; waking it can take about a minute. The API
+   filesystem is ephemeral, so keep the database on Supabase, not local SQLite.
++  Login/recovery budgets and account lockout counters are database-backed, but
++  use an always-on paid instance for production. Configure provider edge rate
++  limits/WAF for the Render hostname; Compose nginx limits do not cover it.
++- **Hosted backup storage:** `/app/backups` is ephemeral on Render and is not a
++  disaster-recovery copy. Use Supabase PITR/snapshots and tested off-service
++  restores. `BACKUP_DIRECTORY` must point to approved persistent storage before
++  relying on in-app archives outside a single running instance.
+ - Verify the deploy at `https://<actual-service-url>.onrender.com/api/health`.
+   It should return `{"status":"ok","api_version":"..."}`. This is a liveness
+   check only: it is **not** proof of database connectivity and it no longer
+@@ -245,7 +258,9 @@ Notes:
+    [Vercel project configuration](https://vercel.com/docs/project-configuration)
+    for details about `vercel.json`.
+ 5. Commit and push this `vercel.json` change to the production branch. Vercel
+-   auto-deploys when that branch receives a push. A deployment made before this
++   auto-deploys when that branch receives a push unless its dashboard setting
++   says otherwise; protect the branch with review and the required Security
++   workflow. Render remains manual-deploy-only. A deployment made before this
+    change will still contain the previous proxy/fallback configuration.
+ 6. In Vercel, open the project's **Deployments** page and wait for the latest
+    deployment to finish. Open the assigned production domain (not a preview
+@@ -278,9 +293,11 @@ deploy, including Free):** before the first API start, set all five variables:
+ owner email, and a unique password of at least 12 characters. The API applies
+ Alembic migrations first, then creates the initial workspace and owner from
+ these values. Wait for Render logs to report `Seeded administrator ...`, then
+-**sign in once successfully**. Only then **remove `SEED_ADMIN_PASSWORD`** from
+-Render's Environment page and redeploy. Removing the other four seed values is
+-also recommended. The health endpoint intentionally does not report setup state,
++**sign in once successfully**. Only then set `BOOTSTRAP_ADMIN_ON_STARTUP=false`
++and **remove `SEED_ADMIN_PASSWORD`** from Render's Environment page and redeploy.
++Removing the other four seed values is also recommended. This does not rotate or
++modify the seeded account; it only disarms future first-boot provisioning. The
++health endpoint intentionally does not report setup state,
+ so the log line and a successful sign-in are the evidence.
+ 
+ **Option B — from your computer against Supabase:** use the same Session pooler
+diff --git a/frontend/Dockerfile b/frontend/Dockerfile
+index b8a893c..ecd02c3 100644
+--- a/frontend/Dockerfile
++++ b/frontend/Dockerfile
+@@ -15,6 +15,10 @@ RUN sed -i '/^user[[:space:]]/d; s@^pid[[:space:]].*;@pid /tmp/nginx.pid;@' /etc
+ USER nginx
+ COPY --chmod=0644 proxy_params_wcp.conf /etc/nginx/proxy_params_wcp.conf
+ COPY --chmod=0644 nginx.conf /etc/nginx/conf.d/default.conf
++# Exact public hostnames are deployment configuration, not a wildcard. The
++# localhost defaults preserve container/CI health probes.
++ARG NGINX_SERVER_NAMES="localhost 127.0.0.1"
++RUN sed -i "s|__NGINX_SERVER_NAMES__|${NGINX_SERVER_NAMES}|g" /etc/nginx/conf.d/default.conf
+ COPY --from=build /app/dist /usr/share/nginx/html
+ EXPOSE 8080
+ # Probe loopback directly even when Docker injects an outbound HTTP proxy.
+diff --git a/frontend/nginx.conf b/frontend/nginx.conf
+index 92ffaa3..251ec53 100644
+--- a/frontend/nginx.conf
++++ b/frontend/nginx.conf
+@@ -15,6 +15,13 @@
+ limit_req_zone $binary_remote_addr zone=auth_login:10m rate=10r/m;
+ limit_req_zone $binary_remote_addr zone=auth_recovery:10m rate=6r/m;
+ limit_req_zone $binary_remote_addr zone=api_general:10m rate=600r/m;
++limit_req_zone $binary_remote_addr zone=api_backup_import:10m rate=1r/m;
++
++# The public TLS proxy is attached to edge_net. Keep WEB_BIND_ADDRESS=127.0.0.1:
++# directly reachable clients must never be able to assert their own rate-limit key.
++real_ip_header X-Forwarded-For;
++set_real_ip_from 172.29.0.0/16;
++real_ip_recursive on;
+ 
+ client_body_temp_path /tmp/client_temp;
+ proxy_temp_path /tmp/proxy_temp;
+@@ -22,9 +29,18 @@ fastcgi_temp_path /tmp/fastcgi_temp;
+ uwsgi_temp_path /tmp/uwsgi_temp;
+ scgi_temp_path /tmp/scgi_temp;
+ 
++# Unknown virtual hosts are rejected before they can reach the SPA or API.
+ server {
+-    listen 8080;
++    listen 8080 default_server;
+     server_name _;
++    return 444;
++}
++
++server {
++    listen 8080;
++    # Replaced from the explicit NGINX_SERVER_NAMES build argument. The default
++    # covers local/CI health checks; production must add its real hostname(s).
++    server_name __NGINX_SERVER_NAMES__;
+     # Do not advertise the nginx version.
+     server_tokens off;
+ 
+@@ -42,6 +58,8 @@ server {
+     proxy_read_timeout 120s;
+     proxy_send_timeout 120s;
+     send_timeout 30s;
++    # Stream large API exports instead of filling the bounded /tmp filesystem.
++    proxy_max_temp_file_size 0;
+ 
+     add_header X-Content-Type-Options "nosniff" always;
+     add_header X-Frame-Options "DENY" always;
+@@ -49,18 +67,21 @@ server {
+     add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+     add_header Cross-Origin-Opener-Policy "same-origin" always;
+     add_header Cross-Origin-Resource-Policy "same-origin" always;
++    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+     # MUI/emotion injects a stylesheet at runtime, so styles need 'unsafe-inline';
+     # scripts do not. Charts, PDF and downloads use blob:/data: URLs.
+-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'" always;
++    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests" always;
+ 
+     # Health is answered by the API; keep it cheap and unauthenticated.
+     location = /api/health {
++        limit_except GET { deny all; }
+         proxy_pass http://api:8000/api/health;
+-        proxy_set_header Host $host;
++        include /etc/nginx/proxy_params_wcp.conf;
+         access_log off;
+     }
+ 
+     location = /api/v1/auth/login {
++        limit_except POST { deny all; }
+         limit_req zone=auth_login burst=5 nodelay;
+         limit_req_status 429;
+         proxy_pass http://api:8000;
+@@ -68,6 +89,7 @@ server {
+     }
+ 
+     location ~ ^/api/v1/auth/(refresh|forgot-password|reset-password|change-password)$ {
++        limit_except POST { deny all; }
+         limit_req zone=auth_recovery burst=5 nodelay;
+         limit_req_status 429;
+         proxy_pass http://api:8000;
+@@ -75,7 +97,11 @@ server {
+     }
+ 
+     # Archives are uploaded here; only this path may exceed the default limit.
++    # Keep this aligned with BACKUP_MAX_UPLOAD_MB and database statement_timeout.
+     location = /api/v1/backup/jobs/import {
++        limit_except POST { deny all; }
++        limit_req zone=api_backup_import burst=2 nodelay;
++        limit_req_status 429;
+         client_max_body_size 2048m;
+         client_body_timeout 600s;
+         proxy_read_timeout 600s;
+@@ -86,6 +112,9 @@ server {
+     }
+ 
+     location /api/ {
++        # The hosted and Compose browser paths are same-origin: OPTIONS is not
++        # an application verb here. Add it only for a future cross-origin caller.
++        limit_except GET POST PUT PATCH DELETE { deny all; }
+         limit_req zone=api_general burst=120 nodelay;
+         limit_req_status 429;
+         proxy_pass http://api:8000;
+@@ -99,14 +128,17 @@ server {
+     location = /redoc { return 404; }
+     location = /openapi.json { return 404; }
+ 
+-    # Hashed build assets are immutable.
++    # Hashed build assets are immutable. `expires` avoids an add_header here,
++    # which would suppress inheritance of every server-level security header.
+     location /assets/ {
++        limit_except GET { deny all; }
+         try_files $uri =404;
+         expires 1y;
+     }
+ 
+     # The SPA shell must be revalidated: a stale bundle can talk to a newer API.
+     location / {
++        limit_except GET { deny all; }
+         try_files $uri $uri/ /index.html;
+         expires epoch;
+     }
+diff --git a/frontend/vercel.json b/frontend/vercel.json
+index 8fb6033..5c50de3 100644
+--- a/frontend/vercel.json
++++ b/frontend/vercel.json
+@@ -24,7 +24,7 @@
+         { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" },
+         {
+           "key": "Content-Security-Policy",
+-          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
++          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+         }
+       ]
+     }
+diff --git a/render.yaml b/render.yaml
+index 8f5bfe9..e652d16 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -5,19 +5,16 @@
+ services:
+   - type: web
+     name: wellcosting-api
+-    runtime: python
+-    plan: free # choose a paid instance for an always-on service
++    runtime: docker
++    plan: free # choose a paid instance for an always-on production service
+     rootDir: backend
+-    buildCommand: pip install --require-hashes -r requirements.txt
+-    # Works on Free plans: the wrapper migrates with a separate credential, then
+-    # removes it from the environment before exec'ing the restricted API process.
+-    startCommand: sh start-hosted.sh
++    dockerfilePath: ./Dockerfile
++    # Deploy only after review and a passing Security workflow. The Dockerfile
++    # entrypoint runs start-hosted.sh: migrate, unset DDL credential, bind PORT.
++    autoDeploy: false
+     healthCheckPath: /api/health
+     envVars:
+-      # Do not inherit Render's changing default Python runtime. Keep this in
+-      # sync with the version used for local development and CI.
+-      - key: PYTHON_VERSION
+-        value: "3.12.16"
++      # Python 3.12.16 is pinned by backend/Dockerfile, not Render's runtime.
+       # Supabase Connect -> Session pooler: preserve generated host/user, use port 5432.
+       # Runtime role: no superuser, no role/database/schema creation.
+       - key: DATABASE_URL
+@@ -33,14 +30,30 @@ services:
+       # Vercel is HTTPS, so the refresh cookie must be Secure.
+       - key: SECURE_COOKIES
+         value: "true"
++      # Refuse direct/rewritten requests carrying any other Host header. If the
++      # service is renamed, update this and every Vercel rewrite together.
++      - key: ALLOWED_HOSTS
++        value: "wellcosting-api.onrender.com"
+       # Render's edge is not a fixed address range, so the API treats the peer
+       # connection as the client. Leave this blank unless Render provides static
+       # proxy addresses for your plan; put distributed rate limits at the edge.
+       - key: TRUSTED_PROXY_IPS
+         sync: false
+-      # Password age and sign-in budgets.
++      # Token and password lifecycle: explicit production policy, not code defaults.
++      - key: ACCESS_TOKEN_MINUTES
++        value: "15"
++      - key: REFRESH_TOKEN_DAYS
++        value: "7"
++      - key: BACKUP_MAX_UPLOAD_MB
++        value: "2048"
+       - key: PASSWORD_MAX_AGE_DAYS
+         value: "90"
++      - key: PASSWORD_EXPIRY_WARNING_DAYS
++        value: "14"
++      - key: PASSWORD_HISTORY_LIMIT
++        value: "5"
++      - key: FORCE_PASSWORD_CHANGE_ON_CREATE
++        value: "true"
+       - key: MAX_FAILED_LOGINS
+         value: "5"
+       - key: LOCKOUT_MINUTES
+diff --git a/scripts/collect-cybersec-evidence.py b/scripts/collect-cybersec-evidence.py
+index ae7859d..d402d03 100755
+--- a/scripts/collect-cybersec-evidence.py
++++ b/scripts/collect-cybersec-evidence.py
+@@ -1,62 +1,166 @@
+ #!/usr/bin/env python3
+-"""Collect review snapshots outside the repository without printing credentials."""
++"""Collect traceable review snapshots outside the repository, never credentials."""
+ import argparse
++from datetime import datetime, timezone
++import hashlib
+ import json
+ import os
+ from pathlib import Path
+ import re
+ import shutil
+ import subprocess
+-from datetime import datetime, timezone
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ 
+ 
+-def main():
++def utcnow() -> str:
++    return datetime.now(timezone.utc).isoformat()
++
++
++def source_metadata() -> dict[str, object]:
++    commit = subprocess.run(
++        ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False
++    )
++    worktree = subprocess.run(
++        ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=False
++    )
++    dirty = bool(worktree.stdout.strip())
++    run_id = os.environ.get("GITHUB_RUN_ID", "")
++    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
++    repository = os.environ.get("GITHUB_REPOSITORY", "")
++    return {
++        "source_commit": commit.stdout.strip() if commit.returncode == 0 else "unknown",
++        "source_worktree_dirty": dirty,
++        "ci_run_id": run_id or None,
++        "ci_run_url": f"{server}/{repository}/actions/runs/{run_id}" if run_id and repository else None,
++    }
++
++
++def main() -> int:
+     parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--output', required=True, type=Path)
+-    parser.add_argument('--tools-bin', type=Path, help='Pinned security-tools virtualenv bin directory')
+-    parser.add_argument('--image', action='append', default=[], help='Built image name:tag; repeat for API/web')
+-    parser.add_argument('--pg-service', help='Existing pg_service.conf entry; never pass credentials')
++    parser.add_argument("--output", required=True, type=Path)
++    parser.add_argument("--tools-bin", type=Path, help="Pinned security-tools virtualenv bin directory")
++    parser.add_argument("--image", action="append", default=[], help="Built image name:tag; repeat for API/web")
++    parser.add_argument("--pg-service", help="Existing pg_service.conf entry; never pass credentials")
+     args = parser.parse_args()
+     output = args.output.expanduser().resolve()
+     if output == ROOT or ROOT in output.parents:
+-        parser.error('Save evidence outside the repository.')
+-    if args.pg_service and not re.fullmatch(r'[A-Za-z0-9_-]+', args.pg_service):
+-        parser.error('Use a simple pg_service.conf entry name.')
++        parser.error("Save evidence outside the repository.")
++    if args.pg_service and not re.fullmatch(r"[A-Za-z0-9_-]+", args.pg_service):
++        parser.error("Use a simple pg_service.conf entry name.")
+     output.mkdir(parents=True, exist_ok=True)
+-    statuses = []
++    statuses: list[dict[str, object]] = []
++    expected_files = {"collection-status.json", "EXPECTED_FILES"}
+     env = os.environ.copy()
+     if args.tools_bin:
+-        env['PATH'] = str(args.tools_bin.resolve()) + os.pathsep + env.get('PATH', '')
++        env["PATH"] = str(args.tools_bin.resolve()) + os.pathsep + env.get("PATH", "")
++    provenance = source_metadata()
+ 
+-    def collect(filename, command, cwd=ROOT):
+-        executable = shutil.which(command[0], path=env.get('PATH'))
++    def collect(filename: str, command: list[str], cwd: Path = ROOT) -> None:
++        expected_files.add(filename)
++        expected_files.add(filename + ".metadata.json")
++        executable = shutil.which(command[0], path=env.get("PATH"))
++        metadata: dict[str, object] = {
++            **provenance,
++            "file": filename,
++            "tool": command[0],
++            "tool_version": None,
++            "command": command,
++            "working_directory": str(cwd),
++            "exit_code": None,
++            "collected_at_utc": utcnow(),
++        }
+         if not executable:
+-            statuses.append({'file': filename, 'status': 'not-collected', 'reason': command[0] + ' is not installed'})
++            statuses.append({
++                **metadata,
++                "status": "not-collected",
++                "reason": command[0] + " is not installed",
++            })
+             return
++        version = subprocess.run(
++            [executable, "--version"], cwd=cwd, env=env, capture_output=True, text=True, check=False
++        )
++        version_text = (version.stdout or version.stderr).strip().splitlines()
++        metadata["tool_version"] = version_text[0] if version_text else "unknown"
+         result = subprocess.run([executable, *command[1:]], cwd=cwd, env=env, capture_output=True)
++        metadata["exit_code"] = result.returncode
++        metadata["collected_at_utc"] = utcnow()
+         (output / filename).write_bytes(result.stdout)
++        (output / (filename + ".metadata.json")).write_text(json.dumps(metadata, indent=2) + "\n")
+         if result.stderr:
+-            (output / (filename + '.stderr.txt')).write_bytes(result.stderr)
+-        statuses.append({'file': filename, 'status': 'collected' if result.returncode == 0 else 'review-required', 'exit_code': result.returncode})
++            stderr_name = filename + ".stderr.txt"
++            (output / stderr_name).write_bytes(result.stderr)
++            expected_files.add(stderr_name)
++        statuses.append({
++            **metadata,
++            "status": "collected" if result.returncode == 0 else "review-required",
++        })
+ 
+-    collect('npm-audit-report.json', ['npm', 'audit', '--json'], ROOT / 'frontend')
+-    collect('npm-outdated-q.txt', ['npm', 'outdated'], ROOT / 'frontend')
+-    collect('pip-audit-report.json', ['pip-audit', '-r', str(ROOT / 'backend/requirements.txt'), '-f', 'json'])
+-    collect('vscode-extensions.txt', ['code', '--list-extensions', '--show-versions'])
++    collect("npm-audit-report.json", ["npm", "audit", "--json"], ROOT / "frontend")
++    collect("npm-outdated-q.txt", ["npm", "outdated"], ROOT / "frontend")
++    collect("pip-audit-report.json", ["pip-audit", "-r", str(ROOT / "backend/requirements.txt"), "-f", "json"])
++    collect("vscode-extensions.txt", ["code", "--list-extensions", "--show-versions"])
+     if args.pg_service:
+-        collect('postgresql-inventory.txt', ['psql', 'service=' + args.pg_service, '-X', '-v', 'ON_ERROR_STOP=1', '-f', str(ROOT / 'scripts/postgres-inventory.sql')])
++        collect(
++            "postgresql-inventory.txt",
++            ["psql", "service=" + args.pg_service, "-X", "-v", "ON_ERROR_STOP=1", "-f", str(ROOT / "scripts/postgres-inventory.sql")],
++        )
+     else:
+-        statuses.append({'file': 'postgresql-inventory.txt', 'status': 'not-collected', 'reason': 'No live PostgreSQL service was supplied.'})
++        statuses.append({
++            **provenance,
++            "file": "postgresql-inventory.txt",
++            "tool": "psql",
++            "tool_version": None,
++            "command": None,
++            "exit_code": None,
++            "status": "not-collected",
++            "reason": "No live PostgreSQL service was supplied.",
++            "collected_at_utc": utcnow(),
++        })
++        expected_files.add("postgresql-inventory.txt")
++        expected_files.add("postgresql-inventory.txt.metadata.json")
+     for number, image in enumerate(args.image, 1):
+-        collect(f'image-{number}-identifier.txt', ['docker', 'image', 'inspect', '--format', '{{.Id}} {{json .RepoDigests}}', image])
+-        collect(f'image-{number}-packages.txt', ['docker', 'run', '--rm', '--network=none', '--entrypoint', 'sh', image, '-c', 'if command -v dpkg >/dev/null; then dpkg -l; elif command -v apk >/dev/null; then apk --no-network info -vv; else exit 2; fi'])
+-    status = {'collected_at_utc': datetime.now(timezone.utc).isoformat(), 'scope': 'This host and explicitly supplied images/database only.', 'results': statuses}
+-    (output / 'collection-status.json').write_text(json.dumps(status, indent=2) + '\n')
+-    print('Evidence saved to ' + str(output) + '. Review collection-status.json for missing evidence and nonzero scan results.')
+-    return 1 if any(s['status'] == 'review-required' for s in statuses) else 0
++        collect(
++            f"image-{number}-identifier.txt",
++            ["docker", "image", "inspect", "--format", "{{.Id}} {{json .RepoDigests}}", image],
++        )
++        collect(
++            f"image-{number}-packages.txt",
++            [
++                "docker", "run", "--rm", "--network=none", "--entrypoint", "sh", image, "-c",
++                "if command -v dpkg >/dev/null; then dpkg -l; elif command -v apk >/dev/null; "
++                "then apk --no-network info -vv; else exit 2; fi",
++            ],
++        )
++
++    (output / "EXPECTED_FILES").write_text("".join(name + "\n" for name in sorted(expected_files)))
++    missing = sorted(
++        name for name in expected_files
++        if name != "collection-status.json" and not (output / name).is_file()
++    )
++    status = {
++        **provenance,
++        "collected_at_utc": utcnow(),
++        "scope": "This host and explicitly supplied images/database only; no hosted dashboard evidence.",
++        "expected_files": sorted(expected_files),
++        "missing_expected_files": missing,
++        "results": statuses,
++    }
++    (output / "collection-status.json").write_text(json.dumps(status, indent=2) + "\n")
++
++    # Keep the checksum manifest outside the delivered evidence directory so an
++    # omitted artifact is visible against EXPECTED_FILES. Sign this separate file
++    # with the organisation's release key; do not store that key in the bundle.
++    manifest = output.parent / (output.name + ".SHA256SUMS")
++    lines = []
++    for path in sorted(item for item in output.rglob("*") if item.is_file()):
++        digest = hashlib.sha256(path.read_bytes()).hexdigest()
++        lines.append(f"{digest}  {output.name}/{path.relative_to(output)}\n")
++    manifest.write_text("".join(lines))
++    print(f"Evidence saved to {output}; checksum manifest: {manifest}")
++    print("Review collection-status.json for missing evidence and nonzero scan results.")
++    return 1 if missing or any(item["status"] == "review-required" for item in statuses) else 0
+ 
+ 
+-if __name__ == '__main__':
++if __name__ == "__main__":
+     raise SystemExit(main())
+diff --git a/scripts/postgres-init-roles.sh b/scripts/postgres-init-roles.sh
+index ac1c15a..b87b0d9 100755
+--- a/scripts/postgres-init-roles.sh
++++ b/scripts/postgres-init-roles.sh
+@@ -1,18 +1,29 @@
+ #!/bin/sh
+ # Fresh-cluster initialization only. Existing databases need the migration runbook.
+ set -eu
++
+ : "${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set}"
+ : "${DB_MIGRATION_PASSWORD:?DB_MIGRATION_PASSWORD must be set}"
+-if [ "$DB_APP_PASSWORD" = "$DB_MIGRATION_PASSWORD" ] || [ "$DB_APP_PASSWORD" = "$POSTGRES_PASSWORD" ] || [ "$DB_MIGRATION_PASSWORD" = "$POSTGRES_PASSWORD" ]; then
++
++if [ "$DB_APP_PASSWORD" = "$DB_MIGRATION_PASSWORD" ] || \
++   [ "$DB_APP_PASSWORD" = "$POSTGRES_PASSWORD" ] || \
++   [ "$DB_MIGRATION_PASSWORD" = "$POSTGRES_PASSWORD" ]; then
+   echo "Database administrator, migrator and application passwords must be distinct." >&2
+   exit 1
+ fi
++
+ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
+ BEGIN;
+ \getenv app_password DB_APP_PASSWORD
+ \getenv migration_password DB_MIGRATION_PASSWORD
++
+ CREATE ROLE wellcosting_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD :'migration_password';
+-CREATE ROLE wellcosting_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD :'app_password';
++CREATE ROLE wellcosting_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD :'app_password' CONNECTION LIMIT 20;
++
++ALTER ROLE wellcosting_app SET statement_timeout = '120s';
++ALTER ROLE wellcosting_app SET idle_in_transaction_session_timeout = '60s';
++ALTER ROLE wellcosting_app SET lock_timeout = '10s';
++
+ REVOKE ALL ON DATABASE wellcosting FROM PUBLIC;
+ GRANT CONNECT ON DATABASE wellcosting TO wellcosting_app, wellcosting_migrator;
+ REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+@@ -20,5 +31,14 @@ GRANT USAGE, CREATE ON SCHEMA public TO wellcosting_migrator;
+ GRANT USAGE ON SCHEMA public TO wellcosting_app;
+ ALTER DEFAULT PRIVILEGES FOR ROLE wellcosting_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO wellcosting_app;
+ ALTER DEFAULT PRIVILEGES FOR ROLE wellcosting_migrator IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO wellcosting_app;
++
++-- New audit tables may use this schema in a separately designed migration.
++-- Existing public.audit_logs rows stay in place; the Alembic permission revision
++-- makes that table append-only without moving or rewriting any business data.
++CREATE SCHEMA IF NOT EXISTS audit;
++GRANT USAGE, CREATE ON SCHEMA audit TO wellcosting_migrator;
++GRANT USAGE ON SCHEMA audit TO wellcosting_app;
++ALTER DEFAULT PRIVILEGES FOR ROLE wellcosting_migrator IN SCHEMA audit GRANT SELECT, INSERT ON TABLES TO wellcosting_app;
++ALTER DEFAULT PRIVILEGES FOR ROLE wellcosting_migrator IN SCHEMA audit GRANT USAGE, SELECT ON SEQUENCES TO wellcosting_app;
+ COMMIT;
+ SQL
+diff --git a/scripts/postgres-inventory.sql b/scripts/postgres-inventory.sql
+index 7a85897..e9d3141 100644
+--- a/scripts/postgres-inventory.sql
++++ b/scripts/postgres-inventory.sql
+@@ -4,5 +4,23 @@ SELECT version();
+ SELECT * FROM pg_available_extensions ORDER BY name;
+ SELECT extname, extversion FROM pg_extension ORDER BY extname;
+ SELECT current_user, current_database();
+-SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolreplication
++SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolconnlimit, rolconfig
+ FROM pg_roles WHERE rolname IN ('wellcosting_app', 'wellcosting_migrator');
++
++-- Expected application audit privileges: SELECT and INSERT only. Historic rows
++-- remain in public.audit_logs; no table move or data rewrite is required.
++SELECT grantee, table_schema, table_name, privilege_type
++FROM information_schema.role_table_grants
++WHERE table_name = 'audit_logs' AND grantee IN ('wellcosting_app', 'wellcosting_migrator')
++ORDER BY grantee, privilege_type;
++
++-- Session values are collected for the current connection. Application runtime
++-- connections set statement_timeout=120s, idle_in_transaction=60s, lock=10s.
++SELECT name, setting, unit FROM pg_settings
++WHERE name IN ('statement_timeout', 'idle_in_transaction_session_timeout', 'lock_timeout', 'max_connections')
++ORDER BY name;
++
++SELECT nspname AS schema_name,
++       has_schema_privilege('wellcosting_app', nspname, 'USAGE') AS app_usage,
++       has_schema_privilege('wellcosting_migrator', nspname, 'CREATE') AS migrator_create
++FROM pg_namespace WHERE nspname IN ('public', 'audit') ORDER BY nspname;

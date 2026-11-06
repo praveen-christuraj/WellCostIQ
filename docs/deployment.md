@@ -1,4 +1,4 @@
-> Current repository baseline: [CYBERSEC_BASELINE.md](CYBERSEC_BASELINE.md). Use Python 3.12.16, Node 22.23.4 and hash-verified Python installs. Configure separate restricted-runtime `DATABASE_URL` and schema-owner `MIGRATION_DATABASE_URL` secrets, then use `sh start-hosted.sh` as the Render start command. The wrapper removes the migration credential before starting the API. Provision and verify both roles/grants with the database administrator before deploying. The Compose PostgreSQL 18.6 baseline does not upgrade a managed Supabase/Render database; confirm its live version and extensions with the provider.
+> Current repository baseline: [CYBERSEC_BASELINE.md](CYBERSEC_BASELINE.md). Use the pinned Docker image (Python 3.12.16), Node 22.23.4 and hash-verified Python installs. Configure separate restricted-runtime `DATABASE_URL` and schema-owner `MIGRATION_DATABASE_URL` secrets, both with `sslmode=require`. Render runs `backend/Dockerfile`; its entrypoint reuses `start-hosted.sh` to migrate, remove the migration credential and bind the assigned `PORT`. Provision and verify both roles/grants with the database administrator before deploying. The Compose PostgreSQL 18.6 baseline does not upgrade a managed Supabase/Render database; confirm its live version and extensions with the provider.
 
 # Deploying WellCostIQ: Vercel + Render + Supabase
 
@@ -31,9 +31,9 @@ Estimated setup time: 30–60 minutes, excluding time spent troubleshooting prov
 - `frontend/vercel.json` must contain the actual Render hostname. If the Render
   service is renamed, update every external rewrite and redeploy Vercel.
 - `GET /api/health` is a **liveness** check that returns only `{"status":"ok","api_version":"..."}`. It deliberately does not disclose whether an administrator exists, and it is not a database-readiness check. Confirm first-run setup from the Render logs (`Seeded administrator ...`) and by signing in.
-- The migration head is **`b7c1d9e4f2a8`** (password expiry and refresh-token replay detection). Render's start command must run `alembic upgrade head` before Uvicorn.
+- The migration head is **`f2a6c8d41e07`** (append-only grants for the existing audit table; no row/table data changes). Render's Docker entrypoint runs `alembic upgrade head` before Uvicorn.
 - The browser sends an `Origin` header through the Vercel rewrite, so `CORS_ORIGINS` must list the exact Vercel origin (or custom domain) even though the browser sees a same-origin URL.
-- Render's current default Python runtime may differ from the one used during development. **Pin Python 3.12** as shown below rather than relying on Render's default.
+- Render uses `runtime: docker`, `rootDir: backend`, `dockerfilePath: ./Dockerfile` and `autoDeploy: false`. Deploy manually only after review and a passing **Security and regression checks** run. The repository cannot prove GitHub required-check/branch-protection settings; an administrator must configure and verify them. Items 1–5 of the dated remediation plan harden Compose/nginx, not Render's direct edge.
 
 ---
 
@@ -122,13 +122,13 @@ service from `render.yaml`.
    |---|---|
    | Name | `wellcosting-api` (or another available name; copy the actual URL Render assigns) |
    | Region | Same region as the Supabase project, or the nearest available region |
-   | Environment | **Python 3** |
-   | Python version | Set environment variable `PYTHON_VERSION=3.12.16` (pin for first deploy) |
+   | Environment | **Docker** |
    | Root Directory | `backend` |
-   | Build Command | `pip install --require-hashes -r requirements.txt` |
-   | Start Command (Free plan) | `sh start-hosted.sh` |
+   | Dockerfile Path | `./Dockerfile` (relative to the Root Directory) |
+   | Build/Start Command | Leave unset; the image installs locked requirements and enters `start-hosted.sh` |
+   | Auto-Deploy | **Disabled**; deploy manually after the Security workflow passes |
    | Health Check Path | `/api/health` |
-   | Instance plan | Free for testing (sleeps when idle); choose a paid instance for an always-on service |
+   | Instance plan | Free for UAT only (sleeps when idle); choose a paid always-on instance for production |
 
    Render provides `PORT`; the startup wrapper binds Uvicorn to that port.
    The wrapper runs migrations using `MIGRATION_DATABASE_URL`, removes that
@@ -136,7 +136,7 @@ service from `render.yaml`.
    on both Free and paid plans. Do not also configure a duplicate migration
    command. A separate paid pre-deploy job is another option only when it has
    its own migration secret and the API job does not receive that secret.
-4. In the service form's **Advanced** section, set `PYTHON_VERSION=3.12.16` and add the environment variables
+4. In the service form's **Advanced** section, add the environment variables
    from the next section before creating the service. In particular, set the
    `DATABASE_URL` and `MIGRATION_DATABASE_URL` for the two dedicated roles, a `SECRET_KEY`, and `CORS_ORIGINS` to the production
    Vercel origin you plan to use. If you have not created the Vercel project
@@ -151,9 +151,10 @@ service from `render.yaml`.
 1. Push the latest repository changes to GitHub. In Render choose **New →
    Blueprint**, connect this repository and branch, and confirm that Render
    found `render.yaml` in the repository root.
-2. Review the proposed `wellcosting-api` service and click **Deploy Blueprint**.
-   The Blueprint uses the Free-compatible migration/start command described
-   above.
+2. Review the proposed `wellcosting-api` Docker service and click **Deploy Blueprint**.
+   The Blueprint uses the same migration/start wrapper on Free and paid plans.
+   Later repository pushes do not deploy automatically: use **Manual Deploy**
+   only after the relevant Security workflow has passed.
 3. During initial Blueprint creation, enter the `sync: false` values when
    prompted. For `CORS_ORIGINS`, use the expected production Vercel origin and
    correct it after Vercel's first deployment if needed. Render prompts only on
@@ -167,11 +168,11 @@ service from `render.yaml`.
 
 | Variable | Required | Value / how to generate |
 |---|---|---|
-| `PYTHON_VERSION` | **Yes for reproducible first deploy** | `3.12.16` (pin a supported Python 3.12 patch release; Render currently defaults new services to Python 3.14) |
 | `DATABASE_URL` | **Yes** | Restricted application-role Session pooler URI, `postgresql+psycopg://`, `sslmode=require`; never the cluster administrator |
 | `MIGRATION_DATABASE_URL` | **Yes** | Distinct schema-owner migration-role URI for `start-hosted.sh`; removed before the API starts |
 | `SECRET_KEY` | **Yes** | Generate a unique key with `openssl rand -hex 32`; on Windows PowerShell, `py -c "import secrets; print(secrets.token_hex(32))"` also works. Use at least 32 characters per environment; the app rejects a missing, short, or default key with PostgreSQL. |
 | `SECURE_COOKIES` | **Yes** | `true` — Vercel serves HTTPS, and the refresh cookie is set with the `Secure` flag |
+| `ALLOWED_HOSTS` | **Yes** | `wellcosting-api.onrender.com`, or the actual assigned Render service hostname. Exact hostname only; no scheme, port or wildcard. Update it with every Vercel rewrite if renamed. |
 | `CORS_ORIGINS` | **Yes** | Exact Vercel origin(s), comma-separated, e.g. `https://wellcostiq.vercel.app`. Add custom domains too. No paths, wildcards or credentials — a trailing slash, host capitalization and an explicit default port (`:443`/`:80`) are normalized for you. |
 | `BOOTSTRAP_ADMIN_ON_STARTUP` | No | `true` (default). Set `false` only if you seed manually. |
 | `SEED_ORG_SLUG` | First boot | Workspace ID, e.g. `my-company` |
@@ -179,8 +180,13 @@ service from `render.yaml`.
 | `SEED_OWNER_NAME` | First boot | Administrator's name, e.g. `Jane Smith` |
 | `SEED_ADMIN_EMAIL` | First boot | Administrator e-mail, e.g. `owner@example.com` |
 | `SEED_ADMIN_PASSWORD` | First boot | Password, **12+ characters**. **Delete this variable only after logs confirm seeding and a login succeeds** (see §4). |
-| `ACCESS_TOKEN_MINUTES` | No | Default `15` |
-| `REFRESH_TOKEN_DAYS` | No | Default `7` |
+| `ACCESS_TOKEN_MINUTES` | **Yes** | `15` — explicitly pinned by the Blueprint |
+| `REFRESH_TOKEN_DAYS` | **Yes** | `7` — explicitly pinned by the Blueprint |
+| `PASSWORD_MAX_AGE_DAYS` | **Yes** | `90` |
+| `PASSWORD_EXPIRY_WARNING_DAYS` | **Yes** | `14` |
+| `PASSWORD_HISTORY_LIMIT` | **Yes** | `5` |
+| `FORCE_PASSWORD_CHANGE_ON_CREATE` | **Yes** | `true` |
+| `MAX_FAILED_LOGINS` / `LOCKOUT_MINUTES` | **Yes** | `5` / `15` |
 | `APP_NAME` | No | Default `WellCostIQ` |
 | `APP_TAGLINE` | No | Default `Well Cost Estimation & Tracking`; shown as the API description in `/docs` and OpenAPI |
 
@@ -191,6 +197,13 @@ Notes:
 - **Free-tier cold starts:** Render spins down a Free web service after 15
   minutes without inbound traffic; waking it can take about a minute. The API
   filesystem is ephemeral, so keep the database on Supabase, not local SQLite.
+  Login/recovery budgets and account lockout counters are database-backed, but
+  use an always-on paid instance for production. Configure provider edge rate
+  limits/WAF for the Render hostname; Compose nginx limits do not cover it.
+- **Hosted backup storage:** `/app/backups` is ephemeral on Render and is not a
+  disaster-recovery copy. Use Supabase PITR/snapshots and tested off-service
+  restores. `BACKUP_DIRECTORY` must point to approved persistent storage before
+  relying on in-app archives outside a single running instance.
 - Verify the deploy at `https://<actual-service-url>.onrender.com/api/health`.
   It should return `{"status":"ok","api_version":"..."}`. This is a liveness
   check only: it is **not** proof of database connectivity and it no longer
@@ -245,7 +258,9 @@ Notes:
    [Vercel project configuration](https://vercel.com/docs/project-configuration)
    for details about `vercel.json`.
 5. Commit and push this `vercel.json` change to the production branch. Vercel
-   auto-deploys when that branch receives a push. A deployment made before this
+   auto-deploys when that branch receives a push unless its dashboard setting
+   says otherwise; protect the branch with review and the required Security
+   workflow. Render remains manual-deploy-only. A deployment made before this
    change will still contain the previous proxy/fallback configuration.
 6. In Vercel, open the project's **Deployments** page and wait for the latest
    deployment to finish. Open the assigned production domain (not a preview
@@ -278,9 +293,11 @@ deploy, including Free):** before the first API start, set all five variables:
 owner email, and a unique password of at least 12 characters. The API applies
 Alembic migrations first, then creates the initial workspace and owner from
 these values. Wait for Render logs to report `Seeded administrator ...`, then
-**sign in once successfully**. Only then **remove `SEED_ADMIN_PASSWORD`** from
-Render's Environment page and redeploy. Removing the other four seed values is
-also recommended. The health endpoint intentionally does not report setup state,
+**sign in once successfully**. Only then set `BOOTSTRAP_ADMIN_ON_STARTUP=false`
+and **remove `SEED_ADMIN_PASSWORD`** from Render's Environment page and redeploy.
+Removing the other four seed values is also recommended. This does not rotate or
+modify the seeded account; it only disarms future first-boot provisioning. The
+health endpoint intentionally does not report setup state,
 so the log line and a successful sign-in are the evidence.
 
 **Option B — from your computer against Supabase:** use the same Session pooler

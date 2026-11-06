@@ -29,6 +29,12 @@ def test_origin_guard_and_no_store():
         response = client.get('/api/v1/auth/me', headers=headers)
         assert response.headers['cache-control'] == 'no-store'
         assert response.headers['x-content-type-options'] == 'nosniff'
+        for path in ('/api/health', '/api/v1/route-that-does-not-exist'):
+            secured = client.get(path)
+            assert secured.headers['x-content-type-options'] == 'nosniff'
+            assert secured.headers['x-frame-options'] == 'DENY'
+            assert secured.headers['referrer-policy'] == 'no-referrer'
+            assert "default-src 'none'" in secured.headers['content-security-policy']
         assert client.post('/api/v1/auth/refresh', headers={'Origin': 'https://evil.example'}).status_code == 403
         assert client.post('/api/v1/auth/refresh', headers={'Origin': 'http://localhost:5173'}).status_code == 200
         assert 'admin_seeded' not in client.get('/api/health').json()
@@ -111,6 +117,47 @@ def test_production_fails_closed():
     with pytest.raises(ValidationError):
         Settings(environment='production', secret_key='a' * 48, secure_cookies=False, cors_origins='https://app.example.com')
     assert Settings(environment='production', secret_key='a' * 48, secure_cookies=True, cors_origins='https://app.example.com')
+
+
+def test_host_allowlist_protects_health_and_every_api_route(fresh_database, monkeypatch):
+    from app.main import settings
+    monkeypatch.setattr(settings, 'allowed_hosts', 'wellcosting-api.onrender.com')
+    with TestClient(app, base_url='http://wellcosting-api.onrender.com') as client:
+        assert client.get('/api/health').status_code == 200
+        rejected = client.get('/api/health', headers={'Host': 'attacker.example'})
+        assert rejected.status_code == 400
+        assert rejected.headers['x-content-type-options'] == 'nosniff'
+        assert 'attacker.example' not in rejected.text
+
+
+@pytest.mark.parametrize('host', ['*', '*.example.com', 'https://api.example.com', 'api.example.com:443', 'api.example.com/path'])
+def test_host_allowlist_rejects_non_hostnames(host):
+    with pytest.raises(ValidationError):
+        Settings(allowed_hosts=host)
+
+
+@pytest.mark.parametrize('environment', ['staging', 'production'])
+@pytest.mark.parametrize('suffix', ['', '?sslmode=disable', '?sslmode=require&sslmode=disable'])
+def test_hosted_postgresql_requires_secure_tls(environment, suffix):
+    with pytest.raises(ValidationError, match='sslmode'):
+        Settings(
+            environment=environment,
+            database_url='postgresql+psycopg://app@db.example.com/wellcosting' + suffix,
+            secret_key='a' * 48,
+            secure_cookies=True,
+            cors_origins='https://app.example.com',
+        )
+
+
+@pytest.mark.parametrize('sslmode', ['require', 'verify-ca', 'verify-full'])
+def test_hosted_postgresql_accepts_explicit_secure_tls(sslmode):
+    assert Settings(
+        environment='production',
+        database_url=f'postgresql+psycopg://app@db.example.com/wellcosting?sslmode={sslmode}',
+        secret_key='a' * 48,
+        secure_cookies=True,
+        cors_origins='https://app.example.com',
+    )
 
 
 def test_database_integrity_errors_are_generic_conflicts():

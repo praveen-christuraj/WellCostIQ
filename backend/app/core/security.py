@@ -25,7 +25,7 @@ ALGORITHM = "HS256"
 # ``aud`` is intentionally not asserted: this API has a single audience, and
 # adding a claim that consumers must supply would break existing integrations.
 REQUIRED_CLAIMS = ("exp", "iat", "nbf", "sub", "org", "type", "ver", "iss")
-ACCESS_TOKEN_TYPE = "access"
+ACCESS_TOKEN_TYPE = "access"  # nosec B105  # JWT claim discriminator, not a credential.
 
 # Deliberately small and dependency-free: a blocklist of the passwords that
 # dominate credential-stuffing lists, plus structural rules below. A breached

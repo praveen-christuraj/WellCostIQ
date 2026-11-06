@@ -85,7 +85,7 @@ def dependency_counts(db: Session, record: Any, organization_id: str) -> dict[st
             for foreign_key in column.foreign_keys:
                 try:
                     target_column = foreign_key.column
-                except Exception:  # An unrelated unresolved optional FK should not block this check.
+                except Exception:  # nosec B112  # Unresolved optional FK is not a resolved dependency.
                     continue
                 if target_column.table is not target_table:
                     continue

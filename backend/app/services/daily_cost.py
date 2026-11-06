@@ -331,7 +331,7 @@ def _section_option(section: DailyCostBaselineSection) -> DailyCostSectionOption
 def _active_master(db: Session, model: Any, record_id: str, organization_id: str, label: str, *, allow_deleted: bool = False) -> Any:
     row = db.scalar(select(model).where(model.id == record_id, model.organization_id == organization_id))
     if row is None:
-        raise HTTPException(status_code=422, detail=f"Select a {label} from this workspace")
+        raise HTTPException(status_code=422, detail=f"Select a {label} from this workspace")  # nosec B608  # Validation text, not SQL.
     if row.is_deleted and not allow_deleted:
         raise HTTPException(status_code=422, detail=f"{label.capitalize()} is in Deleted Entries; choose an active record")
     return row
@@ -1732,7 +1732,7 @@ def _normalise_catalogue_line(
             }
         )
     else:
-        assert isinstance(line, DailyCostConsumableLineIn)
+        assert isinstance(line, DailyCostConsumableLineIn)  # nosec B101  # Internal type narrowing only.
         base.update(
             {
                 "category": line.category,
@@ -3284,7 +3284,7 @@ def reopen_entry(
             from app.services.sow_adjustment import AMENDMENT_THRESHOLD_DAYS
 
             amendment_threshold = AMENDMENT_THRESHOLD_DAYS
-        except Exception:  # noqa: BLE001 - fall back to the default window
+        except Exception:  # nosec B110  # Legacy amendment-window fallback.  # noqa: BLE001
             pass
         if days_old > amendment_threshold and not _has_permission(db, user, "daily-cost:amend"):
             raise HTTPException(
@@ -3310,7 +3310,7 @@ def reopen_entry(
             record_amendment(db, entry=entry, user=user, reason=data.remarks)
         except HTTPException:
             raise
-        except Exception:  # noqa: BLE001 - unmigrated database has no amendment table yet
+        except Exception:  # nosec B110  # Optional legacy amendment-history fallback.  # noqa: BLE001
             pass
         _commit(db)
     return _created_day_or_503(db, organization_id, entry.id)
@@ -3896,7 +3896,7 @@ def _well_progress_row(
         if completed is not None:
             end = completed
         else:
-            assert as_of is not None
+            assert as_of is not None  # nosec B101  # Internal populated-date invariant only.
             end = datetime.combine(as_of + timedelta(days=1), dt_time.min)
         actual_days = _fractional_days(end - spud) if end > spud else Decimal("0.000")
         days_variance = (actual_days - planned_days).quantize(PROGRESS_DAY_QUANT, rounding=ROUND_HALF_UP)

@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
@@ -66,6 +67,30 @@ app.add_middleware(
     expose_headers=["Retry-After"],
     max_age=600,
 )
+
+
+@app.middleware("http")
+async def host_guard(request: Request, call_next):
+    """Refuse unexpected Host values when a deployment configures an allowlist.
+
+    Compose enforces names at nginx as well. Render has no configurable nginx in
+    its request path, so this protects direct service-host access and Vercel
+    rewrites without trusting an attacker-supplied wildcard or forwarded header.
+    """
+    allowed = settings.allowed_host_list
+    if allowed:
+        header = request.headers.get("host", "")
+        try:
+            parts = urlsplit("//" + header)
+            invalid = bool(parts.username or parts.password or parts.path or parts.query or parts.fragment)
+            _ = parts.port  # Validate a supplied port even though policy keys on hostname.
+            host = (parts.hostname or "").lower().rstrip(".")
+        except ValueError:
+            invalid = True
+            host = ""
+        if invalid or host not in allowed:
+            return JSONResponse(status_code=400, content={"detail": "This hostname is not allowed to call the API."})
+    return await call_next(request)
 
 
 @app.middleware("http")

@@ -25,9 +25,9 @@ ChargingBasis = Literal["Day Rate", "Per Service Rate", "Per Section Rate"]
 ConsumableCategory = Literal["Mud Chemicals", "Cement Additives", "Fuel", "Drill Bits"]
 QuantityUnit = Literal["days", "hours"]
 
-assert set(CHARGE_CATEGORIES) == set(ChargeCategory.__args__)  # keep Literal in step with the engine
-assert set(CHARGING_BASES) == set(ChargingBasis.__args__)
-assert set(CONSUMABLE_CATEGORIES) == set(ConsumableCategory.__args__)
+assert set(CHARGE_CATEGORIES) == set(ChargeCategory.__args__)  # nosec B101  # Import-time Literal invariant.
+assert set(CHARGING_BASES) == set(ChargingBasis.__args__)  # nosec B101  # Import-time Literal invariant.
+assert set(CONSUMABLE_CATEGORIES) == set(ConsumableCategory.__args__)  # nosec B101  # Import-time Literal invariant.
 
 MAX_LINES = 500
 

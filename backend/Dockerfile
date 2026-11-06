@@ -20,4 +20,7 @@ COPY --chmod=0755 . ./
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]
+# Hosted Docker deployments use the same reviewed migration/credential-removal
+# wrapper as Render's former Python runtime. Compose overrides this entrypoint
+# for its separate migration and already-migrated API services.
+ENTRYPOINT ["/app/start-hosted.sh"]

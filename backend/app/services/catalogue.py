@@ -301,7 +301,7 @@ def validate_option_parent(db: Session, organization_id: str, list_key: str, par
             raise CatalogueError(f"{list_label(list_key)} do not have a parent value")
         return None
     if not parent_id:
-        raise CatalogueError(f"Select a parent value from {list_label(parent_list)} first")
+        raise CatalogueError(f"Select a parent value from {list_label(parent_list)} first")  # nosec B608  # Validation text, not SQL.
     parent = db.scalar(
         select(CatalogueOption).where(
             CatalogueOption.id == parent_id,
@@ -526,7 +526,7 @@ def _master_values(
             continue
         target = db.get(CatalogueOption, chosen)
         if target is None or target.organization_id != organization_id or target.list_key != option.list_key:
-            raise CatalogueError(f"Select a {option.label.lower()} from Catalogue Lists")
+            raise CatalogueError(f"Select a {option.label.lower()} from Catalogue Lists")  # nosec B608  # Validation text, not SQL.
         unchanged = existing is not None and getattr(existing, option.attr) == chosen
         if not unchanged and target.is_deleted:
             raise CatalogueError(f"'{target.value}' was removed from {list_label(option.list_key)}; choose another {option.label.lower()}")

@@ -557,7 +557,7 @@ def _validate_request(
         where = f"Service line {index}"
         service = lookups.services.get(line.service_id)
         if service is None or service.organization_id != organization_id:
-            errors.append(f"{where}: select a service from Master Data.")
+            errors.append(f"{where}: select a service from Master Data.")  # nosec B608  # Validation text, not SQL.
             continue
         if service.is_deleted:
             errors.append(f"{where}: {service.service_code} is inactive in Master Data. Select an active service.")
@@ -663,7 +663,7 @@ def _validate_request(
         if line.category == engine.CONSUMABLE_DRILL_BITS:
             drill_bit = lookups.drill_bits.get(line.drill_bit_id or "")
             if drill_bit is None or drill_bit.organization_id != organization_id:
-                errors.append(f"{where}: select a drill bit from Master Data.")
+                errors.append(f"{where}: select a drill bit from Master Data.")  # nosec B608  # Validation text, not SQL.
                 continue
             if drill_bit.is_deleted:
                 errors.append(f"{where}: {drill_bit.bit_code} is inactive in Master Data. Select an active drill bit.")
@@ -729,7 +729,7 @@ def _validate_request(
         where = f"Tangible line {index}"
         tangible = lookups.tangibles.get(line.tangible_id)
         if tangible is None or tangible.organization_id != organization_id:
-            errors.append(f"{where}: select a tangible from Master Data.")
+            errors.append(f"{where}: select a tangible from Master Data.")  # nosec B608  # Validation text, not SQL.
             continue
         if tangible.is_deleted:
             errors.append(f"{where}: {tangible.tangible_code} is inactive in Master Data. Select an active tangible.")

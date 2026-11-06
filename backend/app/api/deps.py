@@ -21,7 +21,7 @@ PASSWORD_CHANGE_ALLOWED = {
     "/api/v1/auth/logout-all",
     "/api/v1/auth/refresh",
 }
-WRONG_TOKEN = "Invalid or expired access token"
+WRONG_TOKEN = "Invalid or expired access token"  # nosec B105  # Public error text, not a credential.
 
 
 def _unauthorized(detail: str = WRONG_TOKEN) -> HTTPException:

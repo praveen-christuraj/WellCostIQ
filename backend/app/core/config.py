@@ -20,12 +20,13 @@ use them directly, but their values are masked by ``repr``/``str`` and by
 :meth:`Settings.safe_summary` so a settings object can be logged safely.
 """
 from functools import lru_cache
-from urllib.parse import SplitResult, urlsplit
+import re
+from urllib.parse import SplitResult, parse_qs, urlsplit
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEV_SECRET = "development-only-change-this-secret-before-deploying"
+DEV_SECRET = "development-only-change-this-secret-before-deploying"  # nosec B105  # Rejected outside local development.
 ENVIRONMENTS = ("development", "test", "staging", "production")
 PLACEHOLDER_SECRETS = {
     DEV_SECRET,
@@ -151,6 +152,9 @@ class Settings(BaseSettings):
     # Vendors/PO-SO attachments are stored in the workspace database; this caps one file.
     document_max_size_mb: int = 15
     cors_origins: str = "http://localhost:5173"
+    # Optional application-layer Host allowlist. Nginx is the primary Compose
+    # control; Render sets its exact service hostname to protect direct access.
+    allowed_hosts: str = ""
     # Uvicorn's --forwarded-allow-ips is the real control; this list decides which
     # peers' X-Forwarded-For / X-Real-IP headers are believed by the application.
     trusted_proxy_ips: str = ""
@@ -173,6 +177,29 @@ class Settings(BaseSettings):
     seed_admin_password: str = ""
 
     # ------------------------------------------------------------------ helpers
+    @field_validator("allowed_hosts")
+    @classmethod
+    def validate_allowed_hosts(cls, value: str) -> str:
+        """Store exact hostnames only; never ports, schemes, paths or wildcards."""
+        hosts: list[str] = []
+        for item in value.split(","):
+            host = item.strip().lower().rstrip(".")
+            if not host:
+                continue
+            valid_hostname = re.fullmatch(
+                r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?",
+                host,
+            )
+            if not valid_hostname or ".." in host or any(
+                label.startswith("-") or label.endswith("-") for label in host.split(".")
+            ):
+                raise ValueError(
+                    f"ALLOWED_HOSTS entry {item!r} is invalid; use an exact hostname without scheme, port or wildcard"
+                )
+            if host not in hosts:
+                hosts.append(host)
+        return ",".join(hosts)
+
     @field_validator("cors_origins")
     @classmethod
     def validate_cors_origins(cls, value: str) -> str:
@@ -198,6 +225,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin for origin in self.cors_origins.split(",") if origin]
+
+    @property
+    def allowed_host_list(self) -> list[str]:
+        return [host for host in self.allowed_hosts.split(",") if host]
 
     @property
     def trusted_proxies(self) -> list[str]:
@@ -255,6 +286,14 @@ class Settings(BaseSettings):
         elif not self.database_url.startswith("sqlite"):
             if self.secret_key.startswith("development-only") or len(self.secret_key) < 32:
                 raise ValueError("Set a unique SECRET_KEY of at least 32 characters before using PostgreSQL")
+
+        if self.environment in {"staging", "production"} and self.database_url.startswith("postgresql"):
+            sslmodes = parse_qs(urlsplit(self.database_url).query, keep_blank_values=True).get("sslmode", [])
+            if len(sslmodes) != 1 or sslmodes[0] not in {"require", "verify-ca", "verify-full"}:
+                raise ValueError(
+                    "DATABASE_URL must contain exactly one secure sslmode=require, verify-ca or verify-full "
+                    "outside development/test"
+                )
         return self
 
     # ------------------------------------------------------------------ masking

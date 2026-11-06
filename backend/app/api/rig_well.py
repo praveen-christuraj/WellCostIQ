@@ -398,7 +398,7 @@ def _master_record_or_422(db: Session, model: Any, record_id: str, organization_
     if record is None:
         raise HTTPException(
             status_code=422,
-            detail=f"Select an active {label} from this workspace's Master Data",
+            detail=f"Select an active {label} from this workspace's Master Data",  # nosec B608  # Validation text, not SQL.
         )
     return record
 
