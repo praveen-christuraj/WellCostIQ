@@ -4,12 +4,12 @@ import { ArrowBack, ArrowForward, AttachFile, DeleteOutline, Download, EditOutli
 import { Alert, Box, Button, Chip, IconButton, LinearProgress, Menu, MenuItem, Paper, Stack, Step, StepLabel, Stepper, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, TextField, Tooltip, Typography } from '@mui/material'
 import { FormDialog, PageHeading, Tag } from '../components/Common'
 import { IdvsSheet } from '../components/invoice/IdvsSheet'
-import { formatDate } from '../lib/invoiceCalculations'
+import { formatAmount, formatDate, formatPrecise } from '../lib/invoiceCalculations'
 import { SectionCard } from '../components/ui/SectionCard'
 import { useAuth } from '../context/AuthContext'
 import { api, body, downloadFile, previewFile, uploadFiles } from '../lib/api'
 import { exportIdvs } from '../lib/invoiceExport'
-import { INVOICE_STATUS_LABEL, MAX_ATTACHMENT_BYTES, WORKFLOW_ACTION, formatFileSize, type InvoiceAttachment, type InvoiceDetail, type WorkflowAction } from '../lib/invoiceProcessing'
+import { INVOICE_STATUS_LABEL, MAX_ATTACHMENT_BYTES, SIGNATURE_SPACE, WORKFLOW_ACTION, formatFileSize, type InvoiceAttachment, type InvoiceDetail, type WorkflowAction } from '../lib/invoiceProcessing'
 
 const statusTone = (status: string): 'neutral' | 'success' | 'info' | 'warning' => status === 'paid' || status === 'approved' ? 'success' : status === 'submitted' || status === 'sent_to_accounts' ? 'info' : status === 'epicor_pending' ? 'warning' : 'neutral'
 const today = () => new Date().toISOString().slice(0, 10)
@@ -96,7 +96,21 @@ export default function InvoiceDetailPage() {
     <Menu anchorEl={exportAnchor} open={Boolean(exportAnchor)} onClose={() => setExportAnchor(null)}><MenuItem onClick={() => void runExport('pdf')}><PictureAsPdfOutlined fontSize="small"/>&nbsp; IDVS PDF</MenuItem><MenuItem onClick={() => void runExport('xlsx')}><Download fontSize="small"/>&nbsp; IDVS Excel</MenuItem><MenuItem onClick={() => void runExport('csv')}><Download fontSize="small"/>&nbsp; IDVS CSV</MenuItem></Menu>
     {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}{notice && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNotice('')}>{notice}</Alert>}
     <Paper variant="outlined" sx={{ mb: 2, px: 2 }}><Tabs value={tab} onChange={(_event, value) => setTab(value)} variant="scrollable"><Tab label="Generated IDVS"/><Tab label={`Tracking history (${invoice.history.length})`}/><Tab label={`Supporting documents (${invoice.attachments.length})`}/></Tabs></Paper>
-    {tab === 0 && <Paper variant="outlined" sx={{ p: { xs: 1, md: 2 }, overflow: 'hidden' }}><IdvsSheet invoice={invoice}/></Paper>}
+    {tab === 0 && <Box display="grid" gap={2}>
+      {/* The register keeps both amounts; the sheet above deliberately prints only the IDVS report total. */}
+      <Paper variant="outlined" sx={{ p: 1.5 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} gap={2} alignItems={{ sm: 'center' }} justifyContent="space-between" flexWrap="wrap">
+          <Box><Typography className="eyebrow">Register amounts · {invoice.currency_code}</Typography><Typography variant="caption" color="text.secondary">The IDVS report prints its own total. Register-only taxes are recorded here and change only the Net payable amount.</Typography></Box>
+          <Stack direction="row" gap={3} flexWrap="wrap">
+            <Box><Typography fontSize={11} color="text.secondary">IDVS amount</Typography><Typography fontWeight={750} fontSize={18}>{invoice.currency_code} {formatAmount(invoice.adjusted_verified_amount)}</Typography></Box>
+            <Box><Typography fontSize={11} color="text.secondary">Net payable</Typography><Typography fontWeight={750} fontSize={18} color="primary.main">{invoice.currency_code} {formatAmount(invoice.net_payable_amount)}</Typography></Box>
+          </Stack>
+        </Stack>
+        {invoice.taxes.some(tax => !tax.is_report_visible) && <Box mt={1.5} display="grid" gap={.5}>{invoice.taxes.filter(tax => !tax.is_report_visible).map(tax => <Stack key={tax.id ?? tax.tax_name} direction="row" gap={1} alignItems="center" flexWrap="wrap"><Tag tone="warning">Register only</Tag><Typography fontSize={12} fontWeight={700}>{tax.tax_name} @ {formatPrecise(tax.rate_percent)}%</Typography><Typography fontSize={12} color="text.secondary">{tax.direction === 'addition' ? 'adds' : 'deducts'} {formatAmount(tax.verified_amount)} · {tax.is_net_payable ? 'included in net payable' : 'recorded only, no amount change'}</Typography></Stack>)}</Box>}
+        {invoice.signature_space_mm !== SIGNATURE_SPACE.default && <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>Signing space on the printed sheet: {invoice.signature_space_mm} mm.</Typography>}
+      </Paper>
+      <Paper variant="outlined" sx={{ p: { xs: 1, md: 2 }, overflow: 'hidden' }}><IdvsSheet invoice={invoice}/></Paper>
+    </Box>}
     {tab === 1 && <Box display="grid" gap={2}>
       <SectionCard title="Commercial tracking milestones" subtitle="Only the milestone date and optional remarks are recorded here; EPICOR approval and payment remain external."><Stepper activeStep={activeStep} alternativeLabel nonLinear sx={{ overflowX: 'auto', pb: 1 }}>{[['IDVS created', invoice.idvs_date], ['Submitted', invoice.submitted_date], ['Verified & sent to Accounts', invoice.sent_to_accounts_date], ['Received for EPICOR approval', invoice.epicor_received_date], ['Approved in EPICOR', invoice.epicor_approved_date], ['Paid date', invoice.paid_date]].map(([name, value]) => <Step key={name} completed={Boolean(value)}><StepLabel><Typography fontSize={11}>{name}</Typography><Typography variant="caption" color="text.secondary">{formatDate(value)}</Typography></StepLabel></Step>)}</Stepper></SectionCard>
       <SectionCard title="Audited workflow history" subtitle="Every dated action includes the actor and optional remarks" bodyPadding={0}><TableContainer><Table><TableHead><TableRow><TableCell>Milestone</TableCell><TableCell>Action date</TableCell><TableCell>Recorded by</TableCell><TableCell>Remarks</TableCell><TableCell>Audit timestamp</TableCell></TableRow></TableHead><TableBody>{invoice.history.map(item => <TableRow key={item.id}><TableCell><Tag tone="info">{item.action_label}</Tag></TableCell><TableCell>{formatDate(item.action_date)}</TableCell><TableCell>{item.actor_name}</TableCell><TableCell>{item.remarks || '—'}</TableCell><TableCell>{new Date(item.created_at).toLocaleString()}</TableCell></TableRow>)}{!invoice.history.length && <TableRow><TableCell colSpan={5} align="center"><Typography color="text.secondary" py={4}>This draft has not entered the verification workflow.</Typography></TableCell></TableRow>}</TableBody></Table></TableContainer></SectionCard>

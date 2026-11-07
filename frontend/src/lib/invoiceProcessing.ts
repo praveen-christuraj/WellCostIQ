@@ -27,6 +27,7 @@ export type PaymentTerm = {
 }
 export type TaxConfiguration = {
   id: string; tax_code: string; tax_name: string; rate_percent: string; direction: TaxDirection
+  is_report_visible: boolean; is_net_payable: boolean
   is_common: boolean; description: string; is_active: boolean; is_deleted?: boolean; vendor_ids: string[]
 }
 export type ExchangeRate = { id: string; base_currency: string; quote_currency: string; rate: string; description: string; is_active: boolean; is_deleted?: boolean }
@@ -55,7 +56,12 @@ export type InvoiceLine = {
 export type InvoiceSignature = { role: SignatureRole; signatory_id: string | null; name: string; designation: string }
 export type InvoiceTax = {
   id?: string; tax_configuration_id: string | null; tax_name: string; rate_percent: string
-  direction: TaxDirection; source?: 'common' | 'vendor' | 'manual'; invoice_amount?: string; verified_amount?: string
+  direction: TaxDirection
+  /** Printed on the IDVS report, so it moves the report's total. */
+  is_report_visible: boolean
+  /** Applied to the register's Net payable amount. */
+  is_net_payable: boolean
+  source?: 'common' | 'vendor' | 'manual'; invoice_amount?: string; verified_amount?: string
 }
 export type InvoicePaymentSplit = {
   id?: string; currency_code: string; percentage: string; exchange_rate: string; amount?: string
@@ -82,7 +88,8 @@ export type Invoice = {
   payment_term_id: string | null; payment_term_name: string; payment_tenure_days: number; due_date: string
   disallowed_amount: string; advance_amount: string; invoice_subtotal: string; verified_subtotal: string
   invoice_tax_total: string; verified_tax_total: string; invoice_total: string; verified_total: string
-  adjusted_verified_amount: string; difference_amount: string
+  adjusted_verified_amount: string; net_payable_amount: string
+  signature_space_mm: number; difference_amount: string
   status: InvoiceStatus; display_status: InvoiceDisplayStatus; is_overdue: boolean
   submitted_date: string | null; sent_to_accounts_date: string | null
   epicor_received_date: string | null; epicor_approved_date: string | null; paid_date: string | null
@@ -93,6 +100,11 @@ export type Invoice = {
 export type InvoiceDetail = Invoice & {
   lines: InvoiceLine[]; taxes: InvoiceTax[]; history: WorkflowHistory[]; attachments: InvoiceAttachment[]; signatures: InvoiceSignature[]
 }
+export type InvoiceSignatureSpace = { min: number; max: number; default: number }
+/** Mirrors the server's check constraint on invoice_idvs.signature_space_mm. */
+export const SIGNATURE_SPACE: InvoiceSignatureSpace = { min: 0, max: 60, default: 15 }
+/** Reported when the IDVS has no Block, Rig or Well: the invoice is common material. */
+export const COMMON_SCOPE_LABEL = 'Common for All Blocks'
 export type InvoiceSaveInput = {
   idvs_number?: string; idvs_date: string; expected_revision?: number; day_count_enabled: boolean
   invoice_number: string; invoice_date: string; invoice_received_date: string
@@ -106,15 +118,18 @@ export type InvoiceSaveInput = {
   taxes: Pick<InvoiceTax, 'tax_configuration_id' | 'tax_name' | 'rate_percent' | 'direction'>[] | null
   payment_splits: PaymentSplitInput[] | null
   signatures: { role: SignatureRole; signatory_id: string }[] | null
+  /** Blank signing space printed above the sign-off names, in millimetres (0-60). */
+  signature_space_mm?: number
 }
 export type CurrencyTotals = {
   currency_code: string; invoice_total: string; verified_total: string; adjusted_verified_amount: string
-  difference_amount: string; invoice_count: number; outstanding_count: number; overdue_count: number
+  net_payable_amount: string; difference_amount: string
+  invoice_count: number; outstanding_count: number; overdue_count: number
 }
 export type StatusCount = { status: string; label: string; count: number }
 export type VendorDashboardRow = { vendor_id: string; vendor_name: string; currency_code: string; invoice_count: number; invoice_total: string; verified_total: string; difference_amount: string; approved_count: number }
 export type BlockDashboardRow = { block_id: string; block_code: string; block_name: string; block_category: string; currency_code: string; invoice_count: number; invoice_total: string; verified_total: string }
-export type AgeingRow = { bucket: string; currency_code: string; invoice_count: number; adjusted_verified_amount: string }
+export type AgeingRow = { bucket: string; currency_code: string; invoice_count: number; adjusted_verified_amount: string; net_payable_amount: string }
 export type RecentActivity = { id: string; invoice_id: string; idvs_number: string; invoice_number: string; vendor_name: string; action_label: string; action_date: string; actor_name: string; remarks: string; created_at: string }
 export type InvoiceDashboard = {
   as_of: string; total_invoices: number; draft_count: number; verification_count: number; epicor_count: number

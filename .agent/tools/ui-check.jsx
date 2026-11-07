@@ -76,6 +76,63 @@ check('IDVS subtotal variance excludes taxes in the shared sheet used by screen 
   subtotalDifference('100.00', '90.00') === 10 && idvsSheetSource.includes(subtotalWiring)
   && invoiceDetailSource.includes('<IdvsSheet') && idvsSheetViewSource.includes('buildIdvsSheet') && invoiceExportSource.includes('buildIdvsSheet'))
 
+// Render the real shared IDVS model: register-only taxes stay off the sheet, an
+// empty Block/Rig/Well prints "Common for All Blocks", and a blank signing row
+// separates the sign-off roles from their names.
+const { buildIdvsSheet, IDVS_TITLE } = await import('../../frontend/src/lib/idvsSheet')
+const { COMMON_SCOPE_LABEL } = await import('../../frontend/src/lib/invoiceProcessing')
+const baseInvoice = {
+  idvs_number: 'IDVS-2026-00001', idvs_date: '2026-01-03', revision: 0,
+  invoice_number: 'INV-001', invoice_date: '2026-01-01', invoice_received_date: '2026-01-03',
+  vendor_id: 'v1', vendor_code: 'VEND-01', vendor_name: 'Example Oilfield Services',
+  order_id: null, order_number: '', order_type: '',
+  block_id: null, block_code: '', block_name: '', block_category: '',
+  rig_id: null, rig_code: '', rig_name: '', well_id: null, well_code: '', well_name: '',
+  location_id: 'l1', location_name: 'Port Harcourt', field_name: '', phase: 'Drilling', day_count_enabled: false,
+  signature_space_mm: 15,
+  description_category_id: null, description_category: '', service_description: 'Completion equipment',
+  detailed_description: '', concerned_person: '', service_from: null, service_to: null, currency_code: 'USD',
+  payment_term_id: null, payment_term_name: '', payment_tenure_days: 30, due_date: '2026-01-31',
+  disallowed_amount: '0', advance_amount: '0', invoice_subtotal: '200', verified_subtotal: '180',
+  invoice_tax_total: '5', verified_tax_total: '4.5', invoice_total: '205', verified_total: '184.5',
+  adjusted_verified_amount: '184.5', net_payable_amount: '182.7', difference_amount: '20.5',
+  status: 'draft', display_status: 'draft', is_overdue: false,
+  submitted_date: null, sent_to_accounts_date: null, epicor_received_date: null, epicor_approved_date: null,
+  paid_date: null, payment_reference: '', remarks: '', line_count: 1, attachment_count: 0,
+  payment_splits: [], is_deleted: false, deleted_at: null, created_by: 'Ada Okafor', updated_by: 'Ada Okafor',
+  created_at: '2026-01-03T00:00:00Z', updated_at: '2026-01-03T00:00:00Z',
+  lines: [{ description: 'Packers', invoice_quantity: '2', invoice_days: '1', invoice_unit_price: '100', invoice_total: '200',
+    verified_quantity: '2', verified_days: '1', verified_unit_price: '90', verified_total: '180', difference_amount: '20', remarks: '' }],
+  taxes: [
+    { tax_name: 'VAT', rate_percent: '7.5', direction: 'addition', is_report_visible: true, is_net_payable: true, source: 'common', invoice_amount: '15', verified_amount: '13.5' },
+    { tax_name: 'NCDMB Levy', rate_percent: '1', direction: 'deduction', is_report_visible: false, is_net_payable: true, source: 'common', invoice_amount: '2', verified_amount: '1.8' },
+    { tax_name: 'Reference only', rate_percent: '2', direction: 'addition', is_report_visible: false, is_net_payable: false, source: 'common', invoice_amount: '4', verified_amount: '3.6' },
+  ],
+  history: [], attachments: [], signatures: [],
+}
+const sheet = buildIdvsSheet(baseInvoice)
+const rowText = row => row.cells.map(cell => cell.text ?? '').join('|')
+const taxRows = sheet.body.filter(row => row.cells.some(cell => /VAT|NCDMB|Reference only/.test(cell.text ?? '')))
+check('IDVS sheet prints only report-visible taxes', taxRows.length === 1 && rowText(taxRows[0]).includes('VAT'), rowText(taxRows[0]) || 'none')
+check('IDVS sheet reports the common scope when Block, Rig and Well are blank',
+  sheet.infoRight.join(' ').includes(`Block: ${COMMON_SCOPE_LABEL}`)
+  && sheet.infoRight.join(' ').includes(`Rig: ${COMMON_SCOPE_LABEL}`)
+  && sheet.infoRight.join(' ').includes(`Well: ${COMMON_SCOPE_LABEL}`), sheet.infoRight.join(' | '))
+const signatureRows = sheet.body.filter(row => row.kind === 'signature')
+const signatureLabels = signatureRows.map(rowText)
+const signingRows = signatureRows.filter(row => row.heightMm)
+check('IDVS sheet leaves a blank signing space between the role row and the names',
+  signatureRows.length === 4 && signatureLabels[0].includes('Prepared By')
+  && signingRows.length === 1 && signatureRows.indexOf(signingRows[0]) === 1
+  && signingRows[0].heightMm === 15 && signatureLabels[2].includes('Ada Okafor')
+  && signatureLabels[3] === '|||', signatureLabels.join(' / '))
+const tightSheet = buildIdvsSheet({ ...baseInvoice, signature_space_mm: 0, block_code: 'OML-01' })
+check('IDVS sheet honours a zero signing space and a classified block',
+  tightSheet.body.filter(row => row.kind === 'signature').length === 3
+  && !tightSheet.body.some(row => row.heightMm)
+  && tightSheet.infoRight.join(' ').includes('Block: OML-01'), tightSheet.infoRight.join(' | '))
+check('IDVS title stays in one shared model', sheet.title === IDVS_TITLE)
+
 const container = w.document.getElementById('root')
 const root = createRoot(container)
 

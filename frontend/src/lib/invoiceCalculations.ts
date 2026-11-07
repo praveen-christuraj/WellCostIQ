@@ -33,11 +33,19 @@ export function resolveExchangeRate(currency: string, invoiceCurrency: string, c
 export type DraftTotals = {
   invoiceSubtotal: number; verifiedSubtotal: number; invoiceTaxTotal: number; verifiedTaxTotal: number
   invoiceTotal: number; verifiedTotal: number; adjustedVerifiedAmount: number; differenceAmount: number
+  /** Register amount: verified total less disallowed and advances, with every net-payable tax applied. */
+  netPayableAmount: number; /** Register-only tax movement: net payable − adjusted verified. */
+  registerTaxAmount: number
   splitAmounts: number[]; splitPercentage: number
 }
+/** Mirrors the server: only report-visible taxes move the IDVS total; only net-payable taxes move the register amount. */
+const taxSwitches = (tax: Partial<Pick<InvoiceTax, 'is_report_visible' | 'is_net_payable'>>) => ({
+  reportVisible: tax.is_report_visible ?? true,
+  netPayable: tax.is_net_payable ?? true,
+})
 export function calculateDraft(
   lines: Pick<InvoiceLine, 'invoice_quantity' | 'invoice_days' | 'invoice_unit_price' | 'verified_quantity' | 'verified_days' | 'verified_unit_price'>[],
-  taxes: Pick<InvoiceTax, 'rate_percent' | 'direction'>[],
+  taxes: Pick<InvoiceTax, 'rate_percent' | 'direction' | 'is_report_visible' | 'is_net_payable'>[],
   disallowedAmount: string,
   advanceAmount: string,
   splits: Pick<InvoicePaymentSplit, 'percentage' | 'exchange_rate'>[],
@@ -47,17 +55,25 @@ export function calculateDraft(
   const verifiedSubtotal = lines.reduce((sum, line) => sum + numeric(line.verified_quantity) * lineDayFactors(line, dayCountEnabled).verified * numeric(line.verified_unit_price), 0)
   let invoiceTaxTotal = 0
   let verifiedTaxTotal = 0
+  let netPayableTaxTotal = 0
   for (const tax of taxes) {
+    const { reportVisible, netPayable } = taxSwitches(tax)
     const sign = tax.direction === 'addition' ? 1 : -1
-    invoiceTaxTotal += sign * invoiceSubtotal * numeric(tax.rate_percent) / 100
-    verifiedTaxTotal += sign * verifiedSubtotal * numeric(tax.rate_percent) / 100
+    if (reportVisible) {
+      invoiceTaxTotal += sign * invoiceSubtotal * numeric(tax.rate_percent) / 100
+      verifiedTaxTotal += sign * verifiedSubtotal * numeric(tax.rate_percent) / 100
+    }
+    if (netPayable) netPayableTaxTotal += sign * verifiedSubtotal * numeric(tax.rate_percent) / 100
   }
   const invoiceTotal = invoiceSubtotal + invoiceTaxTotal
   const verifiedTotal = verifiedSubtotal + verifiedTaxTotal
   const adjustedVerifiedAmount = verifiedTotal - numeric(disallowedAmount) - numeric(advanceAmount)
+  const netPayableAmount = verifiedSubtotal + netPayableTaxTotal - numeric(disallowedAmount) - numeric(advanceAmount)
   return {
     invoiceSubtotal, verifiedSubtotal, invoiceTaxTotal, verifiedTaxTotal, invoiceTotal, verifiedTotal,
     adjustedVerifiedAmount, differenceAmount: invoiceTotal - verifiedTotal,
+    netPayableAmount, registerTaxAmount: netPayableAmount - adjustedVerifiedAmount,
+    // Payment splits follow the IDVS report amount, exactly as the server does.
     splitAmounts: splits.map(split => adjustedVerifiedAmount * numeric(split.percentage) / 100 * numeric(split.exchange_rate)),
     splitPercentage: splits.reduce((sum, split) => sum + numeric(split.percentage), 0),
   }

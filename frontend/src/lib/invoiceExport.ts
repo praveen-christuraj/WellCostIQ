@@ -16,7 +16,8 @@ export const invoiceExportColumns: ExportColumn<Invoice>[] = [
   { header: 'Verified Subtotal', value: row => row.verified_subtotal }, { header: 'Invoice Total', value: row => row.invoice_total },
   { header: 'Verified Total', value: row => row.verified_total }, { header: 'Difference', value: row => row.difference_amount },
   { header: 'Disallowed', value: row => row.disallowed_amount }, { header: 'Advance', value: row => row.advance_amount },
-  { header: 'Adjusted Payable', value: row => row.adjusted_verified_amount }, { header: 'Payment Terms', value: row => row.payment_term_name },
+  { header: 'Adjusted Payable', value: row => row.adjusted_verified_amount },
+  { header: 'Net Payable', value: row => row.net_payable_amount }, { header: 'Payment Terms', value: row => row.payment_term_name },
   { header: 'Due Date', value: row => row.due_date }, { header: 'Status', value: row => INVOICE_STATUS_LABEL[row.display_status] },
   { header: 'Submitted', value: row => row.submitted_date ?? '' }, { header: 'Sent to Accounts', value: row => row.sent_to_accounts_date ?? '' },
   { header: 'Received for EPICOR', value: row => row.epicor_received_date ?? '' }, { header: 'Approved in EPICOR', value: row => row.epicor_approved_date ?? '' },
@@ -40,7 +41,8 @@ const idvsColumns: ExportColumn<InvoiceDetail>[] = [
   { header: 'Currency', value: row => row.currency_code }, { header: 'Invoice Total', value: row => row.invoice_total },
   { header: 'Verified Total', value: row => row.verified_total }, { header: 'Difference', value: row => row.difference_amount },
   { header: 'Adjusted Payable', value: row => row.adjusted_verified_amount },
-  { header: 'Taxes', value: row => row.taxes.map(tax => `${tax.tax_name} ${tax.direction} ${tax.rate_percent}%`).join(' | ') },
+  { header: 'Net Payable', value: row => row.net_payable_amount },
+  { header: 'Taxes', value: row => row.taxes.map(tax => `${tax.tax_name} ${tax.direction} ${tax.rate_percent}%${tax.is_report_visible ? '' : ' [register only]'}`).join(' | ') },
   { header: 'Payment Splits', value: row => row.payment_splits.map(split => `${split.percentage}% ${split.currency_code} ${split.amount}`).join(' | ') },
 ]
 export async function exportIdvs(invoice: InvoiceDetail, format: 'csv' | 'xlsx' | 'pdf') {
@@ -96,12 +98,21 @@ async function writeIdvsPdf(fileName: string, sheet: IdvsSheet, invoice: Invoice
     styles: { font, fontSize: size(referencePt.body), textColor: ink, lineColor: ink, lineWidth: 0.2, cellPadding: 1.1, valign: 'middle', fillColor: false },
     headStyles: { font, fontStyle: 'bold', fontSize: size(referencePt.heading), halign: 'center', textColor: ink, fillColor: false },
     columnStyles,
+    // The blank sign-off row is the printed signing space; every other row keeps autoTable's sizing.
+    didParseCell: data => {
+      if (data.section !== 'body') return
+      const heightMm = sheet.body[data.row.index]?.heightMm
+      if (heightMm) data.cell.styles.minCellHeight = heightMm
+    },
     head: sheet.header.map(row => row.map(pdfCell)),
     body: sheet.body.map(row => row.cells.map(pdfCell)),
   })
   const finalY = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
+  // A taller signing space must not push the footer past the printable page.
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const footerY = Math.min(finalY + 6, pageHeight - margin / 2)
   doc.setFont(font, 'normal'); doc.setFontSize(7)
-  doc.text(`Generated ${new Date().toLocaleString()} · ${invoice.attachment_count} supporting attachment(s) · Amounts shown to two decimals; calculations stored at save-time precision`, margin, Math.min(finalY + 6, 204))
+  doc.text(`Generated ${new Date().toLocaleString()} · ${invoice.attachment_count} supporting attachment(s) · Amounts shown to two decimals; calculations stored at save-time precision`, margin, footerY)
   doc.save(fileName)
 }
 
@@ -158,6 +169,8 @@ async function writeIdvsXlsx(fileName: string, sheet: IdvsSheet) {
   const heights = sheet.body.map(row => {
     const description = row.cells[1]?.text ?? ''
     const remarks = row.cells[columnCount - 1]?.text ?? ''
+    // write-excel-file heights are points: 1 mm ≈ 2.835 pt gives the printed signing space.
+    if (row.heightMm) return Math.round(row.heightMm * 2.835)
     if (row.kind !== 'line') return row.kind === 'signature' ? 22 : 20
     const lines = Math.max(1, Math.ceil(description.length / 80), Math.ceil(remarks.length / 22))
     return Math.max(20, lines * 18)
@@ -186,7 +199,7 @@ export async function exportInvoiceDashboardPdf(data: InvoiceDashboard, selected
   doc.setFont('helvetica', 'bold'); doc.setFontSize(17); doc.text('Invoice Processing Dashboard', 14, 17)
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(`As of ${data.as_of} · Generated ${new Date().toLocaleString()} · Amounts remain separated by currency`, 14, 24)
   autoTable(doc, { startY: 31, head: [['Active IDVS', 'Verification', 'EPICOR', 'Approved', 'Paid', 'Overdue', 'Attachments']], body: [[data.total_invoices, data.verification_count, data.epicor_count, data.approved_count, data.paid_count, data.overdue_count, data.attachment_count]], headStyles: { fillColor: [21, 81, 91] } })
-  autoTable(doc, { startY: (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7, head: [['Currency', 'IDVS', 'Invoice total', 'Verified total', 'Adjusted payable', 'Difference', 'Outstanding', 'Overdue']], body: data.currency_totals.map(row => [row.currency_code, row.invoice_count, row.invoice_total, row.verified_total, row.adjusted_verified_amount, row.difference_amount, row.outstanding_count, row.overdue_count]), headStyles: { fillColor: [21, 81, 91] } })
+  autoTable(doc, { startY: (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7, head: [['Currency', 'IDVS', 'Invoice total', 'Verified total', 'IDVS amount', 'Net payable', 'Difference', 'Outstanding', 'Overdue']], body: data.currency_totals.map(row => [row.currency_code, row.invoice_count, row.invoice_total, row.verified_total, row.adjusted_verified_amount, row.net_payable_amount, row.difference_amount, row.outstanding_count, row.overdue_count]), headStyles: { fillColor: [21, 81, 91] } })
   const breakdownY = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7
   autoTable(doc, { startY: breakdownY, head: [['Workflow status', 'Count']], body: data.status_counts.map(row => [row.label, row.count]), headStyles: { fillColor: [21, 81, 91] }, margin: { left: 14, right: 157 } })
   autoTable(doc, { startY: breakdownY, head: [[`Vendor · ${selectedCurrency || 'none'}`, 'IDVS', 'Verified total']], body: data.vendor_rows.filter(row => row.currency_code === selectedCurrency).map(row => [row.vendor_name, row.invoice_count, formatAmount(row.verified_total)]), headStyles: { fillColor: [21, 81, 91] }, margin: { left: 151, right: 14 } })
