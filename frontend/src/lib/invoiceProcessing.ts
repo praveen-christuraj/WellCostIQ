@@ -40,11 +40,13 @@ export type SignatoryOption = { id: string; signatory_role: SignatureRole; full_
 export type InvoiceReference = {
   vendors: VendorOption[]; orders: OrderOption[]; currencies: CurrencyOption[]
   rigs: RigOption[]; blocks: BlockOption[]; wells: WellOption[]
+  descriptions: ConfigItem[]
   locations: ConfigItem[]; categories: ConfigItem[]; payment_terms: PaymentTerm[]
   taxes: TaxConfiguration[]; exchange_rates: ExchangeRate[]; signatories: SignatoryOption[]
 }
 export type InvoiceConfiguration = {
   vendors: VendorOption[]; currencies: CurrencyOption[]
+  descriptions: ConfigItem[]
   locations: ConfigItem[]; categories: ConfigItem[]; payment_terms: PaymentTerm[]
   taxes: TaxConfiguration[]; exchange_rates: ExchangeRate[]; blocks: BlockSetting[]; signatories: Signatory[]
 }
@@ -106,6 +108,7 @@ export const SIGNATURE_SPACE: InvoiceSignatureSpace = { min: 0, max: 60, default
 /** Reported when the IDVS has no Block, Rig or Well: the invoice is common material. */
 export const COMMON_SCOPE_LABEL = 'Common for All Blocks'
 export type InvoiceSaveInput = {
+  block_category?: 'own' | 'jv' | ''
   idvs_number?: string; idvs_date: string; expected_revision?: number; day_count_enabled: boolean
   invoice_number: string; invoice_date: string; invoice_received_date: string
   vendor_id: string; order_id: string | null; block_id: string | null; rig_id: string | null; well_id: string | null
@@ -156,7 +159,7 @@ export const SIGNATURE_LABELS: Record<SignatureRole, string> = {
   prepared: 'Prepared By', checked: 'Checked By', verified: 'Verified By', approved: 'Approved By',
 }
 export const INVOICE_IMPORT_HEADERS = ['Vendor Code', 'Invoice Number', 'Invoice Date', 'Invoice Received Date', 'IDVS Date', 'Location', 'Service Description', 'Currency Code', 'Line Description', 'Invoice Quantity', 'Invoice Unit Price']
-export const INVOICE_IMPORT_OPTIONAL = ['IDVS Number', 'PO/SO Number', 'Block Code', 'Rig Code', 'Well Code', 'Description Category', 'Detailed Description', 'Concerned Person', 'Field Name', 'Phase', 'Service From', 'Service To', 'Payment Term Code', 'Payment Tenure Days', 'Disallowed Amount', 'Advance Amount', 'Invoice Days', 'Verified Quantity', 'Verified Days', 'Verified Unit Price', 'Line Remarks', 'Remarks']
+export const INVOICE_IMPORT_OPTIONAL = ['IDVS Number', 'PO/SO Number', 'Block Category', 'Block Code', 'Rig Code', 'Well Code', 'Description Category', 'Detailed Description', 'Concerned Person', 'Field Name', 'Phase', 'Service From', 'Service To', 'Payment Term Code', 'Payment Tenure Days', 'Disallowed Amount', 'Advance Amount', 'Invoice Days', 'Verified Quantity', 'Verified Days', 'Verified Unit Price', 'Line Remarks', 'Remarks']
 export const INVOICE_IMPORT_SAMPLE: ImportRow = {
   'Vendor Code': 'VEND-01', 'Invoice Number': 'INV-001', 'Invoice Date': '2026-01-01', 'Invoice Received Date': '2026-01-03',
   'IDVS Date': '2026-01-03', Location: 'Port Harcourt', 'Service Description': 'Completion services', 'Currency Code': 'USD',
@@ -168,6 +171,7 @@ export function importInvoiceRow(row: ImportRow) {
   return {
     idvs_number: row['IDVS Number']?.trim() || '', idvs_date: row['IDVS Date'], invoice_received_date: row['Invoice Received Date'],
     vendor_code: row['Vendor Code']?.trim(), order_number: row['PO/SO Number']?.trim() || '', invoice_number: row['Invoice Number']?.trim(),
+    block_category: row['Block Category']?.trim().toLowerCase() || null,
     invoice_date: row['Invoice Date'], block_code: row['Block Code']?.trim() || '', rig_code: row['Rig Code']?.trim() || '', well_code: row['Well Code']?.trim() || '',
     location: row.Location?.trim(), description_category: row['Description Category']?.trim() || '', service_description: row['Service Description']?.trim(),
     detailed_description: row['Detailed Description']?.trim() || '', concerned_person: row['Concerned Person']?.trim() || '', field_name: row['Field Name']?.trim() || '',

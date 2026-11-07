@@ -64,6 +64,7 @@ export default function InvoiceEditor() {
   const loadSequence = useRef(0)
   // Sign-off selections as last loaded or saved; an unchanged selection is sent as null so stored snapshots are kept.
   const signatureBaseline = useRef('[]')
+  const [blockCategory, setBlockCategory] = useState<'own' | 'jv' | ''>('')
   const [reference, setReference] = useState<InvoiceReference | null>(null)
   const [form, setForm] = useState<EditorForm>(initialForm)
   const [revision, setRevision] = useState(0)
@@ -95,6 +96,7 @@ export default function InvoiceEditor() {
         if (sequence !== loadSequence.current) return
         if (invoice.status !== 'draft') { navigate(`/invoice-processing/idvs/${id}/view`, { replace: true }); return }
         setRevision(invoice.revision)
+        setBlockCategory(invoice.block_category)
         setForm({
           idvs_number: invoice.idvs_number, idvs_date: invoice.idvs_date, invoice_number: invoice.invoice_number,
           invoice_date: invoice.invoice_date, invoice_received_date: invoice.invoice_received_date, vendor_id: invoice.vendor_id,
@@ -149,7 +151,8 @@ export default function InvoiceEditor() {
   }
   const chooseWell = (wellId: string) => {
     const well = reference?.wells.find(item => item.id === wellId)
-    setForm(current => ({ ...current, well_id: wellId, rig_id: well?.rig_id ?? current.rig_id, block_id: well?.block_id ?? current.block_id })); setDirty(true)
+    setForm(current => ({ ...current, well_id: wellId, rig_id: well?.rig_id ?? current.rig_id, block_id: well?.block_id ?? current.block_id }));
+    if (well) setBlockCategory(reference?.blocks.find(block => block.id === well.block_id)?.category ?? ''); setDirty(true)
   }
   const selectedVendor = reference?.vendors.find(item => item.id === form.vendor_id) ?? null
   const selectedOrder = reference?.orders.find(item => item.id === form.order_id) ?? null
@@ -218,6 +221,7 @@ export default function InvoiceEditor() {
     return JSON.stringify(choice) === signatureBaseline.current ? null : choice
   }
   const payload = (): InvoiceSaveInput => ({
+    block_category: blockCategory,
     idvs_number: form.idvs_number, idvs_date: form.idvs_date, ...(editing ? { expected_revision: revision } : {}),
     invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, invoice_received_date: form.invoice_received_date,
     vendor_id: form.vendor_id, order_id: form.order_id || null, block_id: form.block_id || null, rig_id: form.rig_id || null, well_id: form.well_id || null,
@@ -277,7 +281,8 @@ export default function InvoiceEditor() {
         </SectionCard>
         <SectionCard title="Operational scope & service" subtitle="Scope is optional for common-material invoices. Selecting a well also resolves its rig and block.">
           <Box display="grid" gridTemplateColumns="repeat(auto-fit,minmax(175px,1fr))" gap={1.5}>
-            <TextField select label="Block (optional)" value={form.block_id} onChange={e => { setForm(current => ({ ...current, block_id: e.target.value, well_id: '' })); setDirty(true) }}><MenuItem value="">Common / no block</MenuItem>{reference?.blocks.map(item => <MenuItem key={item.id} value={item.id}>{item.label}{item.category ? ` · ${item.category.toUpperCase()}` : ''}</MenuItem>)}</TextField>
+            <TextField select label="Block classification" value={blockCategory} onChange={e => { setBlockCategory(e.target.value as 'own' | 'jv' | ''); setDirty(true) }} helperText="Saved with this IDVS; defaults from the selected block."><MenuItem value="">Unclassified / common</MenuItem><MenuItem value="own">Own Block</MenuItem><MenuItem value="jv">JV Block</MenuItem></TextField>
+            <TextField select label="Block (optional)" value={form.block_id} onChange={e => { setForm(current => ({ ...current, block_id: e.target.value, well_id: '' })); setBlockCategory(reference?.blocks.find(block => block.id === e.target.value)?.category ?? ''); setDirty(true) }}><MenuItem value="">Common / no block</MenuItem>{reference?.blocks.map(item => <MenuItem key={item.id} value={item.id}>{item.label}{item.category ? ` · ${item.category.toUpperCase()}` : ''}</MenuItem>)}</TextField>
             <TextField select label="Rig (optional)" value={form.rig_id} onChange={e => { setForm(current => ({ ...current, rig_id: e.target.value, well_id: '' })); setDirty(true) }}><MenuItem value="">No rig</MenuItem>{reference?.rigs.map(item => <MenuItem key={item.id} value={item.id}>{item.label}</MenuItem>)}</TextField>
             <TextField select label="Well (optional)" value={form.well_id} onChange={e => chooseWell(e.target.value)}><MenuItem value="">No well</MenuItem>{availableWells.map(item => <MenuItem key={item.id} value={item.id}>{item.label}</MenuItem>)}</TextField>
             <TextField select required label="Invoice location" value={form.location_id} onChange={e => patch('location_id', e.target.value)}><MenuItem value="" disabled>Select location</MenuItem>{reference?.locations.map((item: ConfigItem) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</TextField>
@@ -287,7 +292,7 @@ export default function InvoiceEditor() {
             <TextField label="Concerned person" value={form.concerned_person} onChange={e => patch('concerned_person', e.target.value)}/>
             <TextField type="date" label="Service from" value={form.service_from} onChange={e => patch('service_from', e.target.value)} InputLabelProps={{ shrink: true }}/>
             <TextField type="date" label="Service to" value={form.service_to} onChange={e => patch('service_to', e.target.value)} InputLabelProps={{ shrink: true }}/>
-            <TextField required label="Service description" value={form.service_description} onChange={e => patch('service_description', e.target.value)} sx={{ gridColumn: 'span 2' }} inputProps={{ maxLength: 500 }}/>
+            <Autocomplete freeSolo options={reference?.descriptions.map(item => item.description || item.name) ?? []} inputValue={form.service_description} onInputChange={(_event, value) => patch('service_description', value)} renderInput={params => <TextField {...params} required label="Service description" inputProps={{ ...params.inputProps, maxLength: 500 }}/>} sx={{ gridColumn: 'span 2' }}/>
             <TextField label="Detailed description" multiline minRows={2} value={form.detailed_description} onChange={e => patch('detailed_description', e.target.value)} sx={{ gridColumn: 'span 2' }} inputProps={{ maxLength: 2000 }}/>
           </Box>
         </SectionCard>

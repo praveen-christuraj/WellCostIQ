@@ -155,11 +155,6 @@ export function printMoney(value: string | number | null | undefined, currency =
   return symbol ? `${sign}${symbol}${formatted}` : `${sign}${code ? `${code} ` : ''}${formatted}`
 }
 
-function currencyLabel(currency: string) {
-  const code = currency.trim().toUpperCase()
-  const symbol = CURRENCY_SYMBOLS[code]
-  return symbol ? `${symbol} (${code})` : code || 'amount'
-}
 
 /** Cumulative up to the previous day, the report day's cost and the total. */
 function daySplit(line: { actual_to_date: string; actual_prior?: string; actual_today?: string }) {
@@ -752,7 +747,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
         <IncidentTable title="NPT summary" rows={npt} total={asNumber(summary?.totals.npt ?? latestComparison.npt_to_date)}/>
       </div>
     </div>
-    <footer className="dcr-footer"><span>Prepared from saved Daily Cost Management records · all figures in {currencyLabel(currency)}</span><span>Printed {printed}{report.reportKind === 'daily' ? '' : ' · cumulative schedules begin on page 2'}</span></footer>
+    <footer className="dcr-footer"><span style={{ marginLeft: 'auto' }}>Printed {printed}{report.reportKind === 'daily' ? '' : ' · cumulative schedules begin on page 2'}</span></footer>
   </section>
 }
 

@@ -79,6 +79,14 @@ class InvoiceDescriptionCategory(InvoiceRecord):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
 
 
+class InvoiceDescription(InvoiceRecord):
+    __tablename__ = "invoice_descriptions"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_invoice_descriptions_org_name"),)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+
+
 class InvoicePaymentTerm(InvoiceRecord):
     __tablename__ = "invoice_payment_terms"
     __table_args__ = (

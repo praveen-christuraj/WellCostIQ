@@ -221,7 +221,7 @@ for (const heading of ['Service-wise cumulative cost', 'Consumables cumulative c
   assert.ok(sheet.textContent.includes(heading), `cumulative pages print ${heading}`)
 }
 const matrix = sheet.querySelector('.dcr-mud-analysis')
-for (const text of ['Surface hole', 'OBM', 'Opening Stock', 'Receipt', 'Additions', 'Total Mud', 'Losses', 'Closing Stock', 'Meterage (current depth)', 'Cost / BBL', 'Reconciled Cost', '20', '30', '60', '90', '15', '95', '1,234.57 m', '€13', '€188']) {
+for (const text of ['Surface hole', 'OBM', 'Opening Stock', 'Receipt', 'Additions', 'Total Mud', 'Losses', 'Closing Stock', 'Meterage', 'bbl/m Consumed', 'Cost / BBL', 'Reconciled Cost', '20', '30', '60', '90', '15', '95', '1,234.57 m', '€13', '€188']) {
   assert.ok(matrix.textContent.includes(text), `mud matrix prints ${text}`)
 }
 assert.equal(matrix.querySelector('thead th:nth-child(2)').textContent, 'Surface holeOBM', 'mud analysis header prints only section and mud type')

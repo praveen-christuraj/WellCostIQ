@@ -130,3 +130,12 @@ npm run build
 cd ..
 make graph
 ```
+
+
+## Configuration uploads and saved block classification
+
+Locations, description categories, reusable descriptions and Sign-off signatories support CSV/XLSX bulk upload from their configuration tabs. Download a template, fill it, review the preview and import. `Name` is required. Signatories additionally require `Designation` and `Role` (`prepared`, `checked`, `verified`, `approved`). `Active` is optional and defaults to true. Non-signatory lists accept optional `Description`; reusable descriptions use that full service text, falling back to Name when blank. Duplicate names (or role/name pairs for signatories) reject the whole batch, including duplicates within the file. Existing entries are preserved; failed batches retain no rows or audit entries. All configuration imports require `invoice-processing:configure` and are workspace-scoped.
+
+IDVS entry has a Block classification selector for Own or JV. Selecting a block/well preloads its configured classification; the invoice can override it and retain its saved value. Active and deleted registers filter by Own, JV, Common/no block or Unclassified blocks, combined with other filters. Invoice import accepts optional `Block Category` (`own` or `jv`). Dashboard block totals group by block and saved classification. The existing role-aware signatories and signing-space/report behavior remain authoritative.
+
+API contract `0.6.1` and migration `b2c3d4e5f6a7` follow main's `c1d2e3f4a5b6`; the migration adds only `invoice_descriptions` and preserves existing rows and signatories. Deploy the migration and API before the matching frontend. The Daily Cost footer no longer prints the “Prepared from saved Daily Cost Management records · all figures in …” sentence; its print timestamp remains.

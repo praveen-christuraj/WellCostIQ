@@ -1123,8 +1123,12 @@ digraph WellCostIQ {
   "frontend/src/pages/FuelCostRegister.tsx" -> "frontend/src/lib/export.ts";
   "frontend/src/pages/FuelCostRegister.tsx" -> "frontend/src/lib/fuelCost.ts";
   "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/components/DataTable.tsx";
+  "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/components/ImportDialog.tsx";
   "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
+  "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/lib/export.ts";
   "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/lib/invoiceCalculations.ts";
   "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/lib/invoiceProcessing.ts";
   "frontend/src/pages/InvoiceDetail.tsx" -> "frontend/src/components/Common.tsx";

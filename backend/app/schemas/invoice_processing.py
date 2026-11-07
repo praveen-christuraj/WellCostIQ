@@ -48,6 +48,20 @@ class InvoiceConfigItemIn(_Strict):
         return _trim(value)
 
 
+class InvoiceConfigImportRow(InvoiceConfigItemIn):
+    designation: str = Field(default="", max_length=150)
+    signatory_role: SignatureRole | None = None
+
+    @field_validator("designation", mode="before")
+    @classmethod
+    def trim_designation(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class InvoiceConfigImport(_Strict):
+    rows: list[InvoiceConfigImportRow] = Field(min_length=1, max_length=5000)
+
+
 class InvoicePaymentTermSplitIn(_Strict):
     currency_code: str = Field(min_length=2, max_length=10)
     percentage: Decimal10 = Field(gt=0, le=100)
@@ -296,6 +310,7 @@ class InvoiceReference(_Strict):
     rigs: list[InvoiceRigOption]
     blocks: list[InvoiceBlockOption]
     wells: list[InvoiceWellOption]
+    descriptions: list[InvoiceConfigItemOut] = Field(default_factory=list)
     locations: list[InvoiceConfigItemOut]
     categories: list[InvoiceConfigItemOut]
     payment_terms: list[InvoicePaymentTermOut]
@@ -307,6 +322,7 @@ class InvoiceReference(_Strict):
 class InvoiceConfiguration(_Strict):
     vendors: list[InvoiceVendorOption]
     currencies: list[InvoiceCurrencyOption]
+    descriptions: list[InvoiceConfigItemOut] = Field(default_factory=list)
     locations: list[InvoiceConfigItemOut]
     categories: list[InvoiceConfigItemOut]
     payment_terms: list[InvoicePaymentTermOut]
@@ -365,6 +381,7 @@ class InvoicePaymentSplitIn(_Strict):
 
 
 class InvoiceSave(_Strict):
+    block_category: Literal["own", "jv", ""] | None = None
     idvs_number: str = Field(default="", max_length=60)
     idvs_date: date
     expected_revision: int | None = Field(default=None, ge=0)
@@ -610,6 +627,7 @@ class InvoiceDetailOut(InvoiceSummaryOut):
 
 
 class InvoiceImportRow(_Strict):
+    block_category: Literal["own", "jv", ""] | None = None
     idvs_number: str = Field(default="", max_length=60)
     idvs_date: Any
     invoice_received_date: Any

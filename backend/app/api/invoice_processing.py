@@ -13,6 +13,7 @@ from app.schemas.invoice_processing import (
     InvoiceBlockSettingOut,
     InvoiceBulkActionOut,
     InvoiceConfigItemIn,
+    InvoiceConfigImport,
     InvoiceConfigItemOut,
     InvoiceConfiguration,
     InvoiceDashboard,
@@ -101,6 +102,11 @@ def configure_block(block_id: str, data: InvoiceBlockSettingIn, request: Request
     return service.set_block_category(db, user.organization_id, block_id, data, user, request)
 
 
+@router.post("/config/{kind}/import", response_model=InvoiceBulkActionOut, dependencies=[Depends(require("invoice-processing:configure"))])
+def import_configuration(kind: str, data: InvoiceConfigImport, request: Request, db: Db, user: Current):
+    return service.import_configuration(db, user.organization_id, kind, data, user, request)
+
+
 @router.post("/config/{kind}", response_model=InvoiceConfigItemOut, status_code=201, dependencies=[Depends(require("invoice-processing:configure"))])
 def create_config_item(kind: str, data: InvoiceConfigItemIn, request: Request, db: Db, user: Current):
     return service.save_config_item(db, user.organization_id, kind, data, user, request)
@@ -131,13 +137,13 @@ def purge_config(kind: str, data: InvoiceIDs, request: Request, db: Db, user: Cu
 def deleted_invoices(
     db: Db, user: Current, status: str = "", vendor_id: str = "", block_id: str = "",
     rig_id: str = "", well_id: str = "", currency_code: str = "", location_id: str = "",
-    overdue: bool = False, date_field: str = "invoice_received_date",
+    block_category: str = "", overdue: bool = False, date_field: str = "invoice_received_date",
     date_from: date | None = Query(None, alias="from"), date_to: date | None = Query(None, alias="to"),
 ):
     return service.list_invoices(
         db, user.organization_id, deleted=True, status=status, vendor_id=vendor_id, block_id=block_id,
         rig_id=rig_id, well_id=well_id, currency_code=currency_code, location_id=location_id,
-        overdue=overdue, date_field=date_field, date_from=date_from, date_to=date_to,
+        block_category=block_category, overdue=overdue, date_field=date_field, date_from=date_from, date_to=date_to,
     )
 
 
@@ -145,13 +151,13 @@ def deleted_invoices(
 def invoices(
     db: Db, user: Current, status: str = "", vendor_id: str = "", block_id: str = "",
     rig_id: str = "", well_id: str = "", currency_code: str = "", location_id: str = "",
-    overdue: bool = False, date_field: str = "invoice_received_date",
+    block_category: str = "", overdue: bool = False, date_field: str = "invoice_received_date",
     date_from: date | None = Query(None, alias="from"), date_to: date | None = Query(None, alias="to"),
 ):
     return service.list_invoices(
         db, user.organization_id, status=status, vendor_id=vendor_id, block_id=block_id,
         rig_id=rig_id, well_id=well_id, currency_code=currency_code, location_id=location_id,
-        overdue=overdue, date_field=date_field, date_from=date_from, date_to=date_to,
+        block_category=block_category, overdue=overdue, date_field=date_field, date_from=date_from, date_to=date_to,
     )
 
 

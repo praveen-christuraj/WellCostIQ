@@ -27,6 +27,7 @@ export default function InvoiceRegister({ deletedView = false }: { deletedView?:
   const [notice, setNotice] = useState('')
   const [vendor, setVendor] = useState('')
   const [status, setStatus] = useState(searchParams.get('status') ?? '')
+  const [blockCategory, setBlockCategory] = useState(searchParams.get('block_category') ?? '')
   const [block, setBlock] = useState('')
   const [currency, setCurrency] = useState('')
   const [location, setLocation] = useState('')
@@ -46,12 +47,13 @@ export default function InvoiceRegister({ deletedView = false }: { deletedView?:
   const query = useMemo(() => {
     const params = new URLSearchParams()
     if (vendor) params.set('vendor_id', vendor); if (status) params.set('status', status)
+    if (blockCategory) params.set('block_category', blockCategory)
     if (block) params.set('block_id', block); if (currency) params.set('currency_code', currency)
     if (location) params.set('location_id', location); if (dateFrom) params.set('from', dateFrom)
     if (dateTo) params.set('to', dateTo); params.set('date_field', dateField)
     if (overdue) params.set('overdue', 'true')
     return `?${params}`
-  }, [vendor, status, block, currency, location, dateField, dateFrom, dateTo, overdue])
+  }, [vendor, status, block, blockCategory, currency, location, dateField, dateFrom, dateTo, overdue])
   const load = useCallback(async () => {
     setLoading(true); setError(''); setSelected([])
     try {
@@ -65,8 +67,8 @@ export default function InvoiceRegister({ deletedView = false }: { deletedView?:
   }, [query, showDeleted]) // reference is deliberately loaded once per workspace page instance
   useEffect(() => { void load() }, [load])
   useEffect(() => { setShowDeleted(deletedView) }, [deletedView])
-  const resetFilters = () => { setVendor(''); setStatus(''); setBlock(''); setCurrency(''); setLocation(''); setDateFrom(''); setDateTo(''); setOverdue(false); setDateField('invoice_date') }
-  const filterActive = Boolean(vendor || status || block || currency || location || dateFrom || dateTo || overdue)
+  const resetFilters = () => { setVendor(''); setStatus(''); setBlock(''); setBlockCategory(''); setCurrency(''); setLocation(''); setDateFrom(''); setDateTo(''); setOverdue(false); setDateField('invoice_date') }
+  const filterActive = Boolean(vendor || status || blockCategory || block || currency || location || dateFrom || dateTo || overdue)
   const openWorkflow = (targets: Invoice[], action: WorkflowAction | 'payment') => {
     setWorkflow({ rows: targets, action }); setActionDate(today()); setActionRemarks(''); setPaymentReference(''); setError('')
   }
@@ -108,10 +110,11 @@ export default function InvoiceRegister({ deletedView = false }: { deletedView?:
   const canBulkPayment = Boolean(selected.length && selected.every(row => row.status === 'approved' && !row.paid_date))
 
   const columns = useMemo<ColDef<Invoice>[]>(() => [
+    { headerName: 'Block classification', field: 'block_category', minWidth: 155, valueFormatter: p => p.value === 'own' ? 'Own Block' : p.value === 'jv' ? 'JV Block' : p.data?.block_id ? 'Unclassified' : 'Common / no block' },
     { headerName: 'IDVS', field: 'idvs_number', minWidth: 155, cellRenderer: (p: ICellRendererParams<Invoice>) => <Box height="100%" display="flex" flexDirection="column" justifyContent="center"><Typography fontSize={12} fontWeight={750}>{p.value}</Typography><Typography fontSize={10} color="text.secondary">{formatDate(p.data?.idvs_date)}</Typography></Box> },
     { headerName: 'INVOICE', field: 'invoice_number', minWidth: 145 }, { headerName: 'INVOICE DATE', field: 'invoice_date', minWidth: 125, valueFormatter: p => formatDate(p.value) },
     { headerName: 'VENDOR', field: 'vendor_name', minWidth: 215, flex: 1 }, { headerName: 'PO / SO', field: 'order_number', minWidth: 125 },
-    { headerName: 'BLOCK', field: 'block_code', minWidth: 115, cellRenderer: (p: ICellRendererParams<Invoice>) => p.value ? <Box display="flex" height="100%" alignItems="center" gap={.6}><span>{p.value}</span><Tag tone={p.data?.block_category === 'jv' ? 'info' : p.data?.block_category === 'own' ? 'success' : 'warning'}>{p.data?.block_category?.toUpperCase() || '?'}</Tag></Box> : <Typography fontSize={11} color="text.secondary" alignSelf="center">{COMMON_SCOPE_LABEL}</Typography> },
+    { headerName: 'Block', field: 'block_code', minWidth: 115, valueFormatter: p => p.value || COMMON_SCOPE_LABEL },
     { headerName: 'RIG / WELL', field: 'well_code', minWidth: 145, valueGetter: p => [p.data?.rig_code, p.data?.well_code].filter(Boolean).join(' / ') },
     { headerName: 'LOCATION', field: 'location_name', minWidth: 145 }, { headerName: 'CURRENCY', field: 'currency_code', minWidth: 90, maxWidth: 100 },
     { headerName: 'INVOICE TOTAL', field: 'invoice_total', minWidth: 135, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },
@@ -156,6 +159,7 @@ export default function InvoiceRegister({ deletedView = false }: { deletedView?:
       <Box display="grid" gridTemplateColumns="repeat(auto-fit,minmax(145px,1fr))" gap={1.2}>
         <TextField select size="small" label="Vendor" value={vendor} onChange={e => setVendor(e.target.value)}><MenuItem value="">All vendors</MenuItem>{reference?.vendors.map(item => <MenuItem key={item.id} value={item.id}>{item.label}</MenuItem>)}</TextField>
         <TextField select size="small" label="Status" value={status} onChange={e => setStatus(e.target.value)}><MenuItem value="">All statuses</MenuItem>{Object.entries(INVOICE_STATUS_LABEL).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField>
+        <TextField select size="small" label="Block classification" value={blockCategory} onChange={e => setBlockCategory(e.target.value)}><MenuItem value="">All classifications</MenuItem><MenuItem value="own">Own Blocks</MenuItem><MenuItem value="jv">JV Blocks</MenuItem><MenuItem value="common">Common / no block</MenuItem><MenuItem value="unclassified">Unclassified blocks</MenuItem></TextField>
         <TextField select size="small" label="Block" value={block} onChange={e => setBlock(e.target.value)}><MenuItem value="">All blocks / common</MenuItem>{reference?.blocks.map(item => <MenuItem key={item.id} value={item.id}>{item.label}</MenuItem>)}</TextField>
         <TextField select size="small" label="Currency" value={currency} onChange={e => setCurrency(e.target.value)}><MenuItem value="">All currencies</MenuItem>{reference?.currencies.map(item => <MenuItem key={item.currency_code} value={item.currency_code}>{item.currency_code} · {item.currency_name}</MenuItem>)}</TextField>
         <TextField select size="small" label="Location" value={location} onChange={e => setLocation(e.target.value)}><MenuItem value="">All locations</MenuItem>{reference?.locations.map(item => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</TextField>

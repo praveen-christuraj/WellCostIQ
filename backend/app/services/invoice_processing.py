@@ -30,6 +30,7 @@ from app.models import (
     Well,
 )
 from app.models.invoice_processing import (
+    InvoiceDescription,
     SIGNATURE_ROLES,
     Invoice,
     InvoiceAttachment,
@@ -50,6 +51,7 @@ from app.models.invoice_processing import (
     InvoiceWorkflowHistory,
 )
 from app.schemas.invoice_processing import (
+    InvoiceConfigImport,
     InvoiceAgeingRow,
     InvoiceAttachmentOut,
     InvoiceBlockDashboardRow,
@@ -175,10 +177,10 @@ def _active(db: Session, model: Any, record_id: str, organization_id: str, label
     return row
 
 
-def _config_item_out(row: InvoiceLocation | InvoiceDescriptionCategory) -> InvoiceConfigItemOut:
+def _config_item_out(row: InvoiceLocation | InvoiceDescriptionCategory | InvoiceDescription) -> InvoiceConfigItemOut:
     return InvoiceConfigItemOut(
         id=row.id,
-        name=row.location_name if isinstance(row, InvoiceLocation) else row.category_name,
+        name=row.name if isinstance(row, InvoiceDescription) else row.location_name if isinstance(row, InvoiceLocation) else row.category_name,
         description=row.description,
         is_active=row.is_active,
         is_deleted=row.is_deleted,
@@ -338,6 +340,7 @@ def reference_data(db: Session, organization_id: str) -> InvoiceReference:
             id=w.id, rig_id=w.rig_id, block_id=w.block_id, well_code=w.well_code,
             well_name=w.well_name, label=f"{w.well_code} — {w.well_name}",
         ) for w in wells],
+        descriptions=_description_options(db, organization_id, True),
         locations=[_config_item_out(row) for row in locations],
         categories=[_config_item_out(row) for row in description_categories],
         payment_terms=[_term_out(row) for row in terms],
@@ -372,6 +375,7 @@ def configuration_data(db: Session, organization_id: str) -> InvoiceConfiguratio
             currency_code=c.currency_code, currency_name=c.currency_name,
             currency_symbol=c.currency_symbol, is_default=c.is_default,
         ) for c in currencies],
+        descriptions=_description_options(db, organization_id),
         locations=[_config_item_out(row) for row in locations],
         categories=[_config_item_out(row) for row in categories],
         payment_terms=[_term_out(row) for row in terms],
@@ -388,7 +392,15 @@ def configuration_data(db: Session, organization_id: str) -> InvoiceConfiguratio
 # Configuration maintenance
 # ---------------------------------------------------------------------------
 
-CONFIG_MODELS = {"locations": InvoiceLocation, "categories": InvoiceDescriptionCategory}
+CONFIG_MODELS = {"locations": InvoiceLocation, "categories": InvoiceDescriptionCategory, "descriptions": InvoiceDescription}
+
+
+def _description_options(db: Session, organization_id: str, active: bool = False) -> list[InvoiceConfigItemOut]:
+    query = select(InvoiceDescription).where(InvoiceDescription.organization_id == organization_id)
+    if active:
+        query = query.where(InvoiceDescription.is_deleted.is_(False), InvoiceDescription.is_active.is_(True))
+    return [_config_item_out(row) for row in db.scalars(query.order_by(InvoiceDescription.name)).all()]
+
 
 
 def _unique_name(
@@ -406,12 +418,12 @@ def _unique_name(
 
 def save_config_item(
     db: Session, organization_id: str, kind: str, data: InvoiceConfigItemIn,
-    user: User, request: Request | None, record_id: str = "",
+    user: User, request: Request | None, record_id: str = "", *, commit: bool = True,
 ) -> InvoiceConfigItemOut:
     model = CONFIG_MODELS.get(kind)
     if model is None:
         raise HTTPException(404, "Unknown invoice configuration type")
-    field = "location_name" if model is InvoiceLocation else "category_name"
+    field = "name" if model is InvoiceDescription else "location_name" if model is InvoiceLocation else "category_name"
     row = db.scalar(select(model).where(model.id == record_id, model.organization_id == organization_id)) if record_id else None
     if record_id and row is None:
         raise HTTPException(404, "Invoice configuration record not found")
@@ -431,13 +443,14 @@ def save_config_item(
         entity_type="invoice_configuration", entity_id=row.id, entity_label=data.name,
         summary=f"{'Updated' if record_id else 'Created'} invoice {kind[:-1]} {data.name}", request=request,
     )
-    _commit(db)
+    if commit:
+        _commit(db)
     return _config_item_out(row)
 
 
 def save_signatory(
     db: Session, organization_id: str, data: InvoiceSignatoryIn,
-    user: User, request: Request | None, record_id: str = "",
+    user: User, request: Request | None, record_id: str = "", *, commit: bool = True,
 ) -> InvoiceSignatoryOut:
     row = db.scalar(select(InvoiceSignatory).where(
         InvoiceSignatory.id == record_id, InvoiceSignatory.organization_id == organization_id,
@@ -470,8 +483,41 @@ def save_signatory(
         summary=f"{'Updated' if record_id else 'Created'} {label} signatory {data.full_name}"
         f"{f' ({data.designation})' if data.designation else ''}", request=request,
     )
-    _commit(db)
+    if commit:
+        _commit(db)
     return _signatory_out(row)
+
+
+def import_configuration(
+    db: Session, organization_id: str, kind: str, data: InvoiceConfigImport,
+    user: User, request: Request | None,
+) -> InvoiceBulkActionOut:
+    if kind not in {*CONFIG_MODELS, "signatories"}:
+        raise HTTPException(404, "Unknown invoice configuration type")
+    try:
+        for number, item in enumerate(data.rows, 2):
+            try:
+                if kind == "signatories":
+                    if not item.signatory_role or not item.designation:
+                        raise HTTPException(422, "Sign-off role and designation are required")
+                    save_signatory(db, organization_id, InvoiceSignatoryIn(
+                        signatory_role=item.signatory_role, full_name=item.name,
+                        designation=item.designation, is_active=item.is_active,
+                    ), user, request, commit=False)
+                else:
+                    save_config_item(db, organization_id, kind, InvoiceConfigItemIn(
+                        name=item.name, description=item.description, is_active=item.is_active,
+                    ), user, request, commit=False)
+            except HTTPException as error:
+                raise HTTPException(error.status_code, f"Row {number}: {error.detail}") from error
+        audit.record(db, organization_id=organization_id, actor=user, action="import",
+                     entity_type="invoice_configuration", entity_label=kind,
+                     summary=f"Imported {len(data.rows)} {kind} records", request=request)
+        _commit(db)
+    except Exception:
+        db.rollback()
+        raise
+    return InvoiceBulkActionOut(affected_count=len(data.rows))
 
 
 def _validate_vendors(db: Session, organization_id: str, vendor_ids: Iterable[str]) -> list[str]:
@@ -962,7 +1008,7 @@ def _write_invoice(
         "block_id": block.id if block else None,
         "block_code_snapshot": block.block_code if block else "",
         "block_name_snapshot": block.block_name if block else "",
-        "block_category": block_category,
+        "block_category": block_category if data.block_category is None else data.block_category,
         "rig_id": rig.id if rig else None, "rig_code_snapshot": rig.rig_code if rig else "",
         "rig_name_snapshot": rig.rig_name if rig else "",
         "well_id": well.id if well else None, "well_code_snapshot": well.well_code if well else "",
@@ -1126,7 +1172,7 @@ def update_invoice(
 def list_invoices(
     db: Session, organization_id: str, *, deleted: bool = False,
     status: str = "", vendor_id: str = "", block_id: str = "", rig_id: str = "", well_id: str = "",
-    currency_code: str = "", location_id: str = "", overdue: bool = False,
+    currency_code: str = "", location_id: str = "", overdue: bool = False, block_category: str = "",
     date_field: str = "invoice_received_date", date_from: date | None = None, date_to: date | None = None,
 ) -> list[InvoiceSummaryOut]:
     if date_from and date_to and date_to < date_from:
@@ -1145,6 +1191,15 @@ def list_invoices(
     ):
         if value:
             query = query.where(getattr(Invoice, field) == value)
+    if block_category:
+        if block_category not in {"own", "jv", "common", "unclassified"}:
+            raise HTTPException(422, "Unknown block classification")
+        if block_category == "common":
+            query = query.where(Invoice.block_id.is_(None), Invoice.block_category == "")
+        elif block_category == "unclassified":
+            query = query.where(Invoice.block_id.is_not(None), Invoice.block_category == "")
+        else:
+            query = query.where(Invoice.block_category == block_category)
     if overdue:
         query = query.where(Invoice.paid_date.is_(None), Invoice.due_date < _today())
     allowed_dates = {"invoice_received_date", "invoice_date", "idvs_date", "due_date", "paid_date"}
@@ -1339,6 +1394,7 @@ def _import_payloads(db: Session, organization_id: str, rows: list[InvoiceImport
             payload = InvoiceSave(
                 idvs_number=item.idvs_number, idvs_date=idvs_date, invoice_number=item.invoice_number,
                 invoice_date=invoice_date, invoice_received_date=received_date, vendor_id=vendor.id,
+                block_category=item.block_category,
                 order_id=order.id if order else None, block_id=block.id if block else None,
                 rig_id=rig.id if rig else None, well_id=well.id if well else None,
                 location_id=location.id, field_name=item.field_name, phase=item.phase,
@@ -1527,7 +1583,7 @@ def dashboard_data(db: Session, organization_id: str) -> InvoiceDashboard:
     status_counts: dict[str, int] = defaultdict(int)
     currencies: dict[str, dict[str, Any]] = {}
     vendors: dict[tuple[str, str], dict[str, Any]] = {}
-    blocks: dict[tuple[str, str], dict[str, Any]] = {}
+    blocks: dict[tuple[str, str, str], dict[str, Any]] = {}
     ageing_buckets = ("Current / not due", "1–30 days overdue", "31–60 days overdue", "61–90 days overdue", "Over 90 days overdue")
     ageing: dict[tuple[str, str], dict[str, Any]] = {}
     today = _today()
@@ -1560,7 +1616,7 @@ def dashboard_data(db: Session, organization_id: str) -> InvoiceDashboard:
         vendor["difference_amount"] += row.difference_amount
         vendor["approved_count"] += int(row.status == "approved")
         vendor["discrepancy_count"] += int(row.difference_amount != 0)
-        block_key = (row.block_id or "", row.currency_code)
+        block_key = (row.block_id or "", row.currency_code, row.block_category)
         block = blocks.setdefault(block_key, {
             "block_code": row.block_code_snapshot or "COMMON", "block_name": row.block_name_snapshot or "Materials / no block assigned",
             "block_category": row.block_category, "invoice_count": 0,

@@ -663,3 +663,80 @@ def test_signature_space_is_saved_and_validated():
         assert refreshed.status_code == 200 and refreshed.json()["success"] is True, refreshed.text
         after = client.get(f"/api/v1/invoice-processing/invoices/{row['id']}", headers=headers).json()
         assert after["signature_space_mm"] == 0
+
+def test_bulk_configuration_is_atomic_and_tenant_scoped():
+    with TestClient(app) as client:
+        north, south = login(client), login(client, 'south')
+        for kind in ('locations', 'categories', 'descriptions', 'signatories'):
+            rows = [{"name": "Alpha", "description": "Reusable text", "signatory_role": "prepared" if kind == 'signatories' else None, "designation": "Cost Engineer" if kind == 'signatories' else ''},
+                    {"name": "Beta", "description": "Second", "signatory_role": "prepared" if kind == 'signatories' else None, "designation": "Manager" if kind == 'signatories' else '', "is_active": False}]
+            result = client.post(f'/api/v1/invoice-processing/config/{kind}/import', headers=north, json={"rows": rows})
+            assert result.status_code == 200, result.text
+            assert result.json()['affected_count'] == 2
+            with SessionLocal() as db:
+                audit_count = db.query(AuditLog).count()
+            invalid = client.post(f'/api/v1/invoice-processing/config/{kind}/import', headers=north,
+                                  json={"rows": [{**rows[0], "name": "New entry"}, rows[0]]})
+            assert invalid.status_code == 409, invalid.text
+            assert 'Row 3' in invalid.json()['detail']
+            with SessionLocal() as db:
+                assert db.query(AuditLog).count() == audit_count
+            config = client.get('/api/v1/invoice-processing/configuration', headers=north).json()
+            assert [item['full_name' if kind == 'signatories' else 'name'] for item in config[kind]] == ['Alpha', 'Beta']
+            refs = client.get('/api/v1/invoice-processing/reference', headers=north).json()
+            assert [item['full_name' if kind == 'signatories' else 'name'] for item in refs[kind]] == ['Alpha']
+            assert client.get('/api/v1/invoice-processing/configuration', headers=south).json()[kind] == []
+        invalid = client.post('/api/v1/invoice-processing/config/signatories/import', headers=north,
+                              json={"rows": [{"name": "No designation"}]})
+        assert invalid.status_code == 422
+        assert client.post('/api/v1/invoice-processing/config/locations/import', json={"rows": [{"name": "Denied"}]}).status_code == 401
+        with SessionLocal() as db:
+            org = db.query(Organization).filter_by(slug='north').one()
+            permission = db.query(Permission).filter_by(organization_id=org.id, key='invoice-processing:read').one()
+            role = Role(organization_id=org.id, name='Invoice reader', permissions=[permission])
+            db.add(User(organization_id=org.id, email='reader@example.com', full_name='Reader', password_hash=hash_password('reader-password-123'), roles=[role]))
+            db.commit()
+        auth = client.post('/api/v1/auth/login', json={"organization": "north", "email": "reader@example.com", "password": "reader-password-123"}).json()
+        denied = client.post('/api/v1/invoice-processing/config/locations/import', headers={"Authorization": f"Bearer {auth['access_token']}"}, json={"rows": [{"name": "Denied"}]})
+        assert denied.status_code == 403
+
+
+def test_invoice_classification_filters_and_signoff_snapshots():
+    with TestClient(app) as client:
+        north, south = login(client), login(client, 'south')
+        vendor, order, block, rig, well = create_commercial_scope(client, north)
+        location, category, term = create_configuration(client, north, vendor, block)
+        person = client.post('/api/v1/invoice-processing/config/signatories', headers=north,
+                             json={"full_name": "Jane Doe", "signatory_role": "prepared", "designation": "Cost Engineer"}).json()
+        payload = invoice_payload(vendor, order, block, rig, well, location, category, term)
+        payload.update(block_category='jv', signatures=[{"role": "prepared", "signatory_id": person["id"]}])
+        created = client.post('/api/v1/invoice-processing/invoices', headers=north, json=payload)
+        assert created.status_code == 201, created.text
+        invoice = created.json()
+        assert invoice['block_category'] == 'jv'
+        assert invoice['signatures'][0]['designation'] == 'Cost Engineer'
+        for classification, expected in [('jv', 1), ('own', 0), ('common', 0), ('unclassified', 0)]:
+            result = client.get(f'/api/v1/invoice-processing/invoices?block_category={classification}', headers=north)
+            assert result.status_code == 200
+            assert len(result.json()) == expected
+        assert client.get('/api/v1/invoice-processing/invoices?block_category=jv', headers=south).json() == []
+        assert client.get('/api/v1/invoice-processing/invoices?block_category=invalid', headers=north).status_code == 422
+        client.patch(f"/api/v1/invoice-processing/config/signatories/{person['id']}", headers=north,
+                     json={"full_name": "Jane Doe", "signatory_role": "prepared", "designation": "Senior Engineer"})
+        assert client.get(f"/api/v1/invoice-processing/invoices/{invoice['id']}", headers=north).json()['signatures'][0]['designation'] == 'Cost Engineer'
+        payload.update(expected_revision=invoice['revision'], block_category='own', signatures=[{"role": "prepared", "signatory_id": person["id"]}])
+        updated = client.put(f"/api/v1/invoice-processing/invoices/{invoice['id']}", headers=north, json=payload)
+        assert updated.status_code == 200, updated.text
+        assert updated.json()['signatures'][0]['designation'] == 'Senior Engineer'
+        assert updated.json()['block_category'] == 'own'
+        payload.pop('expected_revision')
+        payload.update(invoice_number='INV-SECOND', idvs_number='', block_category='jv')
+        second = client.post('/api/v1/invoice-processing/invoices', headers=north, json=payload)
+        assert second.status_code == 201, second.text
+        dashboard = client.get('/api/v1/invoice-processing/dashboard', headers=north).json()
+        assert dashboard['own_block_count'] == dashboard['jv_block_count'] == 1
+        assert {row['block_category'] for row in dashboard['block_rows']} == {'own', 'jv'}
+        deleted = client.post('/api/v1/invoice-processing/invoices/bulk-delete', headers=north, json={"ids": [invoice['id']]})
+        assert deleted.status_code == 200
+        assert len(client.get('/api/v1/invoice-processing/invoices/deleted?block_category=own', headers=north).json()) == 1
+        assert client.get('/api/v1/invoice-processing/invoices/deleted?block_category=jv', headers=north).json() == []
