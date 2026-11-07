@@ -69,6 +69,13 @@ CAPABILITIES = {resource: actions for resource, actions in {
         "fuel-opening-stock",
     ),
     "mud-cost": ("opening-stock-update",),
+    # Invoice Processing separates commercial entry, each verification stage,
+    # module configuration and supporting-document custody.
+    "invoice-processing": (
+        "read", "create", "update", "delete", "restore", "permanent-delete", "import", "export",
+        "configure", "submit", "verify", "epicor", "approve", "payment",
+        "document-upload", "document-download", "document-delete",
+    ),
     "costing-sets": ("read", "create", "update", "delete", "import", "export"),
 }.items()}
 

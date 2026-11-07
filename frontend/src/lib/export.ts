@@ -179,8 +179,15 @@ export async function parseImportFile(file: ImportFile): Promise<{ headers: stri
   const buffer = await file.arrayBuffer()
   validateWorkbookZip(buffer)
   const { default: readXlsxFile } = await import('read-excel-file/browser')
-  const data = await readXlsxFile(buffer)
-  return shape((data as unknown as string[][]).map(line => line.map(cell => String(cell ?? ''))))
+  const data = await readXlsxFile(buffer) as unknown as Array<unknown[] | { data: unknown[][] }>
+  // read-excel-file 9 returns [{ sheet, data }], while earlier versions
+  // returned the first sheet's rows directly. Preserve first-sheet import
+  // behavior across both contract shapes instead of treating a sheet as a row.
+  const first = data[0]
+  const rows = first && !Array.isArray(first) && Array.isArray(first.data)
+    ? first.data
+    : data as unknown[][]
+  return shape(rows.map(line => line.map(cell => String(cell ?? ''))))
 }
 
 export function downloadTemplate(filename: string, headers: string[], sample: ImportRow | ImportRow[] = {}) {

@@ -53,6 +53,23 @@ from app.models.fuel_cost import (
     FuelLedgerSettings,
 )
 from app.models.ndt_inspection import NdtInspection
+from app.models.invoice_processing import (
+    Invoice,
+    InvoiceAttachment,
+    InvoiceBlockSetting,
+    InvoiceDescriptionCategory,
+    InvoiceExchangeRate,
+    InvoiceLine,
+    InvoiceLocation,
+    InvoicePaymentSplit,
+    InvoicePaymentTerm,
+    InvoicePaymentTermSplit,
+    InvoiceTax,
+    InvoiceTaxConfiguration,
+    InvoiceVendorPaymentTerm,
+    InvoiceVendorTax,
+    InvoiceWorkflowHistory,
+)
 from app.models.security import (
     Announcement,
     PasswordHistory,

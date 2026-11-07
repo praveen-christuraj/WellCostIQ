@@ -3,7 +3,7 @@ const ROOT = '/api/v1'
 // dashboard durations all belong to this API contract. A lower server version
 // means the frontend was deployed before its API and must not disguise missing
 // routes or old KPI semantics as a missing business record.
-export const REQUIRED_API_VERSION = '0.3.1'
+export const REQUIRED_API_VERSION = '0.4.0'
 let accessToken: string | null = null
 let refreshing: Promise<boolean> | null = null
 export const setAccessToken = (value: string | null) => { accessToken = value }
@@ -309,12 +309,20 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
 }
 
 export async function previewFile(path: string): Promise<void> {
-  const response = await send('GET', path, null)
-  if (!response.ok) throw await failure(response)
-  const url = URL.createObjectURL(await response.blob())
-  const tab = window.open(url, '_blank', 'noopener')
-  if (!tab) {
-    URL.revokeObjectURL(url)
-    throw new Error('The browser blocked the preview tab. Allow pop-ups or use Download.')
+  // Open inside the original click gesture. Waiting for the authenticated
+  // response first lets browsers block the tab as an unsolicited pop-up.
+  const tab = window.open('about:blank', '_blank')
+  if (!tab) throw new Error('The browser blocked the preview tab. Allow pop-ups or use Download.')
+  tab.opener = null
+  let url = ''
+  try {
+    const response = await send('GET', path, null)
+    if (!response.ok) throw await failure(response)
+    url = URL.createObjectURL(await response.blob())
+    tab.location.href = url
+  } catch (error) {
+    if (url) URL.revokeObjectURL(url)
+    tab.close()
+    throw error
   }
 }
