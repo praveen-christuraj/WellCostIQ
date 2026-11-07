@@ -201,9 +201,9 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
           })}
           <tbody>
             {services.length === 0 && <tr className="ps-line ps-services-empty"><td/><td colSpan={4} className="ps-empty">No service lines.</td></tr>}
-            <tr className="ps-subtotal ps-services-total">
+            <tr className="ps-subtotal ps-total ps-services-total">
               <td colSpan={3}>Services total{standard && standard !== 'USD' ? ` (${standard})` : ''}</td>
-              <td className="num">{summary.services_total === null ? pending : amountText(summary.services_total, standard)}</td>
+              <td className="num total">{summary.services_total === null ? pending : amountText(summary.services_total, standard)}</td>
               <td>{multiCurrency ? 'converted at saved rates' : ''}</td>
             </tr>
           </tbody>
