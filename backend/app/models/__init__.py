@@ -64,6 +64,8 @@ from app.models.invoice_processing import (
     InvoicePaymentSplit,
     InvoicePaymentTerm,
     InvoicePaymentTermSplit,
+    InvoiceSignatory,
+    InvoiceSignature,
     InvoiceTax,
     InvoiceTaxConfiguration,
     InvoiceVendorPaymentTerm,

@@ -30,6 +30,7 @@ from app.models import (
     Well,
 )
 from app.models.invoice_processing import (
+    SIGNATURE_ROLES,
     Invoice,
     InvoiceAttachment,
     InvoiceBlockSetting,
@@ -40,6 +41,8 @@ from app.models.invoice_processing import (
     InvoicePaymentSplit,
     InvoicePaymentTerm,
     InvoicePaymentTermSplit,
+    InvoiceSignatory,
+    InvoiceSignature,
     InvoiceTax,
     InvoiceTaxConfiguration,
     InvoiceVendorPaymentTerm,
@@ -81,6 +84,11 @@ from app.schemas.invoice_processing import (
     InvoiceReference,
     InvoiceRigOption,
     InvoiceSave,
+    InvoiceSignatoryIn,
+    InvoiceSignatoryOption,
+    InvoiceSignatoryOut,
+    InvoiceSignatureIn,
+    InvoiceSignatureOut,
     InvoiceSummaryOut,
     InvoiceTaxConfigurationIn,
     InvoiceTaxConfigurationOut,
@@ -115,6 +123,12 @@ WORKFLOW = {
     "send_to_accounts": ("submitted", "sent_to_accounts", "sent_to_accounts_date"),
     "receive_epicor": ("sent_to_accounts", "epicor_pending", "epicor_received_date"),
     "approve_epicor": ("epicor_pending", "approved", "epicor_approved_date"),
+}
+SIGNATURE_LABELS = {
+    "prepared": "Prepared by",
+    "checked": "Checked by",
+    "verified": "Verified by",
+    "approved": "Approved by",
 }
 DATE_FORMATS = (
     "%Y-%m-%d", "%d-%m-%Y", "%m-%d-%Y", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y",
@@ -211,6 +225,25 @@ def _block_category_map(db: Session, organization_id: str) -> dict[str, str]:
     return {row.block_id: row.category for row in rows}
 
 
+def _sorted_signatories(rows: Iterable[InvoiceSignatory]) -> list[InvoiceSignatory]:
+    return sorted(rows, key=lambda row: (SIGNATURE_ROLES.index(row.signatory_role), row.full_name.lower()))
+
+
+def _signatory_out(row: InvoiceSignatory) -> InvoiceSignatoryOut:
+    return InvoiceSignatoryOut(
+        id=row.id, signatory_role=row.signatory_role, full_name=row.full_name, designation=row.designation,
+        is_active=row.is_active, is_deleted=row.is_deleted, deleted_at=row.deleted_at,
+        created_at=row.created_at, updated_at=row.updated_at,
+    )
+
+
+def _signatory_option(row: InvoiceSignatory) -> InvoiceSignatoryOption:
+    return InvoiceSignatoryOption(
+        id=row.id, signatory_role=row.signatory_role, full_name=row.full_name, designation=row.designation,
+        label=f"{row.full_name} — {row.designation}" if row.designation else row.full_name,
+    )
+
+
 def reference_data(db: Session, organization_id: str) -> InvoiceReference:
     vendors = db.scalars(
         select(Vendor).where(Vendor.organization_id == organization_id, Vendor.is_deleted.is_(False))
@@ -267,6 +300,12 @@ def reference_data(db: Session, organization_id: str) -> InvoiceReference:
             InvoiceExchangeRate.is_deleted.is_(False), InvoiceExchangeRate.is_active.is_(True),
         ).order_by(InvoiceExchangeRate.base_currency, InvoiceExchangeRate.quote_currency)
     ).all()
+    signatories = db.scalars(
+        select(InvoiceSignatory).where(
+            InvoiceSignatory.organization_id == organization_id,
+            InvoiceSignatory.is_deleted.is_(False), InvoiceSignatory.is_active.is_(True),
+        )
+    ).all()
     term_by_id = {term.id: term for term in terms}
     vendor_term = {
         link.vendor_id: link.term_id
@@ -303,6 +342,7 @@ def reference_data(db: Session, organization_id: str) -> InvoiceReference:
         payment_terms=[_term_out(row) for row in terms],
         taxes=[_tax_config_out(row) for row in taxes],
         exchange_rates=[_exchange_out(row) for row in exchange_rates],
+        signatories=[_signatory_option(row) for row in _sorted_signatories(signatories)],
     )
 
 
@@ -315,10 +355,12 @@ def configuration_data(db: Session, organization_id: str) -> InvoiceConfiguratio
     blocks = db.scalars(select(Block).where(Block.organization_id == organization_id, Block.is_deleted.is_(False)).order_by(Block.block_code)).all()
     vendors = db.scalars(select(Vendor).where(Vendor.organization_id == organization_id, Vendor.is_deleted.is_(False)).order_by(Vendor.vendor_code)).all()
     currencies = db.scalars(select(Currency).where(Currency.organization_id == organization_id, Currency.is_deleted.is_(False)).order_by(Currency.currency_code)).all()
+    signatories = db.scalars(select(InvoiceSignatory).where(InvoiceSignatory.organization_id == organization_id)).all()
     categories_by_block = _block_category_map(db, organization_id)
     term_by_id = {term.id: term for term in terms}
     vendor_term = {link.vendor_id: link.term_id for term in terms for link in term.vendor_links}
     return InvoiceConfiguration(
+        signatories=[_signatory_out(row) for row in _sorted_signatories(signatories)],
         vendors=[InvoiceVendorOption(
             id=v.id, vendor_code=v.vendor_code, vendor_name=v.vendor_name, status=v.status,
             credit_terms_days=v.credit_terms_days, payment_term_id=vendor_term.get(v.id),
@@ -390,6 +432,45 @@ def save_config_item(
     )
     _commit(db)
     return _config_item_out(row)
+
+
+def save_signatory(
+    db: Session, organization_id: str, data: InvoiceSignatoryIn,
+    user: User, request: Request | None, record_id: str = "",
+) -> InvoiceSignatoryOut:
+    row = db.scalar(select(InvoiceSignatory).where(
+        InvoiceSignatory.id == record_id, InvoiceSignatory.organization_id == organization_id,
+    )) if record_id else None
+    if record_id and row is None:
+        raise HTTPException(404, "Sign-off signatory not found")
+    label = SIGNATURE_LABELS[data.signatory_role]
+    duplicate = db.scalar(select(InvoiceSignatory.id).where(
+        InvoiceSignatory.organization_id == organization_id,
+        InvoiceSignatory.signatory_role == data.signatory_role,
+        func.lower(InvoiceSignatory.full_name) == data.full_name.lower(),
+        *([InvoiceSignatory.id != record_id] if record_id else []),
+    ))
+    if duplicate:
+        raise HTTPException(409, f"{data.full_name} is already listed under {label}")
+    if row is None:
+        row = InvoiceSignatory(organization_id=organization_id, created_by=_actor(user), updated_by=_actor(user))
+        db.add(row)
+    row.signatory_role = data.signatory_role
+    row.full_name = data.full_name
+    row.designation = data.designation
+    row.is_active = data.is_active
+    row.is_deleted = False
+    row.deleted_at = None
+    row.updated_by = _actor(user)
+    db.flush()
+    audit.record(
+        db, organization_id=organization_id, actor=user, action="update" if record_id else "create",
+        entity_type="invoice_signatory", entity_id=row.id, entity_label=data.full_name,
+        summary=f"{'Updated' if record_id else 'Created'} {label} signatory {data.full_name}"
+        f"{f' ({data.designation})' if data.designation else ''}", request=request,
+    )
+    _commit(db)
+    return _signatory_out(row)
 
 
 def _validate_vendors(db: Session, organization_id: str, vendor_ids: Iterable[str]) -> list[str]:
@@ -577,6 +658,7 @@ def bulk_configuration(
         "payment-terms": InvoicePaymentTerm,
         "taxes": InvoiceTaxConfiguration,
         "exchange-rates": InvoiceExchangeRate,
+        "signatories": InvoiceSignatory,
     }
     model = models.get(kind)
     if model is None:
@@ -587,7 +669,10 @@ def bulk_configuration(
     affected = 0
     timestamp = datetime.now(timezone.utc)
     for row in rows:
-        label = getattr(row, "name", "") or getattr(row, "term_name", "") or getattr(row, "tax_name", "") or f"{getattr(row, 'base_currency', '')} → {getattr(row, 'quote_currency', '')}"
+        label = (
+            getattr(row, "name", "") or getattr(row, "term_name", "") or getattr(row, "tax_name", "")
+            or getattr(row, "full_name", "") or f"{getattr(row, 'base_currency', '')} → {getattr(row, 'quote_currency', '')}"
+        )
         if action == "delete" and not row.is_deleted:
             row.is_deleted, row.deleted_at = True, timestamp
             row.updated_by = _actor(user)
@@ -646,6 +731,7 @@ def _summary_out(row: Invoice) -> InvoiceSummaryOut:
         rig_name=row.rig_name_snapshot, well_id=row.well_id, well_code=row.well_code_snapshot,
         well_name=row.well_name_snapshot, location_id=row.location_id,
         location_name=row.location_name_snapshot, field_name=row.field_name, phase=row.phase,
+        day_count_enabled=row.day_count_enabled,
         description_category_id=row.description_category_id,
         description_category=row.description_category_snapshot, service_description=row.service_description,
         detailed_description=row.detailed_description, concerned_person=row.concerned_person,
@@ -675,11 +761,16 @@ def _detail_out(row: Invoice) -> InvoiceDetailOut:
         **values,
         lines=[InvoiceLineOut(
             id=line.id, description=line.description, invoice_quantity=line.invoice_quantity,
-            invoice_unit_price=line.invoice_unit_price, invoice_total=line.invoice_total,
-            verified_quantity=line.verified_quantity, verified_unit_price=line.verified_unit_price,
+            invoice_days=line.invoice_days, invoice_unit_price=line.invoice_unit_price, invoice_total=line.invoice_total,
+            verified_quantity=line.verified_quantity, verified_days=line.verified_days,
+            verified_unit_price=line.verified_unit_price,
             verified_total=line.verified_total, difference_amount=line.difference_amount,
             remarks=line.remarks, sort_order=line.sort_order,
         ) for line in row.lines],
+        signatures=[InvoiceSignatureOut(
+            role=item.signature_role, signatory_id=item.signatory_id, name=item.signatory_name,
+            designation=item.designation,
+        ) for item in row.signatures],
         taxes=[InvoiceTaxOut(
             id=tax.id, tax_configuration_id=tax.tax_configuration_id, tax_name=tax.tax_name,
             rate_percent=tax.rate_percent, direction=tax.direction, source=tax.source,
@@ -744,6 +835,37 @@ def _auto_taxes(db: Session, organization_id: str, vendor_id: str) -> list[tuple
         if tax.is_common or vendor_match:
             result.append((tax, "common" if tax.is_common else "vendor"))
     return result
+
+
+def _line_days(item: InvoiceLineIn, day_count_enabled: bool) -> tuple[Decimal, Decimal]:
+    """Return ``(invoice_days, verified_days)``; both are 1 when the IDVS day count is off."""
+    if not day_count_enabled:
+        return Decimal("1"), Decimal("1")
+    invoice_days = item.invoice_days if item.invoice_days is not None else Decimal("1")
+    verified_days = invoice_days if item.verified_days is None else item.verified_days
+    return invoice_days, verified_days
+
+
+def _signature_rows(db: Session, organization_id: str, items: list[InvoiceSignatureIn]) -> list[InvoiceSignature]:
+    """Snapshot the selected active signatories onto the IDVS, one row per sign-off role."""
+    rows: list[InvoiceSignature] = []
+    for item in items:
+        label = SIGNATURE_LABELS[item.role]
+        signatory = db.scalar(select(InvoiceSignatory).where(
+            InvoiceSignatory.id == item.signatory_id,
+            InvoiceSignatory.organization_id == organization_id,
+            InvoiceSignatory.is_deleted.is_(False), InvoiceSignatory.is_active.is_(True),
+        ))
+        if signatory is None:
+            raise HTTPException(422, f"The selected {label} signatory is not available in this workspace")
+        if signatory.signatory_role != item.role:
+            raise HTTPException(422, f"The selected signatory is not configured for {label}")
+        rows.append(InvoiceSignature(
+            organization_id=organization_id, signature_role=item.role, signatory_id=signatory.id,
+            signatory_name=signatory.full_name, designation=signatory.designation,
+            sort_order=SIGNATURE_ROLES.index(item.role),
+        ))
+    return rows
 
 
 def _write_invoice(
@@ -846,7 +968,7 @@ def _write_invoice(
         "payment_term_name_snapshot": term.term_name if term else "",
         "payment_tenure_days": tenure, "due_date": payment_due_date(data.invoice_date, tenure),
         "disallowed_amount": data.disallowed_amount, "advance_amount": data.advance_amount,
-        "remarks": data.remarks, "updated_by": _actor(user),
+        "remarks": data.remarks, "day_count_enabled": data.day_count_enabled, "updated_by": _actor(user),
     }
     for field, value in scalar_values.items():
         setattr(row, field, value)
@@ -855,17 +977,25 @@ def _write_invoice(
         row.lines.clear()
         row.taxes.clear()
         row.payment_splits.clear()
+        if data.signatures is not None:
+            row.signatures.clear()
         # Unique payment currencies must be deleted before their replacements
         # are inserted. History and attachments are deliberately not replaced.
         db.flush()
 
-    row.lines = [InvoiceLine(
-        organization_id=organization_id, description=item.description,
-        invoice_quantity=item.invoice_quantity, invoice_unit_price=item.invoice_unit_price,
-        verified_quantity=item.invoice_quantity if item.verified_quantity is None else item.verified_quantity,
-        verified_unit_price=item.invoice_unit_price if item.verified_unit_price is None else item.verified_unit_price,
-        remarks=item.remarks, sort_order=index,
-    ) for index, item in enumerate(data.lines)]
+    new_lines: list[InvoiceLine] = []
+    for index, item in enumerate(data.lines):
+        invoice_days, verified_days = _line_days(item, data.day_count_enabled)
+        new_lines.append(InvoiceLine(
+            organization_id=organization_id, description=item.description,
+            invoice_quantity=item.invoice_quantity, invoice_days=invoice_days,
+            invoice_unit_price=item.invoice_unit_price,
+            verified_quantity=item.invoice_quantity if item.verified_quantity is None else item.verified_quantity,
+            verified_days=verified_days,
+            verified_unit_price=item.invoice_unit_price if item.verified_unit_price is None else item.verified_unit_price,
+            remarks=item.remarks, sort_order=index,
+        ))
+    row.lines = new_lines
 
     tax_inputs = data.taxes
     auto_sources: dict[str, str] = {}
@@ -917,6 +1047,8 @@ def _write_invoice(
             sort_order=index,
         ))
     row.payment_splits = new_splits
+    if data.signatures is not None:
+        row.signatures = _signature_rows(db, organization_id, data.signatures)
     db.flush()
     totals = calculate_idvs(row.lines, row.taxes, row.payment_splits, data.disallowed_amount, data.advance_amount)
     if totals["invoice_total"] < 0 or totals["verified_total"] < 0:
@@ -1173,11 +1305,15 @@ def _import_payloads(db: Session, organization_id: str, rows: list[InvoiceImport
             tenure = None if item.payment_tenure_days in (None, "") else int(item.payment_tenure_days)
             line = InvoiceLineIn(
                 description=item.description, invoice_quantity=item.invoice_quantity,
+                invoice_days=None if item.invoice_days in (None, "") else item.invoice_days,
                 invoice_unit_price=item.invoice_unit_price,
                 verified_quantity=None if item.verified_quantity in (None, "") else item.verified_quantity,
+                verified_days=None if item.verified_days in (None, "") else item.verified_days,
                 verified_unit_price=None if item.verified_unit_price in (None, "") else item.verified_unit_price,
                 remarks=item.line_remarks,
             )
+            # A row that supplies either day column turns on the IDVS day count; groups OR this flag together.
+            day_count = item.invoice_days not in (None, "") or item.verified_days not in (None, "")
             payload = InvoiceSave(
                 idvs_number=item.idvs_number, idvs_date=idvs_date, invoice_number=item.invoice_number,
                 invoice_date=invoice_date, invoice_received_date=received_date, vendor_id=vendor.id,
@@ -1190,7 +1326,8 @@ def _import_payloads(db: Session, organization_id: str, rows: list[InvoiceImport
                 service_to=_parse_date(item.service_to), currency_code=item.currency_code,
                 payment_term_id=term.id if term else None, payment_tenure_days=tenure,
                 disallowed_amount=item.disallowed_amount or 0, advance_amount=item.advance_amount or 0,
-                remarks=item.remarks, lines=[line], taxes=None, payment_splits=None,
+                remarks=item.remarks, day_count_enabled=day_count, lines=[line], taxes=None, payment_splits=None,
+                signatures=None,
             )
             prepared.append((number, payload))
         except (ValueError, ValidationError, TypeError) as error:
@@ -1206,21 +1343,28 @@ def import_invoices(
     groups: dict[tuple[str, str], dict[str, Any]] = {}
     for number, payload in prepared:
         key = (payload.vendor_id, payload.invoice_number.lower())
-        shared = payload.model_dump(exclude={"lines"})
+        # The day-count flag is per IDVS, so rows may differ on it; it is OR'd across the group below.
+        shared = payload.model_dump(exclude={"lines", "day_count_enabled"})
         if key not in groups:
-            groups[key] = {"number": number, "payload": payload, "shared": shared, "lines": list(payload.lines)}
+            groups[key] = {
+                "number": number, "payload": payload, "shared": shared,
+                "lines": list(payload.lines), "day_count": payload.day_count_enabled,
+            }
         else:
             if groups[key]["shared"] != shared:
                 errors.append(f"Row {number}: invoice header values differ from the first row for {payload.invoice_number}")
             else:
                 groups[key]["lines"].extend(payload.lines)
+                groups[key]["day_count"] = groups[key]["day_count"] or payload.day_count_enabled
     if errors:
         return InvoiceImportOut(imported_count=0, invoice_count=0, errors=errors, success=False)
 
     successful: list[Invoice] = []
     line_count = 0
     for group in groups.values():
-        payload = group["payload"].model_copy(update={"lines": group["lines"]})
+        payload = group["payload"].model_copy(
+            update={"lines": group["lines"], "day_count_enabled": group["day_count"]},
+        )
         try:
             with db.begin_nested():
                 existing = db.scalar(select(Invoice).where(

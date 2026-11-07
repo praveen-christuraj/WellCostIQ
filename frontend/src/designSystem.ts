@@ -93,6 +93,23 @@ export const motion = {
   standard: 'cubic-bezier(0.2, 0, 0, 1)',
 } as const
 
+/**
+ * Printed and on-screen IDVS sheet. The sheet is true black on white in every app theme.
+ * Trebuchet MS matches the reference workbook; the PDF uses Helvetica (Arial-metric) because jsPDF
+ * bundles only the standard PDF fonts, and its sizes are the reference sizes scaled to fit A4 landscape.
+ */
+export const idvsSheet = {
+  ink: '#000000',
+  paper: '#FFFFFF',
+  fontFamily: '"Trebuchet MS", Arial, Helvetica, sans-serif',
+  excelFontName: 'Trebuchet MS',
+  pdfFontFamily: 'helvetica',
+  /** Reference workbook point sizes (RIG-11): title 18, headings and body 14, descriptions 13. */
+  referencePt: { title: 18, heading: 14, body: 14, description: 13 },
+  /** A4 landscape cannot hold the 14pt reference columns at 100%; the PDF applies this factor to the reference sizes. */
+  pdfScale: 0.72,
+} as const
+
 /** Type scale. Sizes assume the 87.5% app density already applied on `#root`. */
 export const typeScale = {
   h1: { fontFamily: fonts.display, fontSize: 32, lineHeight: 1.18, fontWeight: 750, letterSpacing: '-0.028em' },

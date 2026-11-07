@@ -3,15 +3,15 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { AgGridReact } from 'ag-grid-react'
 import { AllCommunityModule, ModuleRegistry, themeQuartz, type ColDef, type CellValueChangedEvent, type ICellRendererParams } from 'ag-grid-community'
 import { Add, ArrowBack, ContentCopy, DeleteOutline, InfoOutlined, RestartAlt, SaveOutlined, SettingsOutlined } from '@mui/icons-material'
-import { Alert, Autocomplete, Box, Button, Chip, IconButton, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
+import { Alert, Autocomplete, Box, Button, Chip, FormControlLabel, IconButton, MenuItem, Paper, Stack, Switch, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
 import { PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { SectionCard } from '../components/ui/SectionCard'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { gridThemeParams } from '../designSystem'
 import { api, body } from '../lib/api'
-import { addDays, calculateDraft, formatAmount, multiply, numeric, resolveExchangeRate } from '../lib/invoiceCalculations'
-import { MAX_ATTACHMENT_BYTES, type ConfigItem, type InvoiceDetail, type InvoiceLine, type InvoicePaymentSplit, type InvoiceReference, type InvoiceSaveInput, type InvoiceTax, type PaymentTerm, type TaxDirection, type VendorOption } from '../lib/invoiceProcessing'
+import { addDays, calculateDraft, formatAmount, lineDayFactors, numeric, resolveExchangeRate } from '../lib/invoiceCalculations'
+import { MAX_ATTACHMENT_BYTES, SIGNATURE_LABELS, SIGNATURE_ROLES, type InvoiceSignature, type SignatureRole, type ConfigItem, type InvoiceDetail, type InvoiceLine, type InvoicePaymentSplit, type InvoiceReference, type InvoiceSaveInput, type InvoiceTax, type PaymentTerm, type TaxDirection, type VendorOption } from '../lib/invoiceProcessing'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 const today = () => new Date().toISOString().slice(0, 10)
@@ -25,13 +25,31 @@ type EditorForm = {
   field_name: string; phase: string; description_category_id: string; service_description: string; detailed_description: string
   concerned_person: string; service_from: string; service_to: string; currency_code: string; payment_term_id: string
   payment_tenure_days: string; disallowed_amount: string; advance_amount: string; remarks: string
+  day_count_enabled: boolean; signatures: Record<SignatureRole, string>
 }
-const blankLine = (): EditorLine => ({ key: newKey(), description: '', invoice_quantity: '1', invoice_unit_price: '0', verified_quantity: '1', verified_unit_price: '0', remarks: '' })
+// Blank verified days stay blank so they follow the invoice days, as the server does.
+const blankLine = (): EditorLine => ({ key: newKey(), description: '', invoice_quantity: '1', invoice_days: '1', invoice_unit_price: '0', verified_quantity: '1', verified_days: '', verified_unit_price: '0', remarks: '' })
+const isPasteColumn = (column: ColDef<EditorLine>) => column.editable === true && typeof column.field === 'string' && column.field !== 'key'
+const blankToNull = (value: string) => value.trim() === '' ? null : value.trim()
+const lineTotal = (line: EditorLine, side: 'invoice' | 'verified', dayCount: boolean): number => {
+  const days = lineDayFactors(line, dayCount)
+  return side === 'invoice'
+    ? numeric(line.invoice_quantity) * days.invoice * numeric(line.invoice_unit_price)
+    : numeric(line.verified_quantity) * days.verified * numeric(line.verified_unit_price)
+}
+const emptySignatures = (): Record<SignatureRole, string> => ({ prepared: '', checked: '', verified: '', approved: '' })
+const signatureMap = (signatures: InvoiceSignature[]): Record<SignatureRole, string> => {
+  const map = emptySignatures()
+  for (const item of signatures) if (item.signatory_id) map[item.role] = item.signatory_id
+  return map
+}
+const signatureChoices = (signatures: Record<SignatureRole, string>) => SIGNATURE_ROLES.flatMap(role => signatures[role] ? [{ role, signatory_id: signatures[role] }] : [])
 const initialForm = (): EditorForm => ({
   idvs_number: '', idvs_date: today(), invoice_number: '', invoice_date: today(), invoice_received_date: today(),
   vendor_id: '', order_id: '', block_id: '', rig_id: '', well_id: '', location_id: '', field_name: '', phase: '',
   description_category_id: '', service_description: '', detailed_description: '', concerned_person: '', service_from: '', service_to: '',
   currency_code: '', payment_term_id: '', payment_tenure_days: '', disallowed_amount: '0', advance_amount: '0', remarks: '',
+  day_count_enabled: false, signatures: emptySignatures(),
 })
 const taxKey = (tax: InvoiceTax): EditorTax => ({ ...tax, key: tax.id ?? newKey() })
 const splitKey = (split: InvoicePaymentSplit): EditorSplit => ({ ...split, key: split.id ?? newKey() })
@@ -44,6 +62,8 @@ export default function InvoiceEditor() {
   const { mode } = useColorMode()
   const gridRef = useRef<AgGridReact<EditorLine>>(null)
   const loadSequence = useRef(0)
+  // Sign-off selections as last loaded or saved; an unchanged selection is sent as null so stored snapshots are kept.
+  const signatureBaseline = useRef('[]')
   const [reference, setReference] = useState<InvoiceReference | null>(null)
   const [form, setForm] = useState<EditorForm>(initialForm)
   const [revision, setRevision] = useState(0)
@@ -56,6 +76,7 @@ export default function InvoiceEditor() {
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [signatureSnapshots, setSignatureSnapshots] = useState<InvoiceSignature[]>([])
   const editing = Boolean(id)
 
   const makeSplits = useCallback((term: PaymentTerm | undefined, currency: string, refs: InvoiceReference): EditorSplit[] => {
@@ -84,13 +105,15 @@ export default function InvoiceEditor() {
           service_from: invoice.service_from ?? '', service_to: invoice.service_to ?? '', currency_code: invoice.currency_code,
           payment_term_id: invoice.payment_term_id ?? '', payment_tenure_days: String(invoice.payment_tenure_days),
           disallowed_amount: invoice.disallowed_amount, advance_amount: invoice.advance_amount, remarks: invoice.remarks,
+          day_count_enabled: invoice.day_count_enabled, signatures: signatureMap(invoice.signatures),
         })
         setLines(invoice.lines.map(line => ({ ...line, key: line.id ?? newKey() })))
         setTaxes(invoice.taxes.map(taxKey)); setSplits(invoice.payment_splits.map(splitKey)); setCustomSplits(true)
+        setSignatureSnapshots(invoice.signatures); signatureBaseline.current = JSON.stringify(signatureChoices(signatureMap(invoice.signatures)))
       } else {
         const currency = refs.currencies.find(item => item.is_default)?.currency_code ?? refs.currencies[0]?.currency_code ?? ''
         setForm(current => ({ ...current, currency_code: currency }))
-        setSplits(makeSplits(undefined, currency, refs)); setTaxes(autoTaxes(refs, ''))
+        setSplits(makeSplits(undefined, currency, refs)); setTaxes(autoTaxes(refs, '')); setSignatureSnapshots([]); signatureBaseline.current = '[]'
       }
       if (sequence === loadSequence.current) setDirty(false)
     } catch (caught) {
@@ -134,25 +157,30 @@ export default function InvoiceEditor() {
   const selectedTerm = reference?.payment_terms.find(item => item.id === form.payment_term_id)
   const tenure = form.payment_tenure_days === '' ? selectedTerm?.payment_days ?? 0 : numeric(form.payment_tenure_days)
   const dueDate = addDays(form.invoice_date, tenure)
-  const totals = useMemo(() => calculateDraft(lines, taxes, form.disallowed_amount, form.advance_amount, splits), [lines, taxes, form.disallowed_amount, form.advance_amount, splits])
+  const totals = useMemo(() => calculateDraft(lines, taxes, form.disallowed_amount, form.advance_amount, splits, form.day_count_enabled), [lines, taxes, form.disallowed_amount, form.advance_amount, splits, form.day_count_enabled])
   const updateLine = (key: string, field: keyof InvoiceLine, value: string) => { setLines(current => current.map(line => line.key === key ? { ...line, [field]: value } : line)); setDirty(true) }
   const onCellValueChanged = (event: CellValueChangedEvent<EditorLine>) => {
     const field = event.colDef.field as keyof InvoiceLine | undefined
     if (field && event.data) updateLine(event.data.key, field, String(event.newValue ?? ''))
   }
-  const lineColumns = useMemo<ColDef<EditorLine>[]>(() => [
-    { headerName: '#', valueGetter: params => (params.node?.rowIndex ?? 0) + 1, width: 48, maxWidth: 48, editable: false, suppressMovable: true },
-    { headerName: 'LINE DESCRIPTION', field: 'description', minWidth: 270, flex: 1.5, editable: true, cellEditor: 'agTextCellEditor' },
-    { headerName: 'INVOICE QTY', field: 'invoice_quantity', minWidth: 120, editable: true, type: 'rightAligned' },
-    { headerName: 'INVOICE UNIT PRICE', field: 'invoice_unit_price', minWidth: 145, editable: true, type: 'rightAligned' },
-    { headerName: 'INVOICE TOTAL', minWidth: 135, editable: false, type: 'rightAligned', valueGetter: params => params.data ? multiply(params.data.invoice_quantity, params.data.invoice_unit_price) : 0, valueFormatter: params => formatAmount(params.value) },
-    { headerName: 'VERIFIED QTY', field: 'verified_quantity', minWidth: 120, editable: true, type: 'rightAligned' },
-    { headerName: 'VERIFIED UNIT PRICE', field: 'verified_unit_price', minWidth: 150, editable: true, type: 'rightAligned' },
-    { headerName: 'VERIFIED TOTAL', minWidth: 135, editable: false, type: 'rightAligned', valueGetter: params => params.data ? multiply(params.data.verified_quantity, params.data.verified_unit_price) : 0, valueFormatter: params => formatAmount(params.value) },
-    { headerName: 'DIFFERENCE', minWidth: 120, editable: false, type: 'rightAligned', valueGetter: params => params.data ? multiply(params.data.invoice_quantity, params.data.invoice_unit_price) - multiply(params.data.verified_quantity, params.data.verified_unit_price) : 0, valueFormatter: params => formatAmount(params.value) },
-    { headerName: 'LINE REMARKS', field: 'remarks', minWidth: 190, flex: 1, editable: true },
+  const lineColumns = useMemo<ColDef<EditorLine>[]>(() => {
+    const dayCount = form.day_count_enabled
+    return [
+      { headerName: '#', valueGetter: params => (params.node?.rowIndex ?? 0) + 1, width: 48, maxWidth: 48, editable: false, suppressMovable: true },
+      { headerName: 'LINE DESCRIPTION', field: 'description', minWidth: 270, flex: 1.5, editable: true, cellEditor: 'agTextCellEditor' },
+      { headerName: 'INVOICE QTY', field: 'invoice_quantity', minWidth: 120, editable: true, type: 'rightAligned' },
+      ...(dayCount ? [{ headerName: 'INVOICE DAYS', field: 'invoice_days', minWidth: 110, editable: true, type: 'rightAligned' } as ColDef<EditorLine>] : []),
+      { headerName: 'INVOICE UNIT PRICE', field: 'invoice_unit_price', minWidth: 145, editable: true, type: 'rightAligned' },
+      { headerName: 'INVOICE TOTAL', minWidth: 135, editable: false, type: 'rightAligned', valueGetter: params => params.data ? lineTotal(params.data, 'invoice', dayCount) : 0, valueFormatter: params => formatAmount(params.value) },
+      { headerName: 'VERIFIED QTY', field: 'verified_quantity', minWidth: 120, editable: true, type: 'rightAligned' },
+      ...(dayCount ? [{ headerName: 'VERIFIED DAYS', field: 'verified_days', minWidth: 110, editable: true, type: 'rightAligned' } as ColDef<EditorLine>] : []),
+      { headerName: 'VERIFIED UNIT PRICE', field: 'verified_unit_price', minWidth: 150, editable: true, type: 'rightAligned' },
+      { headerName: 'VERIFIED TOTAL', minWidth: 135, editable: false, type: 'rightAligned', valueGetter: params => params.data ? lineTotal(params.data, 'verified', dayCount) : 0, valueFormatter: params => formatAmount(params.value) },
+      { headerName: 'DIFFERENCE', minWidth: 120, editable: false, type: 'rightAligned', valueGetter: params => params.data ? lineTotal(params.data, 'invoice', dayCount) - lineTotal(params.data, 'verified', dayCount) : 0, valueFormatter: params => formatAmount(params.value) },
+      { headerName: 'LINE REMARKS', field: 'remarks', minWidth: 190, flex: 1, editable: true },
     { headerName: '', field: 'key', width: 88, maxWidth: 88, editable: false, sortable: false, cellRenderer: (params: ICellRendererParams<EditorLine>) => params.data ? <Stack direction="row" height="100%" alignItems="center" spacing={-1}><Tooltip title="Duplicate line"><IconButton size="small" onClick={() => { const copy = { ...params.data!, key: newKey(), id: undefined }; setLines(current => [...current.slice(0, (params.node?.rowIndex ?? 0) + 1), copy, ...current.slice((params.node?.rowIndex ?? 0) + 1)]); setDirty(true) }}><ContentCopy fontSize="small"/></IconButton></Tooltip><Tooltip title="Remove line"><span><IconButton size="small" disabled={lines.length === 1} onClick={() => { setLines(current => current.filter(line => line.key !== params.data!.key)); setDirty(true) }}><DeleteOutline fontSize="small"/></IconButton></span></Tooltip></Stack> : null },
-  ], [lines.length])
+    ]
+  }, [lines.length, form.day_count_enabled])
   const gridTheme = useMemo(() => themeQuartz.withParams(gridThemeParams(mode)), [mode])
   const pasteLines = (event: React.ClipboardEvent<HTMLDivElement>) => {
     const text = event.clipboardData.getData('text/plain')
@@ -160,13 +188,14 @@ export default function InvoiceEditor() {
     const focused = gridRef.current?.api.getFocusedCell()
     if (!focused) return
     event.preventDefault()
-    const fields = ['description', 'invoice_quantity', 'invoice_unit_price', null, 'verified_quantity', 'verified_unit_price', null, null, 'remarks'] as const
-    const startColumn = focused.column.getColId()
-    const pasteFields = ['description', 'invoice_quantity', 'invoice_unit_price', 'verified_quantity', 'verified_unit_price', 'remarks'] as const
-    const columnIndex = pasteFields.indexOf(startColumn as typeof pasteFields[number])
-    // Also accept a nine-column copy of the visible grid, skipping calculated columns.
-    const visibleIndex = fields.indexOf(startColumn as never)
+    const pasteFields = lineColumns.filter(isPasteColumn).map(column => column.field as keyof InvoiceLine)
+    const visibleFields = lineColumns.map(column => (column.field && column.field !== 'key' ? column.field as keyof InvoiceLine : null))
+    const startColumn = focused.column.getColId() as keyof InvoiceLine
+    const visibleSpan = visibleFields.includes(startColumn) ? visibleFields.slice(visibleFields.indexOf(startColumn)) : []
+    const compactSpan = pasteFields.includes(startColumn) ? pasteFields.slice(pasteFields.indexOf(startColumn)) : []
     const matrix = text.replace(/\r/g, '').replace(/\n$/, '').split('\n').map(row => row.split('\t'))
+    // A copy spanning the visible grid maps by grid position; otherwise values fill the editable columns in order.
+    const fieldsForPaste = visibleSpan.length && matrix.every(row => row.length === visibleSpan.length) ? visibleSpan : compactSpan
     setLines(current => {
       const next = current.map(line => ({ ...line }))
       matrix.forEach((values, rowOffset) => {
@@ -174,7 +203,7 @@ export default function InvoiceEditor() {
         while (next.length <= rowIndex && next.length < 500) next.push(blankLine())
         if (!next[rowIndex]) return
         values.forEach((value, columnOffset) => {
-          const field = visibleIndex >= 0 ? fields[visibleIndex + columnOffset] : columnIndex >= 0 ? pasteFields[columnIndex + columnOffset] : null
+          const field = fieldsForPaste[columnOffset]
           if (field) Object.assign(next[rowIndex], { [field]: value.trim() })
         })
       })
@@ -183,6 +212,10 @@ export default function InvoiceEditor() {
     setDirty(true); setNotice(`${matrix.length} spreadsheet row(s) pasted. Review the calculated columns before saving.`)
   }
 
+  const signaturesPayload = (): InvoiceSaveInput['signatures'] => {
+    const choice = signatureChoices(form.signatures)
+    return JSON.stringify(choice) === signatureBaseline.current ? null : choice
+  }
   const payload = (): InvoiceSaveInput => ({
     idvs_number: form.idvs_number, idvs_date: form.idvs_date, ...(editing ? { expected_revision: revision } : {}),
     invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, invoice_received_date: form.invoice_received_date,
@@ -191,16 +224,18 @@ export default function InvoiceEditor() {
     service_description: form.service_description.trim(), detailed_description: form.detailed_description, concerned_person: form.concerned_person,
     service_from: form.service_from || null, service_to: form.service_to || null, currency_code: form.currency_code,
     payment_term_id: form.payment_term_id || null, payment_tenure_days: form.payment_tenure_days === '' ? null : Number(form.payment_tenure_days),
-    disallowed_amount: form.disallowed_amount || '0', advance_amount: form.advance_amount || '0', remarks: form.remarks,
-    lines: lines.map(line => ({ description: line.description.trim(), invoice_quantity: line.invoice_quantity, invoice_unit_price: line.invoice_unit_price, verified_quantity: line.verified_quantity, verified_unit_price: line.verified_unit_price, remarks: line.remarks })),
+    disallowed_amount: form.disallowed_amount || '0', advance_amount: form.advance_amount || '0', remarks: form.remarks, day_count_enabled: form.day_count_enabled,
+    lines: lines.map(line => ({ description: line.description.trim(), invoice_quantity: line.invoice_quantity, invoice_days: blankToNull(line.invoice_days), invoice_unit_price: line.invoice_unit_price, verified_quantity: line.verified_quantity, verified_days: blankToNull(line.verified_days), verified_unit_price: line.verified_unit_price, remarks: line.remarks })),
     taxes: taxes.map(tax => ({ tax_configuration_id: tax.tax_configuration_id, tax_name: tax.tax_name, rate_percent: tax.rate_percent, direction: tax.direction })),
     payment_splits: splits.map(split => ({ currency_code: split.currency_code, percentage: split.percentage, exchange_rate: split.exchange_rate || null })),
+    signatures: signaturesPayload(),
   })
   const validate = (): string => {
     if (!form.vendor_id || !form.location_id || !form.currency_code || !form.idvs_date || !form.invoice_date || !form.invoice_received_date) return 'Complete the vendor, location, currency, IDVS date, invoice date and receipt date.'
     if (!form.invoice_number.trim() || !form.service_description.trim()) return 'Invoice number and service description are required.'
     if (form.service_from && form.service_to && form.service_to < form.service_from) return 'Service To must be on or after Service From.'
     if (!lines.length || lines.some(line => !line.description.trim() || numeric(line.invoice_quantity) <= 0 || numeric(line.invoice_unit_price) < 0 || numeric(line.verified_quantity) < 0 || numeric(line.verified_unit_price) < 0)) return 'Every line needs a description, invoice quantity above zero, and valid non-negative prices and verified quantities.'
+    if (form.day_count_enabled && lines.some(line => (line.invoice_days.trim() !== '' && numeric(line.invoice_days) <= 0) || numeric(line.verified_days) < 0)) return 'With the day count on, invoice days must be above zero and verified days cannot be negative. Leave verified days blank to follow the invoice days.'
     if (Math.abs(totals.splitPercentage - 100) > 0.000001) return `Payment split percentages total ${totals.splitPercentage}%. They must total exactly 100%.`
     if (splits.some(split => !split.currency_code || numeric(split.percentage) <= 0 || numeric(split.exchange_rate) <= 0)) return 'Every payment split needs a currency, a percentage above zero, and a positive exchange rate. Configure any missing exchange rate first.'
     if (totals.adjustedVerifiedAmount < 0) return 'Disallowed and advance amounts cannot exceed the verified total.'
@@ -253,8 +288,12 @@ export default function InvoiceEditor() {
             <TextField label="Detailed description" multiline minRows={2} value={form.detailed_description} onChange={e => patch('detailed_description', e.target.value)} sx={{ gridColumn: 'span 2' }} inputProps={{ maxLength: 2000 }}/>
           </Box>
         </SectionCard>
-        <SectionCard title="IDVS worksheet" subtitle="Click a cell and type, Tab across the row, or paste Excel cells into the focused cell. Calculated columns update immediately." action={<Stack direction="row" gap={1}><Button size="small" startIcon={<RestartAlt/>} onClick={() => { setLines(current => current.map(line => ({ ...line, verified_quantity: line.invoice_quantity, verified_unit_price: line.invoice_unit_price }))); setDirty(true) }}>Copy invoice to verified</Button><Button size="small" startIcon={<Add/>} onClick={() => { setLines(current => [...current, blankLine()]); setDirty(true) }}>Add line</Button></Stack>}>
-          <Alert icon={<InfoOutlined/>} severity="info" sx={{ mb: 1.5, py: 0 }}>Paste columns in worksheet order. For a compact paste use: description, invoice qty, invoice unit price, verified qty, verified unit price, remarks. Totals and differences are never imported as editable values.</Alert>
+        <SectionCard title="IDVS worksheet" subtitle="Click a cell and type, Tab across the row, or paste Excel cells into the focused cell. Calculated columns update immediately." action={<Stack direction="row" gap={1}><Button size="small" startIcon={<RestartAlt/>} onClick={() => { setLines(current => current.map(line => ({ ...line, verified_quantity: line.invoice_quantity, verified_days: line.invoice_days, verified_unit_price: line.invoice_unit_price }))); setDirty(true) }}>Copy invoice to verified</Button><Button size="small" startIcon={<Add/>} onClick={() => { setLines(current => [...current, blankLine()]); setDirty(true) }}>Add line</Button></Stack>}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1} mb={1}>
+            <FormControlLabel control={<Switch checked={form.day_count_enabled} onChange={e => patch('day_count_enabled', e.target.checked)}/>} label="Day count (qty × days × unit price)"/>
+            <Typography variant="caption" color="text.secondary">{form.day_count_enabled ? 'Blank invoice days count as 1; blank verified days follow the invoice days.' : 'Off: each line is qty × unit price and days are stored as 1.'}</Typography>
+          </Stack>
+          <Alert icon={<InfoOutlined/>} severity="info" sx={{ mb: 1.5, py: 0 }}>Paste columns in worksheet order ({lineColumns.filter(isPasteColumn).map(column => column.headerName?.toLowerCase()).join(', ')}). Totals and differences are never imported as editable values.</Alert>
           <Box onPaste={pasteLines} sx={{ height: 390, width: '100%', '& .ag-cell': { fontVariantNumeric: 'tabular-nums' } }}>
             <AgGridReact<EditorLine> ref={gridRef} theme={gridTheme} rowData={lines} columnDefs={lineColumns} getRowId={params => params.data.key} defaultColDef={{ sortable: false, filter: false, resizable: true, suppressMovable: true }} singleClickEdit stopEditingWhenCellsLoseFocus enterNavigatesVertically enterNavigatesVerticallyAfterEdit onCellValueChanged={onCellValueChanged} rowSelection={{ mode: 'singleRow', enableClickSelection: false }} overlayNoRowsTemplate="Add a line to begin"/>
           </Box>
@@ -278,6 +317,22 @@ export default function InvoiceEditor() {
             {splits.map((split, index) => <TableRow key={split.key}><TableCell><TextField select size="small" value={split.currency_code} onChange={e => { setSplits(current => current.map(item => item.key === split.key ? { ...item, currency_code: e.target.value, exchange_rate: String(resolveExchangeRate(e.target.value, form.currency_code, reference?.exchange_rates ?? []) ?? '') } : item)); setCustomSplits(true); setDirty(true) }}>{reference?.currencies.map(item => <MenuItem key={item.currency_code} value={item.currency_code}>{item.currency_code}</MenuItem>)}</TextField></TableCell><TableCell align="right"><TextField size="small" type="number" value={split.percentage} inputProps={{ min: 0, max: 100, step: 'any' }} onChange={e => { setSplits(current => current.map(item => item.key === split.key ? { ...item, percentage: e.target.value } : item)); setCustomSplits(true); setDirty(true) }}/></TableCell><TableCell align="right"><TextField size="small" type="number" value={split.exchange_rate} error={!split.exchange_rate} helperText={!split.exchange_rate ? 'Configure FX' : ''} inputProps={{ min: 0, step: 'any' }} onChange={e => { setSplits(current => current.map(item => item.key === split.key ? { ...item, exchange_rate: e.target.value } : item)); setCustomSplits(true); setDirty(true) }}/></TableCell><TableCell align="right"><Typography fontWeight={700}>{split.currency_code} {formatAmount(totals.splitAmounts[index] ?? 0)}</Typography></TableCell><TableCell><IconButton size="small" disabled={splits.length === 1} onClick={() => { setSplits(current => current.filter(item => item.key !== split.key)); setCustomSplits(true); setDirty(true) }}><DeleteOutline/></IconButton></TableCell></TableRow>)}
           </TableBody></Table></TableContainer>
           <Stack direction="row" alignItems="center" gap={1} mt={1.5}><Button size="small" startIcon={<Add/>} onClick={() => { setSplits(current => [...current, { key: newKey(), currency_code: form.currency_code, percentage: '0', exchange_rate: '1' }]); setCustomSplits(true); setDirty(true) }}>Add split currency</Button><Tag tone={Math.abs(totals.splitPercentage - 100) < .000001 ? 'success' : 'error'}>Total {totals.splitPercentage}%</Tag><Typography variant="caption" color="text.secondary">A missing cross-currency rate is never silently treated as 1.</Typography></Stack>
+        </SectionCard>
+        <SectionCard title="Sign-off" subtitle="Each role stores a snapshot of the signatory's name and designation when this IDVS is saved. Later changes to signatories do not alter it.">
+          {!reference?.signatories.length && <Alert severity="info" sx={{ mb: 1.5 }}>No active signatories are configured yet. Add them under Invoice Configuration → Signatories.</Alert>}
+          <Box display="grid" gridTemplateColumns="repeat(auto-fit,minmax(220px,1fr))" gap={1.5}>
+            {SIGNATURE_ROLES.map(role => {
+              const selected = form.signatures[role]
+              const options = reference?.signatories.filter(item => item.signatory_role === role) ?? []
+              const snapshot = signatureSnapshots.find(item => item.role === role && !item.signatory_id)
+              return <TextField key={role} select label={SIGNATURE_LABELS[role]} value={selected} onChange={e => patch('signatures', { ...form.signatures, [role]: e.target.value })}
+                helperText={!selected && snapshot ? `Snapshot kept on this IDVS: ${snapshot.name}${snapshot.designation ? `, ${snapshot.designation}` : ''}. Choose a signatory to replace it.` : undefined}>
+                <MenuItem value="">Not assigned</MenuItem>
+                {selected && !options.some(item => item.id === selected) && <MenuItem value={selected} disabled>Current signatory (no longer active)</MenuItem>}
+                {options.map(item => <MenuItem key={item.id} value={item.id}>{item.label}</MenuItem>)}
+              </TextField>
+            })}
+          </Box>
         </SectionCard>
       </Box>
       <Paper variant="outlined" sx={{ p: 2, position: { xl: 'sticky' }, top: { xl: 76 } }}>

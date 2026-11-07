@@ -1,7 +1,8 @@
 """Decimal-only Invoice Processing calculations.
 
 Workbook equivalents:
-* line invoice/verified total = quantity × unit price;
+* line invoice/verified total = quantity × number of days × unit price, where
+  the day count is 1 unless the IDVS shows the "No. of days" column;
 * line and sheet difference = invoice − actual/contract;
 * tax = subtotal × configured rate, with additions and deductions signed;
 * adjusted verified amount = verified total − disallowed − advance;
@@ -43,8 +44,10 @@ def payment_due_date(invoice_date: date, tenure_days: int) -> date:
 
 class LineLike(Protocol):
     invoice_quantity: Decimal
+    invoice_days: Decimal
     invoice_unit_price: Decimal
     verified_quantity: Decimal
+    verified_days: Decimal
     verified_unit_price: Decimal
     invoice_total: Decimal
     verified_total: Decimal
@@ -75,8 +78,8 @@ def calculate_idvs(
     invoice_subtotal = ZERO
     verified_subtotal = ZERO
     for line in lines:
-        line.invoice_total = money(line.invoice_quantity * line.invoice_unit_price)
-        line.verified_total = money(line.verified_quantity * line.verified_unit_price)
+        line.invoice_total = money(line.invoice_quantity * line.invoice_days * line.invoice_unit_price)
+        line.verified_total = money(line.verified_quantity * line.verified_days * line.verified_unit_price)
         line.difference_amount = money(line.invoice_total - line.verified_total)
         invoice_subtotal += line.invoice_total
         verified_subtotal += line.verified_total

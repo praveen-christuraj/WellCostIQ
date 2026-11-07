@@ -28,6 +28,8 @@ from app.schemas.invoice_processing import (
     InvoicePaymentTermOut,
     InvoiceReference,
     InvoiceSave,
+    InvoiceSignatoryIn,
+    InvoiceSignatoryOut,
     InvoiceSummaryOut,
     InvoiceTaxConfigurationIn,
     InvoiceTaxConfigurationOut,
@@ -82,6 +84,16 @@ def create_exchange_rate(data: InvoiceExchangeRateIn, request: Request, db: Db, 
 @router.patch("/config/exchange-rates/{record_id}", response_model=InvoiceExchangeRateOut, dependencies=[Depends(require("invoice-processing:configure"))])
 def update_exchange_rate(record_id: str, data: InvoiceExchangeRateIn, request: Request, db: Db, user: Current):
     return service.save_exchange_rate(db, user.organization_id, data, user, request, record_id)
+
+
+@router.post("/config/signatories", response_model=InvoiceSignatoryOut, status_code=201, dependencies=[Depends(require("invoice-processing:configure"))])
+def create_signatory(data: InvoiceSignatoryIn, request: Request, db: Db, user: Current):
+    return service.save_signatory(db, user.organization_id, data, user, request)
+
+
+@router.patch("/config/signatories/{record_id}", response_model=InvoiceSignatoryOut, dependencies=[Depends(require("invoice-processing:configure"))])
+def update_signatory(record_id: str, data: InvoiceSignatoryIn, request: Request, db: Db, user: Current):
+    return service.save_signatory(db, user.organization_id, data, user, request, record_id)
 
 
 @router.put("/config/blocks/{block_id}", response_model=InvoiceBlockSettingOut, dependencies=[Depends(require("invoice-processing:configure"))])

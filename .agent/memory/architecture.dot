@@ -170,6 +170,7 @@ digraph WellCostIQ {
   "frontend/src/components/fuel-cost/FuelCompanyDialog.tsx";
   "frontend/src/components/fuel-cost/FuelConsumptionDialog.tsx";
   "frontend/src/components/fuel-cost/FuelLinesLedger.tsx";
+  "frontend/src/components/invoice/IdvsSheet.tsx";
   "frontend/src/components/lih-cost/LihWorksheet.tsx";
   "frontend/src/components/mud-cost/MudCostEntryDialog.tsx";
   "frontend/src/components/mud-cost/MudCostKpis.tsx";
@@ -204,6 +205,7 @@ digraph WellCostIQ {
   "frontend/src/lib/databaseBrowser.ts";
   "frontend/src/lib/export.ts";
   "frontend/src/lib/fuelCost.ts";
+  "frontend/src/lib/idvsSheet.ts";
   "frontend/src/lib/invoiceCalculations.ts";
   "frontend/src/lib/invoiceExport.ts";
   "frontend/src/lib/invoiceProcessing.ts";
@@ -889,6 +891,10 @@ digraph WellCostIQ {
   "frontend/src/components/fuel-cost/FuelLinesLedger.tsx" -> "frontend/src/lib/dailyCost.ts";
   "frontend/src/components/fuel-cost/FuelLinesLedger.tsx" -> "frontend/src/lib/export.ts";
   "frontend/src/components/fuel-cost/FuelLinesLedger.tsx" -> "frontend/src/lib/fuelCost.ts";
+  "frontend/src/components/invoice/IdvsSheet.tsx" -> "frontend/src/designSystem.ts";
+  "frontend/src/components/invoice/IdvsSheet.tsx" -> "frontend/src/lib/idvsSheet.ts";
+  "frontend/src/components/invoice/IdvsSheet.tsx" -> "frontend/src/lib/invoiceCalculations.ts";
+  "frontend/src/components/invoice/IdvsSheet.tsx" -> "frontend/src/lib/invoiceProcessing.ts";
   "frontend/src/components/lih-cost/LihWorksheet.tsx" -> "frontend/src/lib/dailyCost.ts";
   "frontend/src/components/lih-cost/LihWorksheet.tsx" -> "frontend/src/lib/lihCost.ts";
   "frontend/src/components/mud-cost/MudCostEntryDialog.tsx" -> "frontend/src/components/Common.tsx";
@@ -924,8 +930,12 @@ digraph WellCostIQ {
   "frontend/src/context/ThemeContext.tsx" -> "frontend/src/theme.ts";
   "frontend/src/lib/dailyAllocations.ts" -> "frontend/src/lib/dailyCost.ts";
   "frontend/src/lib/dailyCost.ts" -> "frontend/src/lib/units.ts";
+  "frontend/src/lib/idvsSheet.ts" -> "frontend/src/lib/invoiceCalculations.ts";
+  "frontend/src/lib/idvsSheet.ts" -> "frontend/src/lib/invoiceProcessing.ts";
   "frontend/src/lib/invoiceCalculations.ts" -> "frontend/src/lib/invoiceProcessing.ts";
+  "frontend/src/lib/invoiceExport.ts" -> "frontend/src/designSystem.ts";
   "frontend/src/lib/invoiceExport.ts" -> "frontend/src/lib/export.ts";
+  "frontend/src/lib/invoiceExport.ts" -> "frontend/src/lib/idvsSheet.ts";
   "frontend/src/lib/invoiceExport.ts" -> "frontend/src/lib/invoiceCalculations.ts";
   "frontend/src/lib/invoiceExport.ts" -> "frontend/src/lib/invoiceProcessing.ts";
   "frontend/src/lib/invoiceProcessing.ts" -> "frontend/src/lib/export.ts";
@@ -1118,6 +1128,7 @@ digraph WellCostIQ {
   "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/lib/invoiceCalculations.ts";
   "frontend/src/pages/InvoiceConfiguration.tsx" -> "frontend/src/lib/invoiceProcessing.ts";
   "frontend/src/pages/InvoiceDetail.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/pages/InvoiceDetail.tsx" -> "frontend/src/components/invoice/IdvsSheet.tsx";
   "frontend/src/pages/InvoiceDetail.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
   "frontend/src/pages/InvoiceDetail.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/pages/InvoiceDetail.tsx" -> "frontend/src/lib/api.ts";
