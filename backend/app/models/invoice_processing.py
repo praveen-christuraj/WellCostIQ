@@ -32,6 +32,8 @@ INVOICE_STATUSES = ("draft", "submitted", "sent_to_accounts", "epicor_pending", 
 INVOICE_WORKFLOW_ACTIONS = ("submit", "send_to_accounts", "receive_epicor", "approve_epicor")
 TAX_DIRECTIONS = ("addition", "deduction")
 BLOCK_CATEGORIES = ("own", "jv")
+# Sign-off roles printed on the IDVS, in printed order.
+SIGNATURE_ROLES = ("prepared", "checked", "verified", "approved")
 
 
 class InvoiceRecord(Base):
@@ -213,6 +215,54 @@ class InvoiceBlockSetting(InvoiceRecord):
     category: Mapped[str] = mapped_column(String(10), default="own", server_default="own", nullable=False)
 
 
+class InvoiceSignatory(InvoiceRecord):
+    """A named person and designation offered for one IDVS sign-off role."""
+
+    __tablename__ = "invoice_signatories"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "signatory_role", "full_name", name="uq_invoice_signatories_org_role_name"),
+        CheckConstraint(
+            "signatory_role IN ('prepared', 'checked', 'verified', 'approved')",
+            name="ck_invoice_signatories_role",
+        ),
+        Index("ix_invoice_signatories_org_deleted", "organization_id", "is_deleted"),
+    )
+
+    signatory_role: Mapped[str] = mapped_column(String(20), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    designation: Mapped[str] = mapped_column(String(150), default="", server_default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+
+
+class InvoiceSignature(Base):
+    """Snapshot of the name and designation chosen for one sign-off role on an IDVS."""
+
+    __tablename__ = "invoice_idvs_signatures"
+    __table_args__ = (
+        UniqueConstraint("invoice_id", "signature_role", name="uq_invoice_idvs_signatures_role"),
+        CheckConstraint(
+            "signature_role IN ('prepared', 'checked', 'verified', 'approved')",
+            name="ck_invoice_idvs_signatures_role",
+        ),
+        Index("ix_invoice_idvs_signatures_invoice_order", "invoice_id", "sort_order"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("invoice_idvs.id", ondelete="CASCADE"), nullable=False)
+    signature_role: Mapped[str] = mapped_column(String(20), nullable=False)
+    signatory_id: Mapped[str | None] = mapped_column(
+        ForeignKey("invoice_signatories.id", ondelete="SET NULL"), nullable=True
+    )
+    signatory_name: Mapped[str] = mapped_column(String(150), default="", server_default="", nullable=False)
+    designation: Mapped[str] = mapped_column(String(150), default="", server_default="", nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+
+    invoice: Mapped["Invoice"] = relationship(back_populates="signatures")
+
+
 class Invoice(InvoiceRecord):
     __tablename__ = "invoice_idvs"
     __table_args__ = (
@@ -260,6 +310,8 @@ class Invoice(InvoiceRecord):
     location_name_snapshot: Mapped[str] = mapped_column(String(150), nullable=False)
     field_name: Mapped[str] = mapped_column(String(150), default="", server_default="", nullable=False)
     phase: Mapped[str] = mapped_column(String(100), default="", server_default="", nullable=False)
+    # Services and rental tools bill per day; the column is shown only when this is true.
+    day_count_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     description_category_id: Mapped[str | None] = mapped_column(
         ForeignKey("invoice_description_categories.id", ondelete="RESTRICT"), nullable=True
     )
@@ -317,6 +369,10 @@ class Invoice(InvoiceRecord):
     attachments: Mapped[list["InvoiceAttachment"]] = relationship(
         back_populates="invoice", cascade="all, delete-orphan", lazy="selectin", passive_deletes=True,
     )
+    signatures: Mapped[list["InvoiceSignature"]] = relationship(
+        back_populates="invoice", cascade="all, delete-orphan", order_by="InvoiceSignature.sort_order",
+        lazy="selectin", passive_deletes=True,
+    )
 
 
 class InvoiceLine(Base):
@@ -324,8 +380,10 @@ class InvoiceLine(Base):
     __table_args__ = (
         CheckConstraint("LENGTH(TRIM(description)) > 0", name="ck_invoice_idvs_lines_description"),
         CheckConstraint("invoice_quantity > 0", name="ck_invoice_idvs_lines_invoice_quantity"),
+        CheckConstraint("invoice_days > 0", name="ck_invoice_idvs_lines_invoice_days"),
         CheckConstraint("invoice_unit_price >= 0", name="ck_invoice_idvs_lines_invoice_price"),
         CheckConstraint("verified_quantity >= 0", name="ck_invoice_idvs_lines_verified_quantity"),
+        CheckConstraint("verified_days >= 0", name="ck_invoice_idvs_lines_verified_days"),
         CheckConstraint("verified_unit_price >= 0", name="ck_invoice_idvs_lines_verified_price"),
         Index("ix_invoice_idvs_lines_invoice_order", "invoice_id", "sort_order"),
     )
@@ -337,9 +395,11 @@ class InvoiceLine(Base):
     invoice_id: Mapped[str] = mapped_column(ForeignKey("invoice_idvs.id", ondelete="CASCADE"), nullable=False)
     description: Mapped[str] = mapped_column(String(2000), nullable=False)
     invoice_quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    invoice_days: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("1"), server_default="1", nullable=False)
     invoice_unit_price: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
     invoice_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
     verified_quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    verified_days: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("1"), server_default="1", nullable=False)
     verified_unit_price: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
     verified_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
     difference_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)

@@ -4,6 +4,7 @@ export type InvoiceStatus = 'draft' | 'submitted' | 'sent_to_accounts' | 'epicor
 export type InvoiceDisplayStatus = InvoiceStatus | 'paid'
 export type WorkflowAction = 'submit' | 'send_to_accounts' | 'receive_epicor' | 'approve_epicor'
 export type TaxDirection = 'addition' | 'deduction'
+export type SignatureRole = 'prepared' | 'checked' | 'verified' | 'approved'
 
 export type ConfigItem = {
   id: string; name: string; description: string; is_active: boolean; is_deleted?: boolean
@@ -30,22 +31,28 @@ export type TaxConfiguration = {
 }
 export type ExchangeRate = { id: string; base_currency: string; quote_currency: string; rate: string; description: string; is_active: boolean; is_deleted?: boolean }
 export type BlockSetting = { block_id: string; block_code: string; block_name: string; category: 'own' | 'jv' | '' }
+export type Signatory = {
+  id: string; signatory_role: SignatureRole; full_name: string; designation: string; is_active: boolean
+  is_deleted?: boolean; deleted_at?: string | null; created_at?: string; updated_at?: string
+}
+export type SignatoryOption = { id: string; signatory_role: SignatureRole; full_name: string; designation: string; label: string }
 export type InvoiceReference = {
   vendors: VendorOption[]; orders: OrderOption[]; currencies: CurrencyOption[]
   rigs: RigOption[]; blocks: BlockOption[]; wells: WellOption[]
   locations: ConfigItem[]; categories: ConfigItem[]; payment_terms: PaymentTerm[]
-  taxes: TaxConfiguration[]; exchange_rates: ExchangeRate[]
+  taxes: TaxConfiguration[]; exchange_rates: ExchangeRate[]; signatories: SignatoryOption[]
 }
 export type InvoiceConfiguration = {
   vendors: VendorOption[]; currencies: CurrencyOption[]
   locations: ConfigItem[]; categories: ConfigItem[]; payment_terms: PaymentTerm[]
-  taxes: TaxConfiguration[]; exchange_rates: ExchangeRate[]; blocks: BlockSetting[]
+  taxes: TaxConfiguration[]; exchange_rates: ExchangeRate[]; blocks: BlockSetting[]; signatories: Signatory[]
 }
 export type InvoiceLine = {
-  id?: string; description: string; invoice_quantity: string; invoice_unit_price: string
-  invoice_total?: string; verified_quantity: string; verified_unit_price: string
+  id?: string; description: string; invoice_quantity: string; invoice_days: string; invoice_unit_price: string
+  invoice_total?: string; verified_quantity: string; verified_days: string; verified_unit_price: string
   verified_total?: string; difference_amount?: string; remarks: string; sort_order?: number
 }
+export type InvoiceSignature = { role: SignatureRole; signatory_id: string | null; name: string; designation: string }
 export type InvoiceTax = {
   id?: string; tax_configuration_id: string | null; tax_name: string; rate_percent: string
   direction: TaxDirection; source?: 'common' | 'vendor' | 'manual'; invoice_amount?: string; verified_amount?: string
@@ -68,7 +75,7 @@ export type Invoice = {
   order_id: string | null; order_number: string; order_type: string
   block_id: string | null; block_code: string; block_name: string; block_category: 'own' | 'jv' | ''
   rig_id: string | null; rig_code: string; rig_name: string; well_id: string | null; well_code: string; well_name: string
-  location_id: string; location_name: string; field_name: string; phase: string
+  location_id: string; location_name: string; field_name: string; phase: string; day_count_enabled: boolean
   description_category_id: string | null; description_category: string
   service_description: string; detailed_description: string; concerned_person: string
   service_from: string | null; service_to: string | null; currency_code: string
@@ -83,9 +90,11 @@ export type Invoice = {
   payment_splits: InvoicePaymentSplit[]; is_deleted: boolean; deleted_at: string | null
   created_by: string; updated_by: string; created_at: string; updated_at: string
 }
-export type InvoiceDetail = Invoice & { lines: InvoiceLine[]; taxes: InvoiceTax[]; history: WorkflowHistory[]; attachments: InvoiceAttachment[] }
+export type InvoiceDetail = Invoice & {
+  lines: InvoiceLine[]; taxes: InvoiceTax[]; history: WorkflowHistory[]; attachments: InvoiceAttachment[]; signatures: InvoiceSignature[]
+}
 export type InvoiceSaveInput = {
-  idvs_number?: string; idvs_date: string; expected_revision?: number
+  idvs_number?: string; idvs_date: string; expected_revision?: number; day_count_enabled: boolean
   invoice_number: string; invoice_date: string; invoice_received_date: string
   vendor_id: string; order_id: string | null; block_id: string | null; rig_id: string | null; well_id: string | null
   location_id: string; field_name: string; phase: string; description_category_id: string | null
@@ -93,9 +102,10 @@ export type InvoiceSaveInput = {
   service_from: string | null; service_to: string | null; currency_code: string
   payment_term_id: string | null; payment_tenure_days: number | null
   disallowed_amount: string; advance_amount: string; remarks: string
-  lines: Omit<InvoiceLine, 'id' | 'invoice_total' | 'verified_total' | 'difference_amount' | 'sort_order'>[]
+  lines: (Omit<InvoiceLine, 'id' | 'invoice_total' | 'verified_total' | 'difference_amount' | 'sort_order' | 'invoice_days' | 'verified_days'> & { invoice_days: string | null; verified_days: string | null })[]
   taxes: Pick<InvoiceTax, 'tax_configuration_id' | 'tax_name' | 'rate_percent' | 'direction'>[] | null
   payment_splits: PaymentSplitInput[] | null
+  signatures: { role: SignatureRole; signatory_id: string }[] | null
 }
 export type CurrencyTotals = {
   currency_code: string; invoice_total: string; verified_total: string; adjusted_verified_amount: string
@@ -126,8 +136,12 @@ export const WORKFLOW_ACTION: Partial<Record<InvoiceStatus, { action: WorkflowAc
   epicor_pending: { action: 'approve_epicor', label: 'Approved in EPICOR', permission: 'invoice-processing:approve' },
 }
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+export const SIGNATURE_ROLES: SignatureRole[] = ['prepared', 'checked', 'verified', 'approved']
+export const SIGNATURE_LABELS: Record<SignatureRole, string> = {
+  prepared: 'Prepared By', checked: 'Checked By', verified: 'Verified By', approved: 'Approved By',
+}
 export const INVOICE_IMPORT_HEADERS = ['Vendor Code', 'Invoice Number', 'Invoice Date', 'Invoice Received Date', 'IDVS Date', 'Location', 'Service Description', 'Currency Code', 'Line Description', 'Invoice Quantity', 'Invoice Unit Price']
-export const INVOICE_IMPORT_OPTIONAL = ['IDVS Number', 'PO/SO Number', 'Block Code', 'Rig Code', 'Well Code', 'Description Category', 'Detailed Description', 'Concerned Person', 'Field Name', 'Phase', 'Service From', 'Service To', 'Payment Term Code', 'Payment Tenure Days', 'Disallowed Amount', 'Advance Amount', 'Verified Quantity', 'Verified Unit Price', 'Line Remarks', 'Remarks']
+export const INVOICE_IMPORT_OPTIONAL = ['IDVS Number', 'PO/SO Number', 'Block Code', 'Rig Code', 'Well Code', 'Description Category', 'Detailed Description', 'Concerned Person', 'Field Name', 'Phase', 'Service From', 'Service To', 'Payment Term Code', 'Payment Tenure Days', 'Disallowed Amount', 'Advance Amount', 'Invoice Days', 'Verified Quantity', 'Verified Days', 'Verified Unit Price', 'Line Remarks', 'Remarks']
 export const INVOICE_IMPORT_SAMPLE: ImportRow = {
   'Vendor Code': 'VEND-01', 'Invoice Number': 'INV-001', 'Invoice Date': '2026-01-01', 'Invoice Received Date': '2026-01-03',
   'IDVS Date': '2026-01-03', Location: 'Port Harcourt', 'Service Description': 'Completion services', 'Currency Code': 'USD',
@@ -145,7 +159,8 @@ export function importInvoiceRow(row: ImportRow) {
     phase: row.Phase?.trim() || '', service_from: row['Service From'] || '', service_to: row['Service To'] || '', currency_code: row['Currency Code']?.trim().toUpperCase(),
     payment_term_code: row['Payment Term Code']?.trim() || '', payment_tenure_days: row['Payment Tenure Days'] || '', disallowed_amount: row['Disallowed Amount'] || 0,
     advance_amount: row['Advance Amount'] || 0, description: row['Line Description']?.trim(), invoice_quantity: row['Invoice Quantity'],
-    invoice_unit_price: row['Invoice Unit Price'], verified_quantity: row['Verified Quantity'] ?? '', verified_unit_price: row['Verified Unit Price'] ?? '',
+    invoice_days: row['Invoice Days'] ?? '', invoice_unit_price: row['Invoice Unit Price'], verified_quantity: row['Verified Quantity'] ?? '',
+    verified_days: row['Verified Days'] ?? '', verified_unit_price: row['Verified Unit Price'] ?? '',
     line_remarks: row['Line Remarks']?.trim() || '', remarks: row.Remarks?.trim() || '',
   }
 }

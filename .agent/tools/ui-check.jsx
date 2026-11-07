@@ -66,11 +66,15 @@ check('XLSX imports normalize sheet objects into header-keyed rows',
   parsedWorkbook.headers.join('|') === 'Vendor Code|Line Description' && parsedWorkbook.rows.length === 2 && parsedWorkbook.rows[1]['Line Description'] === 'Second line',
   JSON.stringify(parsedWorkbook))
 
+// The IDVS screen and the PDF/XLSX exports render one shared sheet model (src/lib/idvsSheet.ts).
+const idvsSheetSource = readFileSync('src/lib/idvsSheet.ts', 'utf8')
 const invoiceDetailSource = readFileSync('src/pages/InvoiceDetail.tsx', 'utf8')
+const idvsSheetViewSource = readFileSync('src/components/invoice/IdvsSheet.tsx', 'utf8')
 const invoiceExportSource = readFileSync('src/lib/invoiceExport.ts', 'utf8')
 const subtotalWiring = 'subtotalDifference(invoice.invoice_subtotal, invoice.verified_subtotal)'
-check('IDVS subtotal variance excludes taxes in screen and PDF outputs',
-  subtotalDifference('100.00', '90.00') === 10 && invoiceDetailSource.includes(subtotalWiring) && invoiceExportSource.includes(subtotalWiring))
+check('IDVS subtotal variance excludes taxes in the shared sheet used by screen and PDF/XLSX outputs',
+  subtotalDifference('100.00', '90.00') === 10 && idvsSheetSource.includes(subtotalWiring)
+  && invoiceDetailSource.includes('<IdvsSheet') && idvsSheetViewSource.includes('buildIdvsSheet') && invoiceExportSource.includes('buildIdvsSheet'))
 
 const container = w.document.getElementById('root')
 const root = createRoot(container)

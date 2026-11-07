@@ -1,5 +1,7 @@
 import { exportCsv, exportPdf, exportXlsx, type ExportColumn } from './export'
-import { formatAmount, formatDate, formatPrecise, subtotalDifference } from './invoiceCalculations'
+import { formatAmount, formatPrecise } from './invoiceCalculations'
+import { buildIdvsSheet, type IdvsSheet, type SheetCell } from './idvsSheet'
+import { idvsSheet as sheetTokens } from '../designSystem'
 import { INVOICE_STATUS_LABEL, type Invoice, type InvoiceDashboard, type InvoiceDetail } from './invoiceProcessing'
 
 export const invoiceExportColumns: ExportColumn<Invoice>[] = [
@@ -44,80 +46,137 @@ const idvsColumns: ExportColumn<InvoiceDetail>[] = [
 export async function exportIdvs(invoice: InvoiceDetail, format: 'csv' | 'xlsx' | 'pdf') {
   const safeNumber = invoice.idvs_number.replace(/[^a-z0-9_-]+/gi, '-')
   if (format === 'csv') return exportCsv(`${safeNumber}.csv`, [invoice], idvsColumns)
-  if (format === 'xlsx') return exportXlsx(`${safeNumber}.xlsx`, [invoice], idvsColumns)
+  const sheet = buildIdvsSheet(invoice)
+  if (format === 'xlsx') return writeIdvsXlsx(`${safeNumber}.xlsx`, sheet)
+  return writeIdvsPdf(`${safeNumber}.pdf`, sheet, invoice)
+}
+
+const hexToRgb = (hex: string): [number, number, number] => [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16)) as [number, number, number]
+
+/** Excel and PDF show the same cell text: amounts with two decimals, quantities without padding zeroes. */
+const pdfCell = (cell: SheetCell) => ({
+  content: cell.amount !== undefined ? formatAmount(cell.amount) : cell.quantity !== undefined ? formatPrecise(cell.quantity) : cell.text ?? '',
+  colSpan: cell.colSpan,
+  rowSpan: cell.rowSpan,
+  styles: { halign: cell.align ?? (cell.amount !== undefined || cell.quantity !== undefined ? 'right' as const : 'left' as const), fontStyle: cell.bold ? 'bold' as const : 'normal' as const },
+})
+
+async function writeIdvsPdf(fileName: string, sheet: IdvsSheet, invoice: InvoiceDetail) {
   const [{ jsPDF }, autoTableModule] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
   const autoTable = autoTableModule.default
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-  const teal: [number, number, number] = [21, 81, 91]
-  const ink: [number, number, number] = [27, 43, 48]
-  doc.setFillColor(...teal); doc.rect(0, 0, 297, 29, 'F')
-  doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(17)
-  doc.text('INVOICE DATA VERIFICATION SHEET', 14, 13)
-  doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-  doc.text(`${invoice.idvs_number}  |  IDVS date ${formatDate(invoice.idvs_date)}  |  Revision ${invoice.revision}`, 14, 21)
-  doc.text(INVOICE_STATUS_LABEL[invoice.display_status].toUpperCase(), 283, 17, { align: 'right' })
-  doc.setTextColor(...ink)
+  const ink = hexToRgb(sheetTokens.ink)
+  const font = sheetTokens.pdfFontFamily
+  const size = (referencePt: number) => referencePt * sheetTokens.pdfScale
+  const { referencePt } = sheetTokens
+  const margin = 12
+  const pageWidth = 297 - margin * 2
+  doc.setTextColor(...ink); doc.setDrawColor(...ink); doc.setFillColor(255, 255, 255)
+  // Title box with a medium outline, then the IDVS number on its own line.
+  doc.setLineWidth(0.5); doc.rect(margin, margin, pageWidth, 12)
+  doc.setFont(font, 'bold'); doc.setFontSize(size(referencePt.title))
+  doc.text(sheet.title, 148.5, margin + 8, { align: 'center' })
+  doc.setFontSize(size(referencePt.heading))
+  doc.text(`IDVS No: ${sheet.idvsNumber}`, margin, margin + 19)
+  doc.setFont(font, 'normal')
+  let y = margin + 27
+  sheet.infoLeft.forEach((line, index) => doc.text(line, margin, y + index * 5.6))
+  sheet.infoRight.forEach((line, index) => doc.text(line, margin + pageWidth * 0.62, y + index * 5.6))
+  y += 4 * 5.6 + 3
+
+  const totalWeight = sheet.columns.reduce((sum, column) => sum + column.weight, 0)
+  const columnStyles = Object.fromEntries(sheet.columns.map((column, index) => [index, {
+    cellWidth: (column.weight / totalWeight) * pageWidth,
+    fontSize: column.group === 'description' ? size(referencePt.description) : size(referencePt.body),
+  }]))
   autoTable(doc, {
-    startY: 35, theme: 'grid', styles: { fontSize: 8, cellPadding: 2, lineColor: [210, 220, 222], lineWidth: .15 },
-    headStyles: { fillColor: [235, 242, 243], textColor: ink, fontStyle: 'bold' },
-    head: [['Vendor', 'Invoice / dates', 'PO/SO & scope', 'Location / service']],
-    body: [[
-      `${invoice.vendor_name}\n${invoice.vendor_code}`,
-      `${invoice.invoice_number}\nInvoice: ${formatDate(invoice.invoice_date)}\nReceived: ${formatDate(invoice.invoice_received_date)}`,
-      `${invoice.order_type} ${invoice.order_number || 'Not linked'}\n${[invoice.block_code, invoice.rig_code, invoice.well_code].filter(Boolean).join(' / ') || 'Common materials'}`,
-      `${invoice.location_name}\n${invoice.description_category}\n${invoice.service_description}`,
-    ]],
+    startY: y,
+    margin: { left: margin, right: margin },
+    theme: 'grid',
+    styles: { font, fontSize: size(referencePt.body), textColor: ink, lineColor: ink, lineWidth: 0.2, cellPadding: 1.1, valign: 'middle', fillColor: false },
+    headStyles: { font, fontStyle: 'bold', fontSize: size(referencePt.heading), halign: 'center', textColor: ink, fillColor: false },
+    columnStyles,
+    head: sheet.header.map(row => row.map(pdfCell)),
+    body: sheet.body.map(row => row.cells.map(pdfCell)),
   })
-  autoTable(doc, {
-    startY: (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5,
-    head: [['#', 'Description', 'Invoice qty', 'Invoice unit price', 'Invoice total', 'Verified qty', 'Verified unit price', 'Verified total', 'Difference']],
-    body: invoice.lines.map((line, index) => [index + 1, line.description, formatPrecise(line.invoice_quantity), formatAmount(line.invoice_unit_price), formatAmount(line.invoice_total), formatPrecise(line.verified_quantity), formatAmount(line.verified_unit_price), formatAmount(line.verified_total), formatAmount(line.difference_amount)]),
-    foot: [['', `SUBTOTAL (${invoice.currency_code})`, '', '', formatAmount(invoice.invoice_subtotal), '', '', formatAmount(invoice.verified_subtotal), formatAmount(subtotalDifference(invoice.invoice_subtotal, invoice.verified_subtotal))]],
-    styles: { fontSize: 7.5, cellPadding: 1.8 }, headStyles: { fillColor: teal, textColor: 255 }, footStyles: { fillColor: [235, 242, 243], textColor: ink, fontStyle: 'bold' },
-    columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 66 }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right' } },
+  const finalY = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
+  doc.setFont(font, 'normal'); doc.setFontSize(7)
+  doc.text(`Generated ${new Date().toLocaleString()} · ${invoice.attachment_count} supporting attachment(s) · Amounts shown to two decimals; calculations stored at save-time precision`, margin, Math.min(finalY + 6, 204))
+  doc.save(fileName)
+}
+
+/** Expand the model into a rectangular grid: covered cells become null, as write-excel-file requires. */
+function xlsxGrid(rows: SheetCell[][], columnCount: number, styleOf: (cell: SheetCell) => Record<string, unknown>, heights: (number | undefined)[] = []) {
+  const occupied = rows.map(() => new Array<boolean>(columnCount).fill(false))
+  return rows.map((cells, rowIndex) => {
+    const out: (Record<string, unknown> | null)[] = new Array(columnCount).fill(undefined)
+    let column = 0
+    for (const cell of cells) {
+      while (column < columnCount && occupied[rowIndex][column]) { out[column] = null; column++ }
+      if (column >= columnCount) break
+      const span = cell.colSpan ?? 1
+      const rowSpan = cell.rowSpan ?? 1
+      out[column] = { ...styleOf(cell), ...(span > 1 ? { columnSpan: span } : {}), ...(rowSpan > 1 ? { rowSpan } : {}) }
+      for (let r = rowIndex; r < Math.min(rows.length, rowIndex + rowSpan); r++) {
+        for (let c = column; c < Math.min(columnCount, column + span); c++) {
+          if (r === rowIndex && c === column) continue
+          occupied[r][c] = true
+          if (r === rowIndex) out[c] = null
+        }
+      }
+      column += span
+    }
+    for (let c = 0; c < columnCount; c++) if (out[c] === undefined) out[c] = occupied[rowIndex][c] ? null : { value: '', type: String, borderStyle: 'thin' }
+    if (heights[rowIndex]) (out[0] as Record<string, unknown>).height = heights[rowIndex]
+    return out
   })
-  let y = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5
-  autoTable(doc, {
-    startY: y, margin: { left: 14, right: 157 }, head: [['Tax / adjustment', 'Rate', 'Invoice amount', 'Verified amount']],
-    body: [
-      ...invoice.taxes.map(tax => [`${tax.tax_name} (${tax.direction})`, `${formatPrecise(tax.rate_percent, 4)}%`, formatAmount(tax.invoice_amount), formatAmount(tax.verified_amount)]),
-      ['Disallowed amount', '', '', `-${formatAmount(invoice.disallowed_amount)}`], ['Advance amount', '', '', `-${formatAmount(invoice.advance_amount)}`],
-    ], styles: { fontSize: 7.5, cellPadding: 1.7 }, headStyles: { fillColor: teal },
+}
+
+async function writeIdvsXlsx(fileName: string, sheet: IdvsSheet) {
+  const { default: writeXlsxFile } = await import('write-excel-file/browser')
+  const font = sheetTokens.excelFontName
+  const pt = sheetTokens.referencePt
+  const columnCount = sheet.columns.length
+  const base = { fontFamily: font, fontSize: pt.body, alignVertical: 'center' as const, borderStyle: 'thin' as const }
+  const styleOf = (cell: SheetCell): Record<string, unknown> => {
+    const style = { ...base, align: cell.align ?? 'left', fontWeight: cell.bold ? 'bold' : 'normal', wrap: true }
+    if (cell.amount !== undefined) return { ...style, type: Number, value: cell.amount, format: '#,##0.00;-#,##0.00', align: 'right' }
+    if (cell.quantity !== undefined) return { ...style, type: Number, value: cell.quantity, format: 'General', align: 'right' }
+    return { ...style, type: String, value: cell.text ?? '' }
+  }
+  const widthOf = (key: string) => key.endsWith('Qty') ? 10 : key.endsWith('Days') ? 12 : key.endsWith('Unit') ? 18 : key.endsWith('Total') ? 20 :
+    key === 'sno' ? 7 : key === 'description' ? 90 : key === 'difference' ? 18 : 26
+  const titleRow = [{ value: sheet.title, type: String, columnSpan: columnCount, fontFamily: font, fontSize: pt.title, fontWeight: 'bold' as const, align: 'center' as const, alignVertical: 'center' as const, borderStyle: 'medium' as const, height: 30 }]
+  const infoRows = sheet.infoLeft.map((left, index) => {
+    const row: (Record<string, unknown> | null)[] = new Array(columnCount).fill(null)
+    row[0] = { type: String, value: left, columnSpan: sheet.invoiceStart, fontFamily: font, fontSize: pt.heading, fontWeight: 'bold' as const, height: 20 }
+    row[sheet.verifiedStart] = { type: String, value: sheet.infoRight[index], columnSpan: columnCount - sheet.verifiedStart, fontFamily: font, fontSize: pt.heading, fontWeight: 'bold' as const }
+    return row
   })
-  const taxBottom = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
-  autoTable(doc, {
-    startY: y, margin: { left: 151, right: 14 }, head: [['Commercial summary', invoice.currency_code]],
-    body: [['Invoice total', formatAmount(invoice.invoice_total)], ['Verified total', formatAmount(invoice.verified_total)], ['Difference', formatAmount(invoice.difference_amount)], ['Adjusted verified / payable', formatAmount(invoice.adjusted_verified_amount)], ['Payment terms', `${invoice.payment_tenure_days} days`], ['Due date', invoice.due_date]],
-    styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: teal }, columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
+  const idvsRow = [{ type: String, value: `IDVS No: ${sheet.idvsNumber}`, columnSpan: columnCount, fontFamily: font, fontSize: pt.heading, fontWeight: 'bold' as const, height: 22 }]
+  const body = sheet.body.map(row => row.cells)
+  const heights = sheet.body.map(row => {
+    const description = row.cells[1]?.text ?? ''
+    const remarks = row.cells[columnCount - 1]?.text ?? ''
+    if (row.kind !== 'line') return row.kind === 'signature' ? 22 : 20
+    const lines = Math.max(1, Math.ceil(description.length / 80), Math.ceil(remarks.length / 22))
+    return Math.max(20, lines * 18)
   })
-  const summaryBottom = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
-  y = Math.max(taxBottom, summaryBottom, 132) + 5
-  autoTable(doc, {
-    startY: y, head: [['Payment currency', 'Percentage', 'Exchange rate', 'Split amount']],
-    body: invoice.payment_splits.map(split => [split.currency_code, `${formatPrecise(split.percentage, 4)}%`, formatPrecise(split.exchange_rate), formatAmount(split.amount)]),
-    styles: { fontSize: 8 }, headStyles: { fillColor: teal }, margin: { left: 14, right: 157 },
-  })
-  const splitBottom = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
-  autoTable(doc, {
-    startY: y, head: [['Tracking milestone', 'Date', 'Actor / remarks']],
-    body: invoice.history.map(item => [item.action_label, item.action_date, `${item.actor_name}${item.remarks ? ` · ${item.remarks}` : ''}`]),
-    styles: { fontSize: 7.5 }, headStyles: { fillColor: teal }, margin: { left: 151, right: 14 },
-  })
-  const historyBottom = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
-  y = Math.max(splitBottom, historyBottom) + 7
-  // Keep signatures with a short IDVS when they fit above the fixed footer; only paginate when necessary.
-  if (y > 178) { doc.addPage(); y = 25 }
-  const verifiedBy = invoice.history.find(item => item.action === 'send_to_accounts')?.actor_name ?? ''
-  const approvedBy = invoice.history.find(item => item.action === 'approve_epicor')?.actor_name ?? ''
-  doc.setDrawColor(160); doc.setFontSize(8)
-  ;[['Prepared By', invoice.created_by], ['Checked By', ''], ['Verified By', verifiedBy], ['Approved By', approvedBy]].forEach(([label, name], index) => {
-    const x = 14 + index * 70
-    doc.line(x, y + 8, x + 56, y + 8); doc.setFont('helvetica', 'bold'); doc.text(label, x, y + 14)
-    doc.setFont('helvetica', 'normal'); doc.text(name || ' ', x, y + 19)
-  })
-  doc.setFontSize(7); doc.setTextColor(100)
-  doc.text(`Generated ${new Date().toLocaleString()} · ${invoice.attachment_count} supporting attachment(s) · Calculations stored at save-time precision`, 14, 202)
-  doc.save(`${safeNumber}.pdf`)
+  const data = [
+    titleRow,
+    idvsRow,
+    [],
+    ...infoRows,
+    [],
+    ...xlsxGrid(sheet.header, columnCount, styleOf),
+    ...xlsxGrid(body, columnCount, styleOf, heights),
+  ]
+  await writeXlsxFile(data as never, {
+    sheet: 'IDVS',
+    columns: sheet.columns.map(column => ({ width: widthOf(column.key) })),
+    showGridLines: false,
+    orientation: 'landscape',
+  }, { fontFamily: font, fontSize: pt.body }).toFile(fileName)
 }
 
 export async function exportInvoiceDashboardPdf(data: InvoiceDashboard, selectedCurrency: string) {

@@ -5,6 +5,17 @@ export const numeric = (value: string | number | null | undefined): number => {
   return Number.isFinite(parsed) ? parsed : 0
 }
 export const multiply = (quantity: string, unitPrice: string): number => numeric(quantity) * numeric(unitPrice)
+/**
+ * Day factors mirror the server: 1 whenever the IDVS day count is off; otherwise a blank
+ * invoice day count is 1 and a blank verified day count follows the invoice side.
+ */
+export function lineDayFactors(line: { invoice_days?: string | null; verified_days?: string | null }, dayCountEnabled: boolean): { invoice: number; verified: number } {
+  if (!dayCountEnabled) return { invoice: 1, verified: 1 }
+  const blank = (value: string | null | undefined) => value === undefined || value === null || value === ''
+  const invoice = blank(line.invoice_days) ? 1 : numeric(line.invoice_days)
+  const verified = blank(line.verified_days) ? invoice : numeric(line.verified_days)
+  return { invoice, verified }
+}
 export function addDays(isoDate: string, days: number): string {
   if (!isoDate || !Number.isInteger(days) || days < 0) return ''
   const parsed = new Date(`${isoDate}T00:00:00.000Z`)
@@ -25,14 +36,15 @@ export type DraftTotals = {
   splitAmounts: number[]; splitPercentage: number
 }
 export function calculateDraft(
-  lines: Pick<InvoiceLine, 'invoice_quantity' | 'invoice_unit_price' | 'verified_quantity' | 'verified_unit_price'>[],
+  lines: Pick<InvoiceLine, 'invoice_quantity' | 'invoice_days' | 'invoice_unit_price' | 'verified_quantity' | 'verified_days' | 'verified_unit_price'>[],
   taxes: Pick<InvoiceTax, 'rate_percent' | 'direction'>[],
   disallowedAmount: string,
   advanceAmount: string,
   splits: Pick<InvoicePaymentSplit, 'percentage' | 'exchange_rate'>[],
+  dayCountEnabled = false,
 ): DraftTotals {
-  const invoiceSubtotal = lines.reduce((sum, line) => sum + multiply(line.invoice_quantity, line.invoice_unit_price), 0)
-  const verifiedSubtotal = lines.reduce((sum, line) => sum + multiply(line.verified_quantity, line.verified_unit_price), 0)
+  const invoiceSubtotal = lines.reduce((sum, line) => sum + numeric(line.invoice_quantity) * lineDayFactors(line, dayCountEnabled).invoice * numeric(line.invoice_unit_price), 0)
+  const verifiedSubtotal = lines.reduce((sum, line) => sum + numeric(line.verified_quantity) * lineDayFactors(line, dayCountEnabled).verified * numeric(line.verified_unit_price), 0)
   let invoiceTaxTotal = 0
   let verifiedTaxTotal = 0
   for (const tax of taxes) {

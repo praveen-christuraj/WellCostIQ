@@ -6,13 +6,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.precision import Decimal10
+from app.core.precision import Decimal10, Decimal10Days
 
 TaxDirection = Literal["addition", "deduction"]
 BlockCategory = Literal["own", "jv"]
+SignatureRole = Literal["prepared", "checked", "verified", "approved"]
 WorkflowAction = Literal["submit", "send_to_accounts", "receive_epicor", "approve_epicor"]
 ExportFormat = Literal["csv", "xlsx", "pdf"]
 MAX_MONEY = Decimal("9999999999999999.9999999999")
+MAX_DAYS = Decimal("100000")
 
 
 def _trim(value: Any) -> Any:
@@ -127,6 +129,38 @@ class InvoiceExchangeRateIn(_Strict):
 
 class InvoiceBlockSettingIn(_Strict):
     category: BlockCategory
+
+
+class InvoiceSignatoryIn(_Strict):
+    signatory_role: SignatureRole
+    full_name: str = Field(min_length=1, max_length=150)
+    designation: str = Field(default="", max_length=150)
+    is_active: bool = True
+
+    @field_validator("full_name", "designation", mode="before")
+    @classmethod
+    def trim(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class InvoiceSignatoryOut(_Strict):
+    id: str
+    signatory_role: SignatureRole
+    full_name: str
+    designation: str
+    is_active: bool
+    is_deleted: bool
+    deleted_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class InvoiceSignatoryOption(_Strict):
+    id: str
+    signatory_role: SignatureRole
+    full_name: str
+    designation: str
+    label: str
 
 
 class InvoiceConfigItemOut(_Strict):
@@ -261,6 +295,7 @@ class InvoiceReference(_Strict):
     payment_terms: list[InvoicePaymentTermOut]
     taxes: list[InvoiceTaxConfigurationOut]
     exchange_rates: list[InvoiceExchangeRateOut]
+    signatories: list[InvoiceSignatoryOption]
 
 
 class InvoiceConfiguration(_Strict):
@@ -272,13 +307,17 @@ class InvoiceConfiguration(_Strict):
     taxes: list[InvoiceTaxConfigurationOut]
     exchange_rates: list[InvoiceExchangeRateOut]
     blocks: list[InvoiceBlockSettingOut]
+    signatories: list[InvoiceSignatoryOut]
 
 
 class InvoiceLineIn(_Strict):
     description: str = Field(min_length=1, max_length=2000)
     invoice_quantity: Decimal10 = Field(gt=0, le=MAX_MONEY)
+    # Days are used only when the IDVS enables the day count; otherwise they are stored as 1.
+    invoice_days: Decimal10Days | None = Field(default=None, gt=0, le=MAX_DAYS)
     invoice_unit_price: Decimal10 = Field(ge=0, le=MAX_MONEY)
     verified_quantity: Decimal10 | None = Field(default=None, ge=0, le=MAX_MONEY)
+    verified_days: Decimal10Days | None = Field(default=None, ge=0, le=MAX_DAYS)
     verified_unit_price: Decimal10 | None = Field(default=None, ge=0, le=MAX_MONEY)
     remarks: str = Field(default="", max_length=1000)
 
@@ -286,6 +325,11 @@ class InvoiceLineIn(_Strict):
     @classmethod
     def trim(cls, value: Any) -> Any:
         return _trim(value)
+
+
+class InvoiceSignatureIn(_Strict):
+    role: SignatureRole
+    signatory_id: str = Field(min_length=1, max_length=36)
 
 
 class InvoiceTaxIn(_Strict):
@@ -338,9 +382,12 @@ class InvoiceSave(_Strict):
     disallowed_amount: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_MONEY)
     advance_amount: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_MONEY)
     remarks: str = Field(default="", max_length=1000)
+    day_count_enabled: bool = False
     lines: list[InvoiceLineIn] = Field(min_length=1, max_length=500)
     taxes: list[InvoiceTaxIn] | None = Field(default=None, max_length=50)
     payment_splits: list[InvoicePaymentSplitIn] | None = Field(default=None, max_length=10)
+    # None keeps the stored sign-off selections (used by spreadsheet re-imports); a list replaces them.
+    signatures: list[InvoiceSignatureIn] | None = Field(default=None, max_length=4)
 
     @field_validator(
         "idvs_number", "invoice_number", "field_name", "phase", "service_description",
@@ -365,6 +412,10 @@ class InvoiceSave(_Strict):
                 raise ValueError("Payment splits cannot repeat a currency")
             if self.payment_splits and sum((item.percentage for item in self.payment_splits), Decimal("0")) != Decimal("100"):
                 raise ValueError("Payment split percentages must total exactly 100%")
+        if self.signatures is not None:
+            roles = [item.role for item in self.signatures]
+            if len(roles) != len(set(roles)):
+                raise ValueError("Each sign-off role can be assigned only once")
         return self
 
 
@@ -390,13 +441,22 @@ class InvoicePaymentIn(_Strict):
         return _trim(value)
 
 
+class InvoiceSignatureOut(_Strict):
+    role: SignatureRole
+    signatory_id: str | None
+    name: str
+    designation: str
+
+
 class InvoiceLineOut(_Strict):
     id: str
     description: str
     invoice_quantity: Decimal
+    invoice_days: Decimal
     invoice_unit_price: Decimal
     invoice_total: Decimal
     verified_quantity: Decimal
+    verified_days: Decimal
     verified_unit_price: Decimal
     verified_total: Decimal
     difference_amount: Decimal
@@ -481,6 +541,7 @@ class InvoiceSummaryOut(_Strict):
     location_name: str
     field_name: str
     phase: str
+    day_count_enabled: bool
     description_category_id: str | None
     description_category: str
     service_description: str
@@ -526,6 +587,7 @@ class InvoiceSummaryOut(_Strict):
 
 class InvoiceDetailOut(InvoiceSummaryOut):
     lines: list[InvoiceLineOut]
+    signatures: list[InvoiceSignatureOut]
     taxes: list[InvoiceTaxOut]
     history: list[InvoiceWorkflowHistoryOut]
     attachments: list[InvoiceAttachmentOut]
@@ -558,8 +620,10 @@ class InvoiceImportRow(_Strict):
     advance_amount: Any = 0
     description: str = Field(min_length=1, max_length=2000)
     invoice_quantity: Any
+    invoice_days: Any = None
     invoice_unit_price: Any
     verified_quantity: Any = None
+    verified_days: Any = None
     verified_unit_price: Any = None
     line_remarks: str = Field(default="", max_length=1000)
     remarks: str = Field(default="", max_length=1000)
