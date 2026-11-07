@@ -571,7 +571,25 @@ function ReportCover({ report }: { report: CostPrintReport }) {
     { label: 'Total Mud', value: row => quantityText(optionalText(row, 'total_mud') ?? asNumber(mudBalances.get(row.section_id)?.opening_stock) + asNumber(mudBalances.get(row.section_id)?.receipt) + asNumber(mudBalances.get(row.section_id)?.additions)) },
     { label: 'Losses', value: row => quantityText(row.consumption_losses) },
     { label: 'Closing Stock', value: row => quantityText(mudBalances.get(row.section_id)?.closing_stock) },
-    { label: 'Meterage (current depth)', value: row => depthText(sectionDepths.get(optionalText(row, 'hole_section_id') ?? row.section_id), 'm') },
+    { label: 'Meterage', value: row => {
+      const id = optionalText(row, 'hole_section_id') ?? row.section_id
+      const index = mudSections.findIndex(section => (optionalText(section, 'hole_section_id') ?? section.section_id) === id)
+      const current = asNumber(sectionDepths.get(id))
+      const preceding = index > 0
+        ? asNumber(sectionDepths.get(optionalText(mudSections[index - 1], 'hole_section_id') ?? mudSections[index - 1].section_id))
+        : 0
+      return depthText(Math.max(0, current - preceding), 'm')
+    } },
+    { label: 'bbl/m Consumed', value: row => {
+      const id = optionalText(row, 'hole_section_id') ?? row.section_id
+      const index = mudSections.findIndex(section => (optionalText(section, 'hole_section_id') ?? section.section_id) === id)
+      const current = asNumber(sectionDepths.get(id))
+      const preceding = index > 0
+        ? asNumber(sectionDepths.get(optionalText(mudSections[index - 1], 'hole_section_id') ?? mudSections[index - 1].section_id))
+        : 0
+      const meterage = current - preceding
+      return meterage > 0 ? decimalText(asNumber(row.consumption_losses) / meterage) : '—'
+    } },
     { label: 'Cost / BBL', value: row => row.cost_per_bbl == null ? '—' : printMoney(row.cost_per_bbl, currency) },
     { label: 'Reconciled Cost', value: row => row.reconciled_cost == null ? '—' : printMoney(row.reconciled_cost, currency) },
   ]
