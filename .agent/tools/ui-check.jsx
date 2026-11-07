@@ -32,6 +32,9 @@ const { ThemeProvider, CssBaseline } = await import('@mui/material')
 const { buildTheme } = await import('../../frontend/src/theme')
 const { chartPalette } = await import('../../frontend/src/designSystem')
 const { newNdtLine } = await import('../../frontend/src/lib/ndtInspection')
+const { parseImportFile } = await import('../../frontend/src/lib/export')
+const { subtotalDifference } = await import('../../frontend/src/lib/invoiceCalculations')
+const { default: writeXlsxFile } = await import('write-excel-file/node')
 const { FormDialog, PanelDialog, Tag, ErrorMessage } = await import('../../frontend/src/components/Common')
 const { InteractiveChart } = await import('../../frontend/src/components/ui/InteractiveChart')
 
@@ -46,6 +49,28 @@ const fallbackNdtKeys = [newNdtLine().key, newNdtLine().key]
 if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor)
 else delete globalThis.crypto
 check('NDT line keys work without crypto.randomUUID', fallbackNdtKeys.every(Boolean) && new Set(fallbackNdtKeys).size === fallbackNdtKeys.length, fallbackNdtKeys.join(','))
+
+// Exercise a real XLSX zip through the browser parser. read-excel-file 9 wraps
+// first-sheet rows in { sheet, data }; older releases returned rows directly.
+const workbook = await writeXlsxFile([
+  [{ value: 'Vendor Code', type: String }, { value: 'Line Description', type: String }],
+  [{ value: 'VEND-001', type: String }, { value: 'First line', type: String }],
+  [{ value: 'VEND-001', type: String }, { value: 'Second line', type: String }],
+], { buffer: true })
+const workbookBuffer = await workbook.toBuffer()
+const parsedWorkbook = await parseImportFile({
+  name: 'idvs-regression.xlsx', size: workbookBuffer.length,
+  arrayBuffer: async () => workbookBuffer.buffer.slice(workbookBuffer.byteOffset, workbookBuffer.byteOffset + workbookBuffer.byteLength),
+})
+check('XLSX imports normalize sheet objects into header-keyed rows',
+  parsedWorkbook.headers.join('|') === 'Vendor Code|Line Description' && parsedWorkbook.rows.length === 2 && parsedWorkbook.rows[1]['Line Description'] === 'Second line',
+  JSON.stringify(parsedWorkbook))
+
+const invoiceDetailSource = readFileSync('src/pages/InvoiceDetail.tsx', 'utf8')
+const invoiceExportSource = readFileSync('src/lib/invoiceExport.ts', 'utf8')
+const subtotalWiring = 'subtotalDifference(invoice.invoice_subtotal, invoice.verified_subtotal)'
+check('IDVS subtotal variance excludes taxes in screen and PDF outputs',
+  subtotalDifference('100.00', '90.00') === 10 && invoiceDetailSource.includes(subtotalWiring) && invoiceExportSource.includes(subtotalWiring))
 
 const container = w.document.getElementById('root')
 const root = createRoot(container)
@@ -147,7 +172,7 @@ collectSources('src')
 const directEChartsUsers = sourceFiles.filter(path => path !== 'src/components/ui/InteractiveChart.tsx' && readFileSync(path, 'utf8').includes('echarts-for-react'))
 const chartHostSource = readFileSync('src/components/ui/InteractiveChart.tsx', 'utf8')
 const chartUsageCount = sourceFiles.reduce((count, path) => count + (readFileSync(path, 'utf8').match(/<InteractiveChart\b/g)?.length ?? 0), 0)
-check('all interactive charts use the shared precision host', directEChartsUsers.length === 0 && chartUsageCount === 14, `${chartUsageCount} charts; direct renderers: ${directEChartsUsers.join(',') || 'none'}`)
+check('all interactive charts use the shared precision host', directEChartsUsers.length === 0 && chartUsageCount === 16, `${chartUsageCount} charts; direct renderers: ${directEChartsUsers.join(',') || 'none'}`)
 check('chart host corrects zoomed pointer mapping with SVG', chartHostSource.includes("renderer: 'svg'") && chartHostSource.includes('transitionDuration: 0'))
 for (const mode of ['light', 'dark']) {
   const colours = chartPalette(mode).series

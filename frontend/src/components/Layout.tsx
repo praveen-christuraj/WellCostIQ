@@ -13,6 +13,7 @@ import {
   InsightsOutlined, SettingsOutlined, StorageOutlined, PlaylistAddCheckRounded, WaterDropOutlined,
   AssessmentOutlined, LocalGasStationOutlined, ScienceOutlined, Inventory2Outlined, ScheduleRounded,
   FactCheckOutlined, SecurityRounded, NotificationsOutlined, TuneRounded, BackupOutlined, HomeOutlined,
+  ReceiptLongOutlined, PostAddOutlined,
 } from '@mui/icons-material'
 import Brand, { BrandIcon } from './Brand'
 import { FormDialog, ErrorMessage } from './Common'
@@ -47,6 +48,13 @@ const modules: NavModule[] = [
     { label: 'Consumables', path: '/master-data/consumables', icon: OpacityOutlined, permission: 'master-data:read' },
     { label: 'Catalogue lists', path: '/master-data/catalogue-lists', icon: ListAltOutlined, permission: 'master-data:read' },
     { label: 'Deleted entries', path: '/master-data/deleted', icon: DeleteOutlineRounded, permission: 'master-data:read' },
+  ] },
+  { label: 'Invoice Processing', icon: ReceiptLongOutlined, items: [
+    { label: 'Dashboard', path: '/invoice-processing', icon: DashboardOutlined, permission: 'invoice-processing:read' },
+    { label: 'New IDVS', path: '/invoice-processing/idvs/new', icon: PostAddOutlined, permission: 'invoice-processing:create' },
+    { label: 'Saved IDVS & Tracking', path: '/invoice-processing/register', icon: ReceiptLongOutlined, permission: 'invoice-processing:read' },
+    { label: 'Deleted Entries', path: '/invoice-processing/deleted', icon: DeleteOutlineRounded, permission: 'invoice-processing:read' },
+    { label: 'Invoice Configuration', path: '/invoice-processing/configuration', icon: TuneRounded, permission: 'invoice-processing:configure' },
   ] },
   { label: 'Rig & Well Management', icon: BusinessOutlined, items: [
     { label: 'Overview', path: '/rig-well', icon: BusinessOutlined, permission: 'rig-well:read' },
@@ -99,6 +107,7 @@ const modules: NavModule[] = [
  * bar and the tab title. Longest prefix wins, so the order here matters.
  */
 const DETAIL_LABELS: { prefix: string; label: string }[] = [
+  { prefix: '/invoice-processing/idvs/', label: 'IDVS entry & output' },
   { prefix: '/afe/estimate/', label: 'AFE cost estimate' },
   { prefix: '/daily-cost/entries/', label: 'Daily cost sheet' },
   { prefix: '/daily-cost/analysis/', label: 'Well cost analysis' },

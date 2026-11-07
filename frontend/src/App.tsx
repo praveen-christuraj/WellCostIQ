@@ -45,6 +45,11 @@ const LihCostRegister = lazy(() => import('./pages/LihCostRegister'))
 const FuelCostRegister = lazy(() => import('./pages/FuelCostRegister'))
 const MudCostAnalysis = lazy(() => import('./pages/MudCostAnalysis'))
 const NdtInspectionRegister = lazy(() => import('./pages/NdtInspectionRegister'))
+const InvoiceProcessingDashboard = lazy(() => import('./pages/InvoiceProcessingDashboard'))
+const InvoiceRegister = lazy(() => import('./pages/InvoiceRegister'))
+const InvoiceEditor = lazy(() => import('./pages/InvoiceEditor'))
+const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'))
+const InvoiceConfiguration = lazy(() => import('./pages/InvoiceConfiguration'))
 const CostingSets = lazy(() => import('./pages/CostingSets'))
 const Reports = lazy(() => import('./pages/Reports'))
 const ReportBuilder = lazy(() => import('./pages/ReportBuilder'))
@@ -141,6 +146,13 @@ export default function App() {
           <Route path="daily-cost/ndt-inspections" element={<Guard permission="daily-cost:read"><NdtInspectionRegister/></Guard>}/>
           <Route path="daily-cost/analysis" element={<Guard permission="daily-cost:read"><DailyCostAnalysis/></Guard>}/>
           <Route path="daily-cost/analysis/:wellId" element={<Guard permission="daily-cost:read"><DailyCostAnalysis/></Guard>}/>
+          <Route path="invoice-processing" element={<Guard permission="invoice-processing:read"><InvoiceProcessingDashboard/></Guard>}/>
+          <Route path="invoice-processing/register" element={<Guard permission="invoice-processing:read"><InvoiceRegister/></Guard>}/>
+          <Route path="invoice-processing/deleted" element={<Guard permission="invoice-processing:read"><InvoiceRegister deletedView/></Guard>}/>
+          <Route path="invoice-processing/configuration" element={<Guard permission="invoice-processing:configure"><InvoiceConfiguration/></Guard>}/>
+          <Route path="invoice-processing/idvs/new" element={<Guard permission="invoice-processing:create"><InvoiceEditor/></Guard>}/>
+          <Route path="invoice-processing/idvs/:id/view" element={<Guard permission="invoice-processing:read"><InvoiceDetail/></Guard>}/>
+          <Route path="invoice-processing/idvs/:id" element={<Guard permission="invoice-processing:update"><InvoiceEditor/></Guard>}/>
           <Route path="reports" element={<GuardAny permissions={['rig-well:read', 'afe:read', 'daily-cost:read', 'report-builder:read', 'custom-reports:read']}><Reports/></GuardAny>}/>
           <Route path="reports/builder" element={<GuardAny permissions={['report-builder:read', 'report-builder:create', 'report-builder:update']}><ReportBuilder/></GuardAny>}/>
           <Route path="reports/builder/:reportId" element={<GuardAny permissions={['report-builder:read', 'report-builder:create', 'report-builder:update']}><ReportDesigner/></GuardAny>}/>

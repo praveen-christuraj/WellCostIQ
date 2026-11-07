@@ -63,6 +63,10 @@ REFERENCE_LABELS: dict[str, str] = {
     "phases": "phase record(s)",
     "hole_sections": "hole-section record(s)",
     "activities": "activity record(s)",
+    "invoice_idvs": "IDVS / invoice record(s)",
+    "invoice_locations": "invoice location configuration(s)",
+    "invoice_payment_terms": "invoice payment term configuration(s)",
+    "invoice_tax_configurations": "invoice tax configuration(s)",
 }
 
 def _label(table_name: str) -> str:

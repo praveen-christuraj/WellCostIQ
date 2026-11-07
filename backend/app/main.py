@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import afe, auth, audit, backup, business_dashboard, costing_sets, daily_cost, database_browser, fuel_cost, lih_cost, master_data, mud_cost, ndt_inspection, rbac, report_builder, rig_well, security, service_master, sow_adjustment, usage_reports, vendor_master
+from app.api import afe, auth, audit, backup, business_dashboard, costing_sets, daily_cost, database_browser, fuel_cost, invoice_processing, lih_cost, master_data, mud_cost, ndt_inspection, rbac, report_builder, rig_well, security, service_master, sow_adjustment, usage_reports, vendor_master
 from app.api.catalogue_items import ITEM_ROUTERS, catalogue_error_handler
 from app.api.catalogue_options import router as catalogue_options_router
 from app.bootstrap import bootstrap_admin
@@ -25,7 +25,7 @@ configure_logging()
 
 # Bumped when the API surface changes in a way a browser tab could notice; the
 # health probe and the error messages quote it so a stale deployment is obvious.
-API_VERSION = "0.3.1"
+API_VERSION = "0.4.0"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # Writes that authenticate with the refresh cookie are the only ones a cross-site
 # request could ride on; every other write needs a bearer token the browser does
@@ -184,6 +184,7 @@ app.include_router(mud_cost.router, prefix="/api/v1")
 app.include_router(lih_cost.router, prefix="/api/v1")
 app.include_router(fuel_cost.router, prefix="/api/v1")
 app.include_router(ndt_inspection.router, prefix="/api/v1")
+app.include_router(invoice_processing.router, prefix="/api/v1")
 app.include_router(usage_reports.router, prefix="/api/v1")
 # Tangibles, consumables and catalogue lists are registered before the generic routes too.
 app.include_router(catalogue_options_router, prefix="/api/v1")
