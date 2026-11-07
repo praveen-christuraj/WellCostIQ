@@ -9,7 +9,8 @@ Invoice Processing records an invoice and its verified commercial value, generat
 3. In **Invoice Processing → Invoice Configuration**, maintain:
    - invoice locations and description categories;
    - reusable payment terms, including payment days and currency percentages;
-   - vendor-linked payment terms and common or vendor-linked taxes;
+   - vendor-linked payment terms and common or vendor-linked taxes, each with its
+     **IDVS report** and **Net payable** switches (see [Report and register taxes](#report-and-register-taxes));
    - explicit base/quote exchange rates;
    - sign-off signatories for the Prepared, Checked, Verified, and Approved By roles (name and designation); and
    - **Own Block** or **JV Block** classification for each applicable Rig & Well block.
@@ -47,6 +48,26 @@ Due date          = invoice date + payment tenure days
 
 The sheet's **Sub Total - Services** row shows `invoice subtotal − verified subtotal`; the commercial summary's **Difference** is the separate after-tax value shown above. A tax configured as an **addition** increases its total; a **deduction** decreases it. Split percentages must total exactly 100%. A missing cross-currency rate is an error, never an implicit rate of 1. Split amounts remain in their stated payment currencies and are not added to the invoice-currency total. Dashboard totals and charts likewise remain separated by currency.
 
+### Report and register taxes
+
+Every tax has two independent switches, set while the tax is added or edited in **Invoice Configuration → Taxes** and snapshotted onto each saved IDVS tax row:
+
+| IDVS report | Net payable | Behaviour |
+| --- | --- | --- |
+| on | on | Printed on the IDVS and applied to the IDVS total; also applied to the register's Net payable. This is the default and the behaviour of every existing tax. |
+| off | on | **Register-only tax.** Its amount is calculated and stored against the IDVS but it is not printed and does not change the IDVS report total. It does change the register's **Net payable** amount. |
+| on | off | Printed on the IDVS and included in its total, but not applied to the register's Net payable. |
+| off | off | Recorded for reference only; no amount changes anywhere. |
+
+So an IDVS may carry three taxes while its printed report shows only one. The IDVS keeps two amounts:
+
+```text
+IDVS amount  = adjusted verified amount = verified total − disallowed − advance
+Net payable  = verified subtotal + Σ(signed net-payable taxes) − disallowed − advance
+```
+
+`IDVS amount` is exactly the figure the printed sheet supports. `Net payable` starts from the verified total and applies every net-payable tax, including the register-only ones the report deliberately omits, so the two figures differ only when register-only taxes exist. Payment splits, due-date tracking and ageing continue to follow the IDVS amount, which is what the verification sheet states. The register, the IDVS view, exports and the dashboard all show both amounts side by side, and register-only taxes are labelled **Register only** with their amount and whether they move Net payable.
+
 ## Entry, import, and output
 
 The full-page IDVS editor supports up to 500 worksheet lines, direct AG Grid cell editing, keyboard/paste entry, common and vendor-linked taxes, manual invoice-specific taxes, disallowed/advance adjustments, and payment-currency splits. Save creates a Draft; editing is locked after submission. Optimistic revision checks reject overwriting a draft changed in another session.
@@ -61,7 +82,12 @@ Invoice Days and Verified Days are optional. They apply only when the IDVS day c
 
 Optional columns cover IDVS Number, PO/SO Number, operational scope, description details, service dates/person, payment term/tenure, adjustments, verified values, and remarks. Dates accept ISO `YYYY-MM-DD`, `DD/MM/YYYY`, and Excel date serials. Imports are atomic: any header/reference/calculation error rejects the batch. A repeated vendor + invoice number refreshes an existing Draft with the same IDVS number; submitted and deleted records cannot be replaced through import.
 
-The saved record provides generated IDVS **PDF, XLSX, and CSV** output. The PDF and XLSX follow the RIG-11 reference layout: header block, Services table with invoice and as-per-contract columns (days columns appear only with the day count on), Difference and Remarks, subtotal, tax, total, payment-split and sign-off rows. The on-screen IDVS tab renders the same model. The register and dashboard also provide audited exports. Supporting documents can be uploaded in batches of up to 20 files, with a **25 MB per-file** limit. Content is stored in the tenant-scoped database with size, MIME type, SHA-256 checksum, uploader, label, and notes. PDFs can open inline; other formats download explicitly. Document upload, download, and delete have separate capabilities and audit events.
+The saved record provides generated IDVS **PDF, XLSX, and CSV** output. The PDF and XLSX follow the RIG-11 reference layout: header block, Services table with invoice and as-per-contract columns (days columns appear only with the day count on), Difference and Remarks, subtotal, tax, total, payment-split and sign-off rows.
+
+Two print rules belong to the shared sheet model (`frontend/src/lib/idvsSheet.ts`), so the screen, PDF and XLSX cannot disagree:
+
+- **Signing space.** A blank row is printed between the `Prepared By / Checked By / Verified By / Approved By` row and the names row, giving each signatory room to sign the printed copy. Its height is the IDVS **signing space**, in millimetres (0–60, default 15), set on the IDVS editor and stored per record, so a reprint keeps the same layout. `0` prints the names directly under the roles.
+- **Common scope.** When the IDVS has no Block, Rig or Well, the sheet prints `Common for All Blocks` for each empty one instead of a dash; a filled one still prints its own code. The on-screen IDVS tab renders the same model. The register and dashboard also provide audited exports. Supporting documents can be uploaded in batches of up to 20 files, with a **25 MB per-file** limit. Content is stored in the tenant-scoped database with size, MIME type, SHA-256 checksum, uploader, label, and notes. PDFs can open inline; other formats download explicitly. Document upload, download, and delete have separate capabilities and audit events.
 
 ## Tracking and lifecycle
 
@@ -88,11 +114,11 @@ Capabilities cover `read`, `create`, `update`, `delete`, `restore`, `permanent-d
 
 ## Database and verification
 
-Migration `a1b2c3d4e5f6` adds the column-wise Invoice Processing tables and backfills all module permissions to existing owner roles without altering existing business records. Migration `b3c4d5e6f7a8` adds the day-count flag, line days, and sign-off signatory tables. Existing IDVS records keep the day count off, so their totals are unchanged. API contract version is `0.5.0`.
+Migration `a1b2c3d4e5f6` adds the column-wise Invoice Processing tables and backfills all module permissions to existing owner roles without altering existing business records. Migration `b3c4d5e6f7a8` adds the day-count flag, line days, and sign-off signatory tables. Existing IDVS records keep the day count off, so their totals are unchanged. Migration `c1d2e3f4a5b6` adds the tax report/net-payable switches (configuration and per-IDVS snapshot), the `invoice_idvs.net_payable_amount` column, and `invoice_idvs.signature_space_mm` (default 15 mm). Every new switch defaults to on and `net_payable_amount` is backfilled from the stored adjusted verified amount, so existing IDVS records print and total exactly as before; the downgrade removes only those columns. API contract version is `0.6.0`.
 
 Each IDVS stores a snapshot of its sign-off names and designations. Deleting or renaming a signatory does not alter existing IDVS sign-offs. A deleted signatory is removed from new IDVS choices, and permanently removing it clears only the link, so the printed snapshot stays.
 
-Focused regression coverage is in `backend/tests/test_invoice_processing.py`. It verifies workbook-equivalent calculations, term/due-date and FX splits, ordered transitions, payment chronology, import grouping and atomic errors, generated-document contracts, attachment size/disposition behavior, deleted-record safeguards, tenant isolation, and independent RBAC capabilities. Run:
+Focused regression coverage is in `backend/tests/test_invoice_processing.py`. It verifies workbook-equivalent calculations, term/due-date and FX splits, ordered transitions, payment chronology, import grouping and atomic errors, generated-document contracts, attachment size/disposition behavior, deleted-record safeguards, tenant isolation, independent RBAC capabilities, register-only versus report taxes (report total, IDVS amount and Net payable), and the validated signing space. The shared sheet model is rendered for real by `make ui-check`, which asserts the printed report omits register-only taxes, prints the common-scope text for an empty Block/Rig/Well, and keeps the blank signing row between the roles and the names. Run:
 
 ```bash
 cd backend

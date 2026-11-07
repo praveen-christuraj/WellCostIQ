@@ -9,8 +9,8 @@ import { ImportDialog } from '../components/ImportDialog'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import type { ImportRow } from '../lib/export'
-import { formatAmount, formatDate } from '../lib/invoiceCalculations'
-import { INVOICE_IMPORT_HEADERS, INVOICE_IMPORT_OPTIONAL, INVOICE_IMPORT_SAMPLE, INVOICE_STATUS_LABEL, WORKFLOW_ACTION, importInvoiceRow, type Invoice, type InvoiceImportResult, type InvoiceReference, type WorkflowAction } from '../lib/invoiceProcessing'
+import { formatAmount, formatDate, numeric } from '../lib/invoiceCalculations'
+import { COMMON_SCOPE_LABEL, INVOICE_IMPORT_HEADERS, INVOICE_IMPORT_OPTIONAL, INVOICE_IMPORT_SAMPLE, INVOICE_STATUS_LABEL, WORKFLOW_ACTION, importInvoiceRow, type Invoice, type InvoiceImportResult, type InvoiceReference, type WorkflowAction } from '../lib/invoiceProcessing'
 
 const statusTone = (status: string): 'neutral' | 'success' | 'info' | 'warning' => status === 'paid' || status === 'approved' ? 'success' : status === 'submitted' || status === 'sent_to_accounts' ? 'info' : status === 'epicor_pending' ? 'warning' : 'neutral'
 const today = () => new Date().toISOString().slice(0, 10)
@@ -111,12 +111,16 @@ export default function InvoiceRegister({ deletedView = false }: { deletedView?:
     { headerName: 'IDVS', field: 'idvs_number', minWidth: 155, cellRenderer: (p: ICellRendererParams<Invoice>) => <Box height="100%" display="flex" flexDirection="column" justifyContent="center"><Typography fontSize={12} fontWeight={750}>{p.value}</Typography><Typography fontSize={10} color="text.secondary">{formatDate(p.data?.idvs_date)}</Typography></Box> },
     { headerName: 'INVOICE', field: 'invoice_number', minWidth: 145 }, { headerName: 'INVOICE DATE', field: 'invoice_date', minWidth: 125, valueFormatter: p => formatDate(p.value) },
     { headerName: 'VENDOR', field: 'vendor_name', minWidth: 215, flex: 1 }, { headerName: 'PO / SO', field: 'order_number', minWidth: 125 },
-    { headerName: 'BLOCK', field: 'block_code', minWidth: 115, cellRenderer: (p: ICellRendererParams<Invoice>) => p.value ? <Box display="flex" height="100%" alignItems="center" gap={.6}><span>{p.value}</span><Tag tone={p.data?.block_category === 'jv' ? 'info' : p.data?.block_category === 'own' ? 'success' : 'warning'}>{p.data?.block_category?.toUpperCase() || '?'}</Tag></Box> : <Typography fontSize={11} color="text.secondary" alignSelf="center">Common</Typography> },
+    { headerName: 'BLOCK', field: 'block_code', minWidth: 115, cellRenderer: (p: ICellRendererParams<Invoice>) => p.value ? <Box display="flex" height="100%" alignItems="center" gap={.6}><span>{p.value}</span><Tag tone={p.data?.block_category === 'jv' ? 'info' : p.data?.block_category === 'own' ? 'success' : 'warning'}>{p.data?.block_category?.toUpperCase() || '?'}</Tag></Box> : <Typography fontSize={11} color="text.secondary" alignSelf="center">{COMMON_SCOPE_LABEL}</Typography> },
     { headerName: 'RIG / WELL', field: 'well_code', minWidth: 145, valueGetter: p => [p.data?.rig_code, p.data?.well_code].filter(Boolean).join(' / ') },
     { headerName: 'LOCATION', field: 'location_name', minWidth: 145 }, { headerName: 'CURRENCY', field: 'currency_code', minWidth: 90, maxWidth: 100 },
     { headerName: 'INVOICE TOTAL', field: 'invoice_total', minWidth: 135, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },
     { headerName: 'VERIFIED TOTAL', field: 'verified_total', minWidth: 140, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },
     { headerName: 'DIFFERENCE', field: 'difference_amount', minWidth: 120, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },
+    // The register keeps two amounts: the verified payable on the IDVS and the
+    // net payable after every net-payable tax, including register-only ones.
+    { headerName: 'IDVS AMOUNT', field: 'adjusted_verified_amount', minWidth: 145, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },
+    { headerName: 'NET PAYABLE', field: 'net_payable_amount', minWidth: 145, type: 'rightAligned', cellRenderer: (p: ICellRendererParams<Invoice>) => <Box height="100%" display="flex" alignItems="center" gap={.5}><Typography fontSize={12} fontWeight={700}>{formatAmount(p.value)}</Typography>{Math.abs(numeric(p.value) - numeric(p.data?.adjusted_verified_amount)) > 0.0000001 && <Tooltip title={`IDVS amount ${formatAmount(p.data?.adjusted_verified_amount)} · register-only taxes ${formatAmount(numeric(p.value) - numeric(p.data?.adjusted_verified_amount))}`}><Tag tone="warning">Adj.</Tag></Tooltip>}</Box> },
     { headerName: 'DUE DATE', field: 'due_date', minWidth: 125, valueFormatter: p => formatDate(p.value), cellRenderer: (p: ICellRendererParams<Invoice>) => <Box height="100%" display="flex" alignItems="center" gap={.5}><Typography fontSize={12} color={p.data?.is_overdue ? 'error.main' : 'text.primary'}>{formatDate(p.value)}</Typography>{p.data?.is_overdue && <Tag tone="error">Overdue</Tag>}</Box> },
     { headerName: 'STATUS', field: 'display_status', minWidth: 190, cellRenderer: (p: ICellRendererParams<Invoice>) => <Box display="flex" height="100%" alignItems="center"><Tag tone={statusTone(p.value)}>{INVOICE_STATUS_LABEL[p.value as keyof typeof INVOICE_STATUS_LABEL]}</Tag></Box> },
     { headerName: 'SENT TO ACCOUNTS', field: 'sent_to_accounts_date', minWidth: 150, valueFormatter: p => formatDate(p.value) },

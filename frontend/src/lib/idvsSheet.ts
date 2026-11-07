@@ -1,11 +1,18 @@
 import { formatDate, lineDayFactors, numeric, subtotalDifference } from './invoiceCalculations'
-import { SIGNATURE_LABELS, SIGNATURE_ROLES, type InvoiceDetail, type SignatureRole } from './invoiceProcessing'
+import { COMMON_SCOPE_LABEL, SIGNATURE_LABELS, SIGNATURE_ROLES, SIGNATURE_SPACE, type InvoiceDetail, type SignatureRole } from './invoiceProcessing'
 
 /**
  * Single layout model for the Invoice Discrepancy Verification Sheet. The on-screen sheet, the PDF and
  * the XLSX export all render this model, so the three outputs cannot drift apart. The layout follows the
  * reference workbook RIG-11: services table with "As per Invoice" and "As per Actual / Contract" groups,
  * difference and remarks, subtotal/tax/total/split rows, and the four sign-off blocks.
+ *
+ * Three print rules live here so the screen, PDF and XLSX cannot disagree:
+ * * only report-visible taxes appear in the subtotal/tax block and in the total — a
+ *   register-only tax is stored on the IDVS but never printed;
+ * * an IDVS without a Block, Rig or Well reports "Common for All Blocks";
+ * * a configurable blank signing space separates the sign-off role row from its
+ *   name and designation rows, so the copy can be signed by hand.
  */
 
 export const IDVS_TITLE = 'INVOICE DISCREPANCY VERIFICATION SHEET'
@@ -33,7 +40,15 @@ export type SheetCell = {
 }
 
 export type SheetRowKind = 'line' | 'summary' | 'total' | 'signature'
-export type SheetRow = { kind: SheetRowKind; cells: SheetCell[] }
+export type SheetRow = {
+  kind: SheetRowKind
+  cells: SheetCell[]
+  /**
+   * Height in millimetres of a deliberately blank row. Only the sign-off signing
+   * space uses it today; renderers must size it exactly, never collapse it.
+   */
+  heightMm?: number
+}
 
 export type IdvsSheet = {
   title: string
@@ -46,6 +61,8 @@ export type IdvsSheet = {
   /** Index of the first "As per Invoice" column and the first "As per Actual / Contract" column. */
   invoiceStart: number
   verifiedStart: number
+  /** Height in millimetres of the blank signing row between the role and the printed name. */
+  signatureSpaceMm: number
   header: SheetCell[][]
   body: SheetRow[]
 }
@@ -141,7 +158,8 @@ export function buildIdvsSheet(invoice: InvoiceDetail): IdvsSheet {
 
   const summary: SheetRow[] = [
     summaryRow('summary', `Sub Total - Services (${currency})`, numeric(invoice.invoice_subtotal), numeric(invoice.verified_subtotal), subtotalDifference(invoice.invoice_subtotal, invoice.verified_subtotal)),
-    ...invoice.taxes.map(tax => {
+    // Register-only taxes are deliberately absent: they change the register's Net payable amount, not this sheet.
+    ...invoice.taxes.filter(tax => tax.is_report_visible).map(tax => {
       const sign = tax.direction === 'addition' ? 1 : -1
       const invoiceAmount = sign * numeric(tax.invoice_amount)
       const verifiedAmount = sign * numeric(tax.verified_amount)
@@ -187,10 +205,22 @@ export function buildIdvsSheet(invoice: InvoiceDetail): IdvsSheet {
   const signatureRow = (key: 'label' | 'name' | 'designation'): SheetRow => ({
     kind: 'signature',
     cells: signatureBlocks.map(block => ({
-      text: block[key], colSpan: block.span, align: 'center' as const, bold: key !== 'designation',
+      text: block[key], colSpan: block.span, align: 'center' as const, bold: key === 'label' || key === 'name',
     })),
   })
-  const signature: SheetRow[] = [signatureRow('label'), signatureRow('name'), signatureRow('designation')]
+  // The blank row between "Prepared By" and the printed name is where the copy is signed.
+  const signatureSpace = Math.min(SIGNATURE_SPACE.max, Math.max(SIGNATURE_SPACE.min, Math.round(invoice.signature_space_mm ?? SIGNATURE_SPACE.default)))
+  const signingSpaceRow: SheetRow = {
+    kind: 'signature',
+    heightMm: signatureSpace,
+    cells: signatureBlocks.map(block => ({ text: '', colSpan: block.span, align: 'center' as const })),
+  }
+  const signature: SheetRow[] = [
+    signatureRow('label'),
+    ...(signatureSpace > 0 ? [signingSpaceRow] : []),
+    signatureRow('name'),
+    signatureRow('designation'),
+  ]
 
   return {
     title: IDVS_TITLE,
@@ -202,16 +232,19 @@ export function buildIdvsSheet(invoice: InvoiceDetail): IdvsSheet {
       `Invoice No: ${invoice.invoice_number}`,
       `Invoice Received Date: ${formatDate(invoice.invoice_received_date)}`,
       `Invoice Date: ${formatDate(invoice.invoice_date)}`,
+      `IDVS Date: ${formatDate(invoice.idvs_date)}`,
     ],
     infoRight: [
       `Field: ${invoice.field_name || '—'}`,
-      `Rig: ${invoice.rig_code || '—'}`,
-      `Well: ${invoice.well_code || '—'}`,
+      `Block: ${invoice.block_code || COMMON_SCOPE_LABEL}`,
+      `Rig: ${invoice.rig_code || COMMON_SCOPE_LABEL}`,
+      `Well: ${invoice.well_code || COMMON_SCOPE_LABEL}`,
       `Section: ${invoice.phase || '—'}`,
     ],
     columns,
     invoiceStart,
     verifiedStart,
+    signatureSpaceMm: signatureSpace,
     header: headerRows(columns, invoiceStart, verifiedStart, differenceIndex),
     body: [...lines, ...summary, ...signature],
   }

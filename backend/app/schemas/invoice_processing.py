@@ -92,6 +92,10 @@ class InvoiceTaxConfigurationIn(_Strict):
     tax_name: str = Field(min_length=1, max_length=150)
     rate_percent: Decimal10 = Field(ge=0, le=100)
     direction: TaxDirection = "deduction"
+    # Report and register switches. A tax that is not report-visible is stored on
+    # the IDVS and in the register but never printed or added to the report total.
+    is_report_visible: bool = True
+    is_net_payable: bool = True
     is_common: bool = False
     description: str = Field(default="", max_length=500)
     is_active: bool = True
@@ -200,6 +204,8 @@ class InvoiceTaxConfigurationOut(_Strict):
     tax_name: str
     rate_percent: Decimal
     direction: TaxDirection
+    is_report_visible: bool
+    is_net_payable: bool
     is_common: bool
     description: str
     is_active: bool
@@ -337,6 +343,9 @@ class InvoiceTaxIn(_Strict):
     tax_name: str = Field(default="", max_length=150)
     rate_percent: Decimal10 | None = Field(default=None, ge=0, le=100)
     direction: TaxDirection | None = None
+    # Omitted values follow the linked configuration; a manual tax defaults to both on.
+    is_report_visible: bool | None = None
+    is_net_payable: bool | None = None
 
     @field_validator("tax_name", mode="before")
     @classmethod
@@ -383,6 +392,9 @@ class InvoiceSave(_Strict):
     advance_amount: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_MONEY)
     remarks: str = Field(default="", max_length=1000)
     day_count_enabled: bool = False
+    # Blank signing space printed between the sign-off roles and the names, in millimetres.
+    # Omitted (e.g. by a spreadsheet refresh) keeps the stored value; new IDVS records start at 15 mm.
+    signature_space_mm: int | None = Field(default=None, ge=0, le=60)
     lines: list[InvoiceLineIn] = Field(min_length=1, max_length=500)
     taxes: list[InvoiceTaxIn] | None = Field(default=None, max_length=50)
     payment_splits: list[InvoicePaymentSplitIn] | None = Field(default=None, max_length=10)
@@ -470,6 +482,8 @@ class InvoiceTaxOut(_Strict):
     tax_name: str
     rate_percent: Decimal
     direction: TaxDirection
+    is_report_visible: bool
+    is_net_payable: bool
     source: str
     invoice_amount: Decimal
     verified_amount: Decimal
@@ -542,6 +556,7 @@ class InvoiceSummaryOut(_Strict):
     field_name: str
     phase: str
     day_count_enabled: bool
+    signature_space_mm: int
     description_category_id: str | None
     description_category: str
     service_description: str
@@ -563,6 +578,7 @@ class InvoiceSummaryOut(_Strict):
     invoice_total: Decimal
     verified_total: Decimal
     adjusted_verified_amount: Decimal
+    net_payable_amount: Decimal
     difference_amount: Decimal
     status: str
     display_status: str
@@ -674,6 +690,7 @@ class InvoiceCurrencyTotals(_Strict):
     invoice_total: Decimal
     verified_total: Decimal
     adjusted_verified_amount: Decimal
+    net_payable_amount: Decimal
     difference_amount: Decimal
     outstanding_count: int
     overdue_count: int
@@ -707,6 +724,7 @@ class InvoiceAgeingRow(_Strict):
     currency_code: str
     invoice_count: int
     adjusted_verified_amount: Decimal
+    net_payable_amount: Decimal
 
 
 class InvoiceRecentActivity(_Strict):

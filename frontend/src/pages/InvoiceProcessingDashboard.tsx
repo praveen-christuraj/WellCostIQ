@@ -83,7 +83,8 @@ export default function InvoiceProcessingDashboard() {
     <Box display="grid" gridTemplateColumns="repeat(auto-fit,minmax(175px,1fr))" gap={1.5} mb={2}>
       <StatCard label="Active IDVS" value={data?.total_invoices ?? '—'} hint="Across all currencies and blocks" icon={<ReceiptLongOutlined/>} onClick={() => navigate('/invoice-processing/register')}/>
       <StatCard label={`Verified · ${total?.currency_code ?? 'currency'}`} value={total ? formatAmount(total.verified_total) : '—'} hint={`${total?.invoice_count ?? 0} invoice(s) in this currency`} icon={<BusinessOutlined/>}/>
-      <StatCard label="Adjusted payable" value={total ? `${total.currency_code} ${formatAmount(total.adjusted_verified_amount)}` : '—'} hint="Verified total less disallowed and advances" icon={<CheckCircleOutline/>} tone="positive"/>
+      <StatCard label="IDVS amount" value={total ? `${total.currency_code} ${formatAmount(total.adjusted_verified_amount)}` : '—'} hint="Verified total less disallowed and advances; the IDVS report total" icon={<ReceiptLongOutlined/>}/>
+      <StatCard label="Net payable" value={total ? `${total.currency_code} ${formatAmount(total.net_payable_amount)}` : '—'} hint="Register amount after every net-payable tax, including register-only taxes" icon={<CheckCircleOutline/>} tone="positive"/>
       <StatCard label="Awaiting action" value={(data?.verification_count ?? 0) + (data?.epicor_count ?? 0)} hint={`${data?.verification_count ?? 0} verification · ${data?.epicor_count ?? 0} EPICOR`} icon={<PendingActionsOutlined/>} tone="info"/>
       <StatCard label="Overdue unpaid" value={data?.overdue_count ?? '—'} hint="Due date passed; not yet marked paid" icon={<WarningAmberOutlined/>} tone={data?.overdue_count ? 'error' : 'default'} onClick={() => navigate('/invoice-processing/register?overdue=true')}/>
       <StatCard label="Supporting files" value={data?.attachment_count ?? '—'} hint="Retained against active IDVS records" icon={<AttachFile/>}/>
@@ -103,10 +104,10 @@ export default function InvoiceProcessingDashboard() {
           {!blocks.length && <TableRow><TableCell colSpan={4}><Typography color="text.secondary" py={4} align="center">No invoices have been saved in this currency yet.</Typography></TableCell></TableRow>}
         </TableBody></Table></TableContainer>
       </SectionCard>
-      <SectionCard title="Due-date ageing" subtitle="Unpaid adjusted payable by currency" bodyPadding={0}>
-        <TableContainer sx={{ maxHeight: 340 }}><Table size="small" stickyHeader><TableHead><TableRow><TableCell>Ageing bucket</TableCell><TableCell align="right">IDVS</TableCell><TableCell align="right">Adjusted payable</TableCell></TableRow></TableHead><TableBody>
-          {ageing.map(row => <TableRow key={row.bucket}><TableCell>{row.bucket}</TableCell><TableCell align="right">{row.invoice_count}</TableCell><TableCell align="right">{total?.currency_code} {formatAmount(row.adjusted_verified_amount)}</TableCell></TableRow>)}
-          {!ageing.length && <TableRow><TableCell colSpan={3}><Typography color="text.secondary" py={4} align="center">No unpaid ageing in the selected currency.</Typography></TableCell></TableRow>}
+      <SectionCard title="Due-date ageing" subtitle="Unpaid register amounts by currency" bodyPadding={0}>
+        <TableContainer sx={{ maxHeight: 340 }}><Table size="small" stickyHeader><TableHead><TableRow><TableCell>Ageing bucket</TableCell><TableCell align="right">IDVS</TableCell><TableCell align="right">IDVS amount</TableCell><TableCell align="right">Net payable</TableCell></TableRow></TableHead><TableBody>
+          {ageing.map(row => <TableRow key={row.bucket}><TableCell>{row.bucket}</TableCell><TableCell align="right">{row.invoice_count}</TableCell><TableCell align="right">{total?.currency_code} {formatAmount(row.adjusted_verified_amount)}</TableCell><TableCell align="right">{total?.currency_code} {formatAmount(row.net_payable_amount)}</TableCell></TableRow>)}
+          {!ageing.length && <TableRow><TableCell colSpan={4}><Typography color="text.secondary" py={4} align="center">No unpaid ageing in the selected currency.</Typography></TableCell></TableRow>}
         </TableBody></Table></TableContainer>
       </SectionCard>
     </Box>

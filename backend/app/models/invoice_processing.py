@@ -157,6 +157,10 @@ class InvoiceTaxConfiguration(InvoiceRecord):
     tax_name: Mapped[str] = mapped_column(String(150), nullable=False)
     rate_percent: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
     direction: Mapped[str] = mapped_column(String(20), default="deduction", server_default="deduction", nullable=False)
+    # Printed on the IDVS report, so it moves the report's invoice/verified total.
+    is_report_visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    # Applied to the register's Net payable amount (IDVS amount less register-only taxes).
+    is_net_payable: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     is_common: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     description: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
@@ -269,6 +273,9 @@ class Invoice(InvoiceRecord):
         UniqueConstraint("organization_id", "idvs_number", name="uq_invoice_idvs_org_number"),
         UniqueConstraint("organization_id", "vendor_id", "invoice_number", name="uq_invoice_idvs_org_vendor_invoice"),
         CheckConstraint("payment_tenure_days >= 0", name="ck_invoice_idvs_tenure"),
+        CheckConstraint(
+            "signature_space_mm >= 0 AND signature_space_mm <= 60", name="ck_invoice_idvs_signature_space"
+        ),
         CheckConstraint("disallowed_amount >= 0", name="ck_invoice_idvs_disallowed"),
         CheckConstraint("advance_amount >= 0", name="ck_invoice_idvs_advance"),
         CheckConstraint(
@@ -312,6 +319,8 @@ class Invoice(InvoiceRecord):
     phase: Mapped[str] = mapped_column(String(100), default="", server_default="", nullable=False)
     # Services and rental tools bill per day; the column is shown only when this is true.
     day_count_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # Blank signing space printed between the sign-off role row and the name row.
+    signature_space_mm: Mapped[int] = mapped_column(Integer, default=15, server_default="15", nullable=False)
     description_category_id: Mapped[str | None] = mapped_column(
         ForeignKey("invoice_description_categories.id", ondelete="RESTRICT"), nullable=True
     )
@@ -339,6 +348,10 @@ class Invoice(InvoiceRecord):
     invoice_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
     verified_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
     adjusted_verified_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    # Register-only amount: the verified total with every net-payable tax applied,
+    # including taxes the IDVS report deliberately leaves out. Payment splits keep
+    # using ``adjusted_verified_amount`` (the IDVS report amount).
+    net_payable_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
     difference_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
 
     status: Mapped[str] = mapped_column(String(30), default="draft", server_default="draft", nullable=False)
@@ -428,6 +441,9 @@ class InvoiceTax(Base):
     tax_name: Mapped[str] = mapped_column(String(150), nullable=False)
     rate_percent: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
     direction: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Snapshots of the configuration switches taken when the IDVS line was saved.
+    is_report_visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    is_net_payable: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     source: Mapped[str] = mapped_column(String(20), default="manual", server_default="manual", nullable=False)
     invoice_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
     verified_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)

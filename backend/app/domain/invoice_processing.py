@@ -8,6 +8,13 @@ Workbook equivalents:
 * adjusted verified amount = verified total − disallowed − advance;
 * each payment split = adjusted verified amount × percentage × explicit FX rate.
 
+A tax carries two independent switches. ``is_report_visible`` decides whether the
+tax is printed on the IDVS report and therefore enters its invoice/verified
+total. ``is_net_payable`` decides whether it moves the register's Net payable
+amount. By default a tax is both printed and applied, so every existing IDVS
+keeps its stored totals. A tax that is visible only on the register still has
+its amount stored per row, but it never changes the IDVS report total.
+
 Different output currencies stay on separate payment-split rows and are never
 added together. Values retain the application's ten-decimal storage precision;
 presentation layers may show two decimals without changing these calculations.
@@ -59,6 +66,9 @@ class TaxLike(Protocol):
     direction: str
     invoice_amount: Decimal
     verified_amount: Decimal
+    # Snapshotted switches: printed on the sheet, and applied to the register amount.
+    is_report_visible: bool
+    is_net_payable: bool
 
 
 class SplitLike(Protocol):
@@ -74,7 +84,12 @@ def calculate_idvs(
     disallowed_amount: Decimal,
     advance_amount: Decimal,
 ) -> dict[str, Decimal]:
-    """Populate row calculations and return the header's calculated columns."""
+    """Populate row calculations and return the header's calculated columns.
+
+    Returns the IDVS report totals (only report-visible taxes), the register
+    Net payable amount (only net-payable taxes), and the register-only tax
+    movement that reconciles the two.
+    """
     invoice_subtotal = ZERO
     verified_subtotal = ZERO
     for line in lines:
@@ -88,17 +103,27 @@ def calculate_idvs(
 
     invoice_tax_total = ZERO
     verified_tax_total = ZERO
+    net_payable_tax_total = ZERO
     for tax in taxes:
         # The persisted tax amounts are unsigned; direction supplies the sign in totals.
-        tax.invoice_amount = money(invoice_subtotal * tax.rate_percent / HUNDRED)
-        tax.verified_amount = money(verified_subtotal * tax.rate_percent / HUNDRED)
-        invoice_tax_total += signed_tax(invoice_subtotal, tax.rate_percent, tax.direction)
-        verified_tax_total += signed_tax(verified_subtotal, tax.rate_percent, tax.direction)
+        invoice_amount = money(invoice_subtotal * tax.rate_percent / HUNDRED)
+        verified_amount = money(verified_subtotal * tax.rate_percent / HUNDRED)
+        tax.invoice_amount = invoice_amount
+        tax.verified_amount = verified_amount
+        if tax.is_report_visible:
+            invoice_tax_total += signed_tax(invoice_subtotal, tax.rate_percent, tax.direction)
+            verified_tax_total += signed_tax(verified_subtotal, tax.rate_percent, tax.direction)
+        if tax.is_net_payable:
+            net_payable_tax_total += signed_tax(verified_subtotal, tax.rate_percent, tax.direction)
     invoice_tax_total = money(invoice_tax_total)
     verified_tax_total = money(verified_tax_total)
+    net_payable_tax_total = money(net_payable_tax_total)
     invoice_total = money(invoice_subtotal + invoice_tax_total)
     verified_total = money(verified_subtotal + verified_tax_total)
     adjusted = money(verified_total - disallowed_amount - advance_amount)
+    # The register's Net payable starts from the verified total and applies every
+    # net-payable tax, including the ones the IDVS report deliberately omits.
+    net_payable = money(verified_subtotal + net_payable_tax_total - disallowed_amount - advance_amount)
     for split in splits:
         split.amount = money(adjusted * split.percentage / HUNDRED * split.exchange_rate)
     return {
@@ -109,5 +134,7 @@ def calculate_idvs(
         "invoice_total": invoice_total,
         "verified_total": verified_total,
         "adjusted_verified_amount": adjusted,
+        "net_payable_amount": net_payable,
+        "register_tax_amount": money(net_payable - adjusted),
         "difference_amount": money(invoice_total - verified_total),
     }

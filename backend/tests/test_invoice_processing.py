@@ -536,3 +536,130 @@ def test_import_day_columns_and_signatory_refresh_keep_selections():
         assert after["day_count_enabled"] is False and len(after["lines"]) == 1
         assert Decimal(after["invoice_subtotal"]) == Decimal("200")
         assert {item["role"] for item in after["signatures"]} == {"prepared", "checked", "verified", "approved"}
+
+
+def test_register_only_taxes_and_net_payable_amount():
+    """A tax may be printed on the IDVS, recorded on the register, both, or neither."""
+    with TestClient(app) as client:
+        headers = login(client)
+        vendor, order, block, rig, well = create_commercial_scope(client, headers)
+        location, category, term = create_configuration(client, headers, vendor, block)
+
+        # Withholdings and levies that are deducted from the payable are often kept
+        # off the printed IDVS but still recorded in the register.
+        levy = client.post("/api/v1/invoice-processing/config/taxes", headers=headers, json={
+            "tax_code": "LEVY", "tax_name": "NCDMB Levy", "rate_percent": "1", "direction": "deduction",
+            "is_report_visible": False, "is_net_payable": True,
+            "is_common": True, "description": "", "is_active": True, "vendor_ids": [],
+        })
+        assert levy.status_code == 201, levy.text
+        assert levy.json()["is_report_visible"] is False and levy.json()["is_net_payable"] is True
+
+        # A reference-only tax is stored on the IDVS but changes no amount anywhere.
+        memo = client.post("/api/v1/invoice-processing/config/taxes", headers=headers, json={
+            "tax_code": "MEMO", "tax_name": "Reference only", "rate_percent": "2", "direction": "addition",
+            "is_report_visible": False, "is_net_payable": False,
+            "is_common": True, "description": "", "is_active": True, "vendor_ids": [],
+        })
+        assert memo.status_code == 201, memo.text
+
+        payload = invoice_payload(vendor, order, block, rig, well, location, category, term)
+        # VAT 7.5% common (report + register), WHT 5% vendor-linked (report + register),
+        # the 1% register-only levy and the 2% reference-only tax.
+        created = client.post("/api/v1/invoice-processing/invoices", headers=headers, json=payload)
+        assert created.status_code == 201, created.text
+        row = created.json()
+        taxes = {tax["tax_code"] if "tax_code" in tax else tax["tax_name"]: tax for tax in row["taxes"]}
+        assert len(row["taxes"]) == 4
+        assert taxes["VAT"]["is_report_visible"] is True and taxes["VAT"]["is_net_payable"] is True
+        assert taxes["NCDMB Levy"]["is_report_visible"] is False and taxes["NCDMB Levy"]["is_net_payable"] is True
+        assert taxes["Reference only"]["is_report_visible"] is False and taxes["Reference only"]["is_net_payable"] is False
+
+        # IDVS report totals keep only the report-visible taxes: 180 + 13.5 - 9 = 184.5.
+        assert Decimal(row["invoice_subtotal"]) == Decimal("200")
+        assert Decimal(row["verified_subtotal"]) == Decimal("180")
+        assert Decimal(row["verified_tax_total"]) == Decimal("4.5")
+        assert Decimal(row["invoice_total"]) == Decimal("205")
+        assert Decimal(row["verified_total"]) == Decimal("184.5")
+        assert Decimal(row["adjusted_verified_amount"]) == Decimal("170")
+        # The register adds the register-only levy (1% deducted) but not the reference-only tax.
+        assert Decimal(row["net_payable_amount"]) == Decimal("168.2")
+        # Payment splits follow the IDVS report amount, not the register amount.
+        splits = {split["currency_code"]: split for split in row["payment_splits"]}
+        assert Decimal(splits["USD"]["amount"]) == Decimal("102")
+        assert Decimal(splits["NGN"]["amount"]) == Decimal("108800")
+
+        # A manual tax line that overrides the configuration switches is stored as sent.
+        manual = {**payload, "expected_revision": row["revision"], "invoice_number": "INV-MANUAL"}
+        manual["taxes"] = [{
+            "tax_configuration_id": None, "tax_name": "Manual levy", "rate_percent": "1",
+            "direction": "deduction", "is_report_visible": False, "is_net_payable": True,
+        }]
+        manual_row = client.post("/api/v1/invoice-processing/invoices", headers=headers, json=manual)
+        assert manual_row.status_code == 201, manual_row.text
+        manual_row = manual_row.json()
+        assert manual_row["taxes"][0]["is_report_visible"] is False
+        assert Decimal(manual_row["verified_total"]) == Decimal("180")
+        assert Decimal(manual_row["adjusted_verified_amount"]) == Decimal("165.5")
+        assert Decimal(manual_row["net_payable_amount"]) == Decimal("163.7")
+
+        # Making the levy report-visible re-enters the report total on the next save.
+        patched = client.patch(f"/api/v1/invoice-processing/config/taxes/{levy.json()['id']}", headers=headers, json={
+            "tax_code": "LEVY", "tax_name": "NCDMB Levy", "rate_percent": "1", "direction": "deduction",
+            "is_report_visible": True, "is_net_payable": True,
+            "is_common": True, "description": "", "is_active": True, "vendor_ids": [],
+        })
+        assert patched.status_code == 200, patched.text
+        refreshed = client.put(f"/api/v1/invoice-processing/invoices/{row['id']}", headers=headers, json={
+            **payload, "expected_revision": row["revision"],
+        })
+        assert refreshed.status_code == 200, refreshed.text
+        refreshed = refreshed.json()
+        # Now the deduction is printed too: 180 + 13.5 - 9 - 1.8 = 182.7 verified.
+        assert Decimal(refreshed["verified_total"]) == Decimal("182.7")
+        assert Decimal(refreshed["adjusted_verified_amount"]) == Decimal("168.2")
+        assert Decimal(refreshed["net_payable_amount"]) == Decimal("168.2")
+
+        # The dashboard keeps both register amounts per currency.
+        dashboard = client.get("/api/v1/invoice-processing/dashboard", headers=headers).json()
+        totals = dashboard["currency_totals"][0]
+        assert Decimal(totals["adjusted_verified_amount"]) == Decimal("333.7")
+        assert Decimal(totals["net_payable_amount"]) == Decimal("331.9")
+        assert all("net_payable_amount" in ageing for ageing in dashboard["ageing_rows"])
+
+
+def test_signature_space_is_saved_and_validated():
+    with TestClient(app) as client:
+        headers = login(client)
+        vendor, order, block, rig, well = create_commercial_scope(client, headers)
+        location, category, term = create_configuration(client, headers, vendor, block)
+        payload = invoice_payload(vendor, order, block, rig, well, location, category, term)
+
+        # The default leaves a 15 mm signing gap between the role row and the names.
+        created = client.post("/api/v1/invoice-processing/invoices", headers=headers, json=payload)
+        assert created.status_code == 201, created.text
+        row = created.json()
+        assert row["signature_space_mm"] == 15
+
+        for value, expected in ((25, 200), (0, 200), (61, 422), (-1, 422)):
+            response = client.put(f"/api/v1/invoice-processing/invoices/{row['id']}", headers=headers, json={
+                **payload, "expected_revision": row["revision"], "signature_space_mm": value,
+            })
+            assert response.status_code == expected, (value, response.text)
+            if expected == 200:
+                row = response.json()
+                assert row["signature_space_mm"] == value
+
+        # A spreadsheet refresh that omits the field keeps the stored signing space.
+        refreshed = client.post("/api/v1/invoice-processing/import", headers=headers, json={"rows": [{
+            "idvs_number": row["idvs_number"], "idvs_date": "2026-01-03", "invoice_received_date": "2026-01-03",
+            "vendor_code": "VEND-01", "order_number": "PO-001", "invoice_number": "INV-001",
+            "invoice_date": "2026-01-01", "block_code": "OML-01", "rig_code": "RIG-01", "well_code": "WELL-01",
+            "location": "Port Harcourt", "description_category": "Completion Services",
+            "service_description": "Completion equipment", "currency_code": "USD", "payment_term_code": "30-60-40",
+            "description": "Packers", "invoice_quantity": 2, "invoice_unit_price": 100,
+            "verified_quantity": 2, "verified_unit_price": 90,
+        }]})
+        assert refreshed.status_code == 200 and refreshed.json()["success"] is True, refreshed.text
+        after = client.get(f"/api/v1/invoice-processing/invoices/{row['id']}", headers=headers).json()
+        assert after["signature_space_mm"] == 0

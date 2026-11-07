@@ -201,7 +201,8 @@ def _term_out(row: InvoicePaymentTerm) -> InvoicePaymentTermOut:
 def _tax_config_out(row: InvoiceTaxConfiguration) -> InvoiceTaxConfigurationOut:
     return InvoiceTaxConfigurationOut(
         id=row.id, tax_code=row.tax_code, tax_name=row.tax_name, rate_percent=row.rate_percent,
-        direction=row.direction, is_common=row.is_common, description=row.description,
+        direction=row.direction, is_report_visible=row.is_report_visible,
+        is_net_payable=row.is_net_payable, is_common=row.is_common, description=row.description,
         is_active=row.is_active, vendor_ids=[link.vendor_id for link in row.vendor_links],
         is_deleted=row.is_deleted, deleted_at=row.deleted_at, created_at=row.created_at, updated_at=row.updated_at,
     )
@@ -554,7 +555,10 @@ def save_tax_configuration(
     if row is None:
         row = InvoiceTaxConfiguration(organization_id=organization_id, created_by=_actor(user), updated_by=_actor(user))
         db.add(row)
-    for field in ("tax_code", "tax_name", "rate_percent", "direction", "is_common", "description", "is_active"):
+    for field in (
+        "tax_code", "tax_name", "rate_percent", "direction", "is_report_visible",
+        "is_net_payable", "is_common", "description", "is_active",
+    ):
         setattr(row, field, getattr(data, field))
     row.is_deleted = False
     row.deleted_at = None
@@ -567,7 +571,10 @@ def save_tax_configuration(
     audit.record(
         db, organization_id=organization_id, actor=user, action="update" if record_id else "create",
         entity_type="invoice_tax_configuration", entity_id=row.id, entity_label=row.tax_name,
-        summary=f"Saved {row.tax_code} at {row.rate_percent}% ({row.direction}); common={row.is_common}; {len(vendor_ids)} vendor(s)",
+        summary=(
+            f"Saved {row.tax_code} at {row.rate_percent}% ({row.direction}); common={row.is_common}; "
+            f"report={row.is_report_visible}; net payable={row.is_net_payable}; {len(vendor_ids)} vendor(s)"
+        ),
         request=request,
     )
     _commit(db)
@@ -731,7 +738,7 @@ def _summary_out(row: Invoice) -> InvoiceSummaryOut:
         rig_name=row.rig_name_snapshot, well_id=row.well_id, well_code=row.well_code_snapshot,
         well_name=row.well_name_snapshot, location_id=row.location_id,
         location_name=row.location_name_snapshot, field_name=row.field_name, phase=row.phase,
-        day_count_enabled=row.day_count_enabled,
+        day_count_enabled=row.day_count_enabled, signature_space_mm=row.signature_space_mm,
         description_category_id=row.description_category_id,
         description_category=row.description_category_snapshot, service_description=row.service_description,
         detailed_description=row.detailed_description, concerned_person=row.concerned_person,
@@ -742,7 +749,8 @@ def _summary_out(row: Invoice) -> InvoiceSummaryOut:
         invoice_subtotal=row.invoice_subtotal, verified_subtotal=row.verified_subtotal,
         invoice_tax_total=row.invoice_tax_total, verified_tax_total=row.verified_tax_total,
         invoice_total=row.invoice_total, verified_total=row.verified_total,
-        adjusted_verified_amount=row.adjusted_verified_amount, difference_amount=row.difference_amount,
+        adjusted_verified_amount=row.adjusted_verified_amount,
+        net_payable_amount=row.net_payable_amount, difference_amount=row.difference_amount,
         status=row.status, display_status=display_status,
         is_overdue=not row.paid_date and row.due_date < _today(),
         submitted_date=row.submitted_date, sent_to_accounts_date=row.sent_to_accounts_date,
@@ -773,7 +781,8 @@ def _detail_out(row: Invoice) -> InvoiceDetailOut:
         ) for item in row.signatures],
         taxes=[InvoiceTaxOut(
             id=tax.id, tax_configuration_id=tax.tax_configuration_id, tax_name=tax.tax_name,
-            rate_percent=tax.rate_percent, direction=tax.direction, source=tax.source,
+            rate_percent=tax.rate_percent, direction=tax.direction,
+            is_report_visible=tax.is_report_visible, is_net_payable=tax.is_net_payable, source=tax.source,
             invoice_amount=tax.invoice_amount, verified_amount=tax.verified_amount, sort_order=tax.sort_order,
         ) for tax in row.taxes],
         history=[InvoiceWorkflowHistoryOut(
@@ -970,6 +979,8 @@ def _write_invoice(
         "disallowed_amount": data.disallowed_amount, "advance_amount": data.advance_amount,
         "remarks": data.remarks, "day_count_enabled": data.day_count_enabled, "updated_by": _actor(user),
     }
+    if data.signature_space_mm is not None:
+        scalar_values["signature_space_mm"] = data.signature_space_mm
     for field, value in scalar_values.items():
         setattr(row, field, value)
 
@@ -1016,9 +1027,17 @@ def _write_invoice(
         source = "manual"
         if config:
             source = auto_sources.get(config.id) or ("common" if config.is_common else "vendor" if any(link.vendor_id == vendor.id for link in config.vendor_links) else "manual")
+        report_visible = item.is_report_visible
+        if report_visible is None:
+            report_visible = config.is_report_visible if config else True
+        net_payable = item.is_net_payable
+        if net_payable is None:
+            net_payable = config.is_net_payable if config else True
         new_taxes.append(InvoiceTax(
             organization_id=organization_id, tax_configuration_id=config.id if config else None,
-            tax_name=name, rate_percent=rate, direction=direction, source=source, sort_order=index,
+            tax_name=name, rate_percent=rate, direction=direction,
+            is_report_visible=report_visible, is_net_payable=net_payable,
+            source=source, sort_order=index,
         ))
     row.taxes = new_taxes
 
@@ -1053,6 +1072,9 @@ def _write_invoice(
     totals = calculate_idvs(row.lines, row.taxes, row.payment_splits, data.disallowed_amount, data.advance_amount)
     if totals["invoice_total"] < 0 or totals["verified_total"] < 0:
         raise HTTPException(422, "Tax deductions cannot make the invoice or verified total negative")
+    # The register's net payable applies register-only taxes on top of the report total.
+    if totals["net_payable_amount"] < 0:
+        raise HTTPException(422, "Tax deductions cannot make the net payable amount negative")
     if totals["adjusted_verified_amount"] < 0:
         raise HTTPException(422, "Disallowed and advance amounts cannot exceed the verified total")
     for field, value in totals.items():
@@ -1327,7 +1349,7 @@ def _import_payloads(db: Session, organization_id: str, rows: list[InvoiceImport
                 payment_term_id=term.id if term else None, payment_tenure_days=tenure,
                 disallowed_amount=item.disallowed_amount or 0, advance_amount=item.advance_amount or 0,
                 remarks=item.remarks, day_count_enabled=day_count, lines=[line], taxes=None, payment_splits=None,
-                signatures=None,
+                signatures=None, signature_space_mm=None,
             )
             prepared.append((number, payload))
         except (ValueError, ValidationError, TypeError) as error:
@@ -1514,13 +1536,14 @@ def dashboard_data(db: Session, organization_id: str) -> InvoiceDashboard:
         status_counts[display] += 1
         bucket = currencies.setdefault(row.currency_code, {
             "invoice_count": 0, "invoice_total": Decimal("0"), "verified_total": Decimal("0"),
-            "adjusted_verified_amount": Decimal("0"), "difference_amount": Decimal("0"),
-            "outstanding_count": 0, "overdue_count": 0,
+            "adjusted_verified_amount": Decimal("0"), "net_payable_amount": Decimal("0"),
+            "difference_amount": Decimal("0"), "outstanding_count": 0, "overdue_count": 0,
         })
         bucket["invoice_count"] += 1
         bucket["invoice_total"] += row.invoice_total
         bucket["verified_total"] += row.verified_total
         bucket["adjusted_verified_amount"] += row.adjusted_verified_amount
+        bucket["net_payable_amount"] += row.net_payable_amount
         bucket["difference_amount"] += row.difference_amount
         if not row.paid_date:
             bucket["outstanding_count"] += 1
@@ -1560,9 +1583,11 @@ def dashboard_data(db: Session, organization_id: str) -> InvoiceDashboard:
                 ageing_bucket = ageing_buckets[4]
             values = ageing.setdefault((row.currency_code, ageing_bucket), {
                 "invoice_count": 0, "adjusted_verified_amount": Decimal("0"),
+                "net_payable_amount": Decimal("0"),
             })
             values["invoice_count"] += 1
             values["adjusted_verified_amount"] += row.adjusted_verified_amount
+            values["net_payable_amount"] += row.net_payable_amount
     history = db.scalars(select(InvoiceWorkflowHistory).where(
         InvoiceWorkflowHistory.organization_id == organization_id,
     ).order_by(InvoiceWorkflowHistory.created_at.desc()).limit(10)).all()
@@ -1599,6 +1624,7 @@ def dashboard_data(db: Session, organization_id: str) -> InvoiceDashboard:
             bucket=label, currency_code=code,
             invoice_count=ageing.get((code, label), {}).get("invoice_count", 0),
             adjusted_verified_amount=ageing.get((code, label), {}).get("adjusted_verified_amount", Decimal("0")),
+            net_payable_amount=ageing.get((code, label), {}).get("net_payable_amount", Decimal("0")),
         ) for code in sorted(currencies) for label in ageing_buckets],
         recent_activity=[InvoiceRecentActivity(
             id=item.id, invoice_id=item.invoice_id,
