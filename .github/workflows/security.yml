@@ -45,7 +45,7 @@ jobs:
       - name: Capture all static findings, including scoped reviewed suppressions
         if: always()
         run: '"$RUNNER_TEMP/security-tools/bin/bandit" -r backend/app -f json -o bandit-results.json --exit-zero --ignore-nosec'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: python-security-reports
@@ -72,7 +72,7 @@ jobs:
       - name: Audit all frontend dependencies
         run: npm audit --audit-level=low --json > npm-audit-report.json
         working-directory: frontend
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: npm-audit-report
@@ -132,7 +132,7 @@ jobs:
         run: |
           docker image inspect --format '{{.Id}} {{json .RepoDigests}}' "wellcostiq-api:ci-$GITHUB_SHA" > api-image-identifier.txt
           docker image inspect --format '{{.Id}} {{json .RepoDigests}}' "wellcostiq-web:ci-$GITHUB_SHA" > web-image-identifier.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: container-identifiers
