@@ -13,7 +13,7 @@ import {
   InsightsOutlined, SettingsOutlined, StorageOutlined, PlaylistAddCheckRounded, WaterDropOutlined,
   AssessmentOutlined, LocalGasStationOutlined, ScienceOutlined, Inventory2Outlined, ScheduleRounded,
   FactCheckOutlined, SecurityRounded, NotificationsOutlined, TuneRounded, BackupOutlined, HomeOutlined,
-  ReceiptLongOutlined, PostAddOutlined,
+  ReceiptLongOutlined, PostAddOutlined, ContentCopyOutlined,
 } from '@mui/icons-material'
 import Brand, { BrandIcon } from './Brand'
 import { FormDialog, ErrorMessage } from './Common'
@@ -68,6 +68,7 @@ const modules: NavModule[] = [
     { label: 'Overview', path: '/afe', icon: DashboardOutlined, permission: 'afe:read' },
     { label: 'AFE & cost estimation', path: '/afe/register', icon: DescriptionOutlined, permission: 'afe:read' },
     { label: 'Reusable costing sets', path: '/costing-sets', icon: PlaylistAddCheckRounded, permission: 'costing-sets:read' },
+    { label: 'Reusable templates', path: '/record-templates', icon: ContentCopyOutlined, permission: 'template:read' },
   ] },
   { label: 'Daily Cost Management', icon: RequestQuoteOutlined, items: [
     { label: 'Daily cost register', path: '/daily-cost', icon: RequestQuoteOutlined, permission: 'daily-cost:read' },

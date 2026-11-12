@@ -22,8 +22,23 @@ export type DailyCostSectionOption = {
   hole_section_id: string; section_code: string; section_name: string
   from_depth: string; to_depth: string; total_days: string; phases: DailyCostPhaseOption[]
 }
+/** One rig's latest saved daily sheet, as returned by /daily-cost/entries/latest-per-rig. */
+export type DailyCostRigLatest = {
+  rig_id: string
+  rig_code: string
+  rig_name: string
+  entry: DailyCostEntry
+  age_days: number
+}
+export type DailyCostRigLatestReport = {
+  as_of_date: string
+  inactivity_days: number
+  rigs: DailyCostRigLatest[]
+  /** Rigs dropped from the register because their newest sheet is too old. */
+  inactive_rigs: DailyCostRigLatest[]
+}
 export type DailyCostWellOption = {
-  id: string; rig_id: string; well_code: string; well_name: string; display_name: string
+  id: string; rig_id: string; rig_code?: string; rig_name?: string; well_code: string; well_name: string; display_name: string
   status: string; config_status: string; completion_status: string; completion_config_status: string
   drilling_is_deleted?: boolean; completion_is_deleted?: boolean
   objective?: string

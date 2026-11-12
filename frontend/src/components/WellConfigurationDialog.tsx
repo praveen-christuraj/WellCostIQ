@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import { AddRounded, ArrowDownwardRounded, ArrowUpwardRounded, DeleteOutlineRounded } from '@mui/icons-material'
+import { AddRounded, ArrowDownwardRounded, ArrowUpwardRounded, DeleteOutlineRounded, PostAddOutlined } from '@mui/icons-material'
 import { Alert, Box, Button, Card, CardContent, CircularProgress, Divider, MenuItem, Paper, TextField, Typography } from '@mui/material'
 import { ErrorMessage, FormDialog, Tag } from './Common'
+import { TemplatePickerDialog } from './templates/TemplatePickerDialog'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import type { MasterConfigurationOption, RigWellConfigurationOptions, Well, WellConfiguration } from '../lib/rigWell'
+import type { Template } from '../lib/recordTemplates'
 import { formatDepthMeters } from '../lib/units'
 
 type PhaseInput = { key: string; phase_id: string; days: string; remarks: string }
@@ -54,6 +56,48 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
+  const [templateNotice, setTemplateNotice] = useState('')
+
+  /**
+   * Fill the plan from a well configuration template.
+   *
+   * Sections and phases are resolved against this workspace's Master Data, so a
+   * template cannot point at a section that no longer exists. Depths and days
+   * come from the template as a starting point and stay editable — the well's own
+   * overlap and ordering rules still run when the plan is saved.
+   */
+  const applyWellTemplate = (template: Template) => {
+    setTemplatePickerOpen(false)
+    const resolved = template.sections
+      .filter(section => section.is_available)
+      .map(section => ({
+        key: nextKey(),
+        hole_section_id: section.hole_section_id,
+        from_depth: section.from_depth,
+        to_depth: section.to_depth,
+        remarks: section.remarks,
+        phases: section.phases
+          .filter(phase => phase.is_available)
+          .map(phase => ({
+            key: nextKey(),
+            phase_id: phase.phase_id,
+            days: phase.days,
+            remarks: phase.remarks,
+          })),
+      }))
+    if (!resolved.length) {
+      setTemplateNotice(`“${template.name}” has no section that is still available in Master Data.`)
+      return
+    }
+    setSections(resolved)
+    setDirty(true)
+    setTemplateNotice(
+      `${resolved.length} hole section${resolved.length === 1 ? '' : 's'} filled from “${template.name}”. `
+      + 'Review the depths and planned days, then save the plan.',
+    )
+    void api(`/record-templates/${template.id}/apply`, { method: 'POST', silent: true }).catch(() => undefined)
+  }
 
   const readOnly = !can('rig-well:update') || !configuration || configuration.status === 'completed' || configuration.config_status !== 'draft'
   const totalDays = useMemo(
@@ -275,9 +319,15 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
         <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1 }}><Typography fontSize={10} fontWeight={800} color="text.secondary" textTransform="uppercase">Planned duration</Typography><Typography fontSize={15} fontWeight={800} mt={.3}>{totalDays.toFixed(2)} days</Typography></Box>
       </Box>
 
+      {templateNotice && <Alert severity="info" onClose={() => setTemplateNotice('')} sx={{ mb: 1.5 }}>{templateNotice}</Alert>}
+
       <Box display="flex" justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap">
         <Box><Typography fontWeight={800} fontSize={13}>Hole sections and phases</Typography><Typography color="text.secondary" fontSize={11.5} mt={.25}>Order sections from shallow to deep. Depth intervals may touch but cannot overlap.</Typography></Box>
-        {!readOnly && <Button size="small" variant="outlined" startIcon={<AddRounded/>} onClick={addSection} disabled={!options.hole_sections.length}>Add section</Button>}
+        {!readOnly && <Box display="flex" gap={1} flexWrap="wrap">
+          {can('template:read') && <Button size="small" variant="outlined" startIcon={<PostAddOutlined/>}
+            onClick={() => setTemplatePickerOpen(true)} disabled={!options.hole_sections.length}>Use a template</Button>}
+          <Button size="small" variant="outlined" startIcon={<AddRounded/>} onClick={addSection} disabled={!options.hole_sections.length}>Add section</Button>
+        </Box>}
       </Box>
 
       {!sections.length && <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', borderStyle: 'dashed' }}><Typography fontWeight={700} fontSize={13}>No plan sections yet</Typography><Typography color="text.secondary" fontSize={12} mt={.5}>Add the first Hole Section, then assign the planned Phase and days.</Typography></Paper>}
@@ -330,6 +380,13 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
       <ErrorMessage message={error}/>
     </Box>}
   </FormDialog>
+    <TemplatePickerDialog
+      open={templatePickerOpen && !readOnly}
+      kind="well"
+      wellId={well?.id ?? ''}
+      onClose={() => setTemplatePickerOpen(false)}
+      onApply={template => applyWellTemplate(template)}
+    />
     <FormDialog open={!!transition} title={`${transition ? transitionLabels[transition] : 'Update scope'} · ${scope}`}
       subtitle="This change applies only to the selected well configuration scope."
       onClose={() => { if (!saving) setTransition(null) }} onSubmit={() => void confirmTransition()}

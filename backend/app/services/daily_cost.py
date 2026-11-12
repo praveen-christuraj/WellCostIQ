@@ -59,6 +59,7 @@ from app.schemas.daily_cost import (
     DailyCostSectionDepthOut, DailyCostSectionOption, DailyCostServiceLineIn, DailyCostServiceLineOut, DailyCostStatusIn,
     DailyCostSubActivityOption, DailyCostTangibleLineIn, DailyCostTangibleLineOut,
     DailyCostTrendPoint, DailyCostVendorOption, DailyCostWarnings, DailyCostWellHeader,
+    DailyCostRigLatest, DailyCostRigLatestOut,
     DailyCostWellOption, DailyCostWellProgress, DailyCostWellProgressReport,
     DailyCostMudReconciliation, DailyCostMudSectionReconciliation,
     DailyCostWellProgressUpdate, DailyCostWellSummary, DailyCostWellTotals,
@@ -872,6 +873,10 @@ def reference_data(db: Session, organization_id: str) -> DailyCostReference:
         rigs=[DailyCostRigOption(id=row.id, rig_code=row.rig_code, rig_name=row.rig_name, display_name=_label(row.rig_code, row.rig_name)) for row in rigs],
         wells=[DailyCostWellOption(
             id=well.id, rig_id=well.rig_id, well_code=well.well_code, well_name=well.well_name,
+            # The rig's own code/name travel with the well so a picker, register
+            # partition or template can name the rig without a second lookup.
+            rig_code=well.rig.rig_code if well.rig else "",
+            rig_name=well.rig.rig_name if well.rig else "",
             display_name=_label(well.well_code, well.well_name), status=well.status, config_status=well.config_status,
             completion_status=well.completion_status,
             completion_config_status=well.completion_config_status,
@@ -3232,6 +3237,123 @@ def list_entries(
         )
         for row in rows
     ]
+
+
+# A rig with no new daily sheet for this many days has no costs in progress: its
+# wells are not being costed any more, so the register stops listing it.
+RIG_INACTIVITY_DAYS = 5
+
+
+def latest_entry_per_rig(
+    db: Session,
+    organization_id: str,
+    *,
+    as_of: date | None = None,
+    inactivity_days: int = RIG_INACTIVITY_DAYS,
+) -> DailyCostRigLatestOut:
+    """Exactly one saved daily sheet per rig: the most recent active one.
+
+    The daily cost register is rig-scoped and only ever needs the last sheet of
+    each rig — that is the sheet the user continues from. Older sheets of the
+    same rig become history. A rig whose newest sheet is ``inactivity_days`` or
+    more days old is in progress no more and is returned in ``inactive_rigs``
+    rather than in the register, so the page can say why it disappeared.
+
+    Only non-deleted sheets count. Deleted sheets never hide a rig that still
+    has live costs, and a rig whose every sheet is deleted has nothing to show.
+    """
+    report_date = as_of or datetime.now(timezone.utc).date()
+    cutoff = report_date - timedelta(days=max(inactivity_days, 1) - 1)
+    candidates = db.scalars(
+        select(DailyCostEntry)
+        .options(
+            joinedload(DailyCostEntry.rig), joinedload(DailyCostEntry.well), joinedload(DailyCostEntry.afe),
+            joinedload(DailyCostEntry.rate_baseline), joinedload(DailyCostEntry.baseline),
+            selectinload(DailyCostEntry.service_lines), selectinload(DailyCostEntry.consumable_lines),
+            selectinload(DailyCostEntry.tangible_lines), selectinload(DailyCostEntry.other_expense_lines),
+        )
+        .where(
+            DailyCostEntry.organization_id == organization_id,
+            DailyCostEntry.is_deleted.is_(False),
+            # Anything older than the cutoff can never be a rig's newest sheet, so
+            # it never has to be read at all. A sheet dated ahead of the report
+            # date is still a saved record and still shows, so nothing a user
+            # saved can disappear from the register.
+            DailyCostEntry.cost_date >= cutoff,
+        )
+        .order_by(DailyCostEntry.cost_date.desc(), DailyCostEntry.created_at.desc(), DailyCostEntry.id)
+    ).unique().all()
+
+    newest: dict[str, DailyCostEntry] = {}
+    for entry in candidates:
+        # Ordered newest first, so the first row seen for a rig is its latest.
+        newest.setdefault(entry.rig_id, entry)
+
+    # A rig with a newer sheet outside the cutoff window is not inactive; read the
+    # small set of rigs that have no recent sheet so their age is exact.
+    missing = [rig_id for rig_id in _active_rig_ids(db, organization_id) if rig_id not in newest]
+    if missing:
+        older = db.scalars(
+            select(DailyCostEntry)
+            .options(
+                joinedload(DailyCostEntry.rig), joinedload(DailyCostEntry.well), joinedload(DailyCostEntry.afe),
+                joinedload(DailyCostEntry.rate_baseline), joinedload(DailyCostEntry.baseline),
+                selectinload(DailyCostEntry.service_lines), selectinload(DailyCostEntry.consumable_lines),
+                selectinload(DailyCostEntry.tangible_lines), selectinload(DailyCostEntry.other_expense_lines),
+            )
+            .where(
+                DailyCostEntry.organization_id == organization_id,
+                DailyCostEntry.is_deleted.is_(False),
+                DailyCostEntry.rig_id.in_(missing),
+            )
+            .order_by(DailyCostEntry.cost_date.desc(), DailyCostEntry.created_at.desc(), DailyCostEntry.id)
+        ).unique().all()
+        for entry in older:
+            newest.setdefault(entry.rig_id, entry)
+
+    if not newest:
+        return DailyCostRigLatestOut(as_of_date=report_date, inactivity_days=inactivity_days, rigs=[], inactive_rigs=[])
+
+    well_ids = sorted({entry.well_id for entry in newest.values()})
+    by_section, by_day, _ = resolve_actual_depths(db, organization_id, well_ids=well_ids)
+    sections_for_key: dict[tuple[str, date], list[DailyCostSectionDepthOut]] = defaultdict(list)
+    for (well_id, cost_date, _section_id), value in by_section.items():
+        sections_for_key[(well_id, cost_date)].append(value)
+    cumulative = _cumulative_cost_index(db, organization_id)
+
+    rows: list[DailyCostRigLatest] = []
+    inactive: list[DailyCostRigLatest] = []
+    for entry in sorted(
+        newest.values(),
+        key=lambda row: (row.rig_code_snapshot, row.cost_date, row.daily_cost_code),
+    ):
+        age = (report_date - entry.cost_date).days
+        row = DailyCostRigLatest(
+            rig_id=entry.rig_id,
+            rig_code=entry.rig_code_snapshot,
+            rig_name=entry.rig_name_snapshot,
+            entry=_entry_out(
+                entry,
+                day_depth=by_day.get((entry.well_id, entry.cost_date)),
+                section_depths=sections_for_key.get((entry.well_id, entry.cost_date), []),
+                cumulative_cost=cumulative.get(
+                    (entry.well_id, entry.afe_id, entry.cost_date), Decimal(entry.total_cost)
+                ),
+            ),
+            age_days=age,
+        )
+        (rows if age < inactivity_days else inactive).append(row)
+    rows.sort(key=lambda item: (item.age_days, item.rig_code))
+    inactive.sort(key=lambda item: (item.age_days, item.rig_code))
+    return DailyCostRigLatestOut(
+        as_of_date=report_date, inactivity_days=inactivity_days, rigs=rows, inactive_rigs=inactive,
+    )
+
+
+def _active_rig_ids(db: Session, organization_id: str) -> list[str]:
+    return list(db.scalars(
+        select(Rig.id).where(Rig.organization_id == organization_id, Rig.is_deleted.is_(False))
+    ).all())
 
 
 def submit_entry(

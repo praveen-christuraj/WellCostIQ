@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Box, Button, Chip, Collapse, Divider, IconButton, InputAdornment, Menu, MenuItem, Paper, TextField, Typography } from '@mui/material'
 import { AddRounded, CloseRounded, DownloadRounded, FilterListRounded, SearchRounded, UploadRounded } from '@mui/icons-material'
 import { AgGridReact } from 'ag-grid-react'
@@ -132,31 +132,53 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
   const activeFilters = rules.filter(r => r.value || r.op === 'is empty' || r.op === 'is not empty').length + (dateField && (dateFrom || dateTo) ? 1 : 0)
 
   const rawValue = (row: T, field: string) => (row as Record<string, unknown>)[field]
+
+  // Quick search reads every column of every row, which is the most expensive
+  // thing this component does. The searchable text of each row is therefore
+  // built once per rows/columns change (memoised, in one pass), and the search
+  // itself is deferred so a keystroke paints immediately and the filtered view
+  // follows in the same frame instead of blocking the input.
+  //
+  // Filter rules and the date range keep their own memo: the grid has to know
+  // how many rows matched *before* it can size itself, so that path stays
+  // synchronous and only search is deferred.
+  const rowText = useMemo(
+    () => rows.map(row => exportCols.map(col => col.value(row).toLowerCase()).join('\u0001')),
+    [rows, exportCols],
+  )
+  const deferredSearch = useDeferredValue(search)
+  const searchNeedle = deferredSearch.trim().toLowerCase()
+
+  const matchesRules = useCallback((row: T) => {
+    for (const rule of rules) {
+      const raw = rawValue(row, rule.field)
+      const value = String(raw ?? '').toLowerCase()
+      const target = rule.value.trim().toLowerCase()
+      if (rule.op === 'is empty' && value !== '') return false
+      if (rule.op === 'is not empty' && value === '') return false
+      if (rule.op === 'contains' && !value.includes(target)) return false
+      if (rule.op === 'equals' && value !== target) return false
+      if (rule.op === 'starts with' && !value.startsWith(target)) return false
+      if (rule.op === 'ends with' && !value.endsWith(target)) return false
+    }
+    if (dateField && (dateFrom || dateTo)) {
+      const value = rawValue(row, dateField)
+      if (!value) return false
+      const day = new Date(value as string).getTime()
+      if (dateFrom && day < new Date(`${dateFrom}T00:00:00`).getTime()) return false
+      if (dateTo && day > new Date(`${dateTo}T23:59:59.999`).getTime()) return false
+    }
+    return true
+  }, [rules, dateField, dateFrom, dateTo])
+
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return rows.filter(row => {
-      if (q && !exportCols.some(c => c.value(row).toLowerCase().includes(q))) return false
-      for (const rule of rules) {
-        const raw = rawValue(row, rule.field)
-        const value = String(raw ?? '').toLowerCase()
-        const target = rule.value.trim().toLowerCase()
-        if (rule.op === 'is empty' && value !== '') return false
-        if (rule.op === 'is not empty' && value === '') return false
-        if (rule.op === 'contains' && !value.includes(target)) return false
-        if (rule.op === 'equals' && value !== target) return false
-        if (rule.op === 'starts with' && !value.startsWith(target)) return false
-        if (rule.op === 'ends with' && !value.endsWith(target)) return false
-      }
-      if (dateField && (dateFrom || dateTo)) {
-        const value = rawValue(row, dateField)
-        if (!value) return false
-        const day = new Date(value as string).getTime()
-        if (dateFrom && day < new Date(`${dateFrom}T00:00:00`).getTime()) return false
-        if (dateTo && day > new Date(`${dateTo}T23:59:59.999`).getTime()) return false
-      }
-      return true
-    })
-  }, [rows, search, rules, dateField, dateFrom, dateTo, exportCols])
+    const matched: T[] = []
+    for (let index = 0; index < rows.length; index += 1) {
+      if (searchNeedle && !rowText[index].includes(searchNeedle)) continue
+      if (matchesRules(rows[index])) matched.push(rows[index])
+    }
+    return matched
+  }, [rows, rowText, searchNeedle, matchesRules])
 
   // Grid skin comes from the shared design tokens, so it always matches the MUI theme.
   const gridTheme = useMemo(() => themeQuartz.withParams(gridThemeParams(mode)), [mode])

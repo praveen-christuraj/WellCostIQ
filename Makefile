@@ -1,4 +1,4 @@
-.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check
+.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -89,3 +89,21 @@ usage-reports-check:
 		--bundle --platform=node --format=esm --jsx=automatic \
 		--outfile=node_modules/.cache/usage-reports-check.mjs --loader:.jsx=jsx --log-level=error \
 		--external:jsdom && node node_modules/.cache/usage-reports-check.mjs
+
+# Reusable templates: the library page, the picker preview/confirm and the
+# code-scoped well plan preview (the structures that must survive Master Data changes).
+templates-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/templates-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic \
+		--outfile=node_modules/.cache/templates-check.mjs --loader:.jsx=jsx --log-level=error \
+		--external:jsdom && node node_modules/.cache/templates-check.mjs
+
+# Catalogue tables: the description column and the bulk price revision dialog's
+# preview, reason gate and all-or-nothing refusal (Master Data → Tangibles/Consumables).
+catalogue-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/catalogue-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic \
+		--outfile=node_modules/.cache/catalogue-check.mjs --loader:.jsx=jsx --log-level=error \
+		--external:jsdom && node node_modules/.cache/catalogue-check.mjs

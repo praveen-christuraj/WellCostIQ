@@ -1140,3 +1140,239 @@ def import_rows(db: Session, spec: PricedSpec, organization_id: str, user: Any, 
     return imported, errors, created
 
 
+# ---------------------------------------------------------------------------
+# Bulk rate revision (price list re-upload)
+# ---------------------------------------------------------------------------
+
+
+class BulkRevisionResult(BaseModel):
+    """Outcome of one atomic bulk price revision batch."""
+
+    revised_count: int
+    unchanged_count: int
+    error_count: int
+    skipped_count: int
+    # Plain text, formatted the way the revision file shows a price (102, not
+    # 102.0000000000), so the summary can be read back to the operator verbatim.
+    original_rate: str | None = None
+    new_rate: str | None = None
+    currency: str = ""
+    effective_date: date | None = None
+    errors: list[str]
+    warnings: list[str]
+
+
+def price_text(value: Any) -> str:
+    """A price as an operator reads it: four decimals, trailing zeros trimmed.
+
+    Decimal columns carry ten decimals, so printing them raw would fill the
+    revision template with ``1250.0000000000``. The trailing ``.0000`` goes too,
+    leaving a plain ``1250`` that can be typed straight back.
+    """
+    if value in (None, ""):
+        return ""
+    text = str(q4(value))
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def revision_template_rows(spec: PricedSpec, items: list[Any], options: dict[str, CatalogueOption]) -> list[dict[str, str]]:
+    """One spreadsheet-style row per active item, ready to be downloaded as the
+    revision template. Only the price columns are meant to be edited; the code
+    identifies the record and every other column is context for the reviewer."""
+    breakdown_header = (spec.breakdown_label or "Group").lower().replace(" ", "_")
+    rows: list[dict[str, str]] = []
+    for item in items:
+        row: dict[str, str] = {
+            spec.code_attr: str(getattr(item, spec.code_attr)),
+            spec.name_attr: str(getattr(item, spec.name_attr)),
+        }
+        if spec.breakdown_attr:
+            option = options.get(getattr(item, spec.breakdown_attr) or "")
+            row[breakdown_header] = option.value if option else ""
+        row["description"] = item.description or ""
+        row["uom"] = str(getattr(item, "uom", "") or "")
+        row["unit_rate"] = price_text(item.unit_rate)
+        if spec.priced_uplift:
+            row["cost_uplift"] = price_text(item.cost_uplift if item.cost_uplift is not None else DEFAULT_UPLIFT)
+        row["currency"] = item.currency
+        row["current_revision_number"] = str(item.current_revision_number)
+        rows.append(row)
+    return rows
+
+
+def _bulk_rate_targets(
+    spec: PricedSpec, row: dict[str, Any], item: Any
+) -> dict[str, Any]:
+    """Rate fields a revision row actually changes.
+
+    A revision upload carries the whole price list, so only the price columns
+    are read: rate, uplift % (uplift-priced types) and an optional currency.
+    Blank cells keep the current value, which is what makes "edit only the rows
+    whose price changed" safe.
+    """
+    canonical = _canonical_row(spec, row)
+    rate_text = canonical.get("unit_rate")
+    uplift_text = canonical.get("cost_uplift")
+    currency_text = canonical.get("currency")
+    return {
+        "unit_rate": parse_decimal(rate_text, "Unit rate", allow_blank=True),
+        "cost_uplift": parse_decimal(uplift_text, "Uplift %", allow_blank=True) if spec.priced_uplift else None,
+        "currency": clean_value(currency_text).upper(),
+        "effective_date": parse_date(canonical.get("effective_date")),
+        "reason": clean_value(canonical.get("reason")),
+    }
+
+
+def bulk_revise_rates(
+    db: Session,
+    spec: PricedSpec,
+    organization_id: str,
+    user: Any,
+    rows: list[dict[str, Any]],
+    request: Request | None,
+    *,
+    reason: str = "",
+    effective_date: date | None = None,
+) -> BulkRevisionResult:
+    """Apply one bulk price revision.
+
+    The batch is all-or-nothing. Either every row that names a real record with
+    a valid price is revised together (one effective date, one reason, one audit
+    entry), or nothing is written and the caller receives the row-level errors
+    so the file can be corrected. Rows whose price did not change are reported
+    as unchanged rather than as failures.
+
+    Rows are matched on the item code only. That is deliberate: a revision file
+    is produced from this workspace's own register, so a code that is unknown or
+    removed is a stale-file signal, not permission to create a new item.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    unchanged = 0
+    skipped = 0
+
+    fallback_reason = clean_value(reason)
+    fallback_effective = effective_date or today()
+    if fallback_effective > today():
+        raise CatalogueError("Effective date cannot be in the future")
+
+    targets: list[tuple[Any, dict[str, Any]]] = []
+    seen_codes: set[str] = set()
+
+    for row_number, row in enumerate(rows, start=1):
+        canonical = _canonical_row(spec, row)
+        code = clean_value(canonical.get(spec.code_attr)).upper()
+        if not code:
+            errors.append(f"Row {row_number}: {spec.code_label} is required to identify the record")
+            continue
+        if code in seen_codes:
+            errors.append(f"Row {row_number}: {code} appears more than once in this file")
+            continue
+        seen_codes.add(code)
+
+        item = db.scalar(select(spec.model).where(
+            spec.model.organization_id == organization_id,
+            getattr(spec.model, spec.code_attr) == code,
+        ))
+        if item is None:
+            errors.append(f"Row {row_number}: {code} is not in this workspace. Download a fresh template.")
+            continue
+        if item.is_deleted:
+            skipped += 1
+            warnings.append(f"Row {row_number}: {code} is in Deleted Entries and was skipped.")
+            continue
+
+        try:
+            values = _bulk_rate_targets(spec, canonical, item)
+        except CatalogueError as error:
+            errors.append(f"Row {row_number}: {error.message}")
+            continue
+
+        if values["unit_rate"] is None and values["cost_uplift"] is None and not values["currency"]:
+            unchanged += 1
+            continue
+
+        candidate = {
+            "unit_rate": values["unit_rate"] if values["unit_rate"] is not None else item.unit_rate,
+            "cost_uplift": (
+                values["cost_uplift"] if values["cost_uplift"] is not None else item.cost_uplift
+            ) if spec.priced_uplift else None,
+            "currency": values["currency"] or item.currency,
+            "po_number": item.po_number,
+            "effective_date": fallback_effective,
+        }
+        try:
+            rate = _rate_values(db, organization_id, spec, candidate)
+        except CatalogueError as error:
+            errors.append(f"Row {row_number}: {code}: {error.message}")
+            continue
+
+        changed = (
+            q4(rate["unit_rate"]) != q4(item.unit_rate)
+            or (spec.priced_uplift and q4(rate["cost_uplift"] or 0) != q4(item.cost_uplift or 0))
+            or rate["currency"] != item.currency
+        )
+        if not changed:
+            unchanged += 1
+            continue
+
+        targets.append((item, {
+            **candidate,
+            "effective_date": values["effective_date"] or fallback_effective,
+            "reason": values["reason"] or fallback_reason or "Bulk price revision",
+        }))
+
+    if errors:
+        # Nothing is written and the file is rejected, but the row-level detail
+        # still travels back: the upload form lists every bad row so the file can
+        # be corrected in one pass instead of one error at a time.
+        raise CatalogueError(
+            f"{len(errors)} row{'s' if len(errors) > 1 else ''} could not be revised. "
+            "No price was changed. " + " ".join(errors[:20])
+            + (" …" if len(errors) > 20 else ""),
+        )
+    if not targets:
+        raise CatalogueError(
+            "No price changed in this file. Edit the unit rate (or uplift %) of at least one row and upload it again."
+        )
+
+    revised = 0
+    for item, payload in targets:
+        revise_item(
+            db, spec, organization_id, user, item, payload, request,
+            reason=payload["reason"], via="from bulk price revision",
+        )
+        revised += 1
+
+    currencies = {payload["currency"] for _, payload in targets}
+    rates = {q4(payload["unit_rate"]) for _, payload in targets}
+    batch_effective = targets[0][1]["effective_date"]
+    result = BulkRevisionResult(
+        revised_count=revised,
+        unchanged_count=unchanged,
+        error_count=0,
+        skipped_count=skipped,
+        original_rate=None,
+        # Formatted like the template it came from, so the summary reads 102, not 102.0000000000.
+        new_rate=price_text(rates.pop()) if len(rates) == 1 else None,
+        currency=currencies.pop() if len(currencies) == 1 else "",
+        effective_date=batch_effective,
+        errors=[],
+        warnings=warnings,
+    )
+    audit.record(
+        db, organization_id=organization_id, actor=user, action="bulk_revise_rate",
+        entity_type=spec.entity, entity_label=spec.label,
+        summary=(
+            f"Bulk price revision: {revised} {spec.label.lower()} revised effective "
+            f"{batch_effective.isoformat()}"
+            + (f" (new rate {result.new_rate} {result.currency})" if result.new_rate is not None else "")
+            + (f", {unchanged} unchanged" if unchanged else "")
+            + (f", {skipped} skipped (deleted)" if skipped else "")
+            + f". Reason: {targets[0][1]['reason']}"
+        ),
+        request=request,
+    )
+    return result

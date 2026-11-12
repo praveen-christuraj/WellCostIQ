@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router-dom'
 import {
-  PrintOutlined, AddRounded, ArrowBackRounded, ArrowForwardRounded, CloudUploadOutlined, ContentCopyOutlined, DeleteOutlineRounded,
-  DownloadOutlined, EditOutlined, LockOutlined, PlaylistAddRounded, RefreshRounded, SaveOutlined, SendRounded, UndoRounded,
+  PrintOutlined, AddRounded, ArrowBackRounded, ArrowForwardRounded, CloudUploadOutlined, ContentCopyOutlined, DeleteOutlineRounded, PostAddOutlined,
+  DownloadOutlined, EditOutlined, LockOutlined, PlaylistAddRounded, RefreshRounded, SaveOutlined, SendRounded, UndoRounded, VisibilityOutlined,
 } from '@mui/icons-material'
 import {
   Alert, Box, Button, CircularProgress, LinearProgress, MenuItem, Paper, Table, TableBody, TableCell,
@@ -12,11 +12,13 @@ import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { DailyCostLineDialog, type DailyCostLineKind, type EditableDailyCostLine } from '../components/daily-cost/DailyCostLineDialog'
+import { TemplatePickerDialog } from '../components/templates/TemplatePickerDialog'
 import { DailyCostBulkScopeDialog } from '../components/daily-cost/DailyCostBulkScopeDialog'
 import { WellProgressPanel } from '../components/daily-cost/WellProgressPanel'
 import { CostingSetPickerDialog } from '../components/CostingSetPickerDialog'
 import { AdvancedSelectorDialog, type AdvancedSelectorItem, type AdvancedSelectorSelection } from '../components/AdvancedItemSelector'
-import { useCostPrint } from '../components/daily-cost/DailyCostPrintSheet'
+import { DailyCostPrintSheet, useCostPrint, type CostPrintReport } from '../components/daily-cost/DailyCostPrintSheet'
+import { PreviewPrintPortal, ReportViewDialog } from '../components/ui/ReportViewDialog'
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
@@ -36,6 +38,7 @@ import type { LihCostReport } from '../lib/lihCost'
 import type { NdtEntry } from '../lib/ndtInspection'
 import { formatDepthMeters } from '../lib/units'
 import { COSTING_SET_ITEM_KIND_LABEL, type CostingSet, type CostingSetGroup } from '../lib/costingSets'
+import type { Template } from '../lib/recordTemplates'
 
 /** Where each dialog kind lives inside the save payload. */
 type LineGroupKey = 'services' | 'consumables' | 'tangibles' | 'other_expenses'
@@ -72,6 +75,10 @@ export default function DailyCostSheet() {
   const [printOpen, setPrintOpen] = useState(false)
   const [printBusy, setPrintBusy] = useState(false)
   const [printError, setPrintError] = useState('')
+  // Report viewer: the saved daily report, before submission or printing.
+  const [viewing, setViewing] = useState(false)
+  const [viewReport, setViewReport] = useState<CostPrintReport | null>(null)
+  const [viewError, setViewError] = useState('')
   const { entryId = '' } = useParams()
   const { can } = useAuth()
   const canReadCostingSets = can('costing-sets:read')
@@ -119,6 +126,7 @@ export default function DailyCostSheet() {
   const [costingSets, setCostingSets] = useState<CostingSet[]>([])
   const [costingSetError, setCostingSetError] = useState('')
   const [setPickerGroup, setSetPickerGroup] = useState<CostingSetGroup | null>(null)
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
   const [pendingConsumableSet, setPendingConsumableSet] = useState<CostingSet | null>(null)
   const [selectedServiceIndices, setSelectedServiceIndices] = useState<number[]>([])
   const [selectedConsumableIndices, setSelectedConsumableIndices] = useState<number[]>([])
@@ -441,6 +449,142 @@ export default function DailyCostSheet() {
     } finally {
       setCopyBusy(false)
     }
+  }
+
+  /**
+   * Fill this day from a saved daily sheet template.
+   *
+   * A template carries the lines a rig repeats — the services it always runs and
+   * the consumables it always uses — not the amounts of the day. Quantities come
+   * from the template as a starting point; prices always come from this AFE's
+   * locked rate baseline, never from the template. Every line stays editable, and
+   * nothing is saved until the user saves the sheet.
+   */
+  const applyDayTemplate = (template: Template) => {
+    setTemplatePickerOpen(false)
+    if (!day || !reference || !baseline) return
+    const sheetScope = reference.afes.find(item => item.id === day.entry.afe_id)?.configuration_scope ?? 'drilling'
+    const preferredActivityId = payload.services[0]?.activity_id
+      ?? reference.activities.find(item => deriveClassification(item) === 'Planned')?.id
+      ?? reference.activities[0]?.id
+      ?? ''
+    const subActivity = reference.sub_activities.find(item =>
+      item.well_id === day.entry.well_id
+      && (item.scope ?? 'drilling') === sheetScope
+      && item.activity_id === preferredActivityId,
+    )
+    const activity = reference.activities.find(item => item.id === preferredActivityId)
+    const fallbackSection = baseline.sections[0]
+    const scopeSection = (code: string) =>
+      baseline.sections.find(section => section.section_code.toUpperCase() === code.toUpperCase()) ?? fallbackSection
+    const sectionPhase = (sectionId: string | null, phaseCode: string) =>
+      baseline.sections.find(section => section.hole_section_id === sectionId)?.phases
+        .find(phase => phase.phase_code.toUpperCase() === phaseCode.toUpperCase())?.phase_id ?? null
+
+    let skipped = 0
+    const next = { ...payload, services: [...payload.services], consumables: [...payload.consumables], tangibles: [...payload.tangibles] }
+    let added = 0
+
+    if (!activity || !subActivity) {
+      setSaveError('This sheet has no sub activity to charge lines to. Add a well sub activity first.')
+      return
+    }
+
+    // Services the AFE actually carries a current rate for can be added directly.
+    const rateFor = (serviceId: string) => baseline.service_rates.find(rate =>
+      rate.service_id === serviceId && rate.is_current !== false)
+
+    for (const line of template.services) {
+      if (!line.is_available) { skipped += 1; continue }
+      const rate = rateFor(line.service_id)
+      if (!rate) { skipped += 1; continue }
+      const section = scopeSection(line.section_code) ?? fallbackSection
+      if (!section) { skipped += 1; continue }
+      const phaseId = line.phase_code ? sectionPhase(section.hole_section_id, line.phase_code) : section.phases[0]?.phase_id ?? null
+      const quantity = line.charging_basis === 'Day Rate'
+        ? (line.operation_days ?? '1')
+        : (line.operation_days ?? '1')
+      next.services.push({
+        activity_id: activity.id,
+        hole_section_id: section.hole_section_id,
+        phase_id: phaseId,
+        sub_activity_id: subActivity.id,
+        vendor_id: null,
+        party_name: line.remarks || subActivity.responsible_party || '',
+        quantity,
+        currency: (line.currency || day.entry.standard_currency).toUpperCase(),
+        override_rate: null,
+        override_reason: '',
+        remarks: line.remarks,
+        service_id: line.service_id,
+        baseline_service_rate_id: rate.id ?? null,
+        charging_basis: rate.charging_basis ?? line.charging_basis,
+        charge_category: line.operation_rate ? 'Operation' : rate.charge_category,
+        quantity_unit: line.quantity_unit,
+      } as DailyCostSavePayload['services'][number])
+      added += 1
+    }
+
+    for (const line of template.consumables) {
+      if (!line.is_available || !line.drill_bit_id) { skipped += 1; continue }
+      const snapshot = baseline.catalogue_rates.find(item => item.item_kind === 'drill_bit' && item.id === line.drill_bit_id)
+      if (!snapshot) { skipped += 1; continue }
+      const section = scopeSection(line.section_code) ?? fallbackSection
+      if (!section) { skipped += 1; continue }
+      next.consumables.push({
+        activity_id: activity.id,
+        hole_section_id: section.hole_section_id,
+        phase_id: line.phase_code ? sectionPhase(section.hole_section_id, line.phase_code) : section.phases[0]?.phase_id ?? null,
+        sub_activity_id: subActivity.id,
+        vendor_id: null,
+        party_name: subActivity.responsible_party || '',
+        quantity: line.quantity || '1',
+        currency: (line.currency || day.entry.standard_currency).toUpperCase(),
+        override_rate: null,
+        override_reason: '',
+        remarks: line.remarks,
+        category: line.category,
+        item_kind: 'drill_bit',
+        item_id: line.drill_bit_id,
+      } as DailyCostSavePayload['consumables'][number])
+      added += 1
+    }
+
+    for (const line of template.tangibles) {
+      if (!line.is_available) { skipped += 1; continue }
+      const snapshot = baseline.catalogue_rates.find(item => item.item_kind === 'tangible' && item.id === line.tangible_id)
+      const section = fallbackSection
+      if (!snapshot || !section) { skipped += 1; continue }
+      next.tangibles.push({
+        activity_id: activity.id,
+        hole_section_id: section.hole_section_id,
+        phase_id: section.phases[0]?.phase_id ?? null,
+        sub_activity_id: subActivity.id,
+        vendor_id: null,
+        party_name: subActivity.responsible_party || '',
+        quantity: line.quantity || '1',
+        currency: day.entry.standard_currency,
+        override_rate: null,
+        override_reason: '',
+        remarks: line.remarks,
+        tangible_id: line.tangible_id,
+      } as DailyCostSavePayload['tangibles'][number])
+      added += 1
+    }
+
+    if (added) {
+      setPayload(next)
+      setPreview(null)
+    }
+    setNotice(
+      added
+        ? `${added} line${added === 1 ? '' : 's'} added from “${template.name}”. Quantities came from the template and prices from this AFE — review both, then save the sheet.`
+        : `No line could be added from “${template.name}”. Its lines are not in this AFE's locked rates.`,
+    )
+    if (skipped) {
+      setSaveError(`${skipped} template line${skipped === 1 ? '' : 's'} could not be placed in this day: they are not available or have no current AFE rate.`)
+    }
+    void api(`/record-templates/${template.id}/apply`, { method: 'POST', silent: true }).catch(() => undefined)
   }
 
   const completeStatusAction = async () => {
@@ -951,10 +1095,13 @@ export default function DailyCostSheet() {
     return (initial + current - previous).toFixed(2)
   }
 
-  const printDay = async () => {
-    if (dirty || !day) return
-    setPrintBusy(true)
-    setPrintError('')
+  /**
+   * The saved daily report, as data. Both the View action and the Print action
+   * read it through here, so the sheet that is checked on screen is exactly the
+   * sheet that prints.
+   */
+  const loadDayReport = async (): Promise<CostPrintReport | null> => {
+    if (!day) return null
     try {
       // Re-fetch the saved record, never print an unsaved preview.
       const saved = await api<DailyCostDay>(`/daily-cost/entries/${entry.id}`)
@@ -984,7 +1131,7 @@ export default function DailyCostSheet() {
         well_id: entry.well_id, include_deleted: entry.is_deleted,
       }) })
       const well = reference?.wells.find(item => item.id === entry.well_id)
-      print({
+      return {
         // The report title names the well scope the sheet costs.
         title: costReportTitle('daily', [saved.progress?.scope ?? progress?.scope], entry.well_name),
         period: displayDate(entry.cost_date), days: [saved],
@@ -993,10 +1140,40 @@ export default function DailyCostSheet() {
         wellObjective: well?.objective,
         services: reference?.services,
         reportKind: 'daily',
-      })
+      } as CostPrintReport
+    } finally { setPrintBusy(false) }
+  }
+
+  const printDay = async () => {
+    if (dirty || !day) return
+    setPrintBusy(true)
+    setPrintError('')
+    try {
+      const report = await loadDayReport()
+      if (report) print(report)
     } catch (caught) {
       setPrintError(caught instanceof Error ? caught.message : 'The daily sheet could not be printed')
-    } finally { setPrintBusy(false) }
+    }
+  }
+
+  /**
+   * Open the saved daily report on screen. The same payload the Print action
+   * uses is loaded first, so the user reads the real report — not a summary —
+   * before submitting or printing it.
+   */
+  const viewDay = async () => {
+    if (dirty || !day) return
+    setViewing(true)
+    setViewError('')
+    setViewReport(null)
+    setPrintBusy(true)
+    try {
+      setViewReport(await loadDayReport())
+    } catch (caught) {
+      setViewError(caught instanceof Error ? caught.message : 'The daily sheet report could not be prepared')
+    } finally {
+      setPrintBusy(false)
+    }
   }
 
   const statusTitle = statusAction === 'submit' ? 'Submit daily cost sheet?' : 'Reopen this daily cost sheet?'
@@ -1016,6 +1193,9 @@ export default function DailyCostSheet() {
           : `Prints the saved daily report with this sheet's milestone label and ${leadLagText(entry.lead_lag_kind, entry.lead_lag_days)}.`}>
           <span><Button variant="outlined" startIcon={<PrintOutlined/>} disabled={dirty || saving || printBusy} onClick={() => void printDay()}>{printBusy ? 'Preparing print…' : 'Print daily sheet'}</Button></span>
         </Tooltip>
+          <Tooltip title={dirty ? 'Save or discard changes before viewing the saved daily sheet.' : 'Open the saved daily report on screen before submitting or printing.'}>
+            <span><Button variant="outlined" startIcon={<VisibilityOutlined/>} disabled={dirty || saving || printBusy} onClick={() => void viewDay()}>View</Button></span>
+          </Tooltip>
           <Button variant="outlined" startIcon={<PrintOutlined/>} onClick={() => setPrintOpen(true)}>Print well costing sheet</Button>
         </>}
         <Button component={RouterLink} to="/daily-cost" variant="outlined" startIcon={<ArrowBackRounded/>}>Register</Button>
@@ -1026,6 +1206,9 @@ export default function DailyCostSheet() {
             : 'No earlier daily sheet for this AFE'}>
             <span><Button variant="outlined" startIcon={<ContentCopyOutlined/>} disabled={!previousDay || copyBusy} onClick={() => void copyPreviousDay('replace')}>Copy previous day</Button></span>
           </Tooltip>
+          {can('template:read') && <Tooltip title="Start from a saved daily sheet template: the lines this rig repeats are added, and you change only the quantities that differ.">
+            <span><Button variant="outlined" startIcon={<PostAddOutlined/>} onClick={() => setTemplatePickerOpen(true)}>Use a template</Button></span>
+          </Tooltip>}
           <Button variant="outlined" startIcon={<CloudUploadOutlined/>} onClick={openImport}>Import lines</Button>
           {can('daily-cost:update') && <Button variant="contained" startIcon={<SaveOutlined/>} onClick={() => void save()} disabled={saveDisabled}>{saving ? 'Saving…' : 'Save sheet'}</Button>}
         </>}
@@ -1321,6 +1504,21 @@ export default function DailyCostSheet() {
 
     <ErrorMessage message={printError}/>
     {printSheet}
+
+    {/* View before print: the saved daily report on screen, with a deliberate Print action. */}
+    <ReportViewDialog
+      open={viewing}
+      title={`Daily cost report · ${entry.daily_cost_code}`}
+      subtitle={`${entry.rig_code} · ${entry.well_code} ${entry.well_name} · ${displayDate(entry.cost_date)}. The saved report exactly as it prints; nothing is submitted or printed until you choose to.`}
+      onClose={() => { setViewing(false); setViewReport(null); setViewError('') }}
+      onPrint={printDay}
+      printLabel="Print daily sheet"
+      busy={!viewReport && !viewError && printBusy}
+      error={viewError}
+    >
+      {viewReport && <PreviewPrintPortal><DailyCostPrintSheet report={viewReport}/></PreviewPrintPortal>}
+      {viewReport && <DailyCostPrintSheet report={viewReport} preview/>}
+    </ReportViewDialog>
     <WellCostPrintDialog open={printOpen} onClose={() => setPrintOpen(false)} wells={reference?.wells ?? []} initialWellId={entry.well_id}/>
 
     <DailyCostBulkScopeDialog
@@ -1354,6 +1552,13 @@ export default function DailyCostSheet() {
       existingIds={payload.consumables.map(line => `${line.item_kind}:${line.item_id}`)}
       onClose={() => setPendingConsumableSet(null)}
       onAdd={addConsumableSetUsage}
+    />
+
+    <TemplatePickerDialog
+      open={templatePickerOpen && editable}
+      kind="daily-cost"
+      onClose={() => setTemplatePickerOpen(false)}
+      onApply={template => applyDayTemplate(template)}
     />
 
     <DailyCostLineDialog
