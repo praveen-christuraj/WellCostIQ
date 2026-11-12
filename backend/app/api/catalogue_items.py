@@ -15,7 +15,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import Current, Db, require
-from app.schemas.catalogue import PricedItemOverview, RateRevisionOut
+from app.schemas.catalogue import (
+    BulkPriceRevisionRequest,
+    BulkPriceRevisionResult,
+    PricedItemOverview,
+    RateRevisionOut,
+)
 from app.schemas.master_data import MasterDataBulkActionResponse, MasterDataIDs, MasterDataImportRequest, MasterDataImportResponse
 from app.services import catalogue as svc
 from app.services.catalogue import CatalogueError, PricedSpec
@@ -83,6 +88,54 @@ def build_item_router(spec: PricedSpec) -> APIRouter:
     @router.get("/deleted", dependencies=[read])
     def list_deleted(db: Db, user: Current) -> list[Any]:
         return out_list(db, user.organization_id, svc.list_items(db, spec, user.organization_id, deleted=True))
+
+    # ----- bulk price revision (reads stay available without update rights) -----
+
+    @router.get("/price-revision-template", dependencies=[read])
+    def price_revision_template(db: Db, user: Current) -> Response:
+        """The active price list as a CSV an operator edits and uploads back.
+
+        Downloading it is the whole bulk-price-revision workflow: the file
+        already carries every active code, name and current price, so only the
+        rows whose price moved are edited. Declared before ``/{item_id}`` so the
+        literal path wins.
+        """
+        import csv
+        import io
+
+        items = svc.list_items(db, spec, user.organization_id, deleted=False)
+        rows = svc.revision_template_rows(spec, items, svc.options_by_id(db, user.organization_id))
+        headers = list(rows[0].keys()) if rows else [spec.code_attr, spec.name_attr, "unit_rate", "currency"]
+        buffer = io.StringIO()
+        buffer.write("\ufeff")
+        writer = csv.DictWriter(buffer, fieldnames=headers, lineterminator="\r\n")
+        writer.writeheader()
+        writer.writerows(rows)
+        filename = f"{spec.key}-price-revision-{svc.today().isoformat()}.csv"
+        return Response(
+            content=buffer.getvalue().encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @router.post("/bulk-revise", response_model=BulkPriceRevisionResult, dependencies=[Depends(require("master-data:update"))])
+    def bulk_revise(data: BulkPriceRevisionRequest, request: Request, db: Db, user: Current):
+        """Revise the price of many items in one all-or-nothing batch."""
+        rows = data.rows
+        if data.code_header:
+            # The operator may rename the identifying column in the spreadsheet;
+            # remap it so the canonical row reader still finds the code.
+            header = data.code_header.strip()
+            rows = [{**row, spec.code_attr: row.get(spec.code_attr) or row.get(header)} for row in rows]
+        try:
+            result = svc.bulk_revise_rates(
+                db, spec, user.organization_id, user, rows, request,
+                reason=data.reason, effective_date=data.effective_date,
+            )
+        except CatalogueError as error:
+            return JSONResponse(status_code=error.status_code, content={"detail": error.message})
+        _commit(db)
+        return result
 
     @router.get("/{item_id}", dependencies=[read])
     def get_item(item_id: str, db: Db, user: Current) -> Any:

@@ -77,6 +77,9 @@ CAPABILITIES = {resource: actions for resource, actions in {
         "document-upload", "document-download", "document-delete",
     ),
     "costing-sets": ("read", "create", "update", "delete", "import", "export"),
+    # Reusable templates (AFE estimate, well plan, daily sheet). Read is enough to
+    # pick and apply one; changing the library needs its own rights.
+    "template": ("read", "create", "update", "delete", "export"),
 }.items()}
 
 

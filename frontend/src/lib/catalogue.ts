@@ -92,6 +92,7 @@ export const TANGIBLE_CONFIG: TypeConfig = {
   columns: [
     { key: 'tangible_code', label: 'CODE', width: 115 },
     { key: 'tangible_name', label: 'NAME', flex: 1.3, width: 190 },
+    { key: 'description', label: 'DESCRIPTION', flex: 1.4, width: 220 },
     { key: 'scope', label: 'SCOPE', width: 110 },
     { key: 'category_name', label: 'CATEGORY', width: 150 },
     { key: 'subcategory_name', label: 'SUBCATEGORY', width: 150 },
@@ -141,6 +142,7 @@ export const DRILL_BIT_CONFIG: TypeConfig = {
   columns: [
     { key: 'bit_code', label: 'CODE', width: 110 },
     { key: 'bit_name', label: 'NAME', flex: 1.2, width: 180 },
+    { key: 'description', label: 'DESCRIPTION', flex: 1.4, width: 220 },
     { key: 'bit_type_name', label: 'TYPE', width: 115 },
     { key: 'manufacturer_name', label: 'MAKE', width: 140 },
     { key: 'model_no', label: 'MODEL', width: 110 },
@@ -189,6 +191,7 @@ export const MUD_CHEMICAL_CONFIG: TypeConfig = {
   columns: [
     { key: 'chemical_code', label: 'CODE', width: 115 },
     { key: 'chemical_name', label: 'NAME', flex: 1.2, width: 190 },
+    { key: 'description', label: 'DESCRIPTION', flex: 1.4, width: 220 },
     { key: 'group_name', label: 'GROUP', width: 160 },
     { key: 'manufacturer_name', label: 'MAKE', width: 140 },
     { key: 'part_number', label: 'PART NO.', width: 120 },
@@ -233,6 +236,7 @@ export const CEMENT_ADDITIVE_CONFIG: TypeConfig = {
   columns: [
     { key: 'additive_code', label: 'CODE', width: 115 },
     { key: 'additive_name', label: 'NAME', flex: 1.2, width: 190 },
+    { key: 'description', label: 'DESCRIPTION', flex: 1.4, width: 220 },
     { key: 'additive_type_name', label: 'TYPE', width: 160 },
     { key: 'manufacturer_name', label: 'MAKE', width: 140 },
     { key: 'part_number', label: 'PART NO.', width: 120 },
@@ -272,6 +276,7 @@ export const FUEL_CONFIG: TypeConfig = {
   columns: [
     { key: 'fuel_code', label: 'CODE', width: 130 },
     { key: 'fuel_name', label: 'FUEL', flex: 1, width: 220 },
+    { key: 'description', label: 'DESCRIPTION', flex: 1.4, width: 220 },
     { key: 'uom', label: 'UOM', width: 90 },
     { key: 'unit_rate', label: 'CURRENT PRICE', kind: 'money', width: 150 },
     { key: 'currency', label: 'CCY', width: 80 },

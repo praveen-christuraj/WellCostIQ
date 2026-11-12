@@ -120,6 +120,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (path.includes('/lih-cost/entries')) return json([])
   if (path.endsWith('/ndt-inspections/reference')) return json({ rigs: apiRigs, wells: apiWells })
   if (path.includes('/ndt-inspections/entries')) return json([])
+  if (path.includes('/daily-cost/entries/latest-per-rig')) return json({ as_of_date: '2026-11-12', inactivity_days: 5, rigs: [], inactive_rigs: [] })
   if (path.includes('/daily-cost/entries')) return json([])
   if (path.includes('/daily-cost/reference')) return json(dailyReference)
   return json({})

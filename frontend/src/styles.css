@@ -440,7 +440,88 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   }
 }
 
-/* AFE print sheet: hidden on screen. When printing, the app is hidden and the AFE report is
+/* ---------------------------------------------------------------------------
+   Report viewer (View before print)
+
+   The print sheets are written for A4 paper and hidden on screen. The View
+   action renders the same markup inside `.wcp-report-preview`, which gives it
+   a screen form: normal document flow, visible page separations, and the
+   report's own tables untouched. Only layout is touched here -- no report rule
+   is redefined, so the preview can never drift from what prints.
+   --------------------------------------------------------------------------- */
+.wcp-report-preview .afe-print-sheet,
+.wcp-report-preview .afe-print-sheet.afe-cost-print-sheet,
+.wcp-report-preview .afe-print-sheet.daily-cost-print-sheet,
+.wcp-report-preview .afe-print-sheet.mud-cost-print-sheet {
+  display: block;
+  color: #16283F;
+  background: #fff;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10px;
+  line-height: 1.32;
+}
+.wcp-report-preview .afe-print-sheet h1 { font-size: 17px; margin: 0; color: #0B2A47; }
+.wcp-report-preview .afe-print-sheet h2 { font-size: 12px; margin: 16px 0 6px; color: #0B2A47; border-bottom: 1px solid #123A63; padding-bottom: 3px; }
+.wcp-report-preview .afe-print-sheet h3 { font-size: 11px; margin: 12px 0 4px; color: #123A63; }
+.wcp-report-preview .afe-print-sheet p { margin: 0 0 6px; }
+.wcp-report-preview .afe-print-sheet table { width: 100%; border-collapse: collapse; margin: 0 0 6px; table-layout: fixed; }
+.wcp-report-preview .afe-print-sheet th,
+.wcp-report-preview .afe-print-sheet td { border: 1px solid #B9CCE0; padding: 3px 5px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.wcp-report-preview .afe-print-sheet thead th { background: #E8EEF6; color: #0B2A47; font-size: 9px; }
+.wcp-report-preview .afe-print-sheet tbody th,
+.wcp-report-preview .afe-print-sheet tfoot th { background: #F3F6FA; font-weight: 700; }
+.wcp-report-preview .afe-print-sheet .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wcp-report-preview .afe-print-sheet .ps-eyebrow { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #4A6F96; }
+.wcp-report-preview .afe-print-sheet .ps-sub { font-size: 9px; color: #4A6F96; margin-top: 2px; }
+.wcp-report-preview .afe-print-sheet .ps-group { font-size: 8px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: #123A63; }
+.wcp-report-preview .afe-print-sheet .ps-component td { font-size: 9.5px; color: #333; }
+.wcp-report-preview .afe-print-sheet .ps-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.wcp-report-preview .afe-print-sheet .ps-empty { font-style: italic; color: #4A6F96; }
+.wcp-report-preview .afe-print-sheet .ps-note { font-size: 9px; color: #4A6F96; }
+.wcp-report-preview .afe-print-sheet .ps-total th,
+.wcp-report-preview .afe-print-sheet .ps-total td { font-weight: 800; background: #E8EEF6; }
+.wcp-report-preview .afe-print-sheet .ps-grand th,
+.wcp-report-preview .afe-print-sheet .ps-grand td { font-size: 11px; font-weight: 800; color: #0B2A47; background: #E8EEF6; border-top: 2px solid #123A63; border-bottom: 2px solid #123A63; }
+.wcp-report-preview .afe-print-sheet .ps-titlebar { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; border-bottom: 2px solid #123A63; padding-bottom: 6px; margin-bottom: 10px; }
+.wcp-report-preview .afe-print-sheet .ps-titlemeta { text-align: right; font-size: 10px; line-height: 1.45; }
+.wcp-report-preview .afe-print-sheet .ps-titlecode { display: block; font-size: 13px; font-weight: 700; color: #0B2A47; }
+.wcp-report-preview .afe-print-sheet .ps-printed { display: block; color: #4A6F96; }
+.wcp-report-preview .afe-print-sheet .ps-pagefoot { display: flex; justify-content: space-between; margin-top: 12px; padding-top: 4px; border-top: 1px solid #B9CCE0; font-size: 9px; color: #4A6F96; }
+.wcp-report-preview .afe-print-sheet .ps-sign td { height: 46px; }
+/* A page break in print is a visible rule in the viewer, so the second page
+   reads as a second page instead of a continuation. */
+.wcp-report-preview .afe-print-sheet .ps-page + .ps-page { margin-top: 24px; padding-top: 18px; border-top: 2px dashed #B9CCE0; }
+.wcp-report-preview .afe-print-sheet .ps-page::after { display: none; }
+.wcp-report-preview .afe-print-sheet .ps-warnings ul { margin: 2px 0 4px; padding-left: 18px; }
+/* The daily report's cover page is sized for A4 in print; on screen it is a
+   normal block so the viewer scrolls instead of clipping. */
+.wcp-report-preview .daily-cost-print-sheet .daily-report-cover { height: auto; overflow: visible; break-after: auto; }
+.wcp-report-preview .daily-cost-print-sheet .daily-report-details { break-before: auto; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-report-unit + .dcr-report-unit { margin-top: 24px; padding-top: 18px; border-top: 2px dashed #B9CCE0; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-layout { display: grid; grid-template-columns: minmax(0, 2.58fr) minmax(0, 1fr); grid-template-areas: "left mud" "left loss" "lower lower"; gap: 8px; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-left { grid-area: left; display: grid; gap: 8px; grid-template-rows: max-content minmax(0, 1fr) max-content; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-mud-stack { grid-area: mud; display: grid; gap: 8px; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-layout > .dcr-loss { grid-area: loss; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-bottomline { grid-area: lower; display: grid; grid-template-columns: minmax(0, .61fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-panel { border: 1px solid #B9CCE0; border-radius: 4px; overflow: hidden; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-panel h2 { margin: 0; padding: 3px 6px; border: 0; border-bottom: 1px solid #B9CCE0; font-size: 9px; background: #E8EEF6; text-transform: uppercase; letter-spacing: .2px; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-panel table { margin: 0; font-size: 8.5px; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-panel th,
+.wcp-report-preview .daily-cost-print-sheet .dcr-panel td { padding: 2px 4px; border-color: #B9CCE0; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-cost-panel { display: block; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-cost-panel th,
+.wcp-report-preview .daily-cost-print-sheet .dcr-cost-panel td { padding: 3px 4px; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-cost-group-row th { background: #E8EEF6; color: #123A63; font-size: 8px; font-weight: 800; text-align: left; text-transform: uppercase; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-stack { display: grid; gap: 8px; grid-template-rows: max-content minmax(0, 1fr); }
+.wcp-report-preview .mud-cost-print-sheet { font-size: 9px; }
+.wcp-report-preview .mud-cost-print-sheet .ps-sub,
+.wcp-report-preview .mud-cost-print-sheet .ps-note { font-size: 8.5px; }
+.wcp-report-preview .mud-cost-print-sheet .dcr-panel h2 { font-size: 8.5px; }
+
+/* Print sheet: hidden on screen. When printing, the app is hidden and the AFE report is
+   shown in its fixed two-page format - summary and sign-off on page 1, the consumable and
+   tangible line detail on page 2. Daily Cost printing reuses these rules and the .ps-* classes. */
+ When printing, the app is hidden and the AFE report is
    shown in its fixed two-page format - summary and sign-off on page 1, the consumable and
    tangible line detail on page 2. Daily Cost printing reuses these rules and the .ps-* classes. */
 .afe-print-sheet { display: none; }

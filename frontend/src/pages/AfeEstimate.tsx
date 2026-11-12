@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom'
-import { AddRounded, ArrowBackRounded, DeleteOutlineRounded, EditOutlined, PlaylistAddRounded, PrintOutlined, SaveOutlined, TableRowsOutlined, UndoRounded } from '@mui/icons-material'
+import { AddRounded, ArrowBackRounded, DeleteOutlineRounded, EditOutlined, PlaylistAddRounded, PrintOutlined, SaveOutlined, TableRowsOutlined, UndoRounded, VisibilityOutlined, PostAddOutlined } from '@mui/icons-material'
 import { Alert, Box, Button, CircularProgress, MenuItem, Paper, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { AfePrintSheet } from '../components/afe/AfePrintSheet'
+import { PreviewPrintPortal, ReportViewDialog } from '../components/ui/ReportViewDialog'
 import { BreakdownDialog } from '../components/afe/BreakdownDialog'
 import { AfeScopeAssignmentDialog, type AfeScopeTarget } from '../components/afe/AfeScopeAssignmentDialog'
 import { BulkEstimateDialog, type BulkResult } from '../components/afe/BulkEstimateDialog'
 import { CostingSetPickerDialog } from '../components/CostingSetPickerDialog'
+import { TemplatePickerDialog } from '../components/templates/TemplatePickerDialog'
 import { ConsumableLineDialog } from '../components/afe/ConsumableLineDialog'
 import { ErrorDetails, StatusDialog, StatusTag } from '../components/afe/AfeShared'
 import { SowAdjustmentDialog } from '../components/afe/SowAdjustmentDialog'
@@ -27,6 +29,7 @@ import {
 import { defaultCurrencyCode } from '../lib/masterData'
 import { compareServiceCodes, compareServiceGroups } from '../lib/serviceGroups'
 import type { CostingSet, CostingSetGroup } from '../lib/costingSets'
+import { resolveScope, type Template } from '../lib/recordTemplates'
 
 type LineKind = 'service' | 'consumable' | 'tangible'
 type Editor = { kind: LineKind; key: string | null } | null
@@ -108,6 +111,7 @@ export default function AfeEstimate() {
   const navigate = useNavigate()
   const { can } = useAuth()
   const canReadCostingSets = can('costing-sets:read')
+  const canReadTemplates = can('template:read')
 
   const [afe, setAfe] = useState<Afe | null>(null)
   const [saved, setSaved] = useState<AfeEstimate | null>(null)
@@ -127,11 +131,15 @@ export default function AfeEstimate() {
   const [costingSets, setCostingSets] = useState<CostingSet[]>([])
   const [costingSetError, setCostingSetError] = useState('')
   const [setPickerGroup, setSetPickerGroup] = useState<CostingSetGroup | null>(null)
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
   const [breakdown, setBreakdown] = useState<{ title: string; currency: string; components: AfeComponent[]; warnings: string[] } | null>(null)
   const [statusTarget, setStatusTarget] = useState<AfeStatusAction | null>(null)
   const [sowOpen, setSowOpen] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
   const [printing, setPrinting] = useState(false)
+  // The saved report, opened on screen with the View action before it is
+  // submitted or printed.
+  const [viewing, setViewing] = useState(false)
   const [selected, setSelected] = useState<Record<LineKind, string[]>>({ service: [], consumable: [], tangible: [] })
   const [bulkDelete, setBulkDelete] = useState<LineKind | null>(null)
 
@@ -508,6 +516,130 @@ export default function AfeEstimate() {
     )
   }
 
+  /**
+   * Start the estimate from a saved template.
+   *
+   * The template supplies the structure — which services, which section and
+   * phase, which consumables and tangibles. Prices are never copied: every line
+   * is priced from this AFE's own rates when the preview runs, so a template
+   * cannot smuggle in a stale price.
+   *
+   * Lines already on the estimate are kept. A template line that would land on
+   * the same service and scope as an existing line is reported as skipped rather
+   * than added twice.
+   */
+  const applyEstimateTemplate = async (template: Template, preview_summary: { warnings: string[] }) => {
+    if (!saved || !reference) return
+    setTemplatePickerOpen(false)
+    const plan = saved.well
+    const currency = inputs.standard_currency || defaultCurrencyCode(reference.currencies)
+    let skipped = 0
+    const notes: string[] = []
+    let nextServices = inputs.services.slice()
+    let nextConsumables = inputs.consumables.slice()
+    let nextTangibles = inputs.tangibles.slice()
+    let added = 0
+
+    const serviceKeys = new Set(nextServices.map(line =>
+      `${line.service_id}|${line.hole_section_id ?? ''}|${line.phase_id ?? ''}`,
+    ))
+    const tangibleKeys = new Set(nextTangibles.map(line => line.tangible_id))
+    const consumableKeys = new Set(nextConsumables.map(line => line.category === 'Drill Bits'
+      ? `bit:${line.drill_bit_id}|${line.hole_section_id}|${line.phase_id ?? ''}`
+      : `budget:${line.category}|${line.hole_section_id}|${line.phase_id ?? ''}`))
+
+    for (const line of template.services) {
+      if (!line.is_available) { skipped += 1; continue }
+      const scope = resolveScope(plan, line.section_code, line.phase_code)
+      if (scope.missing) { skipped += 1; notes.push(`${line.section_label || line.section_code} is not in this well's plan`); continue }
+      const key = `${line.service_id}|${scope.sectionId ?? ''}|${scope.phaseId ?? ''}`
+      if (serviceKeys.has(key)) { skipped += 1; continue }
+      const rates: ServiceLineInput['rates'] = []
+      if (line.operation_rate) rates.push({ category: 'Operation', unit_rate: line.operation_rate })
+      if (line.standby_rate) rates.push({ category: 'Standby', unit_rate: line.standby_rate })
+      if (line.repair_rate) rates.push({ category: 'Others', unit_rate: line.repair_rate })
+      const charges: ServiceLineInput['charges'] = []
+      if (line.operation_days) charges.push({ category: 'Operation', quantity: line.operation_days, quantity_unit: line.quantity_unit })
+      if (line.standby_days) charges.push({ category: 'Standby', quantity: line.standby_days, quantity_unit: line.quantity_unit })
+      if (line.repair_days) charges.push({ category: 'Others', quantity: line.repair_days, quantity_unit: line.quantity_unit })
+      nextServices = [...nextServices, {
+        ...emptyServiceLine(line.charging_basis),
+        service_id: line.service_id,
+        hole_section_id: scope.sectionId,
+        phase_id: scope.phaseId,
+        currency: (line.currency || currency).toUpperCase(),
+        service_amount: line.service_amount || '0',
+        remarks: line.remarks,
+        rates,
+        charges,
+      }]
+      serviceKeys.add(key)
+      added += 1
+    }
+
+    for (const line of template.consumables) {
+      if (!line.is_available) { skipped += 1; continue }
+      const scope = resolveScope(plan, line.section_code, line.phase_code)
+      if (scope.missing || !scope.sectionId) { skipped += 1; continue }
+      if (line.category === 'Drill Bits' && line.drill_bit_id) {
+        const key = `bit:${line.drill_bit_id}|${scope.sectionId}|${scope.phaseId ?? ''}`
+        if (consumableKeys.has(key)) { skipped += 1; continue }
+        nextConsumables = [...nextConsumables, {
+          ...emptyConsumableLine('Drill Bits'),
+          hole_section_id: scope.sectionId,
+          phase_id: scope.phaseId,
+          drill_bit_id: line.drill_bit_id,
+          quantity: line.quantity || '1',
+          currency: (line.currency || currency).toUpperCase(),
+          remarks: line.remarks,
+        }]
+        consumableKeys.add(key)
+        added += 1
+        continue
+      }
+      const key = `budget:${line.category}|${scope.sectionId}|${scope.phaseId ?? ''}`
+      if (consumableKeys.has(key)) { skipped += 1; continue }
+      nextConsumables = [...nextConsumables, {
+        ...emptyConsumableLine(line.category),
+        hole_section_id: scope.sectionId,
+        phase_id: scope.phaseId,
+        quantity: line.quantity || '1',
+        estimated_amount: line.estimated_amount ?? '',
+        currency: (line.currency || currency).toUpperCase(),
+        remarks: line.remarks,
+      }]
+      consumableKeys.add(key)
+      added += 1
+    }
+
+    for (const line of template.tangibles) {
+      if (!line.is_available) { skipped += 1; continue }
+      if (tangibleKeys.has(line.tangible_id)) { skipped += 1; continue }
+      nextTangibles = [...nextTangibles, {
+        ...emptyTangibleLine(),
+        tangible_id: line.tangible_id,
+        quantity: line.quantity || '1',
+        remarks: line.remarks,
+      }]
+      tangibleKeys.add(line.tangible_id)
+      added += 1
+    }
+
+    if (added) setInputs({ ...inputs, services: nextServices, consumables: nextConsumables, tangibles: nextTangibles })
+    setNotice(
+      added
+        ? `${added} line${added === 1 ? '' : 's'} added from “${template.name}”. Prices come from this AFE, not from the template — preview the estimate and confirm every rate and amount, then save.`
+        : `No line was added from “${template.name}”. Check the template scope against this well's plan.`,
+    )
+    if (skipped || preview_summary.warnings.length) {
+      setSaveError({
+        message: `${skipped} template line${skipped === 1 ? '' : 's'} could not be placed. ${notes.slice(0, 3).join('; ')}${notes.length > 3 ? '…' : ''}`.trim(),
+      })
+    }
+    // Counting the use keeps the library honest without changing the template.
+    try { await api(`/record-templates/${template.id}/apply`, { method: 'POST', silent: true }) } catch { /* usage count is not worth failing the page over */ }
+  }
+
   const applyBulkScope = (sectionId: string | null, phaseId: string | null) => {
     if (!bulkScopeTarget || !saved) return
     const target = bulkScopeTarget
@@ -692,6 +824,12 @@ export default function AfeEstimate() {
       subtitle={`${afe.rig_code} · ${afe.well_code} ${afe.well_name} · ${afe.afe_type} AFE · ${afe.configuration_scope} configuration. Sections and phases come from the scoped well plan.`}
       action={<Box display="flex" gap={1} flexWrap="wrap" justifyContent="flex-end">
         <Button variant="outlined" startIcon={<ArrowBackRounded/>} onClick={goBack}>AFE cost estimation</Button>
+        {editable && canReadTemplates && <Tooltip title="Start from a saved template: the standard lines are added, and you change only the values that differ."><span>
+          <Button variant="outlined" startIcon={<PostAddOutlined/>} onClick={() => setTemplatePickerOpen(true)} disabled={saving}>Use a template</Button>
+        </span></Tooltip>}
+        {canPrint && <Tooltip title={dirty ? 'Save the estimate before viewing it.' : estimateReady ? 'Open the complete AFE report on screen' : 'Save an estimate before viewing it.'}><span>
+          <Button variant="outlined" startIcon={<VisibilityOutlined/>} onClick={() => setViewing(true)} disabled={!estimateReady || dirty}>{'View'}</Button>
+        </span></Tooltip>}
         {canPrint && <Tooltip title={dirty ? 'Save the estimate before printing.' : estimateReady ? 'Print the complete AFE' : 'Save an estimate before printing.'}><span>
           <Button variant="outlined" startIcon={<PrintOutlined/>} onClick={() => void print()} disabled={!estimateReady || dirty || printing}>{printing ? 'Preparing...' : 'Print AFE'}</Button>
         </span></Tooltip>}
@@ -992,6 +1130,12 @@ export default function AfeEstimate() {
       onSave={lines => { upsertTangibles(lines); setEditor(null) }}
     />}
     <BulkEstimateDialog open={bulkOpen !== null} initialMode={bulkOpen ?? 'consumable'} scope={saved.well} reference={reference} onClose={() => setBulkOpen(null)} onApply={applyBulk}/>
+    <TemplatePickerDialog
+      open={templatePickerOpen && editable}
+      kind="afe"
+      onClose={() => setTemplatePickerOpen(false)}
+      onApply={(template, preview) => { void applyEstimateTemplate(template, preview) }}
+    />
     <CostingSetPickerDialog
       open={setPickerGroup !== null}
       group={setPickerGroup ?? 'services'}
@@ -1055,8 +1199,23 @@ export default function AfeEstimate() {
     {/* Intercepts navigation, the back button and tab close while the estimate has unsaved edits. */}
     {leaveGuard}
 
-    {/* Print sheet is hidden on screen and printed in full (all sections, all lines). */}
-    {saved.persisted && <AfePrintSheet estimate={saved}/>}
+    {/* Print sheet: hidden on screen and printed in full (all sections, all lines).
+        While the viewer is open the same report is portalled to the body, because
+        printing hides the whole application root. */}
+    {saved.persisted && (viewing
+      ? <PreviewPrintPortal><AfePrintSheet estimate={saved}/></PreviewPrintPortal>
+      : <AfePrintSheet estimate={saved}/>)}
+
+    {saved.persisted && <ReportViewDialog
+      open={viewing}
+      title={`AFE cost estimate · ${afe.afe_code}`}
+      subtitle={`${afe.rig_code} · ${afe.well_code} ${afe.well_name} · ${afe.afe_type} ${afe.configuration_scope} AFE. This is the saved report exactly as it prints — check it here before submitting or printing.`}
+      onClose={() => setViewing(false)}
+      onPrint={() => { setViewing(false); void print() }}
+      printLabel="Print AFE"
+    >
+      <AfePrintSheet estimate={saved} preview/>
+    </ReportViewDialog>}
 
     {sowOpen && <SowAdjustmentDialog
       open={sowOpen}

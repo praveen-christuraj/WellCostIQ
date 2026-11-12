@@ -96,19 +96,23 @@ function reportTitle(report: CostPrintReport) {
  * page per day. In bulk mode every selected report contributes its first page
  * only, so the operator can print or save one combined PDF.
  */
-export function DailyCostPrintSheet({ report, reports, coversOnly = false }: CostPrintReports) {
+export function DailyCostPrintSheet({ report, reports, coversOnly = false, preview = false }: CostPrintReports & {
+  /** Render inline for the on-screen viewer instead of portalling it for print. */
+  preview?: boolean
+}) {
   const queue = reports?.length ? reports : report ? [report] : []
   if (!queue.length) return null
   const bulk = coversOnly || queue.length > 1
-  return createPortal(<article
-    className={`afe-print-sheet daily-cost-print-sheet${bulk ? ' daily-cost-print-sheet--bulk' : ''}`}
-    aria-hidden="true"
+  const sheet = <article
+    className={`afe-print-sheet daily-cost-print-sheet${bulk ? ' daily-cost-print-sheet--bulk' : ''}${preview ? ' afe-print-sheet--preview' : ''}`}
+    aria-hidden={preview ? undefined : 'true'}
   >
     {queue.map((item, index) => <div className="dcr-report-unit" key={`${item.title}-${item.period}-${index}`}>
       <ReportCover report={item}/>
       {!coversOnly && <CumulativeReportDetails report={item}/>}
     </div>)}
-  </article>, document.body)
+  </article>
+  return preview ? sheet : createPortal(sheet, document.body)
 }
 
 type CoverIncident = { label: string; days: number; amount: number; party: string; remarks: string }
@@ -848,6 +852,8 @@ export function useCostPrint() {
   }, [])
   const print = (next: CostPrintReport) => {
     flushSync(() => setQueue({ reports: [next], coversOnly: false }))
+    // The viewer (when open) closes itself before calling print, so the report
+    // mounted here is the only one in the document and prints on its own page.
     window.print()
     // afterprint clears the portal, including in browsers with an asynchronous dialog.
   }

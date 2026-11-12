@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AddRounded, DeleteForeverOutlined, DeleteOutlineRounded, EventNoteOutlined,
-  FactCheckOutlined, FilterAltOffOutlined, FilterListRounded, InsightsOutlined, PlaceOutlined, PlaylistAddCheckRounded,
-  RestoreRounded, RefreshRounded, PrintOutlined, WaterDropOutlined,
+  FactCheckOutlined, FilterAltOffOutlined, FilterListRounded, HistoryOutlined, InfoOutlined, InsightsOutlined,
+  PlaceOutlined, PlaylistAddCheckRounded, RestoreRounded, RefreshRounded, PrintOutlined, WaterDropOutlined,
 } from '@mui/icons-material'
 import {
   Alert, Box, Button, CircularProgress, MenuItem, Paper, Tab, Tabs, TextField, Typography,
@@ -20,18 +20,34 @@ import {
 } from '../lib/activeScope'
 import {
   dailyMoney, DAILY_COST_STATUSES, displayDate, entryQuery, localToday,
-  type DailyCostDay, type DailyCostEntry, type DailyCostReference,
+  type DailyCostDay, type DailyCostEntry, type DailyCostReference, type DailyCostRigLatestReport,
   type DailyCostStatus,
 } from '../lib/dailyCost'
 import { formatDepthMeters } from '../lib/units'
 
-type CostTab = 'register' | 'final_review' | 'completed'
+type CostTab = 'register' | 'history' | 'final_review' | 'completed'
 
-const TABS: { key: CostTab; label: string }[] = [
-  { key: 'register', label: 'Daily cost register' },
-  { key: 'final_review', label: 'Wells for final review' },
-  { key: 'completed', label: 'Completed wells' },
+/**
+ * The register opens on one row per rig: the latest saved daily sheet, which is
+ * the sheet the user continues from. Everything else has moved on:
+ *  - "Other daily cost registers" holds the superseded sheets — earlier days of
+ *    an active rig, and every sheet of a well that has left the active scope.
+ *  - the two review tabs keep the existing well workflow views.
+ */
+const TABS: { key: CostTab; label: string; hint: string }[] = [
+  { key: 'register', label: 'Daily cost register', hint: 'One row per rig: the latest saved daily sheet, ready to continue.' },
+  { key: 'history', label: 'Other daily cost registers', hint: 'Every earlier sheet, including superseded days of an active rig.' },
+  { key: 'final_review', label: 'Wells for final review', hint: 'Wells whose costs are closed for review before completion.' },
+  { key: 'completed', label: 'Completed wells', hint: 'Wells that finished, kept for reference and reporting.' },
 ]
+
+/**
+ * A rig with no new daily sheet for this many days is no longer being costed,
+ * so its latest sheet stops appearing in the register. The same number is the
+ * API default; it is sent explicitly so the page always says which window it
+ * used.
+ */
+const RIG_INACTIVITY_DAYS = 5
 
 type PendingAction = { kind: 'delete' | 'restore' | 'purge'; rows: DailyCostEntry[] }
 
@@ -97,6 +113,8 @@ export default function DailyCostManagement() {
   const [filterStatus, setFilterStatus] = useState<'' | DailyCostStatus>('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  // One row per rig: the latest saved sheet, plus the rigs that went quiet.
+  const [latestRigs, setLatestRigs] = useState<DailyCostRigLatestReport | null>(null)
 
   const filterQuery = entryQuery({
     well_id: filterWell, afe_id: filterAfe, status: filterStatus, from: dateFrom, to: dateTo,
@@ -117,12 +135,18 @@ export default function DailyCostManagement() {
         try { setReference(await api<DailyCostReference>('/daily-cost/reference')) }
         catch { setReference(null) }
       } else {
-        const [entries, ref] = await Promise.all([
+        // Three requests, all independent: the register rows, the reference data
+        // and the one-row-per-rig view the register opens on. They are issued
+        // together so the page never waits for one before asking for the next.
+        const [entries, ref, latest] = await Promise.all([
           api<DailyCostEntry[]>(`/daily-cost/entries${filterQuery}`),
           api<DailyCostReference>('/daily-cost/reference'),
+          api<DailyCostRigLatestReport>(`/daily-cost/entries/latest-per-rig?inactivity_days=${RIG_INACTIVITY_DAYS}`, { silent: true })
+            .catch(() => null),
         ])
         setRows(entries)
         setReference(ref)
+        setLatestRigs(latest)
       }
     } catch (caught) {
       setLoadError(caught instanceof Error ? caught.message : 'Daily Cost Management could not be loaded')
@@ -153,7 +177,46 @@ export default function DailyCostManagement() {
     return 'register'
   }
 
-  const tabRows = useMemo(() => rows.filter(row => deletedView ? true : rowTab(row) === active), [rows, active, deletedView])
+  /**
+   * The one-row-per-rig view. When its request fails the page falls back to the
+   * flat register (every sheet, as before) and says so, rather than showing an
+   * empty register that would look like lost work.
+   */
+  const perRigView = Array.isArray(latestRigs?.rigs)
+  const latestRowIds = useMemo(
+    () => new Set((Array.isArray(latestRigs?.rigs) ? latestRigs.rigs : []).map(item => item.entry?.id).filter(Boolean) as string[]),
+    [latestRigs],
+  )
+
+  /**
+   * Which tab a row belongs to.
+   *
+   * "register" is the working view: exactly one row per rig — the latest saved
+   * sheet — and only while that rig is still being costed. Every other sheet is
+   * history: earlier days of the same rig, the previous row of a rig that has
+   * moved on, and the sheets of wells that left the active scope. The two review
+   * tabs keep their own rules and are unaffected by the per-rig view.
+   */
+  const tabRows = useMemo(() => {
+    if (deletedView) return rows
+    const latest = (row: DailyCostEntry) => latestRowIds.has(row.id)
+    if (active === 'register') return perRigView ? rows.filter(latest) : rows
+    if (active === 'history') return perRigView ? rows.filter(row => !latest(row)) : []
+    return rows.filter(row => rowTab(row) === active)
+  }, [rows, active, deletedView, perRigView, latestRowIds])
+
+  /** How many sheets each tab holds, shown beside its label. */
+  const tabCounts = useMemo<Record<CostTab, number>>(() => {
+    if (deletedView) return { register: rows.length, history: 0, final_review: 0, completed: 0 }
+    const latest = (row: DailyCostEntry) => latestRowIds.has(row.id)
+    const latestCount = perRigView ? rows.filter(latest).length : rows.length
+    return {
+      register: latestCount,
+      history: perRigView ? rows.length - latestCount : 0,
+      final_review: rows.filter(row => rowTab(row) === 'final_review').length,
+      completed: rows.filter(row => rowTab(row) === 'completed').length,
+    }
+  }, [rows, deletedView, perRigView, latestRowIds, wellsById, afesById]) // rowTab reads the reference maps
 
   // Wells whose at least one non-deleted scope is configured can take new daily sheets; the sheet's scope follows its AFE.
   const wells = useMemo(() => reference?.wells.filter(well => {
@@ -443,14 +506,20 @@ export default function DailyCostManagement() {
       </Box>
       <Box sx={{ px: 2, py: .85, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.default', display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Typography fontSize={11} color="text.secondary">
-          New sheets and the detail registers open on {scopeRig?.display_name ?? 'the selected rig'} · {scopeWell ? `${scopeWell.well_code} · ${scopeWell.well_name}` : 'the selected well'}. Change either here or on the register you open.
+          Open on {scopeRig?.display_name ?? 'the selected rig'} · {scopeWell ? `${scopeWell.well_code} · ${scopeWell.well_name}` : 'the selected well'}. New sheets and the detail registers use this scope; change either here or on the register you open.
         </Typography>
       </Box>
     </Paper>}
 
     {!deletedView && <Box borderBottom={1} borderColor="divider" mb={2}>
       <Tabs value={active} onChange={(_event, value: CostTab) => setParams(value === 'register' ? {} : { tab: value })} aria-label="Daily cost tabs">
-        {TABS.map(tab => <Tab key={tab.key} value={tab.key} label={tab.label} id={`daily-cost-tab-${tab.key}`} aria-controls={`daily-cost-panel-${tab.key}`} />)}
+        {TABS.map(tab => <Tab
+          key={tab.key} value={tab.key} id={`daily-cost-tab-${tab.key}`} aria-controls={`daily-cost-panel-${tab.key}`}
+          label={<Box component="span" display="inline-flex" alignItems="center" gap={.75}>
+            {tab.label}
+            <Box component="span" className="tnum" sx={{ fontSize: 10.5, fontWeight: 700, color: 'text.secondary' }}>{tabCounts[tab.key]}</Box>
+          </Box>}
+        />)}
       </Tabs>
     </Box>}
 
@@ -461,6 +530,33 @@ export default function DailyCostManagement() {
     >
       <ErrorMessage message={loadError} />
       {notice && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNotice('')}>{notice}</Alert>}
+
+      {!deletedView && <Alert
+        severity={active === 'register' ? 'info' : 'warning'}
+        icon={active === 'register' ? <InfoOutlined/> : <HistoryOutlined/>}
+        sx={{ mb: 2, py: .25 }}
+      >
+        {active === 'register'
+          ? <>One row per rig — the latest saved daily sheet, which is the sheet you continue from. Older days move to <strong>Other daily cost registers</strong> as soon as a newer sheet is saved. A rig with no sheet for {latestRigs?.inactivity_days ?? RIG_INACTIVITY_DAYS} days is not in progress and leaves this list.</>
+          : active === 'history'
+            ? <>Every sheet that is not a rig&rsquo;s latest: earlier days of an active rig, and every sheet of a well that has left the active scope. Nothing is deleted — open any sheet here to review it, print it, or restore it to the register by creating a newer day.</>
+            : <>{TABS.find(tab => tab.key === active)?.hint} These sheets are read-only here; open one to review or print it.</>}
+      </Alert>}
+
+      {!deletedView && !perRigView && !loading && <Alert severity="warning" sx={{ mb: 2 }} icon={<InfoOutlined/>}>
+        The one-row-per-rig register could not be loaded, so every saved sheet is listed instead. Nothing is missing —
+        use Refresh once the connection settles to return to one row per rig.
+      </Alert>}
+
+      {!deletedView && latestRigs?.inactive_rigs?.length && active === 'register' && <Alert severity="info" sx={{ mb: 2 }} icon={<InfoOutlined/>}>
+        <Typography fontSize={12.5} fontWeight={700} mb={.4}>
+          {latestRigs.inactive_rigs.length} rig{latestRigs.inactive_rigs.length === 1 ? '' : 's'} not in progress (no sheet for {latestRigs.inactivity_days} days)
+        </Typography>
+        <Typography fontSize={12} color="text.secondary">
+          {latestRigs.inactive_rigs.map(item => `${item.rig_code} · last ${displayDate(item.entry.cost_date)} (${item.age_days} days)`).join(' · ')}.
+          {' '}Their latest sheets are in <strong>Other daily cost registers</strong>, and they return to this register as soon as a new day is entered.
+        </Typography>
+      </Alert>}
 
       {!deletedView && <Paper variant="outlined" sx={{ borderRadius: 2.5, mb: 2, overflow: 'hidden' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', px: 2, py: .95, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>

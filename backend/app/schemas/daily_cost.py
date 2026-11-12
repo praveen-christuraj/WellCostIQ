@@ -364,6 +364,8 @@ class DailyCostSectionOption(BaseModel):
 class DailyCostWellOption(BaseModel):
     id: str
     rig_id: str
+    rig_code: str = ""
+    rig_name: str = ""
     well_code: str
     well_name: str
     display_name: str
@@ -778,6 +780,31 @@ class DailyCostEntryOut(BaseModel):
     updated_by: str
     created_at: datetime
     updated_at: datetime
+
+
+class DailyCostRigLatest(BaseModel):
+    """One rig's most recent saved daily sheet.
+
+    The daily cost register shows exactly one row per rig: this one. ``age_days``
+    counts calendar days from the sheet date to the report date (0 = today). A
+    rig whose newest sheet is ``inactivity_days`` or more days old has no costs
+    in progress and is not listed at all.
+    """
+
+    rig_id: str
+    rig_code: str
+    rig_name: str
+    entry: DailyCostEntryOut
+    age_days: int
+
+
+class DailyCostRigLatestOut(BaseModel):
+    as_of_date: date
+    inactivity_days: int
+    rigs: list[DailyCostRigLatest]
+    # Rigs that were dropped because their newest sheet is too old. Named so the
+    # page can explain the absence instead of the row silently disappearing.
+    inactive_rigs: list[DailyCostRigLatest] = Field(default_factory=list)
 
 
 class DailyCostWarnings(BaseModel):

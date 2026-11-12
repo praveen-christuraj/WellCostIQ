@@ -51,6 +51,7 @@ const InvoiceEditor = lazy(() => import('./pages/InvoiceEditor'))
 const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'))
 const InvoiceConfiguration = lazy(() => import('./pages/InvoiceConfiguration'))
 const CostingSets = lazy(() => import('./pages/CostingSets'))
+const Templates = lazy(() => import('./pages/Templates'))
 const Reports = lazy(() => import('./pages/Reports'))
 const ReportBuilder = lazy(() => import('./pages/ReportBuilder'))
 const ReportDesigner = lazy(() => import('./pages/ReportDesigner'))
@@ -135,6 +136,7 @@ export default function App() {
           <Route path="rig-well/sub-activities" element={<Guard permission="rig-well:read"><WellSubActivities/></Guard>}/>
           <Route path="rig-well/deleted" element={<Guard permission="rig-well:read"><RigWellDeleted/></Guard>}/>
           <Route path="costing-sets" element={<Guard permission="costing-sets:read"><CostingSets/></Guard>}/>
+          <Route path="record-templates" element={<Guard permission="template:read"><Templates/></Guard>}/>
           <Route path="afe" element={<Guard permission="afe:read"><AfeOverview/></Guard>}/>
           <Route path="afe/register" element={<Guard permission="afe:read"><AfeManagement/></Guard>}/>
           <Route path="afe/estimate/:afeId" element={<Guard permission="afe:read"><AfeEstimate/></Guard>}/>

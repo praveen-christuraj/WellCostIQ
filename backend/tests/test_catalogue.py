@@ -566,3 +566,158 @@ def test_overview_audit_and_rbac():
         assert client.get("/api/v1/master-data/tangibles", headers=viewer_headers).status_code == 200
         forbidden = client.post("/api/v1/master-data/tangibles", headers=viewer_headers, json=_tangible_payload(category["id"], subcategory["id"], manufacturer["id"], tangible_code="NOPE"))
         assert forbidden.status_code == 403
+
+
+def _tangible_with_rate(client, headers, category, subcategory, manufacturer, **overrides):
+    payload = _tangible_payload(category["id"], subcategory["id"], manufacturer["id"], **overrides)
+    response = client.post("/api/v1/master-data/tangibles", headers=headers, json=payload)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _revision_file(client, headers, path="/api/v1/master-data/tangibles"):
+    """The downloaded template, parsed the way the upload will send it back."""
+    import csv
+    import io
+
+    response = client.get(f"{path}/price-revision-template", headers=headers)
+    assert response.status_code == 200, response.text
+    assert "text/csv" in response.headers["content-type"]
+    text = response.content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    return list(reader.fieldnames or []), [dict(row) for row in reader]
+
+
+def test_price_revision_template_carries_the_current_prices_and_bulk_upload_revises_them():
+    """Bulk price revision: download the price list, edit prices, upload it back."""
+    with TestClient(app) as client:
+        headers = login(client)
+        _seed_masters(client, headers)
+        category, subcategory, manufacturer = _setup_tangible_lists(client, headers)
+        first = _tangible_with_rate(client, headers, category, subcategory, manufacturer)
+        second = _tangible_with_rate(
+            client, headers, category, subcategory, manufacturer,
+            tangible_code="tng-0002", tangible_name="Stop collar 9-5/8in", unit_rate="400",
+        )
+
+        headers_row, rows = _revision_file(client, headers)
+        # The template lists every active item with the price already in it.
+        assert {"tangible_code", "tangible_name", "description", "uom", "unit_rate", "cost_uplift", "currency", "current_revision_number"}.issubset(set(headers_row))
+        assert [row["tangible_code"] for row in rows] == ["TNG-0001", "TNG-0002"]
+        assert rows[0]["unit_rate"] == "1250"
+        assert rows[0]["description"] == "Bow spring"
+        assert rows[0]["cost_uplift"] == "120"
+
+        # Only the rows whose price moved are edited; the rest are uploaded untouched.
+        edited = [dict(row) for row in rows]
+        edited[0]["unit_rate"] = "1400"
+        result = client.post("/api/v1/master-data/tangibles/bulk-revise", headers=headers, json={
+            "rows": edited, "reason": "Annual vendor increase", "effective_date": "2026-02-01",
+        })
+        assert result.status_code == 200, result.text
+        payload = result.json()
+        assert payload["revised_count"] == 1
+        assert payload["unchanged_count"] == 1
+        assert payload["error_count"] == 0
+        assert payload["effective_date"] == "2026-02-01"
+        assert payload["new_rate"] == "1400"
+
+        revised = client.get(f"/api/v1/master-data/tangibles/{first['id']}", headers=headers).json()
+        assert Decimal(revised["unit_rate"]) == Decimal("1400")
+        assert Decimal(revised["final_cost"]) == Decimal("1680")  # 1400 + 120 %
+        assert revised["current_revision_number"] == 2
+        untouched = client.get(f"/api/v1/master-data/tangibles/{second['id']}", headers=headers).json()
+        assert Decimal(untouched["unit_rate"]) == Decimal("400")
+        assert untouched["current_revision_number"] == 1
+
+        history = client.get(f"/api/v1/master-data/tangibles/{first['id']}/revisions", headers=headers).json()
+        assert history[0]["reason"] == "Annual vendor increase"
+        assert history[0]["effective_date"] == "2026-02-01"
+        with SessionLocal() as db:
+            actions = [row.summary for row in db.query(AuditLog).filter(AuditLog.action == "bulk_revise_rate").all()]
+        assert len(actions) == 1 and "Annual vendor increase" in actions[0]
+
+
+def test_bulk_price_revision_is_all_or_nothing_and_rejects_unknown_or_duplicate_codes():
+    with TestClient(app) as client:
+        headers = login(client)
+        _seed_masters(client, headers)
+        category, subcategory, manufacturer = _setup_tangible_lists(client, headers)
+        item = _tangible_with_rate(client, headers, category, subcategory, manufacturer)
+
+        def upload(rows, **extra):
+            return client.post("/api/v1/master-data/tangibles/bulk-revise", headers=headers, json={
+                "rows": rows, "reason": "Corrected vendor list", **extra,
+            })
+
+        unknown = upload([
+            {"tangible_code": "TNG-0001", "unit_rate": "1300"},
+            {"tangible_code": "TNG-9999", "unit_rate": "50"},
+        ])
+        assert unknown.status_code == 422, unknown.text
+        assert "TNG-9999" in unknown.json()["detail"]
+        # Nothing was written, not even the valid row.
+        assert Decimal(client.get(f"/api/v1/master-data/tangibles/{item['id']}", headers=headers).json()["unit_rate"]) == Decimal("1250")
+
+        duplicate = upload([
+            {"tangible_code": "TNG-0001", "unit_rate": "1300"},
+            {"tangible_code": "tng-0001", "unit_rate": "1400"},
+        ])
+        assert duplicate.status_code == 422
+        assert "more than once" in duplicate.json()["detail"]
+
+        # A file with no changed price is a mistake, not a silent success.
+        unchanged = upload([{"tangible_code": "TNG-0001", "unit_rate": "1250"}])
+        assert unchanged.status_code == 422
+        assert "No price changed" in unchanged.json()["detail"]
+
+        assert upload([{"tangible_code": "TNG-0001", "unit_rate": "-5"}]).status_code == 422
+        assert upload([{"tangible_code": "TNG-0001", "unit_rate": "1300"}], effective_date="2099-01-01").status_code == 422
+        assert upload([{"tangible_code": "", "unit_rate": "1300"}]).status_code == 422
+
+
+def test_bulk_price_revision_reports_rows_unchanged_missing_and_deleted_and_renamed_columns():
+    with TestClient(app) as client:
+        headers = login(client)
+        _seed_masters(client, headers)
+        category, subcategory, manufacturer = _setup_tangible_lists(client, headers)
+        kept = _tangible_with_rate(client, headers, category, subcategory, manufacturer)
+        removed = _tangible_with_rate(
+            client, headers, category, subcategory, manufacturer,
+            tangible_code="tng-0002", tangible_name="Stop collar 9-5/8in", unit_rate="400",
+        )
+        assert client.delete(f"/api/v1/master-data/tangibles/{removed['id']}", headers=headers).status_code == 200
+
+        result = client.post("/api/v1/master-data/tangibles/bulk-revise", headers=headers, json={
+            "rows": [
+                {"tangible_code": "TNG-0001", "unit_rate": "1350"},
+                {"tangible_code": "TNG-0002", "unit_rate": "500"},
+            ],
+            "reason": "Mid-year review",
+        })
+        assert result.status_code == 200, result.text
+        payload = result.json()
+        assert payload["revised_count"] == 1
+        assert payload["skipped_count"] == 1
+        assert any("Deleted Entries" in warning for warning in payload["warnings"])
+        assert Decimal(client.get(f"/api/v1/master-data/tangibles/{kept['id']}", headers=headers).json()["unit_rate"]) == Decimal("1350")
+
+        # An operator who renames the identifying column can still upload the file.
+        renamed = client.post("/api/v1/master-data/tangibles/bulk-revise", headers=headers, json={
+            "rows": [{"Item Code": "TNG-0001", "unit_rate": "1500"}],
+            "reason": "Renamed column", "code_header": "Item Code",
+        })
+        assert renamed.status_code == 200, renamed.text
+        assert Decimal(client.get(f"/api/v1/master-data/tangibles/{kept['id']}", headers=headers).json()["unit_rate"]) == Decimal("1500")
+
+        # Another organisation's file cannot touch these records: its own template
+        # is empty and its upload of our code is rejected as unknown, leaving the
+        # price here untouched.
+        other = login(client, "south")
+        assert client.get("/api/v1/master-data/tangibles/price-revision-template", headers=other).status_code == 200
+        assert _revision_file(client, other)[1] == []
+        crossed = client.post("/api/v1/master-data/tangibles/bulk-revise", headers=other, json={
+            "rows": [{"tangible_code": "TNG-0001", "unit_rate": "1600"}], "reason": "Other tenant",
+        })
+        assert crossed.status_code == 422
+        assert Decimal(client.get(f"/api/v1/master-data/tangibles/{kept['id']}", headers=headers).json()["unit_rate"]) == Decimal("1500")

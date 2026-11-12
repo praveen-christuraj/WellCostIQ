@@ -147,6 +147,7 @@ The entries in this inventory were found in **`frontend/src/App.tsx`** on the au
 | `/afe/register` | `AfeManagement` | Registry tabs, status queues, clear review/approval actions |
 | `/afe/estimate/:afeId` | `AfeEstimate` | Structured scope/phase/section estimate editor with services, consumables, tangibles, currency and validation |
 | `/costing-sets` | `CostingSets` | Discoverable reusable templates, preview before applying, safe reuse |
+| `/record-templates` | `Templates` | Template library: AFE estimate, well configuration and daily cost sheet starting points, previewed before applying |
 | `/daily-cost` | `DailyCostManagement` | Daily register; filters and saved-sheet actions, with no misleading workspace-level totals |
 | `/daily-cost/entries/:entryId` | `DailyCostSheet` | High-priority editor: scope, progress, daily/cumulative metrics, cost-group sheets, preview, submit/print |
 | `/daily-cost/analysis` | `DailyCostAnalysis` | Require explicit well selection, clarify raw vs reconciled totals |
@@ -216,6 +217,7 @@ WELLCOSTIQ
 │   ├── Daily Cost Register                  /daily-cost
 │   ├── Well Cost Analysis                   /daily-cost/analysis
 │   ├── Reusable Costing Sets                /costing-sets
+│   ├── Reusable Templates                   /record-templates
 │   ├── Mud Cost Analysis                    /daily-cost/mud-cost-analysis
 │   ├── Fuel Cost Register                   /daily-cost/fuel-cost-register
 │   ├── Lost in Hole                         /daily-cost/lih-register

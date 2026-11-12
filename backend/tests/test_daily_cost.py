@@ -2028,3 +2028,79 @@ def test_cost_report_groups_services_by_the_configured_service_group():
         assert next(
             row for row in locked.json()["budget_lines"] if row["budget_kind"] == "service"
         )["service_group"] == "Formation Evaluation"
+
+
+def test_register_shows_only_the_latest_sheet_per_rig_and_drops_inactive_rigs():
+    """The register is rig-scoped: one row per rig, the sheet the user continues from.
+
+    Worked example from the request (as of 12-Nov-2026): the 10-Nov sheet shows;
+    once 11-Nov is saved, 11-Nov takes the row and 10-Nov becomes history. A rig
+    with no sheet for five days is not in progress and leaves the register, but
+    its sheet stays available (in ``inactive_rigs``) so nothing is lost.
+    """
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup_daily_sheet(client, headers)
+        entry_id = setup["entry"]["id"]
+        assert setup["entry"]["cost_date"] == "2026-10-10"
+
+        def latest(as_of, **extra):
+            query = "&".join(f"{key}={value}" for key, value in extra.items())
+            response = client.get(
+                f"/api/v1/daily-cost/entries/latest-per-rig?as_of={as_of}" + (f"&{query}" if query else ""),
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            return response.json()
+
+        # Only the one saved sheet: it is the rig's latest, so it opens the register.
+        report = latest("2026-10-12")
+        assert report["as_of_date"] == "2026-10-12"
+        assert report["inactivity_days"] == 5
+        assert [row["entry"]["id"] for row in report["rigs"]] == [entry_id]
+        assert report["rigs"][0]["rig_code"] == "RIG-01"
+        assert report["rigs"][0]["age_days"] == 2
+        assert report["inactive_rigs"] == []
+
+        # A newer day takes the row; the earlier day is no longer "the latest".
+        created = _post(client, "/api/v1/daily-cost/entries", headers, {
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"],
+            "cost_date": "2026-10-11", "remarks": "Next day",
+        })
+        newer_id = created["entry"]["id"]
+        report = latest("2026-10-12")
+        assert [row["entry"]["id"] for row in report["rigs"]] == [newer_id]
+        assert report["rigs"][0]["age_days"] == 1
+
+        # The age window is inclusive of its last day and exclusive past it.
+        assert [row["entry"]["id"] for row in latest("2026-10-15")["rigs"]] == [newer_id]
+        aged = latest("2026-10-16")
+        assert aged["rigs"] == []
+        assert [row["entry"]["id"] for row in aged["inactive_rigs"]] == [newer_id]
+        assert aged["inactive_rigs"][0]["age_days"] == 5
+
+        # A tighter window drops the rig sooner; the sheet is reported, not deleted.
+        assert latest("2026-10-13", inactivity_days=1)["inactive_rigs"][0]["entry"]["id"] == newer_id
+        assert client.get(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers).status_code == 200
+
+        # A sheet dated ahead of the report date is still saved work and still shows.
+        ahead = _post(client, "/api/v1/daily-cost/entries", headers, {
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"],
+            "cost_date": "2026-11-02", "remarks": "Entered early",
+        })
+        assert [row["entry"]["id"] for row in latest("2026-10-12")["rigs"]] == [ahead["entry"]["id"]]
+
+        # Deleted sheets never hide a rig that still has live costs.
+        assert client.delete(f"/api/v1/daily-cost/entries/{ahead['entry']['id']}", headers=headers).status_code == 200
+        assert [row["entry"]["id"] for row in latest("2026-10-12")["rigs"]] == [newer_id]
+
+        # Tenant isolation: the second organisation's owner sees none of it.
+        other = client.get(
+            "/api/v1/daily-cost/entries/latest-per-rig", headers=login(client, "south"),
+        )
+        assert other.status_code == 200, other.text
+        assert other.json()["rigs"] == []
+        # The window is validated rather than silently clamped.
+        assert client.get(
+            "/api/v1/daily-cost/entries/latest-per-rig?inactivity_days=0", headers=headers,
+        ).status_code == 422

@@ -1,4 +1,3 @@
-import { createPortal } from 'react-dom'
 import { depthToMeters } from '../../lib/units'
 import { type AfeEstimate, type AfeStatusEvent, type CurrencySetup, type ServiceLineOut } from '../../lib/afe'
 import { groupServiceOptions, sortServicesByGroup } from '../../lib/serviceGroups'
@@ -93,7 +92,14 @@ function costGroupTotal(lines: { amount: string; currency: string; components: {
   return `${total / AMOUNT_SCALE}.${String(total % AMOUNT_SCALE).padStart(10, '0')}`
 }
 
-export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
+/**
+ * The AFE report itself: page one summary and sign-off, page two line detail.
+ *
+ * Rendered through `AfePrintPreview` (View) or straight into the document body
+ * for printing. The component no longer portals internally, so the same markup
+ * serves both the on-screen preview and `window.print()`.
+ */
+export function AfePrintSheet({ estimate, preview = false }: { estimate: AfeEstimate; preview?: boolean }) {
   const { afe, well, services, consumables, tangibles, summary } = estimate
   const titleIdentity = [afe.afe_type, afe.afe_name, afe.rig_name].filter(Boolean).join(' - ')
   // Keep the existing group order and natural service-code order within each block.
@@ -131,7 +137,7 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
       : line.charging_basis === 'Day Rate' ? line.rates.length : 1), 0)
     + printGroups.length * 2 + consumableCategories.length + well.sections.length + 8
 
-  return createPortal(<div className="afe-print-sheet afe-cost-print-sheet" aria-hidden="true">
+  return <div className={`afe-print-sheet afe-cost-print-sheet${preview ? ' afe-print-sheet--preview' : ''}`} aria-hidden={preview ? undefined : 'true'}>
     {/* Page 1 - compact summary: metadata, one categorized cost table, total and well plan. */}
     <div className={`ps-page ps-afe-summary${pageOneDetailRows > 20 ? ' ps-afe-dense' : ''}`}>
       <header className="ps-titlebar">
@@ -411,5 +417,5 @@ export function AfePrintSheet({ estimate }: { estimate: AfeEstimate }) {
         <span>{APP_NAME} · AFE cost estimate · {afe.afe_name}</span>
       </footer>
     </div>
-  </div>, document.body)
+  </div>
 }

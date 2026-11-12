@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AddRounded, DeleteOutlineRounded, EditOutlined, HistoryOutlined, PriceChangeOutlined, UploadFileRounded } from '@mui/icons-material'
+import {
+  AddRounded, DeleteOutlineRounded, EditOutlined, HistoryOutlined, PriceChangeOutlined, UploadFileRounded,
+} from '@mui/icons-material'
 import { Alert, Box, Button, Chip, CircularProgress, Paper, Typography } from '@mui/material'
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../DataTable'
 import { ErrorMessage, FormDialog } from '../Common'
 import { ImportDialog } from '../ImportDialog'
+import { BulkPriceRevisionDialog } from './BulkPriceRevisionDialog'
 import { PricedItemFormDialog } from './PricedItemFormDialog'
 import { ReviseRateDialog } from './ReviseRateDialog'
 import { PriceHistoryDialog } from './PriceHistoryDialog'
@@ -54,6 +57,7 @@ export function CatalogueItemRegister({ config }: { config: TypeConfig }) {
   const [revising, setRevising] = useState(false)
   const [historyRecord, setHistoryRecord] = useState<PricedRecord | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [bulkRevisionOpen, setBulkRevisionOpen] = useState(false)
 
   const [deleteRecord, setDeleteRecord] = useState<PricedRecord | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -215,10 +219,15 @@ export function CatalogueItemRegister({ config }: { config: TypeConfig }) {
       <Box>
         <Typography fontWeight={800} fontSize={16}>{config.label} register</Typography>
         <Typography color="text.secondary" fontSize={12} mt={.35}>
-          {rows.length} active {rows.length === 1 ? config.singular : `${config.singular}s`}. {uplift ? 'Final cost = rate as per PO × uplift ÷ 100.' : 'Rates are unit rates per the unit of measure.'} Rate changes go through Revise rate.
+          {rows.length} active {rows.length === 1 ? config.singular : `${config.singular}s`}. {uplift ? 'Final cost = rate as per PO × uplift ÷ 100.' : 'Rates are unit rates per the unit of measure.'} Rate changes go through Revise rate, or revise many at once with Bulk price revision.
         </Typography>
       </Box>
       <Box display="flex" gap={1} flexWrap="wrap">
+        {can('master-data:update') && <Button
+          variant="outlined" startIcon={<PriceChangeOutlined/>} onClick={() => setBulkRevisionOpen(true)}
+          disabled={!rows.length}
+          title={rows.length ? `Revise many ${config.singular} prices from one file` : `Add a ${config.singular} before revising prices`}
+        >Bulk price revision</Button>}
         {can('master-data:import') && <Button variant="outlined" startIcon={<UploadFileRounded/>} onClick={() => setImportOpen(true)}>Import</Button>}
         {can('master-data:delete') && <Button color="error" variant="outlined" startIcon={<DeleteOutlineRounded/>} disabled={!selected.length} onClick={() => openDelete()}>
           Move {selected.length || ''} to deleted entries
@@ -297,6 +306,13 @@ export function CatalogueItemRegister({ config }: { config: TypeConfig }) {
       </Box>
     </FormDialog>
 
+    <BulkPriceRevisionDialog
+      open={bulkRevisionOpen}
+      onClose={() => setBulkRevisionOpen(false)}
+      config={config}
+      current={rows}
+      onRevised={summary => { setNotice(summary); void load() }}
+    />
     <ImportDialog
       open={importOpen}
       onClose={() => setImportOpen(false)}

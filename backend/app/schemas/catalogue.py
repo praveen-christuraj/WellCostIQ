@@ -147,6 +147,34 @@ class PricedItemOverview(BaseModel):
     recent_revisions: list[RateRevisionOut]
 
 
+class BulkPriceRevisionRequest(BaseModel):
+    """A downloaded price list with the edited rows uploaded back.
+
+    ``code_header`` names the column that identifies the record so an operator
+    may rename columns in the spreadsheet without breaking the upload.
+    """
+
+    rows: list[dict[str, Any]] = Field(min_length=1, max_length=5000)
+    reason: str = Field(default="", max_length=500)
+    effective_date: date | None = None
+    code_header: str = Field(default="", max_length=60)
+
+
+class BulkPriceRevisionResult(BaseModel):
+    revised_count: int
+    unchanged_count: int
+    skipped_count: int = 0
+    error_count: int
+    # Plain text, formatted the way the revision file shows a price (102, not
+    # 102.0000000000), so the summary can be read back to the operator verbatim.
+    original_rate: str | None = None
+    new_rate: str | None = None
+    currency: str = ""
+    effective_date: date | None = None
+    errors: list[str]
+    warnings: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Tangibles
 # ---------------------------------------------------------------------------

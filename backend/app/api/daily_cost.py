@@ -19,6 +19,7 @@ from app.schemas.daily_cost import (
     DailyCostOverview,
     DailyCostPreviewOut,
     DailyCostReference,
+    DailyCostRigLatestOut,
     DailyCostReopenIn,
     DailyCostSaveIn,
     DailyCostStatusIn,
@@ -109,6 +110,27 @@ def well_cost_report(
     """Complete saved sheets for one well; no cross-well or cross-currency totals."""
     return service.well_cost_report(
         db, user.organization_id, well_id, date_from=date_from, date_to=date_to, include_draft=include_draft,
+    )
+
+
+@router.get(
+    "/entries/latest-per-rig", response_model=DailyCostRigLatestOut,
+    dependencies=[Depends(require("daily-cost:read"))],
+)
+def latest_entries_per_rig(
+    db: Db,
+    user: Current,
+    as_of: date | None = Query(default=None),
+    inactivity_days: int = Query(default=5, ge=1, le=60),
+) -> DailyCostRigLatestOut:
+    """Exactly one saved sheet per rig — the latest — and the rigs that have gone quiet.
+
+    The register's opening view is rig-scoped: each rig shows the single sheet
+    the user continues from. ``inactive_rigs`` names the rigs whose newest sheet
+    is too old to still be in progress, so the page can explain their absence.
+    """
+    return service.latest_entry_per_rig(
+        db, user.organization_id, as_of=as_of, inactivity_days=inactivity_days,
     )
 
 
