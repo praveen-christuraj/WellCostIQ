@@ -6,7 +6,7 @@ import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { AfePrintSheet } from '../components/afe/AfePrintSheet'
-import { PreviewPrintPortal, ReportViewDialog } from '../components/ui/ReportViewDialog'
+import { ReportViewDialog } from '../components/ui/ReportViewDialog'
 import { BreakdownDialog } from '../components/afe/BreakdownDialog'
 import { AfeScopeAssignmentDialog, type AfeScopeTarget } from '../components/afe/AfeScopeAssignmentDialog'
 import { BulkEstimateDialog, type BulkResult } from '../components/afe/BulkEstimateDialog'
@@ -1216,11 +1216,10 @@ export default function AfeEstimate() {
     {leaveGuard}
 
     {/* Print sheet: hidden on screen and printed in full (all sections, all lines).
-        While the viewer is open the same report is portalled to the body, because
-        printing hides the whole application root. */}
-    {saved.persisted && (viewing
-      ? <PreviewPrintPortal><AfePrintSheet estimate={saved}/></PreviewPrintPortal>
-      : <AfePrintSheet estimate={saved}/>)}
+        AfePrintSheet portals the printable copy into the document body itself, because
+        printing hides the whole application root — leaving it inline would print a
+        blank page whether or not the viewer is open. */}
+    {saved.persisted && <AfePrintSheet estimate={saved}/>}
 
     {saved.persisted && <ReportViewDialog
       open={viewing}

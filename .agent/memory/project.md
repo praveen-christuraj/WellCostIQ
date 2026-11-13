@@ -1,5 +1,12 @@
 # Durable project memory
 
+## AFE Estimate print returned a blank page (2026-11-13)
+
+- **Symptom.** View worked, but the **Print AFE** button opened the browser dialog on an empty page, both from the AFE cost estimate workspace and from the report viewer's own Print action.
+- **Cause.** `@media print` hides the whole application (`body > #root { display: none !important }` in `styles.css`) and then reveals `.afe-print-sheet`. `AfePrintSheet.tsx` had stopped portalling and merely returned a `<div>`, so the printable copy rendered *inside* `#root` whenever the viewer was closed and was hidden together with the app. Only the viewer path was portalled (through `PreviewPrintPortal`), which is why View looked correct.
+- **Fix.** `AfePrintSheet` now returns `preview ? sheet : createPortal(sheet, document.body)` — the same body-portal pattern as `DailyCostPrintSheet` and `MudCostPrintSheet`. The viewer keeps rendering it inline (`preview`) so the on-screen paper preview is unchanged, and `AfeEstimate.tsx` renders one sheet without the conditional `PreviewPrintPortal` wrapper. Any future print sheet must live in a body portal for the same reason; `make afe-print-check` now asserts the print copy is a direct child of `<body>`, never a descendant of `#root`, and that the preview adds no second document-level copy.
+- **Verification.** `make afe-print-check`, `make daily-cost-check`, `make ui-check` (47), `make well-lifecycle-check` (45), `npx tsc --noEmit` and `npm run build` all pass.
+
 ## Well status and plan status ladders, one-step rollback (2026-11-13)
 
 - **User directive.** Well statuses are **Upcoming → Active → Final review → Completed**; plan statuses are **Draft → Configured → Completed**. Every transition is consistent in every module, can move forward and can be **rolled back one step** to the previous status. Before this, "final review" was a *plan* status while "completed" was a *well* status, so a well in final review still read as Active and each module re-derived its own gate.

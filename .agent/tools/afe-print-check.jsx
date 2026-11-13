@@ -59,6 +59,12 @@ const root = createRoot(document.getElementById('root'))
 await act(async () => root.render(<AfePrintSheet estimate={estimate}/>))
 const sheet = document.querySelector('.afe-cost-print-sheet')
 assert.ok(sheet, 'AFE print sheet has its report-specific class')
+// Print CSS hides `body > #root`, so the printable copy must be a body child;
+// rendering it inline inside the application root printed a blank page.
+assert.ok(document.body.querySelector(':scope > .afe-cost-print-sheet'),
+  'the printable AFE sheet is a direct child of <body>, outside the application root that printing hides')
+assert.equal(document.querySelector('#root .afe-cost-print-sheet'), null,
+  'the printable AFE sheet never renders inside the hidden application root')
 const pages = sheet.querySelectorAll(':scope > .ps-page')
 assert.equal(pages.length, 2, 'report keeps its two explicit page groups')
 assert.ok(pages[0].textContent.includes('Mud logging'), 'service name prints on page one')
@@ -322,7 +328,18 @@ assert.ok(styles.includes('.afe-cost-print-sheet .ps-service-group-heading { fon
 assert.ok(styles.includes('.afe-cost-print-sheet .ps-service-group-total { break-before: avoid; }'),
   'AFE-only group subtotals stay with their preceding service when printing')
 
+// The viewer's preview stays inline on its paper surface; only the print copy is portalled.
+const previewHost = document.createElement('div')
+document.body.appendChild(previewHost)
+const previewRoot = createRoot(previewHost)
+await act(async () => previewRoot.render(<AfePrintSheet estimate={estimate} preview/>))
+assert.ok(previewHost.querySelector(':scope > .afe-cost-print-sheet'), 'the report preview renders inline inside the viewer')
+assert.equal(document.body.querySelectorAll(':scope > .afe-cost-print-sheet').length, 1,
+  'the preview does not add a second document-level print copy')
+await act(async () => previewRoot.unmount())
+previewHost.remove()
+
 await act(async () => root.unmount())
 dom.window.close()
-console.log('AFE print checks passed: full title identity, compact metadata, unified categorized cost table and section plan; service ordering, group totals, saved FX, entered rates and compact layout.')
+console.log('AFE print checks passed: full title identity, compact metadata, unified categorized cost table and section plan; service ordering, group totals, saved FX, entered rates, compact layout and the body-portalled print copy.')
 process.exit(0)
