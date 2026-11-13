@@ -240,6 +240,11 @@ export type DailyCostComparisonLine = {
   sort_order?: number
   /** Cumulative actual under Planned / UPA / NPT; `actual_planned` is the default case. */
   actual_planned?: string; actual_upa?: string; actual_npt?: string
+  /** Scope the allowance was priced on; set for a service priced per section. */
+  hole_section_id?: string | null; section_label?: string
+  phase_id?: string | null; phase_label?: string
+  /** How many same-scope allowances this row clubs into one printed line. */
+  club_count?: number
 }
 /**
  * `actual_to_date` covers all four groups, so `balance` is the AFE total less the

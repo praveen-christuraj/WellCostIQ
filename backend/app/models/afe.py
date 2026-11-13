@@ -4,7 +4,8 @@ An AFE is scoped to one well under one rig. Its cost estimate is stored as
 column-wise line tables (no JSON payload columns):
 
 * ``afe_service_lines`` with rate-card children (``afe_service_rates``,
-  ``afe_service_charges``, ``afe_service_section_rates``);
+  ``afe_service_scope_rates``, ``afe_service_charges``, ``afe_service_scope_days``,
+  ``afe_service_section_rates``);
 * ``afe_consumable_lines`` (drill bits carry a catalogue item; mud chemicals,
   cement additives and fuel are section/phase lump sums);
 * ``afe_tangible_lines`` priced from the tangible catalogue.
@@ -162,10 +163,21 @@ class AfeServiceLine(AfeChildRecord):
     section_rates: Mapped[list["AfeServiceSectionRate"]] = relationship(
         cascade="all, delete-orphan", order_by="AfeServiceSectionRate.sort_order", lazy="selectin", passive_deletes=True
     )
+    scope_rates: Mapped[list["AfeServiceScopeRate"]] = relationship(
+        cascade="all, delete-orphan", order_by="AfeServiceScopeRate.sort_order", lazy="selectin", passive_deletes=True
+    )
+    scope_days: Mapped[list["AfeServiceScopeDays"]] = relationship(
+        cascade="all, delete-orphan", order_by="AfeServiceScopeDays.sort_order", lazy="selectin", passive_deletes=True
+    )
 
 
 class AfeServiceRate(AfeChildRecord):
-    """One unit rate per charge category for a Day Rate service line."""
+    """One unit rate per charge category for a Day Rate service line.
+
+    Rows here are the shared rate for every scope the service covers. A rate
+    that differs for one section or phase is stored in ``afe_service_scope_rates``
+    and overrides this row for that scope alone.
+    """
 
     __tablename__ = "afe_service_rates"
     __table_args__ = (
@@ -175,6 +187,33 @@ class AfeServiceRate(AfeChildRecord):
     )
 
     line_id: Mapped[str] = mapped_column(ForeignKey("afe_service_lines.id", ondelete="CASCADE"), nullable=False, index=True)
+    charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+
+
+class AfeServiceScopeRate(AfeChildRecord):
+    """A Day Rate unit rate for one section (and optional phase) of a service line.
+
+    The service is configured once; each (section, phase) that pays a different
+    rate gets one row here. The engine prices every scope exactly once and adds
+    the scopes to the line's single amount.
+    """
+
+    __tablename__ = "afe_service_scope_rates"
+    __table_args__ = (
+        UniqueConstraint(
+            "line_id", "hole_section_id", "phase_id", "charge_category", name="uq_afe_service_scope_rates_scope"
+        ),
+        CheckConstraint(_in("charge_category", CHARGE_CATEGORIES), name="ck_afe_service_scope_rates_category"),
+        CheckConstraint("unit_rate >= 0", name="ck_afe_service_scope_rates_rate"),
+        Index("ix_afe_service_scope_rates_line", "line_id"),
+    )
+
+    line_id: Mapped[str] = mapped_column(ForeignKey("afe_service_lines.id", ondelete="CASCADE"), nullable=False, index=True)
+    hole_section_id: Mapped[str] = mapped_column(
+        ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True)
     charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
     unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
 
@@ -191,6 +230,32 @@ class AfeServiceCharge(AfeChildRecord):
 
     line_id: Mapped[str] = mapped_column(ForeignKey("afe_service_lines.id", ondelete="CASCADE"), nullable=False, index=True)
     charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    quantity_unit: Mapped[str] = mapped_column(String(10), default="days", server_default="days", nullable=False)
+
+
+class AfeServiceScopeDays(AfeChildRecord):
+    """An explicit day (or hour) quantity for one scope of a Day Rate line.
+
+    When a service runs different days in different sections, each section's
+    days are recorded here instead of the single line-level quantity. Scopes
+    without a row fall back to the well plan's planned days.
+    """
+
+    __tablename__ = "afe_service_scope_days"
+    __table_args__ = (
+        CheckConstraint(_in("charge_category", CHARGE_CATEGORIES), name="ck_afe_service_scope_days_category"),
+        CheckConstraint(_in("quantity_unit", ("days", "hours")), name="ck_afe_service_scope_days_unit"),
+        CheckConstraint("quantity >= 0", name="ck_afe_service_scope_days_qty"),
+        Index("ix_afe_service_scope_days_line", "line_id"),
+    )
+
+    line_id: Mapped[str] = mapped_column(ForeignKey("afe_service_lines.id", ondelete="CASCADE"), nullable=False, index=True)
+    charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
+    hole_section_id: Mapped[str] = mapped_column(
+        ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
     quantity_unit: Mapped[str] = mapped_column(String(10), default="days", server_default="days", nullable=False)
 

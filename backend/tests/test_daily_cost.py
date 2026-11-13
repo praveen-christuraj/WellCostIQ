@@ -2104,3 +2104,138 @@ def test_register_shows_only_the_latest_sheet_per_rig_and_drops_inactive_rigs():
         assert client.get(
             "/api/v1/daily-cost/entries/latest-per-rig?inactivity_days=0", headers=headers,
         ).status_code == 422
+
+
+def _setup_two_section_scoped_service(client, headers):
+    """A well with two sections and one Day Rate service priced per section."""
+
+    setup = _setup_daily_sheet(client, headers, create_entry=False)
+    hole_2 = _post(client, "/api/v1/master-data/hole-sections", headers, {"code": "12-1/4", "name": "Intermediate hole"})
+    reopened = client.post(f"/api/v1/rig-well/wells/{setup['well']['id']}/transition", headers=headers, json={
+        "action": "draft", "remarks": "Add the intermediate section",
+    })
+    assert reopened.status_code == 200, reopened.text
+    config = client.put(f"/api/v1/rig-well/wells/{setup['well']['id']}/configuration", headers=headers, json={
+        "depth_unit": "m",
+        "sections": [
+            {
+                "hole_section_id": setup["hole"]["id"], "from_depth": "0", "to_depth": "1000", "remarks": "",
+                "phases": [{"phase_id": setup["phase"]["id"], "days": "10", "remarks": ""}],
+            },
+            {
+                "hole_section_id": hole_2["id"], "from_depth": "1000", "to_depth": "3000", "remarks": "",
+                "phases": [{"phase_id": setup["phase"]["id"], "days": "20", "remarks": ""}],
+            },
+        ],
+    })
+    assert config.status_code == 200, config.text
+    assert client.post(f"/api/v1/rig-well/wells/{setup['well']['id']}/transition", headers=headers, json={
+        "action": "configure", "remarks": "Plan checked",
+    }).status_code == 200
+    estimate = client.put(f"/api/v1/afe/afes/{setup['afe']['id']}/estimate", headers=headers, json={
+        "services": [{
+            "client_key": "service-scoped", "service_id": setup["service"]["id"], "charging_basis": "Day Rate",
+            "hole_section_id": None, "phase_id": None, "currency": "USD", "service_amount": "0",
+            "remarks": "One service, two section rates", "rates": [], "charges": [], "section_rates": [],
+            "scope_rates": [
+                {"hole_section_id": setup["hole"]["id"], "phase_id": None, "category": "Operation", "unit_rate": "100"},
+                {"hole_section_id": hole_2["id"], "phase_id": None, "category": "Operation", "unit_rate": "200"},
+            ],
+            "scope_days": [],
+        }],
+        "consumables": [{
+            "client_key": "bulk-mud", "category": "Mud Chemicals", "hole_section_id": setup["hole"]["id"],
+            "phase_id": setup["phase"]["id"], "drill_bit_id": None, "quantity": "1", "override_rate": None,
+            "estimated_amount": "5000", "currency": "USD", "remarks": "Bulk chemicals allowance",
+        }],
+        "tangibles": [], "standard_currency": "", "exchange_rates": [],
+    })
+    assert estimate.status_code == 200, estimate.text
+    assert Decimal(estimate.json()["services"][0]["amount"]) == Decimal("5000.00")  # 10x100 + 20x200
+    setup["hole_2"] = hole_2
+    created = _post(client, "/api/v1/daily-cost/entries", headers, {
+        "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": "2026-10-10", "remarks": "",
+    })
+    setup["entry"] = created["entry"]
+    setup["baseline"] = client.get(
+        f"/api/v1/daily-cost/entries/{created['entry']['id']}/baseline", headers=headers
+    ).json()
+    return setup
+
+
+def test_scoped_day_rate_allowances_fan_out_once_per_section_and_club_actuals():
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup_two_section_scoped_service(client, headers)
+        baseline = setup["baseline"]
+        allowances = [row for row in baseline["budget_lines"] if row["cost_group"] == "Services"]
+        assert len(allowances) == 2, "one allowance per priced section, never one combined row"
+        by_section = {row["section_id"]: row for row in allowances}
+        assert Decimal(by_section[setup["hole"]["id"]]["planned_amount"]) == Decimal("1000.00")
+        assert Decimal(by_section[setup["hole_2"]["id"]]["planned_amount"]) == Decimal("4000.00")
+        assert len({row["item_key"] for row in allowances}) == 2
+
+        # One locked rate per section, so the daily sheet prices the right scope.
+        rates = [row for row in baseline["service_rates"] if row["rate_kind"] == "day_rate"]
+        assert {row["hole_section_id"] for row in rates} == {setup["hole"]["id"], setup["hole_2"]["id"]}
+        rate_by_section = {row["hole_section_id"]: row for row in rates}
+        assert Decimal(rate_by_section[setup["hole_2"]["id"]]["unit_rate"]) == Decimal("200")
+
+        entry_id = setup["entry"]["id"]
+
+        def service_line(hole, sub, quantity):
+            return {
+                "activity_id": setup["activity"]["id"], "hole_section_id": hole,
+                "phase_id": setup["phase"]["id"], "sub_activity_id": sub,
+                "vendor_id": setup["vendor"]["id"], "quantity": quantity, "quantity_unit": "days",
+                "currency": "USD", "service_id": setup["service"]["id"],
+                "baseline_service_rate_id": rate_by_section[hole]["id"], "charging_basis": "Day Rate",
+                "charge_category": "Operation",
+            }
+
+        payload = {
+            "remarks": "",
+            "services": [
+                service_line(setup["hole"]["id"], setup["sub1"]["id"], "2"),
+                service_line(setup["hole_2"]["id"], setup["sub2"]["id"], "3"),
+            ],
+            "consumables": [], "tangibles": [],
+        }
+        second = client.put(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers, json=payload)
+        assert second.status_code == 200, second.text
+        services = second.json()["services"]
+        assert len(services) == 2
+        assert {Decimal(row["amount"]) for row in services} == {Decimal("200.00"), Decimal("600.00")}
+        assert len({row["budget_key"] for row in services}) == 2, "each scope clubs under its own allowance"
+
+        # The service prints once per section and phase, with that scope's
+        # actuals clubbed, never once per allowance.
+        comparison = second.json()["comparison"]["budget_lines"]
+        service_rows = [row for row in comparison if row["cost_group"] == "Services"]
+        assert len(service_rows) == 2, "one printed row per priced section"
+        assert {row["hole_section_id"] for row in service_rows} == {setup["hole"]["id"], setup["hole_2"]["id"]}
+        assert all(row["section_label"] for row in service_rows), "each printed row names its section"
+        actual_by_section = {row["hole_section_id"]: Decimal(row["actual_to_date"]) for row in service_rows}
+        assert actual_by_section[setup["hole"]["id"]] == Decimal("200.00")
+        assert actual_by_section[setup["hole_2"]["id"]] == Decimal("600.00")
+        assert Decimal(sum(actual_by_section.values(), Decimal("0"))) == Decimal("800.00")
+        assert len({row["item_code"] for row in service_rows}) == 1
+
+        # A second actual in the same scope is clubbed into the same row.
+        third = client.put(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers, json={
+            "remarks": "",
+            "services": [
+                service_line(setup["hole"]["id"], setup["sub1"]["id"], "2"),
+                service_line(setup["hole_2"]["id"], setup["sub2"]["id"], "3"),
+                service_line(setup["hole_2"]["id"], setup["sub3"]["id"], "1"),
+            ],
+            "consumables": [], "tangibles": [],
+        })
+        assert third.status_code == 200, third.text
+        clubbed = [row for row in third.json()["comparison"]["budget_lines"] if row["cost_group"] == "Services"]
+        assert len(clubbed) == 2
+        club_row = next(row for row in clubbed if row["hole_section_id"] == setup["hole_2"]["id"])
+        assert Decimal(club_row["actual_to_date"]) == Decimal("800.00")  # 3 x 200 + 1 x 200
+        # The scope is already one printed row: it stays one row, not a club of one.
+        assert club_row["club_count"] == 0
+        assert club_row["section_label"].endswith("Intermediate hole")

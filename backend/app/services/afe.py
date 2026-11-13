@@ -43,6 +43,8 @@ from app.models.afe import (
     AfeServiceLine,
     AfeServiceRate,
     AfeExchangeRate,
+    AfeServiceScopeDays,
+    AfeServiceScopeRate,
     AfeServiceSectionRate,
     AfeTangibleLine,
 )
@@ -301,6 +303,8 @@ def _lookups_for_afes(db: Session, organization_id: str, afes: Sequence[Afe]) ->
                 *(line.hole_section_id or "" for line in afe.service_lines),
                 *(line.hole_section_id for line in afe.consumable_lines),
                 *(row.hole_section_id for line in afe.service_lines for row in line.section_rates),
+                *(row.hole_section_id for line in afe.service_lines for row in line.scope_rates),
+                *(row.hole_section_id for line in afe.service_lines for row in line.scope_days),
             )
         ],
         phase_ids=[
@@ -310,6 +314,8 @@ def _lookups_for_afes(db: Session, organization_id: str, afes: Sequence[Afe]) ->
                 *(line.phase_id or "" for line in afe.service_lines),
                 *(line.phase_id or "" for line in afe.consumable_lines),
                 *(row.phase_id or "" for line in afe.service_lines for row in line.section_rates),
+                *(row.phase_id or "" for line in afe.service_lines for row in line.scope_rates),
+                *(row.phase_id or "" for line in afe.service_lines for row in line.scope_days),
             )
         ],
     )
@@ -355,7 +361,13 @@ class RService:
     rates: tuple[tuple[str, Decimal], ...]
     charges: tuple[tuple[str, Decimal, str], ...]
     section_rates: tuple[tuple[str, str | None, Decimal], ...]
-    line: engine.ServiceLine
+    # A Day Rate service is configured once for the whole well; these rows carry
+    # the per-(section, phase) rates and explicit days that differ by scope.
+    scope_rates: tuple[tuple[str, str | None, str, Decimal], ...] = ()
+    scope_days: tuple[tuple[str, str | None, str, Decimal, str], ...] = ()
+    # Every (section, phase) the service is priced on, in well-plan order.
+    scopes: tuple[tuple[str, str | None], ...] = ()
+    line: engine.ServiceLine | None = None
 
 
 @dataclass
@@ -406,6 +418,46 @@ def _service_label(service: Service | None) -> str:
     return _label(service.service_code, service.service_name) if service else "Removed service"
 
 
+def _service_scopes(
+    basis: str,
+    section_id: str | None,
+    phase_id: str | None,
+    scope_rates: Sequence[tuple[str, str | None, str, Decimal]],
+    scope_days: Sequence[tuple[str, str | None, str, Decimal, str]],
+    section_rates: Sequence[tuple[str, str | None, Decimal]],
+) -> tuple[tuple[str, str | None], ...]:
+    """Every (section, phase) a service line is priced on, de-duplicated.
+
+    A Day Rate service configured once for the whole well owns one scope per
+    section (and phase) that carries its own rate or days. Per Section Rate
+    lines own the sections they price; a Per Service Rate line owns its section.
+    The report uses this to list the service once and total it across scopes.
+    """
+
+    scopes: list[tuple[str, str | None]] = []
+
+    def add(value_section: str | None, value_phase: str | None) -> None:
+        if value_section is None:
+            return
+        key = (value_section, value_phase)
+        if key not in scopes:
+            scopes.append(key)
+
+    if basis == engine.BASIS_PER_SECTION:
+        for entry_section, entry_phase, _amount in section_rates:
+            add(entry_section, entry_phase)
+        return tuple(scopes)
+    if basis == engine.BASIS_PER_SERVICE:
+        add(section_id, phase_id)
+        return tuple(scopes)
+    for row_section, row_phase, _category, _rate in scope_rates:
+        add(row_section, row_phase)
+    for row_section, row_phase, _category, _qty, _unit in scope_days:
+        add(row_section, row_phase)
+    add(section_id, phase_id)
+    return tuple(scopes)
+
+
 def _stored_resolved(afe: Afe, lookups: Lookups) -> Resolved:
     resolved = Resolved()
     for row in afe.service_lines:
@@ -416,6 +468,14 @@ def _stored_resolved(afe: Afe, lookups: Lookups) -> Resolved:
         )
         section_rates = tuple(
             (entry.hole_section_id, entry.phase_id, Decimal(entry.amount)) for entry in row.section_rates
+        )
+        scope_rates = tuple(
+            (entry.hole_section_id, entry.phase_id, entry.charge_category, Decimal(entry.unit_rate))
+            for entry in row.scope_rates
+        )
+        scope_days = tuple(
+            (entry.hole_section_id, entry.phase_id, entry.charge_category, Decimal(entry.quantity), entry.quantity_unit)
+            for entry in row.scope_days
         )
         resolved.services.append(
             RService(
@@ -431,6 +491,9 @@ def _stored_resolved(afe: Afe, lookups: Lookups) -> Resolved:
                 rates=rates,
                 charges=charges,
                 section_rates=section_rates,
+                scope_rates=scope_rates,
+                scope_days=scope_days,
+                scopes=_service_scopes(row.charging_basis, row.hole_section_id, row.phase_id, scope_rates, scope_days, section_rates),
                 line=engine.ServiceLine(
                     key=row.id,
                     label=_service_label(service),
@@ -444,6 +507,14 @@ def _stored_resolved(afe: Afe, lookups: Lookups) -> Resolved:
                     section_rates=tuple(
                         engine.SectionRateInput(section_id, phase_id, amount)
                         for section_id, phase_id, amount in section_rates
+                    ),
+                    service_rates=tuple(
+                        engine.ServiceRateInput(category, rate, section_id, phase_id)
+                        for section_id, phase_id, category, rate in scope_rates
+                    ),
+                    scope_days=tuple(
+                        engine.ScopeDaysInput(category, qty, unit, section_id, phase_id)
+                        for section_id, phase_id, category, qty, unit in scope_days
                     ),
                 ),
             )
@@ -529,6 +600,8 @@ def _validate_request(
                 *(line.hole_section_id or "" for line in payload.services),
                 *(line.hole_section_id for line in payload.consumables),
                 *(entry.hole_section_id for line in payload.services for entry in line.section_rates),
+                *(entry.hole_section_id for line in payload.services for entry in line.scope_rates),
+                *(entry.hole_section_id for line in payload.services for entry in line.scope_days),
             )
         ],
         phase_ids=[
@@ -537,6 +610,8 @@ def _validate_request(
                 *(line.phase_id or "" for line in payload.services),
                 *(line.phase_id or "" for line in payload.consumables),
                 *(entry.phase_id or "" for line in payload.services for entry in line.section_rates),
+                *(entry.phase_id or "" for line in payload.services for entry in line.scope_rates),
+                *(entry.phase_id or "" for line in payload.services for entry in line.scope_days),
             )
         ],
     )
@@ -568,6 +643,8 @@ def _validate_request(
             errors.append(f"{where}: enter the currency for this service.")
         if line.phase_id and not line.hole_section_id:
             errors.append(f"{where}: a phase needs a section first.")
+        scope_rates: tuple[tuple[str, str | None, str, Decimal], ...] = ()
+        scope_days: tuple[tuple[str, str | None, str, Decimal, str], ...] = ()
         if basis == engine.BASIS_DAY_RATE:
             if line.hole_section_id or line.phase_id:
                 section_ok(line.hole_section_id, line.phase_id, where)
@@ -587,9 +664,62 @@ def _validate_request(
                     )
                 if charge.quantity_unit == engine.UNIT_HOURS and charge.quantity > engine.HOURS_PER_DAY:
                     errors.append(f"{where}: {charge.category} hours cannot exceed 24 in one entry. Enter days instead.")
+            # Per-scope rates and days: the one-dialog configuration for a service
+            # that costs differently in each section and phase.
+            seen_scope_rates: set[tuple[str, str | None, str]] = set()
+            scope_rates_rows: list[tuple[str, str | None, str, Decimal]] = []
+            for entry in line.scope_rates:
+                key = (entry.hole_section_id, entry.phase_id or None, entry.category)
+                if key in seen_scope_rates:
+                    errors.append(
+                        f"{where}: {entry.category} has more than one rate for the same section and phase."
+                    )
+                    continue
+                seen_scope_rates.add(key)
+                if entry.category in engine.ONE_TIME_CATEGORIES:
+                    errors.append(
+                        f"{where}: {entry.category} is a one-time charge; enter it once for the whole service."
+                    )
+                    continue
+                if section_ok(entry.hole_section_id, entry.phase_id or None, where):
+                    scope_rates_rows.append(
+                        (entry.hole_section_id, entry.phase_id or None, entry.category, Decimal(entry.unit_rate))
+                    )
+            seen_scope_days: set[tuple[str, str | None, str]] = set()
+            scope_days_rows: list[tuple[str, str | None, str, Decimal, str]] = []
+            for entry in line.scope_days:
+                key = (entry.hole_section_id, entry.phase_id or None, entry.category)
+                if key in seen_scope_days:
+                    errors.append(
+                        f"{where}: {entry.category} has more than one day quantity for the same section and phase."
+                    )
+                    continue
+                seen_scope_days.add(key)
+                if entry.category in engine.ONE_TIME_CATEGORIES:
+                    errors.append(
+                        f"{where}: {entry.category} is a one-time charge; enter its rate, not days."
+                    )
+                    continue
+                if entry.quantity_unit == engine.UNIT_HOURS and entry.quantity > engine.HOURS_PER_DAY:
+                    errors.append(
+                        f"{where}: {entry.category} hours cannot exceed 24 in one entry for a section. Enter days instead."
+                    )
+                    continue
+                if section_ok(entry.hole_section_id, entry.phase_id or None, where):
+                    scope_days_rows.append(
+                        (
+                            entry.hole_section_id,
+                            entry.phase_id or None,
+                            entry.category,
+                            Decimal(entry.quantity),
+                            entry.quantity_unit,
+                        )
+                    )
             rates = tuple((rate.category, Decimal(rate.unit_rate)) for rate in line.rates)
             charges = tuple((charge.category, Decimal(charge.quantity), charge.quantity_unit) for charge in line.charges)
             section_rates: tuple[tuple[str, str | None, Decimal], ...] = ()
+            scope_rates = tuple(scope_rates_rows)
+            scope_days = tuple(scope_days_rows)
             scope_section_id, scope_phase_id = line.hole_section_id, line.phase_id
             service_amount = Decimal("0")
         elif basis == engine.BASIS_PER_SERVICE:
@@ -599,7 +729,7 @@ def _validate_request(
                 section_ok(line.hole_section_id, line.phase_id, where)
             if line.service_amount <= 0:
                 errors.append(f"{where}: enter the per-service price.")
-            if line.rates or line.charges or line.section_rates:
+            if line.rates or line.charges or line.section_rates or line.scope_rates or line.scope_days:
                 errors.append(f"{where}: rate cards apply to Day Rate services only.")
             rates, charges, section_rates = (), (), ()
             scope_section_id, scope_phase_id = line.hole_section_id, line.phase_id
@@ -609,7 +739,7 @@ def _validate_request(
                 errors.append(f"{where}: add at least one section rate.")
             if line.hole_section_id or line.phase_id:
                 errors.append(f"{where}: a Per Section Rate is entered per section below, not on the service line.")
-            if line.rates or line.charges or line.service_amount:
+            if line.rates or line.charges or line.service_amount or line.scope_rates or line.scope_days:
                 errors.append(f"{where}: rate cards and per-service prices do not apply to Per Section Rate services.")
             seen_scopes: set[tuple[str, str | None]] = set()
             entries: list[tuple[str, str | None, Decimal]] = []
@@ -639,6 +769,9 @@ def _validate_request(
                 rates=rates,
                 charges=charges,
                 section_rates=section_rates,
+                scope_rates=scope_rates,
+                scope_days=scope_days,
+                scopes=_service_scopes(basis, scope_section_id, scope_phase_id, scope_rates, scope_days, section_rates),
                 line=engine.ServiceLine(
                     key=line.client_key or "",
                     label=_label(service.service_code, service.service_name),
@@ -652,6 +785,14 @@ def _validate_request(
                     section_rates=tuple(
                         engine.SectionRateInput(section_id, phase_id, amount)
                         for section_id, phase_id, amount in section_rates
+                    ),
+                    service_rates=tuple(
+                        engine.ServiceRateInput(category, rate, section_id, phase_id)
+                        for section_id, phase_id, category, rate in scope_rates
+                    ),
+                    scope_days=tuple(
+                        engine.ScopeDaysInput(category, qty, unit, section_id, phase_id)
+                        for section_id, phase_id, category, qty, unit in scope_days
                     ),
                 ),
             )
@@ -829,6 +970,43 @@ def _service_out(
                 "amount": amount,
             }
             for section_id, phase_id, amount in row.section_rates
+        ],
+        scope_rates=[
+            {
+                "hole_section_id": section_id,
+                "section_label": _section_label(scope, lookups, section_id),
+                "phase_id": phase_id,
+                "phase_label": _phase_label(scope, lookups, section_id, phase_id),
+                "category": category,
+                "unit_rate": rate,
+            }
+            for section_id, phase_id, category, rate in sorted(
+                row.scope_rates, key=lambda item: _CATEGORY_ORDER.get(item[2], 99)
+            )
+        ],
+        scope_days=[
+            {
+                "hole_section_id": section_id,
+                "section_label": _section_label(scope, lookups, section_id),
+                "phase_id": phase_id,
+                "phase_label": _phase_label(scope, lookups, section_id, phase_id),
+                "category": category,
+                "quantity": quantity,
+                "quantity_unit": unit,
+            }
+            for section_id, phase_id, category, quantity, unit in sorted(
+                row.scope_days, key=lambda item: _CATEGORY_ORDER.get(item[2], 99)
+            )
+        ],
+        scopes=[
+            {
+                "hole_section_id": section_id,
+                "section_label": _section_label(scope, lookups, section_id),
+                "phase_id": phase_id,
+                "phase_label": _phase_label(scope, lookups, section_id, phase_id),
+                "amount": Decimal("0"),
+            }
+            for section_id, phase_id in row.scopes
         ],
         amount=result.amount,
         warnings=list(result.warnings),
@@ -1660,6 +1838,29 @@ def _service_rows(afe: Afe, resolved: Resolved) -> list[AfeServiceLine]:
                 sort_order=i,
             )
             for i, (section_id, phase_id, amount) in enumerate(row.section_rates)
+        ]
+        line.scope_rates = [
+            AfeServiceScopeRate(
+                organization_id=afe.organization_id,
+                hole_section_id=section_id,
+                phase_id=phase_id,
+                charge_category=category,
+                unit_rate=rate,
+                sort_order=i,
+            )
+            for i, (section_id, phase_id, category, rate) in enumerate(row.scope_rates)
+        ]
+        line.scope_days = [
+            AfeServiceScopeDays(
+                organization_id=afe.organization_id,
+                hole_section_id=section_id,
+                phase_id=phase_id,
+                charge_category=category,
+                quantity=quantity,
+                quantity_unit=unit,
+                sort_order=i,
+            )
+            for i, (section_id, phase_id, category, quantity, unit) in enumerate(row.scope_days)
         ]
         rows.append(line)
     return rows

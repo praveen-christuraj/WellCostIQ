@@ -1,4 +1,4 @@
-.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check
+.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check afe-scope-dialog-check afe-print-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -107,3 +107,21 @@ catalogue-check:
 		--bundle --platform=node --format=esm --jsx=automatic \
 		--outfile=node_modules/.cache/catalogue-check.mjs --loader:.jsx=jsx --log-level=error \
 		--external:jsdom && node node_modules/.cache/catalogue-check.mjs
+
+# AFE one-dialog scope configuration: a Day Rate service priced per section and
+# phase in a single dialog, with its amount as the sum of those sections.
+afe-scope-dialog-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/afe-scope-dialog-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic \
+		--outfile=node_modules/.cache/afe-scope-dialog-check.mjs --loader:.jsx=jsx --log-level=error \
+		--external:jsdom && node node_modules/.cache/afe-scope-dialog-check.mjs
+
+# AFE print: two A4 pages, one grand total, one row per service even when the
+# service is priced on several sections.
+afe-print-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/afe-print-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic \
+		--outfile=node_modules/.cache/afe-print-check.mjs --loader:.jsx=jsx --log-level=error \
+		--external:jsdom && node node_modules/.cache/afe-print-check.mjs

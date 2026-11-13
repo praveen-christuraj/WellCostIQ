@@ -25,6 +25,8 @@ redesigned for this app's structure and models; the reference tab layout is not 
 | `afe_service_rates` | Unit rate per charge category for Day Rate lines. |
 | `afe_service_charges` | Explicit day quantities (days or hours) per day-based category. |
 | `afe_service_section_rates` | Amount per (section, phase) for Per Section Rate lines. |
+| `afe_service_scope_rates` | Day Rate unit rate per (section, optional phase, charge category): one service configured for the whole well. |
+| `afe_service_scope_days` | Explicit days (or hours) for one (section, phase, category), overriding that scope's planned days. |
 | `afe_consumable_lines` | Lump sum (Mud Chemicals, Cement Additives, Fuel) or drill bit line (bit, quantity, override). |
 | `afe_tangible_lines` | Tangible line: item, quantity, override rate. |
 | `afe_exchange_rates` | Conversion rate per foreign currency: units of the standard currency per one unit. Only for mixed-currency estimates. |
@@ -44,6 +46,13 @@ lock, so a double click cannot duplicate lines.
   Operation uses the planned days of the scope unless explicit Operation days are entered.
   A well-wide line (no section) is split across sections by each section's planned days, and each
   share is shown under its section. This fixes the reference bug that showed daily cost well-wide.
+- **One service, many section rates.** A Day Rate line may carry `scope_rates` (a rate per section,
+  optionally per phase, per charge category) and `scope_days` (that scope's own days). Every category
+  is priced **once per scope**, so the service amount is the sum of its section amounts and no section
+  is counted twice. A rate entered without a section is shared by every scope of the line; a scoped
+  rate overrides it for that scope alone. One-time categories are charged once per scope rate row, or
+  once for the well-level line. The editor keeps all of this inside one dialog
+  (`ServiceLineDialog`), and the estimate list shows the scope and rate counts on the single row.
 - **Per Section Rate**: one amount per (section, optional phase).
 - **Per Service Rate**: one lump sum for the chosen section and phase.
 - **Consumables**: lump sums cost the entered amount. Drill bits cost quantity × effective rate, and
@@ -94,7 +103,9 @@ app itself hidden while printing.
    its entered-currency rate detail (unit rate × charged quantity, fixed amount, or **each** section
    and phase with its entered section rate), amount in the entered currency and **remarks**.
    Scoped day-rate and per-service lines include their section / phase in the Basis cell;
-   there are no separate Scope or Currency columns. The services subtotal uses the standard currency.
+   there are no separate Scope or Currency columns. A Day Rate service configured across the whole
+   well still prints **once**, its single amount being the sum of its sections, with one rate detail
+   line per section and phase underneath. The services subtotal uses the standard currency.
    The same table then shows Consumables as four categorized lump sums (**Mud Chemicals, Cement
    Additives, Fuel and Drill Bits**) plus a Consumables total, followed by the Tangibles lump sum and
    total. The **total AFE amount** closes the table.

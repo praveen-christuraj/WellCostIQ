@@ -971,3 +971,236 @@ def test_completion_only_well_supports_scoped_afe_creation_and_import():
         created = client.post("/api/v1/afe/afes", headers=headers, json=afe_body)
         assert created.status_code == 200, created.text
         assert client.post("/api/v1/afe/afes", headers=headers, json={**afe_body, "afe_code": "NO-DRILL", "configuration_scope": "drilling"}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# One Day Rate service across every section and phase
+# ---------------------------------------------------------------------------
+
+
+def _three_section_scope():
+    return engine_rules.WellScope(
+        sections=(
+            engine_rules.SectionScope("s1", "17-1/2", (engine_rules.PhaseScope("p1", "Drilling", Decimal("10")),)),
+            engine_rules.SectionScope("s2", "12-1/4", (engine_rules.PhaseScope("p1", "Drilling", Decimal("30")),)),
+            engine_rules.SectionScope("s3", "8-1/2", (engine_rules.PhaseScope("p1", "Drilling", Decimal("20")),)),
+        )
+    )
+
+
+def test_engine_day_rate_scope_rates_prices_each_section_once_and_adds_them():
+    line = engine_rules.ServiceLine(
+        key="k", label="Mud logging", charging_basis=engine_rules.BASIS_DAY_RATE, currency="USD",
+        service_rates=(
+            engine_rules.ServiceRateInput("Operation", Decimal("1000"), "s1", None),
+            engine_rules.ServiceRateInput("Operation", Decimal("1100"), "s2", None),
+            engine_rules.ServiceRateInput("Operation", Decimal("1200"), "s3", None),
+            engine_rules.ServiceRateInput("Mobilization", Decimal("5000")),
+        ),
+    )
+    result = engine_rules.compile_estimate(_three_section_scope(), services=[line])
+    # 10x1000 + 30x1100 + 20x1200 = 67,000 plus the one-time 5,000.
+    assert result.services_total == Decimal("72000.00")
+    by_section = {row.section_id: row.services for row in result.by_section}
+    assert by_section["s1"] == Decimal("10000.00")
+    assert by_section["s2"] == Decimal("33000.00")
+    assert by_section["s3"] == Decimal("24000.00")
+    components = result.services[0].components
+    operation = [row for row in components if row.category == "Operation"]
+    assert len(operation) == 3, "each section is priced exactly once"
+    assert {row.section_id for row in operation} == {"s1", "s2", "s3"}
+
+
+def test_engine_shared_rate_covers_every_remaining_scope_and_scope_days_override_planned_days():
+    line = engine_rules.ServiceLine(
+        key="k", label="Mud logging", charging_basis=engine_rules.BASIS_DAY_RATE, currency="USD",
+        service_rates=(
+            engine_rules.ServiceRateInput("Operation", Decimal("100"), "s1", None),
+            engine_rules.ServiceRateInput("Operation", Decimal("200"), "s2", None),
+            engine_rules.ServiceRateInput("Operation", Decimal("300"), "s3", None),
+            engine_rules.ServiceRateInput("Standby", Decimal("50")),
+        ),
+        scope_days=(
+            engine_rules.ScopeDaysInput("Operation", Decimal("48"), "hours", "s2", None),
+        ),
+    )
+    result = engine_rules.compile_estimate(_three_section_scope(), services=[line])
+    # Operation: 10x100 + 2x200 + 20x300 = 7,400. Standby: 60 planned days x 50 = 3,000.
+    assert result.services_total == Decimal("10400.00")
+    components = result.services[0].components
+    scoped = {(row.category, row.section_id): row for row in components}
+    assert scoped[("Operation", "s2")].quantity == Decimal("2")
+    assert scoped[("Standby", "s1")].amount == Decimal("500.00")
+    assert scoped[("Standby", "s3")].amount == Decimal("1000.00")
+
+
+def test_engine_section_rate_covers_only_the_phases_without_their_own_rate():
+    """A section rate plus a phase rate must never price the same days twice."""
+
+    scope = engine_rules.WellScope(sections=(
+        engine_rules.SectionScope("s1", "17-1/2", (
+            engine_rules.PhaseScope("p1", "Drilling", Decimal("10")),
+            engine_rules.PhaseScope("p2", "Cementing", Decimal("4")),
+        )),
+        engine_rules.SectionScope("s2", "12-1/4", (engine_rules.PhaseScope("p1", "Drilling", Decimal("20")),)),
+    ))
+    line = engine_rules.ServiceLine(
+        key="k", label="Cement", charging_basis=engine_rules.BASIS_DAY_RATE, currency="USD",
+        service_rates=(
+            engine_rules.ServiceRateInput("Operation", Decimal("100"), "s1"),
+            engine_rules.ServiceRateInput("Operation", Decimal("300"), "s1", "p2"),
+            engine_rules.ServiceRateInput("Operation", Decimal("200"), "s2"),
+        ),
+    )
+    result = engine_rules.compile_estimate(scope, services=[line])
+    # The section rate covers the un-rated p1 phase only: 10x100 + 4x300 + 20x200.
+    assert result.services_total == Decimal("6200.00")
+    components = {(row.section_id, row.phase_id): row for row in result.services[0].components}
+    assert components[("s1", None)].quantity == Decimal("10")
+    assert components[("s1", "p2")].quantity == Decimal("4")
+    assert result.services[0].warnings == ()
+
+
+def test_engine_scope_rate_for_one_phase_leaves_the_other_phase_unpriced():
+    line = engine_rules.ServiceLine(
+        key="k", label="Cementing", charging_basis=engine_rules.BASIS_DAY_RATE, currency="USD",
+        service_rates=(engine_rules.ServiceRateInput("Operation", Decimal("100"), "s2", "p1"),),
+    )
+    result = engine_rules.compile_estimate(_three_section_scope(), services=[line])
+    assert result.services_total == Decimal("3000.00")
+    component = result.services[0].components[0]
+    assert (component.section_id, component.phase_id) == ("s2", "p1")
+
+
+def _configure_three_section_well(client, headers, master):
+    """Save and configure a third section, so one service can price three rates."""
+
+    hole_3 = client.post(
+        "/api/v1/master-data/hole-sections", headers=headers, json={"code": "8-1/2", "name": "Reservoir hole"}
+    )
+    assert hole_3.status_code == 201, hole_3.text
+    hole_3 = hole_3.json()
+
+    def section(hole, start, end, days):
+        return {
+            "hole_section_id": hole, "from_depth": start, "to_depth": end, "remarks": "",
+            "phases": [{"phase_id": master["phase"], "days": days, "remarks": ""}],
+        }
+
+    payload = {
+        "depth_unit": "m",
+        "sections": [
+            section(master["hole_1"], "0", "100", "10"),
+            section(master["hole_2"], "100", "500", "30"),
+            section(hole_3["id"], "500", "900", "20"),
+        ],
+    }
+    return hole_3["id"], payload
+
+
+def test_one_day_rate_service_saves_three_section_rates_and_totals_once_per_scope():
+    with TestClient(app) as client:
+        headers = login(client)
+        master, rig, well, afe = _setup(client, headers)
+        hole_3, payload = _configure_three_section_well(client, headers, master)
+        # A configured plan is read-only: reopen it as Draft before adding a section.
+        assert client.post(
+            f"/api/v1/rig-well/wells/{well['id']}/transition", headers=headers, json={"action": "draft", "remarks": "Add third section"}
+        ).status_code == 200
+        saved_plan = client.put(f"/api/v1/rig-well/wells/{well['id']}/configuration", headers=headers, json=payload)
+        assert saved_plan.status_code == 200, saved_plan.text
+        assert client.post(
+            f"/api/v1/rig-well/wells/{well['id']}/transition", headers=headers, json={"action": "configure", "remarks": "Third section"}
+        ).status_code == 200
+
+        url = f"/api/v1/afe/afes/{afe['id']}/estimate"
+        estimate = _estimate_payload(master, consumables=[], tangibles=[], services=[
+            {
+                "client_key": "one-service", "service_id": master["service"], "charging_basis": "Day Rate",
+                "hole_section_id": None, "phase_id": None, "currency": "USD", "service_amount": "0",
+                "remarks": "Three section rates in one service",
+                "rates": [], "charges": [], "section_rates": [],
+                "scope_rates": [
+                    {"hole_section_id": master["hole_1"], "phase_id": None, "category": "Operation", "unit_rate": "1000"},
+                    {"hole_section_id": master["hole_2"], "phase_id": master["phase"], "category": "Operation", "unit_rate": "1100"},
+                    {"hole_section_id": hole_3, "phase_id": None, "category": "Operation", "unit_rate": "1200"},
+                    {"hole_section_id": hole_3, "phase_id": None, "category": "Standby", "unit_rate": "250"},
+                ],
+                "scope_days": [
+                    {"hole_section_id": master["hole_1"], "phase_id": None, "category": "Operation", "quantity": "10", "quantity_unit": "days"},
+                ],
+            }
+        ])
+        response = client.put(url, headers=headers, json=estimate)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        line = body["services"][0]
+        # 10x1000 + 30x1100 + 20x1200 = 67,000; Standby 20 planned days x 250 = 5,000.
+        assert Decimal(line["amount"]) == Decimal("72000.00")
+        assert Decimal(body["summary"]["services_total"]) == Decimal("72000.00")
+        assert len(body["services"]) == 1
+        saved_scopes = {(row["hole_section_id"], row["category"]): Decimal(row["unit_rate"]) for row in line["scope_rates"]}
+        assert saved_scopes[(master["hole_1"], "Operation")] == Decimal("1000")
+        assert saved_scopes[(hole_3, "Standby")] == Decimal("250")
+        assert {row["hole_section_id"] for row in line["scopes"]} == {master["hole_1"], master["hole_2"], hole_3}
+        by_section = {row["label"]: Decimal(row["services"]) for row in body["summary"]["by_section"]}
+        assert by_section["17-1/2 — Surface hole"] == Decimal("10000.00")
+        assert by_section["12-1/4 — Intermediate hole"] == Decimal("33000.00")
+        assert by_section["8-1/2 — Reservoir hole"] == Decimal("29000.00")
+
+        # Reading the saved estimate returns the same single line and the same total.
+        reloaded = client.get(url, headers=headers).json()
+        assert len(reloaded["services"]) == 1
+        assert Decimal(reloaded["services"][0]["amount"]) == Decimal("72000.00")
+        assert Decimal(reloaded["summary"]["total"]) == Decimal("72000.00")
+
+
+def test_day_rate_scope_rows_reject_duplicates_unknown_sections_and_one_time_days():
+    with TestClient(app) as client:
+        headers = login(client)
+        master, _, well, afe = _setup(client, headers)
+        url = f"/api/v1/afe/afes/{afe['id']}/estimate"
+        base = {
+            "client_key": "one-service", "service_id": master["service"], "charging_basis": "Day Rate",
+            "hole_section_id": None, "phase_id": None, "currency": "USD", "service_amount": "0", "remarks": "",
+            "rates": [], "charges": [], "section_rates": [],
+        }
+        duplicate = client.post(f"{url}/preview", headers=headers, json=_estimate_payload(master, consumables=[], tangibles=[], services=[
+            {
+                **base,
+                "scope_rates": [
+                    {"hole_section_id": master["hole_1"], "phase_id": None, "category": "Operation", "unit_rate": "10"},
+                    {"hole_section_id": master["hole_1"], "phase_id": None, "category": "Operation", "unit_rate": "20"},
+                ],
+                "scope_days": [],
+            }
+        ]))
+        assert duplicate.status_code in (409, 422)
+        assert any("more than one rate" in text for text in _detail_list(duplicate))
+
+        outside = client.post(f"{url}/preview", headers=headers, json=_estimate_payload(master, consumables=[], tangibles=[], services=[
+            {
+                **base,
+                "scope_rates": [{"hole_section_id": "not-in-config", "phase_id": None, "category": "Operation", "unit_rate": "10"}],
+                "scope_days": [],
+            }
+        ]))
+        assert outside.status_code in (409, 422)
+        assert any("not in this well's configuration" in text for text in _detail_list(outside))
+
+        one_time_days = client.post(f"{url}/preview", headers=headers, json=_estimate_payload(master, consumables=[], tangibles=[], services=[
+            {
+                **base,
+                "scope_rates": [{"hole_section_id": master["hole_1"], "phase_id": None, "category": "Operation", "unit_rate": "10"}],
+                "scope_days": [
+                    {"hole_section_id": master["hole_1"], "phase_id": None, "category": "Mobilization", "quantity": "2", "quantity_unit": "days"},
+                ],
+            }
+        ]))
+        assert one_time_days.status_code in (409, 422)
+        assert any("one-time charge" in text for text in _detail_list(one_time_days))
+
+
+def _detail_list(response) -> list[str]:
+    detail = response.json().get("detail", [])
+    return detail if isinstance(detail, list) else [str(detail)]

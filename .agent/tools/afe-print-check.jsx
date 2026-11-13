@@ -163,6 +163,34 @@ assert.ok(serviceRows[1].cells[2].textContent.includes('Surface · Drilling'), '
 assert.ok(serviceRows[2].cells[2].textContent.includes('Fixed $100'), 'fixed rates retain their currency')
 assert.equal(servicesTable.querySelector('.ps-services-total').cells[0].colSpan, 3, 'services total spans the remaining label columns')
 
+// A Day Rate service configured once for the whole well prints once, with one
+// detail row per section and phase; its amount already sums every section.
+const scopedEstimate = structuredClone(estimate)
+scopedEstimate.services = [{
+  ...estimate.services[0], id: 'scoped-day-rate', client_key: 'scoped-day-rate', charging_basis: 'Day Rate',
+  hole_section_id: null, section_label: '', phase_id: null, phase_label: '', currency: 'USD', service_amount: '0',
+  amount: '72000', rates: [], charges: [], section_rates: [],
+  scope_rates: [
+    { hole_section_id: 'section1', section_label: 'SEC-1 · Surface', phase_id: null, phase_label: '', category: 'Operation', unit_rate: '1000' },
+    { hole_section_id: 'section2', section_label: 'SEC-2 · Intermediate', phase_id: 'phase1', phase_label: 'DRILL · Drilling', category: 'Operation', unit_rate: '1100' },
+  ],
+  scope_days: [
+    { hole_section_id: 'section2', section_label: 'SEC-2 · Intermediate', phase_id: 'phase1', phase_label: 'DRILL · Drilling', category: 'Operation', quantity: '48', quantity_unit: 'hours' },
+  ],
+}]
+scopedEstimate.summary.services_total = '72000'
+scopedEstimate.summary.total = '72050'
+await act(async () => root.render(<AfePrintSheet estimate={scopedEstimate}/>))
+const scopedRowsAfter = document.querySelectorAll('.ps-afe-summary .ps-service-group-block tr.ps-line')
+assert.equal(scopedRowsAfter.length, 1, 'a service priced on several sections still prints as one service row')
+assert.equal(scopedRowsAfter[0].cells[3].textContent, '$72,000', 'the single row carries the sum of every section amount')
+assert.ok(scopedRowsAfter[0].cells[2].textContent.includes('Surface: Operation $1,000'), 'the first section keeps its own rate')
+assert.ok(scopedRowsAfter[0].cells[2].textContent.includes('Intermediate · Drilling: Operation $1,100'),
+  'the phase-scoped rate prints under its section')
+assert.ok(scopedRowsAfter[0].cells[2].textContent.includes('× 48 hours'), 'the entered scope days print with the rate')
+assert.equal(new Set([...scopedRowsAfter].map(row => row.cells[1].querySelector('strong').textContent)).size, 1,
+  'the service is never duplicated per section')
+
 const allGroupsEstimate = structuredClone(estimate)
 allGroupsEstimate.services = [
   ['Well Services', 'WELL-1', '30'],
