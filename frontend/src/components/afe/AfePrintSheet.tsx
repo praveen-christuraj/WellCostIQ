@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { depthToMeters } from '../../lib/units'
 import { type AfeEstimate, type AfeStatusEvent, type CurrencySetup, type ServiceLineOut } from '../../lib/afe'
 import { groupServiceOptions, sortServicesByGroup } from '../../lib/serviceGroups'
@@ -120,9 +121,12 @@ function costGroupTotal(lines: { amount: string; currency: string; components: {
 /**
  * The AFE report itself: page one summary and sign-off, page two line detail.
  *
- * Rendered through `AfePrintPreview` (View) or straight into the document body
- * for printing. The component no longer portals internally, so the same markup
- * serves both the on-screen preview and `window.print()`.
+ * The same markup serves the on-screen preview (View) and `window.print()`:
+ * `preview` renders it inline inside the viewer, while the printable copy is
+ * portalled into the document body. That portal is required — the print
+ * stylesheet hides `body > #root` (`styles.css`), so a sheet rendered inside the
+ * application root would print as a blank page. Daily Cost and Mud Cost print
+ * sheets follow the same body-portal pattern.
  */
 export function AfePrintSheet({ estimate, preview = false }: { estimate: AfeEstimate; preview?: boolean }) {
   const { afe, well, services, consumables, tangibles, summary } = estimate
@@ -164,7 +168,7 @@ export function AfePrintSheet({ estimate, preview = false }: { estimate: AfeEsti
         : 1), 0)
     + printGroups.length * 2 + consumableCategories.length + well.sections.length + 8
 
-  return <div className={`afe-print-sheet afe-cost-print-sheet${preview ? ' afe-print-sheet--preview' : ''}`} aria-hidden={preview ? undefined : 'true'}>
+  const sheet = <div className={`afe-print-sheet afe-cost-print-sheet${preview ? ' afe-print-sheet--preview' : ''}`} aria-hidden={preview ? undefined : 'true'}>
     {/* Page 1 - compact summary: metadata, one categorized cost table, total and well plan. */}
     <div className={`ps-page ps-afe-summary${pageOneDetailRows > 20 ? ' ps-afe-dense' : ''}`}>
       <header className="ps-titlebar">
@@ -445,4 +449,8 @@ export function AfePrintSheet({ estimate, preview = false }: { estimate: AfeEsti
       </footer>
     </div>
   </div>
+
+  // Print copy lives in the body because `@media print` hides the whole app root;
+  // the viewer renders it inline instead, on its white paper surface.
+  return preview ? sheet : createPortal(sheet, document.body)
 }
