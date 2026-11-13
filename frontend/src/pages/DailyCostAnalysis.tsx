@@ -16,6 +16,7 @@ import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { ErrorMessage, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
 import { WellProgressPanel } from '../components/daily-cost/WellProgressPanel'
+import { CostCriteriaPivot } from '../components/daily-cost/CostCriteriaPivot'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { api, body } from '../lib/api'
@@ -58,7 +59,7 @@ function factorColumns(group: DailyCostFactorGroup, currency: string): ColDef<Da
   const columns: ColDef<DailyCostFactorRow>[] = [
     { headerName: 'CODE', field: 'code', minWidth: 130, width: 150 },
     { headerName: group.dimension === 'party' ? 'PARTY' : 'NAME', field: 'name', minWidth: 190, flex: 1.1 },
-    { headerName: 'DETAIL', field: 'detail', minWidth: 150, flex: 1 },
+    { headerName: group.dimension === 'party' ? 'ROLE' : 'DETAIL', field: 'detail', minWidth: 200, flex: 1.1 },
   ]
   if (group.dimension === 'cost_group' || group.dimension === 'section') {
     columns.push({ headerName: 'AFE PLANNED', field: 'planned', minWidth: 150, valueFormatter: params => dailyMoney(String(params.value ?? '0'), currency) })
@@ -70,14 +71,49 @@ function factorColumns(group: DailyCostFactorGroup, currency: string): ColDef<Da
       },
     })
   }
-  columns.push({ headerName: 'ACTUAL', field: 'amount', minWidth: 150, valueFormatter: params => dailyMoney(String(params.value ?? '0'), currency) })
+  if (group.dimension === 'party') {
+    // Two different questions on one row: who bills the work, and whose
+    // responsibility the unplanned time was. They are never added together.
+    columns.push({
+      headerName: 'BOOKED (VENDOR)', field: 'booked_amount', minWidth: 165,
+      headerTooltip: 'Cost charged by this party as the service provider / vendor on the daily lines, whatever the reason for the work.',
+      valueFormatter: params => dailyMoney(String(params.value ?? '0'), currency),
+    })
+    columns.push({
+      headerName: 'NPT COST', field: 'npt_amount', minWidth: 145,
+      headerTooltip: 'Non-productive-time cost this party is responsible for, from the responsible party on the Well Sub-activity.',
+      valueFormatter: params => dailyMoney(String(params.value ?? '0'), currency),
+    })
+    columns.push({
+      headerName: 'UPA COST', field: 'upa_amount', minWidth: 145,
+      headerTooltip: 'Unplanned-activity cost this party is responsible for, from the responsible party on the Well Sub-activity.',
+      valueFormatter: params => dailyMoney(String(params.value ?? '0'), currency),
+    })
+    columns.push({
+      headerName: 'TOTAL EXPOSURE', field: 'responsible_amount', minWidth: 160,
+      headerTooltip: 'NPT plus UPA cost attributed to this party. It is exposure, not a second invoice.',
+      cellRenderer: (params: ICellRendererParams<DailyCostFactorRow>) => {
+        const value = Number(params.data?.responsible_amount ?? 0)
+        return <Typography fontSize={12} fontWeight={800} color={value > 0 ? 'warning.main' : 'text.secondary'}>{dailyMoney(value, currency)}</Typography>
+      },
+    })
+    columns.push({
+      headerName: 'NPT DAYS', field: 'npt_days', minWidth: 120,
+      headerTooltip: 'Deduplicated NPT service hours responsible party-wise, divided by 24, at three decimals.',
+      valueFormatter: params => Number(params.value ?? 0).toFixed(3),
+    })
+    columns.push({
+      headerName: 'UPA DAYS', field: 'upa_days', minWidth: 120,
+      headerTooltip: 'Deduplicated UPA service hours responsible party-wise, divided by 24, at three decimals.',
+      valueFormatter: params => Number(params.value ?? 0).toFixed(3),
+    })
+  } else {
+    columns.push({ headerName: 'ACTUAL', field: 'amount', minWidth: 150, valueFormatter: params => dailyMoney(String(params.value ?? '0'), currency) })
+  }
   columns.push({
-    headerName: 'SHARE', field: 'share', minWidth: 120,
+    headerName: group.dimension === 'party' ? 'SHARE OF SPEND' : 'SHARE', field: 'share', minWidth: 130,
     valueFormatter: params => `${Number(params.value ?? 0).toFixed(1)}%`,
   })
-  if (group.dimension !== 'currency') {
-    columns.push({ headerName: 'QUANTITY', field: 'quantity', minWidth: 120, valueFormatter: params => Number(params.value ?? 0).toLocaleString() })
-  }
   return columns
 }
 
@@ -160,6 +196,7 @@ export default function DailyCostAnalysis() {
       legend: { top: 0, textStyle: { color: theme.palette.text.secondary }, itemWidth: 12, itemHeight: 8 },
       tooltip: {
         trigger: 'axis',
+        axisPointer: { type: 'cross', snap: true },
         valueFormatter: value => dailyMoney(Number(value), currency),
       },
       xAxis: { type: 'category', data: days, axisLabel: { color: theme.palette.text.secondary }, axisLine: { lineStyle: { color: theme.palette.divider } } },
@@ -195,7 +232,7 @@ export default function DailyCostAnalysis() {
       animation: false,
       grid: { left: 14, right: 18, top: 26, bottom: 32, containLabel: true },
       legend: { top: 0, textStyle: { color: theme.palette.text.secondary }, itemWidth: 12, itemHeight: 8 },
-      tooltip: { trigger: 'axis', valueFormatter: value => dailyMoney(Number(value), currency) },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow', snap: true }, valueFormatter: value => dailyMoney(Number(value), currency) },
       xAxis: { type: 'category', data: summary.daily.map(row => row.cost_date.slice(5)), axisLabel: { color: theme.palette.text.secondary }, axisLine: { lineStyle: { color: theme.palette.divider } } },
       yAxis: { type: 'value', axisLabel: { color: theme.palette.text.secondary }, splitLine: { lineStyle: { color: theme.palette.divider } } },
       series: [
@@ -385,7 +422,10 @@ export default function DailyCostAnalysis() {
           <Typography color="text.secondary" fontSize={11.5}>
             Planned days {Number(summary.totals.planned_days).toLocaleString()}
             {summary.totals.adjusted_planned_days != null && <> · Adjusted {Number(summary.totals.adjusted_planned_days).toLocaleString()}</>}
-            {' '}· Actual {summary.totals.recorded_days} recorded day{summary.totals.recorded_days === 1 ? '' : 's'}
+            {' '}· Actual {(summary.totals.actual_days ?? summary.totals.spud_actual_days) != null
+              ? `${Number(summary.totals.actual_days ?? summary.totals.spud_actual_days).toFixed(3)} days (${summary.totals.actual_days_basis === 'spud' ? 'from spud' : 'cost dates only'})`
+              : 'days not counted yet'}
+            {' '}· {summary.totals.recorded_days} recorded day{summary.totals.recorded_days === 1 ? '' : 's'}
             {' '}· first day {displayDate(summary.totals.first_day)} · last day {displayDate(summary.totals.last_day)}
             {summary.totals.days_to_budget ? ` · at this burn rate the AFE lasts ${summary.totals.days_to_budget} more days` : ''}
           </Typography>
@@ -416,6 +456,75 @@ export default function DailyCostAnalysis() {
           </Box>
         </Box>
       </Paper>
+
+      {summary.forecast && <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 1.8 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={1} flexWrap="wrap" mb={1.2}>
+          <Box>
+            <Typography fontWeight={800} fontSize={15}>Forecast and out-of-scope cost</Typography>
+            <Typography color="text.secondary" fontSize={11.5} mt={.25}>
+              What the well is heading for at the rate it is actually spending, and what has been spent
+              without an AFE allowance behind it.
+            </Typography>
+          </Box>
+          <Tag tone={summary.forecast.forecast_over_budget ? 'error' : 'success'}>
+            {summary.forecast.forecast_over_budget ? 'Forecast above the plan' : 'Forecast within the plan'}
+          </Tag>
+        </Box>
+        <Box display="grid" gap={1.3} mb={1.4} sx={{ gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' } }}>
+          <Box sx={{ p: 1.3, border: '1px solid', borderColor: 'divider', borderRadius: 1.5 }}>
+            <Typography fontSize={10.5} fontWeight={800} letterSpacing={.6} color="text.secondary">FORECAST FINAL COST</Typography>
+            <Typography fontSize={19} fontWeight={800} mt={.4} color={summary.forecast.forecast_over_budget ? 'error.main' : 'text.primary'}>
+              {dailyMoney(summary.forecast.forecast_final_cost, currency)}
+            </Typography>
+            <Typography fontSize={10.8} color="text.secondary">
+              {summary.forecast.forecast_over_budget ? 'Over' : 'Within'} the plan by {dailyMoney(Math.abs(Number(summary.forecast.forecast_variance)), currency)}
+            </Typography>
+          </Box>
+          <Box sx={{ p: 1.3, border: '1px solid', borderColor: 'divider', borderRadius: 1.5 }}>
+            <Typography fontSize={10.5} fontWeight={800} letterSpacing={.6} color="text.secondary">RUN RATE</Typography>
+            <Typography fontSize={19} fontWeight={800} mt={.4}>{dailyMoney(summary.forecast.run_rate, currency)}</Typography>
+            <Typography fontSize={10.8} color="text.secondary">
+              per {summary.forecast.basis === 'spud' ? 'elapsed day' : 'recorded day'} · {Number(summary.forecast.remaining_planned_days).toFixed(3)} planned days ahead
+            </Typography>
+          </Box>
+          <Box sx={{ p: 1.3, border: '1px solid', borderColor: 'divider', borderRadius: 1.5 }}>
+            <Typography fontSize={10.5} fontWeight={800} letterSpacing={.6} color="text.secondary">OUT OF SCOPE</Typography>
+            <Typography fontSize={19} fontWeight={800} mt={.4} color={Number(summary.out_of_scope?.amount ?? 0) > 0 ? 'warning.main' : 'text.primary'}>
+              {dailyMoney(summary.out_of_scope?.amount ?? '0', currency)}
+            </Typography>
+            <Typography fontSize={10.8} color="text.secondary">
+              {summary.out_of_scope?.line_count ?? 0} unbudgeted line(s) · {dailyMoney(summary.out_of_scope?.other_expenses ?? '0', currency)} other expenses
+            </Typography>
+          </Box>
+          <Box sx={{ p: 1.3, border: '1px solid', borderColor: 'divider', borderRadius: 1.5 }}>
+            <Typography fontSize={10.5} fontWeight={800} letterSpacing={.6} color="text.secondary">PLAN COMPARISON</Typography>
+            <Typography fontSize={19} fontWeight={800} mt={.4}>{dailyMoney(summary.forecast.planned_final_cost, currency)}</Typography>
+            <Typography fontSize={10.8} color="text.secondary">
+              {summary.totals.days_to_budget ? `${summary.totals.days_to_budget} more days at this rate` : 'Effective plan (adjusted where approved)'}
+            </Typography>
+          </Box>
+        </Box>
+        <Typography color="text.secondary" fontSize={11.5}>{summary.forecast.note}</Typography>
+        {Boolean(summary.out_of_scope?.lines.length) && <Box mt={1.4} sx={{ overflowX: 'auto' }}>
+          <Typography fontSize={10.5} fontWeight={800} letterSpacing={.6} color="text.secondary" mb={.6}>UNBUDGETED COST LINES</Typography>
+          <Box component="table" sx={{
+            borderCollapse: 'collapse', width: '100%', minWidth: 620,
+            '& th': { textAlign: 'left', color: 'text.secondary', fontSize: 10, letterSpacing: .6, fontWeight: 800, py: 1, borderBottom: '1px solid', borderColor: 'divider' },
+            '& td': { py: 1, borderBottom: '1px solid', borderColor: 'divider', fontSize: 12 },
+            '& th[align="right"], & td[align="right"]': { textAlign: 'right' },
+          }}>
+            <thead><tr><th>GROUP</th><th>ITEM</th><th>SERVICE GROUP</th><th align="right">ACTUAL</th><th align="right">NPT</th><th align="right">UPA</th></tr></thead>
+            <tbody>{summary.out_of_scope!.lines.map(line => <tr key={line.budget_key}>
+              <td>{line.cost_group}</td>
+              <td>{line.item_name || line.item_code || 'Unnamed cost'}</td>
+              <td>{line.service_group || '—'}</td>
+              <td align="right">{dailyMoney(line.actual, currency)}</td>
+              <td align="right">{Number(line.npt) > 0 ? dailyMoney(line.npt, currency) : '—'}</td>
+              <td align="right">{Number(line.upa) > 0 ? dailyMoney(line.upa, currency) : '—'}</td>
+            </tr>)}</tbody>
+          </Box>
+        </Box>}
+      </Paper>}
 
       {mud && <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 1.8 }}>
         <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={1} flexWrap="wrap" mb={1}>
@@ -537,6 +646,14 @@ export default function DailyCostAnalysis() {
             <Typography color="text.secondary" fontSize={11.5} mb={1}>
               {activeGroup.label} · {activeGroup.rows.length} {activeGroup.rows.length === 1 ? 'row' : 'rows'} totalling {dailyMoney(activeGroup.total, activeGroup.dimension === 'currency' ? '' : activeGroup.currency)}
             </Typography>
+            {activeGroup.dimension === 'party' && <Alert severity="info" sx={{ mb: 1.2 }}>
+              <Typography fontSize={11.8}>
+                <strong>Booked</strong> is what each party charges as the service provider on the daily lines — a
+                provider that stands by for 24 hours bills 24 hours. <strong>NPT / UPA exposure</strong> is the cost
+                of the unplanned hours attributed to the responsible party on the Well Sub-activity, which can be a
+                different company. The two are separate measures and are never added together.
+              </Typography>
+            </Alert>}
             <DataTable
               rows={activeGroup.rows}
               columns={factorColumns(activeGroup, activeGroup.currency)}
@@ -549,6 +666,10 @@ export default function DailyCostAnalysis() {
           </> : <Typography color="text.secondary" fontSize={12.5} py={2}>No factor data for this filter.</Typography>}
         </Box>
       </Paper>
+
+      {Boolean(summary.criteria?.length) && <Box mb={1.8}>
+        <CostCriteriaPivot rows={summary.criteria ?? []} currency={currency}/>
+      </Box>}
 
       <Box>
         <Box display="flex" justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap" mb={1}>

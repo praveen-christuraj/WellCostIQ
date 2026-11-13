@@ -627,6 +627,23 @@ def dashboard(
     plan_map = _plan_map(db, organization_id, well_ids) if caps.plan else {}
     plans = {well.id: _plan_for_well(well, plan_map) for well in wells}
 
+    # ---- exact actual days ------------------------------------------------------
+    # Actual days are elapsed time from the Well Spud Date & Time, not the number
+    # of daily sheets. Fourteen sheets can span 13.4 days when the spud happened
+    # part-way through the first report day, so the progress engine supplies the
+    # three-decimal figure and its basis. A well with no spud instant reports the
+    # recorded-date count and is labelled `cost_dates` instead of pretending to a
+    # precision it does not have.
+    from app.services.daily_cost import _afe_actual_days, progress_days_for_wells
+
+    progress_days: dict[str, Any] = (
+        progress_days_for_wells(
+            db, organization_id, wells,
+            date_from=date_from, date_to=date_to, include_draft=include_draft, afe_id=afe_id,
+        )
+        if caps.actuals and wells else {}
+    )
+
     # ---- actuals ---------------------------------------------------------------
     per_well: dict[str, dict[str, Any]] = {}
     per_afe: dict[str, dict[str, Any]] = {}
@@ -795,6 +812,12 @@ def dashboard(
             _money(Decimal("0")) if caps.actuals else None
         )
         balance = _money(effective - actual) if effective is not None and actual is not None else None
+        afe_scope = afe.configuration_scope if afe.configuration_scope in ("drilling", "completion") else "drilling"
+        afe_progress = ((progress_days.get(afe.well_id) or {}).get("scopes") or {}).get(afe_scope)
+        afe_days, afe_days_basis = (
+            _afe_actual_days(actual_bucket["first"], actual_bucket["last"], afe_progress)
+            if actual_bucket else (None, None)
+        )
         afe_rows.append(DashboardAfeRow(
             afe_id=afe.id,
             afe_code=afe.afe_code,
@@ -821,7 +844,8 @@ def dashboard(
             conversion_pending=pending,
             first_cost_date=actual_bucket["first"] if actual_bucket else None,
             last_cost_date=actual_bucket["last"] if actual_bucket else None,
-            actual_days=_span(actual_bucket) if caps.actuals else None,
+            actual_days=afe_days if caps.actuals else None,
+            actual_days_basis=(afe_days_basis or "") if caps.actuals else "",
             recorded_days=actual_bucket["recorded_days"] if actual_bucket else (0 if caps.actuals else None),
             sheets=actual_bucket["sheets"] if actual_bucket else (0 if caps.actuals else None),
             npt_days=afe_classification.get((afe.id, "NPT"), 0) if caps.actuals else None,
@@ -889,6 +913,7 @@ def dashboard(
                 elif section_id in depths:
                     reached.append(depths[section_id])
             actual_depth = _money(max(reached)) if reached else _money(Decimal("0"))
+        well_progress = progress_days.get(well.id) or {}
         planned_depth = _money(plan["depth"]) if caps.plan else None
         progress = (
             _percent(actual_depth, planned_depth)
@@ -935,7 +960,8 @@ def dashboard(
             upa_amount=_money(actual_bucket["upa"]) if actual_bucket else (_money(Decimal("0")) if caps.actuals else None),
             first_cost_date=first_day,
             last_cost_date=last_day,
-            actual_days=_span(actual_bucket) if caps.actuals else None,
+            actual_days=(well_progress.get("actual_days") if caps.actuals else None),
+            actual_days_basis=((well_progress.get("basis") or "") if caps.actuals else ""),
             recorded_days=actual_bucket["recorded_days"] if actual_bucket else (0 if caps.actuals else None),
             sheets=actual_bucket["sheets"] if actual_bucket else (0 if caps.actuals else None),
             draft_sheets=actual_bucket["draft_sheets"] if actual_bucket else (0 if caps.actuals else None),
@@ -957,7 +983,11 @@ def dashboard(
             active_wells=sum(1 for row in rows if row.status == "active"),
             completed_wells=sum(1 for row in rows if row.status == "completed"),
             planned_days=_money(sum((row.planned_days or Decimal("0") for row in rows), Decimal("0"))) if caps.plan else None,
-            actual_days=sum((row.actual_days or 0 for row in rows)) if caps.actuals else None,
+            actual_days=(
+                sum((row.actual_days or Decimal("0.000") for row in rows), Decimal("0.000"))
+                if caps.actuals else None
+            ),
+            actual_days_basis=_combined_basis([row.actual_days_basis for row in rows]) if caps.actuals else "",
             recorded_days=sum((row.recorded_days or 0 for row in rows)) if caps.actuals else None,
             npt_days=sum((row.npt_days or 0 for row in rows)) if caps.actuals else None,
             upa_days=sum((row.upa_days or 0 for row in rows)) if caps.actuals else None,
@@ -974,7 +1004,7 @@ def dashboard(
 
     # ---- totals -----------------------------------------------------------------
     planned_days_total = sum((row.planned_days or Decimal("0") for row in well_rows), Decimal("0"))
-    actual_days_total = sum((row.actual_days or 0 for row in well_rows))
+    actual_days_total = sum((row.actual_days or Decimal("0.000") for row in well_rows), Decimal("0.000"))
     recorded_days_total = sum((row.recorded_days or 0 for row in well_rows))
     npt_days_total = sum((row.npt_days or 0 for row in well_rows))
     upa_days_total = sum((row.upa_days or 0 for row in well_rows))
@@ -999,6 +1029,7 @@ def dashboard(
         wells_with_actuals=sum(1 for row in well_rows if (row.sheets or 0) > 0) if caps.actuals else None,
         planned_days=_money(planned_days_total) if caps.plan else None,
         actual_days=actual_days_total if caps.actuals else None,
+        actual_days_basis=_combined_basis([row.actual_days_basis for row in well_rows]) if caps.actuals else "",
         recorded_days=recorded_days_total if caps.actuals else None,
         npt_days=npt_days_total if caps.actuals else None,
         upa_days=upa_days_total if caps.actuals else None,
@@ -1227,11 +1258,12 @@ def dashboard(
 # ---------------------------------------------------------------------------
 
 
-def _span(bucket: dict[str, Any] | None) -> int:
-    """Calendar days from the first to the last sheet of the cost register."""
-    if not bucket or not bucket["first"] or not bucket["last"]:
-        return 0
-    return (bucket["last"] - bucket["first"]).days + 1
+def _combined_basis(bases: Sequence[str]) -> str:
+    """One basis label for a set of rows that may have been counted differently."""
+    values = {value for value in bases if value}
+    if not values:
+        return ""
+    return values.pop() if len(values) == 1 else "mixed"
 
 
 def _section_depths(well: Well) -> dict[str | None, Decimal]:
@@ -1294,7 +1326,9 @@ def well_detail(
         raise HTTPException(status_code=404, detail="Well not found in this workspace")
 
     notes: list[str] = [
-        "Actual days run from the first to the last day of this well's cost register (calendar days), so any missing sheet inside that span is included.",
+        "Actual days are elapsed time, not a count of sheets: from the Well Spud Date & Time to the "
+        "Progress Completed Date & Time (or the end of the last included cost date), reported at three "
+        "decimals. Sections and activities report active days — the cost dates on which they were charged.",
         "NPT and UPA days are deduplicated operational service hours divided by 24; affected cost dates are not used as duration.",
     ]
 

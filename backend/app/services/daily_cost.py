@@ -64,6 +64,7 @@ from app.schemas.daily_cost import (
     DailyCostWellOption, DailyCostWellProgress, DailyCostWellProgressReport,
     DailyCostMudReconciliation, DailyCostMudSectionReconciliation,
     DailyCostWellProgressUpdate, DailyCostWellSummary, DailyCostWellTotals,
+    DailyCostForecast, DailyCostOutOfScope, DailyCostOutOfScopeLine, DailyCostCriteriaRow,
 )
 from app.services import afe as afe_service
 from app.services import audit
@@ -4120,6 +4121,187 @@ def _factor_rows(
     return result
 
 
+def _party_factor_rows(
+    db: Session,
+    organization_id: str,
+    well_id: str,
+    lines: Any,
+    *,
+    currency: str,
+    total: Decimal,
+    date_from: date | None,
+    date_to: date | None,
+    include_draft: bool,
+) -> list[DailyCostFactorRow]:
+    """The ledger cut by responsible party, with booking and liability separated.
+
+    A service is always *booked* by the vendor that charges it, whatever the
+    reason for the work: a provider that stood by for 24 hours is paid for 24
+    hours. Responsibility is a second, different question. When a line is
+    classified NPT or UPA, the responsible party recorded on the Well
+    Sub-activity carries the exposure — the unplanned hours and the cost of
+    them — even though the invoice still goes to the charging vendor. That is
+    the 24-hour service from provider A whose 14 unplanned hours were caused by
+    provider B: A is booked for 24 hours, B owns the 14-hour UPA exposure.
+
+    ``amount`` stays the booked value so the rows reconcile with the ledger;
+    ``npt_amount``/``upa_amount``/``responsible_amount`` and the day counts
+    carry the attribution. Both sides are reported for every party, so a
+    provider that caused the delay is never hidden behind the one that billed.
+    """
+    booked = db.execute(
+        select(
+            lines.c.vendor_code,
+            lines.c.vendor_name,
+            func.sum(lines.c.standard_amount),
+            func.sum(lines.c.quantity),
+        )
+        .select_from(lines)
+        .group_by(lines.c.vendor_code, lines.c.vendor_name)
+    ).all()
+    responsible_expr = func.coalesce(
+        func.nullif(lines.c.sub_activity_party, ""),
+        func.nullif(lines.c.party_name, ""),
+        func.nullif(lines.c.vendor_name, ""),
+        UNASSIGNED,
+    )
+    attribution = db.execute(
+        select(
+            responsible_expr.label("party"),
+            lines.c.classification,
+            func.sum(lines.c.standard_amount),
+        )
+        .select_from(lines)
+        .where(lines.c.classification.in_(("NPT", "UPA")))
+        .group_by(responsible_expr, lines.c.classification)
+    ).all()
+
+    # Operational days: the same deduplicated service hours / 24 the dashboard
+    # uses, keyed by date, sheet, activity, sub-activity, section, phase and the
+    # responsible party, so simultaneous services never double the duration.
+    from app.services.operational_time import ONE_TIME_SERVICE_CATEGORIES, hours_to_days
+
+    day_query = (
+        select(
+            DailyCostEntry.cost_date,
+            DailyCostEntry.id,
+            DailyCostServiceLine.classification,
+            DailyCostServiceLine.activity_id,
+            DailyCostServiceLine.sub_activity_id,
+            DailyCostServiceLine.hole_section_id,
+            DailyCostServiceLine.phase_id,
+            DailyCostServiceLine.charging_basis,
+            DailyCostServiceLine.charge_category,
+            DailyCostServiceLine.quantity_unit,
+            DailyCostServiceLine.quantity,
+            DailyCostServiceLine.sub_activity_party_snapshot,
+            DailyCostServiceLine.party_name,
+            DailyCostServiceLine.vendor_name_snapshot,
+        )
+        .select_from(DailyCostServiceLine)
+        .join(DailyCostEntry, DailyCostServiceLine.entry_id == DailyCostEntry.id)
+        .where(
+            DailyCostServiceLine.organization_id == organization_id,
+            DailyCostEntry.organization_id == organization_id,
+            DailyCostEntry.well_id == well_id,
+            DailyCostEntry.is_deleted.is_(False),
+            DailyCostServiceLine.classification.in_(("NPT", "UPA")),
+        )
+    )
+    if not include_draft:
+        day_query = day_query.where(DailyCostEntry.status == "submitted")
+    if date_from is not None:
+        day_query = day_query.where(DailyCostEntry.cost_date >= date_from)
+    if date_to is not None:
+        day_query = day_query.where(DailyCostEntry.cost_date <= date_to)
+    allocation_hours: dict[tuple[Any, ...], Decimal] = {}
+    for (
+        cost_date, entry_key, classification, activity, sub_activity, section, phase,
+        charging_basis, charge_category, quantity_unit, quantity, sub_party, party, vendor,
+    ) in db.execute(day_query).all():
+        if (
+            charging_basis != "Day Rate"
+            or charge_category in ONE_TIME_SERVICE_CATEGORIES
+            or quantity_unit != "hours"
+        ):
+            continue
+        owner = str(sub_party or party or vendor or UNASSIGNED)
+        allocation = (
+            cost_date, entry_key, str(classification), activity or "", sub_activity or "",
+            section or "", phase or "", owner,
+        )
+        hours = Decimal(str(quantity or 0))
+        allocation_hours[allocation] = max(allocation_hours.get(allocation, Decimal("0")), hours)
+    party_hours: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal("0"))
+    for allocation, hours in allocation_hours.items():
+        party_hours[(allocation[-1], allocation[2])] += hours
+
+    rows: dict[str, dict[str, Any]] = {}
+
+    def party_row(name: str) -> dict[str, Any]:
+        key = name or UNASSIGNED
+        if key not in rows:
+            rows[key] = {
+                "code": "", "booked": Decimal("0"), "quantity": Decimal("0"),
+                "npt": Decimal("0"), "upa": Decimal("0"),
+                "npt_days": Decimal("0"), "upa_days": Decimal("0"),
+            }
+        return rows[key]
+
+    for vendor_code, vendor_name, amount, quantity in booked:
+        label = str(vendor_name or "")
+        row = party_row(label)
+        if not row["code"]:
+            row["code"] = str(vendor_code or "")
+        row["booked"] += Decimal(amount or 0)
+        row["quantity"] += Decimal(quantity or 0)
+    for party, classification, amount in attribution:
+        row = party_row(str(party or UNASSIGNED))
+        if str(classification) == "NPT":
+            row["npt"] += Decimal(amount or 0)
+        else:
+            row["upa"] += Decimal(amount or 0)
+    for (party, classification), hours in party_hours.items():
+        row = party_row(party)
+        if classification == "NPT":
+            row["npt_days"] += hours_to_days(hours)
+        else:
+            row["upa_days"] += hours_to_days(hours)
+
+    result: list[DailyCostFactorRow] = []
+    for name, value in sorted(rows.items(), key=lambda item: (-item[1]["booked"], item[0])):
+        exposure = value["npt"] + value["upa"]
+        if value["booked"] and exposure:
+            role = "Books the cost and carries the NPT/UPA exposure"
+        elif exposure:
+            role = "Responsible party for NPT/UPA — not billed by this party"
+        elif value["booked"]:
+            role = "Service provider / vendor that books the cost"
+        else:
+            role = "No vendor or responsible party recorded"
+        result.append(DailyCostFactorRow(
+            key=name,
+            code=value["code"] or ("" if value["booked"] else "UNASSIGNED"),
+            name=name,
+            detail=role,
+            amount=_money(value["booked"]),
+            planned=None,
+            balance=None,
+            share=(
+                (value["booked"] / total * Decimal("100")).quantize(Decimal("0.01"))
+                if total > 0 else Decimal("0.00")
+            ),
+            quantity=value["quantity"],
+            booked_amount=_money(value["booked"]),
+            responsible_amount=_money(exposure),
+            npt_amount=_money(value["npt"]),
+            upa_amount=_money(value["upa"]),
+            npt_days=value["npt_days"].quantize(PROGRESS_DAY_QUANT, rounding=ROUND_HALF_UP),
+            upa_days=value["upa_days"].quantize(PROGRESS_DAY_QUANT, rounding=ROUND_HALF_UP),
+        ))
+    return result
+
+
 def well_cost_report(
     db: Session, organization_id: str, well_id: str, *,
     date_from: date | None = None, date_to: date | None = None, include_draft: bool = True,
@@ -4303,6 +4485,7 @@ def _well_progress_row(
         actual_days=actual_days,
         days_variance=days_variance,
         as_of_date=as_of,
+        basis="spud" if actual_days is not None else "",
     )
 
 
@@ -4336,6 +4519,168 @@ def _latest_cost_dates_by_scope(
     }
 
 
+PROGRESS_DAY_BASIS_SPUD = "spud"
+PROGRESS_DAY_BASIS_COST_DATES = "cost_dates"
+
+
+def _scope_window_end(
+    spud: datetime | None,
+    completed: datetime | None,
+    last_cost_date: date | None,
+    date_to: date | None,
+) -> tuple[datetime | None, str | None]:
+    """End instant of one scope's progress and the basis the count rests on.
+
+    A recorded Progress Completed Date & Time freezes the count at that instant;
+    otherwise the end is the end of the latest daily-cost date in the window.
+    Without a spud instant the only honest duration left is the number of
+    recorded cost dates, which the caller reports as ``cost_dates`` so a page
+    can say so instead of quietly presenting a sheet count as elapsed days.
+    """
+    if completed is not None and (date_to is None or completed.date() <= date_to):
+        return completed, PROGRESS_DAY_BASIS_SPUD
+    if last_cost_date is not None:
+        return datetime.combine(last_cost_date + timedelta(days=1), dt_time.min), (
+            PROGRESS_DAY_BASIS_SPUD if spud is not None else PROGRESS_DAY_BASIS_COST_DATES
+        )
+    return None, None
+
+
+def progress_days_for_wells(
+    db: Session,
+    organization_id: str,
+    wells: Sequence[Well],
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    include_draft: bool = True,
+    afe_id: str = "",
+) -> dict[str, dict[str, Any]]:
+    """Exact fractional actual days per well and configuration scope.
+
+    Actual days are elapsed time from the Well Spud Date & Time to the end of
+    the last cost date in the window (or the Progress Completed Date & Time),
+    at three decimals — the same basis the NPT/UPA day counts use. The number
+    of daily sheets is deliberately *not* the duration: fourteen sheets can
+    cover 13.4 days when the spud happened part-way through the first day.
+
+    Wells without a spud instant fall back to their recorded cost dates and
+    report ``basis = "cost_dates"``; callers must label that fallback rather
+    than claim elapsed precision it does not have.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    if not wells:
+        return result
+    well_ids = [well.id for well in wells]
+    query = (
+        select(
+            DailyCostEntry.well_id,
+            Afe.configuration_scope,
+            func.max(DailyCostEntry.cost_date),
+            func.count(func.distinct(DailyCostEntry.cost_date)),
+        )
+        .join(Afe, Afe.id == DailyCostEntry.afe_id)
+        .where(
+            DailyCostEntry.organization_id == organization_id,
+            DailyCostEntry.well_id.in_(well_ids),
+            DailyCostEntry.is_deleted.is_(False),
+            Afe.organization_id == organization_id,
+        )
+        .group_by(DailyCostEntry.well_id, Afe.configuration_scope)
+    )
+    if afe_id:
+        query = query.where(DailyCostEntry.afe_id == afe_id)
+    if not include_draft:
+        query = query.where(DailyCostEntry.status == "submitted")
+    if date_from is not None:
+        query = query.where(DailyCostEntry.cost_date >= date_from)
+    if date_to is not None:
+        query = query.where(DailyCostEntry.cost_date <= date_to)
+    last_dates: dict[tuple[str, str], date] = {}
+    recorded_days: dict[tuple[str, str], int] = {}
+    for well_key, scope, last_date, days in db.execute(query).all():
+        key = (str(well_key), str(scope or "drilling"))
+        if last_date is not None:
+            last_dates[key] = last_date
+        recorded_days[key] = int(days or 0)
+
+    for well in wells:
+        scopes: dict[str, dict[str, Any]] = {}
+        total = Decimal("0.000")
+        counted = 0
+        bases: set[str] = set()
+        for scope in PROGRESS_SCOPES:
+            key = (well.id, scope)
+            spud: datetime | None = getattr(well, f"{scope}_spud_at")
+            completed: datetime | None = getattr(well, f"{scope}_progress_completed_at")
+            last_date = last_dates.get(key)
+            recorded = recorded_days.get(key, 0)
+            end, basis = _scope_window_end(spud, completed, last_date, date_to)
+            days: Decimal | None = None
+            if basis == PROGRESS_DAY_BASIS_SPUD and end is not None and spud is not None:
+                days = _fractional_days(end - spud) if end > spud else Decimal("0.000")
+            elif basis == PROGRESS_DAY_BASIS_COST_DATES:
+                days = Decimal(recorded).quantize(PROGRESS_DAY_QUANT, rounding=ROUND_HALF_UP)
+            if days is not None:
+                total += days
+                counted += 1
+                bases.add(str(basis))
+            scopes[scope] = {
+                "actual_days": days,
+                "basis": basis,
+                "spud_at": spud,
+                "completed_at": completed,
+                "as_of_date": last_date,
+                "recorded_days": recorded,
+            }
+        overall_basis = None
+        if bases:
+            overall_basis = bases.pop() if len(bases) == 1 else "mixed"
+        result[well.id] = {
+            "scopes": scopes,
+            "actual_days": total if counted else None,
+            "basis": overall_basis,
+            "recorded_days": sum(row["recorded_days"] for row in scopes.values()),
+        }
+    return result
+
+
+def _afe_actual_days(
+    first: date | None,
+    last: date | None,
+    progress: dict[str, Any] | None,
+) -> tuple[Decimal | None, str | None]:
+    """One AFE's exact share of elapsed time, clipped to its own cost dates.
+
+    An AFE may cover only part of a scope, so its days run from the later of the
+    spud instant and its first cost date to the earlier of the scope's end and
+    the end of its last cost date. Without a spud instant the span stays a
+    recorded-date count and is labelled as such.
+    """
+    if first is None or last is None:
+        return None, None
+    spud = (progress or {}).get("spud_at")
+    completed = (progress or {}).get("completed_at")
+    if spud is None:
+        return (
+            Decimal((last - first).days + 1).quantize(PROGRESS_DAY_QUANT, rounding=ROUND_HALF_UP),
+            PROGRESS_DAY_BASIS_COST_DATES,
+        )
+    start = max(spud, datetime.combine(first, dt_time.min))
+    scope_progress = progress or {}
+    if scope_progress.get("basis") == PROGRESS_DAY_BASIS_SPUD:
+        scope_end, _ = _scope_window_end(spud, completed, scope_progress.get("as_of_date"), None)
+    else:
+        scope_end = None
+    end = min(
+        datetime.combine(last + timedelta(days=1), dt_time.min),
+        scope_end if scope_end is not None else datetime.max,
+    )
+    if end <= start:
+        return Decimal("0.000"), PROGRESS_DAY_BASIS_SPUD
+    return _fractional_days(end - start), PROGRESS_DAY_BASIS_SPUD
+
+
 def _progress_report_for_well(
     db: Session, organization_id: str, well: Well, *, as_of: date | None = None, cache: dict | None = None,
 ) -> DailyCostWellProgressReport:
@@ -4349,6 +4694,72 @@ def _progress_report_for_well(
             for scope in PROGRESS_SCOPES
         ],
     )
+
+
+def progress_overview(
+    db: Session,
+    organization_id: str,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    include_draft: bool = True,
+) -> list[DailyCostWellProgressReport]:
+    """Exact progress days for every well that carries daily cost.
+
+    Whole-register pages (well-wise comparisons, analysis tools) need the same
+    elapsed-day figure the register shows without one request per well. The
+    window narrows the count to the last included cost date, exactly as the
+    single-well endpoint does.
+    """
+    tracked = list(db.scalars(
+        select(Well)
+        .where(
+            Well.organization_id == organization_id,
+            Well.is_deleted.is_(False),
+            Well.id.in_(
+                select(DailyCostEntry.well_id).where(
+                    DailyCostEntry.organization_id == organization_id,
+                    DailyCostEntry.is_deleted.is_(False),
+                )
+            ),
+        )
+        .order_by(Well.well_code)
+    ).all())
+    if not tracked:
+        return []
+    days = progress_days_for_wells(
+        db, organization_id, tracked, date_from=date_from, date_to=date_to, include_draft=include_draft,
+    )
+    cache: dict = {}
+    reports: list[DailyCostWellProgressReport] = []
+    for well in tracked:
+        state = (days.get(well.id) or {}).get("scopes") or {}
+        rows: list[DailyCostWellProgress] = []
+        for scope in PROGRESS_SCOPES:
+            entry = state.get(scope) or {}
+            planned = _progress_planned_days(db, organization_id, well, scope, cache)
+            actual = entry.get("actual_days")
+            rows.append(DailyCostWellProgress(
+                scope=scope,  # type: ignore[arg-type]
+                scope_label=PROGRESS_SCOPE_LABELS[scope],
+                progress_label=PROGRESS_COMPLETED_LABELS[scope],
+                spud_at=entry.get("spud_at"),
+                progress_completed_at=entry.get("completed_at"),
+                milestone_label=getattr(well, f"{scope}_milestone_label", "") or "",
+                is_completed=entry.get("completed_at") is not None,
+                planned_days=planned,
+                actual_days=actual,
+                days_variance=(
+                    (actual - planned).quantize(PROGRESS_DAY_QUANT, rounding=ROUND_HALF_UP)
+                    if actual is not None else None
+                ),
+                as_of_date=entry.get("as_of_date"),
+                basis=str(entry.get("basis") or ""),
+            ))
+        reports.append(DailyCostWellProgressReport(
+            well_id=well.id, well_code=well.well_code, well_name=well.well_name, scopes=rows,
+        ))
+    return reports
 
 
 def well_progress_report(
@@ -4944,7 +5355,11 @@ def well_cost_summary(
         ),
         DailyCostFactorGroup(
             dimension="party", label=FACTOR_LABELS["party"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "party", currency=currency, total=actual_total),
+            rows=_party_factor_rows(
+                db, organization_id, well_id, lines,
+                currency=currency, total=actual_total,
+                date_from=date_from, date_to=date_to, include_draft=include_draft,
+            ),
         ),
         DailyCostFactorGroup(
             dimension="rate_source", label=FACTOR_LABELS["rate_source"], currency=currency, total=actual_total,
@@ -5183,6 +5598,8 @@ def well_cost_summary(
         adjusted_used_percent=adjusted_used,
         adjusted_planned_days=adjusted_planned_days,
         has_adjustment=adjusted_planned is not None or adjusted_planned_days is not None,
+        actual_days=spud_actual_days if spudded_rows else None,
+        actual_days_basis="spud" if spudded_rows else "recorded",
         spud_actual_days=spud_actual_days if spudded_rows else None,
         spud_days_variance=spud_days_variance if spudded_rows else None,
         actual_mud_chemicals=actual_mud_chemicals,
@@ -5259,6 +5676,119 @@ def well_cost_summary(
         ],
     )
 
+    # ---- forecast, out-of-scope spend and the criteria pivot ------------------
+    effective_planned = adjusted_planned if adjusted_planned is not None else planned_total
+    effective_planned_days_total = (
+        adjusted_planned_days if adjusted_planned_days is not None else Decimal(planned_days)
+    )
+    run_rate = average if recorded_days else Decimal("0.00")
+    elapsed_for_forecast = spud_actual_days if spudded_rows else Decimal(recorded_days)
+    remaining_planned = max(effective_planned_days_total - elapsed_for_forecast, Decimal("0"))
+    forecast_final = _money(actual_total + run_rate * remaining_planned)
+    forecast_variance = _money(forecast_final - effective_planned)
+    forecast_note = (
+        f"Projected at {currency} {run_rate:,.2f} per "
+        f"{'elapsed day' if spudded_rows else 'recorded cost date'} over the "
+        f"{remaining_planned} planned day(s) still ahead."
+        if recorded_days else
+        "A forecast needs at least one recorded cost date."
+    )
+    if not spudded_rows and recorded_days:
+        forecast_note += (
+            " No Well Spud Date & Time is recorded, so the run rate uses recorded cost dates; "
+            "entering the spud instant makes the projection exact."
+        )
+    forecast = DailyCostForecast(
+        available=bool(recorded_days),
+        currency=currency,
+        basis="spud" if spudded_rows else "recorded",
+        elapsed_days=spud_actual_days if spudded_rows else None,
+        recorded_days=recorded_days,
+        planned_days=_rate(effective_planned_days_total),
+        remaining_planned_days=_rate(remaining_planned),
+        run_rate=run_rate,
+        actual_to_date=_money(actual_total),
+        forecast_final_cost=forecast_final,
+        planned_final_cost=_money(effective_planned),
+        forecast_variance=forecast_variance,
+        forecast_over_budget=bool(forecast_final > effective_planned),
+        days_to_budget=days_to_budget,
+        note=forecast_note,
+    )
+
+    # Out of scope = actual with no AFE allowance behind it, plus other expenses,
+    # which never carry an allowance. LIH is reported separately because it is
+    # deducted from the AFE rather than spent against a line.
+    unbudgeted = Decimal("0")
+    out_lines: list[DailyCostOutOfScopeLine] = []
+    for row in budget_lines:
+        if row.planned > 0 or row.actual_to_date <= 0:
+            continue
+        unbudgeted += row.actual_to_date
+        out_lines.append(DailyCostOutOfScopeLine(
+            budget_key=row.budget_key,
+            cost_group=str(row.cost_group),
+            item_code=row.item_code,
+            item_name=row.item_name,
+            service_group=row.service_group,
+            actual=_money(row.actual_to_date),
+            npt=_money(row.actual_npt),
+            upa=_money(row.actual_upa),
+        ))
+    out_lines.sort(key=lambda item: (-item.actual, item.budget_key))
+    out_of_scope_amount = _money(unbudgeted + other_expenses)
+    out_of_scope = DailyCostOutOfScope(
+        available=bool(recorded_days),
+        currency=currency,
+        amount=out_of_scope_amount,
+        line_count=len(out_lines),
+        share_percent=(
+            (out_of_scope_amount / actual_total * Decimal("100")).quantize(Decimal("0.01"))
+            if actual_total > 0 else Decimal("0.00")
+        ),
+        planned_amount=Decimal("0.00"),
+        other_expenses=_money(other_expenses),
+        unbudgeted=_money(unbudgeted),
+        lines=out_lines[:50],
+    )
+
+    criteria_rows = db.execute(
+        select(
+            lines.c.section_code, lines.c.section_name,
+            lines.c.phase_code, lines.c.phase_name,
+            lines.c.activity_code, lines.c.activity_name,
+            lines.c.classification,
+            func.sum(lines.c.standard_amount),
+        )
+        .select_from(lines)
+        .group_by(
+            lines.c.section_code, lines.c.section_name,
+            lines.c.phase_code, lines.c.phase_name,
+            lines.c.activity_code, lines.c.activity_name,
+            lines.c.classification,
+        )
+        .order_by(func.sum(lines.c.standard_amount).desc())
+    ).all()
+    criteria: list[DailyCostCriteriaRow] = []
+    for section_code, section_name, phase_code, phase_name, activity_code, activity_name, classification, amount in criteria_rows:
+        value = Decimal(amount or 0)
+        criteria.append(DailyCostCriteriaRow(
+            section_code=str(section_code or ""),
+            section_name=str(section_name or ""),
+            phase_code=str(phase_code or ""),
+            phase_name=str(phase_name or ""),
+            activity_code=str(activity_code or ""),
+            activity_name=str(activity_name or ""),
+            classification=str(classification or "Planned"),
+            actual=_money(value),
+            npt=_money(value) if str(classification) == "NPT" else Decimal("0.00"),
+            upa=_money(value) if str(classification) == "UPA" else Decimal("0.00"),
+            share=(
+                (value / actual_total * Decimal("100")).quantize(Decimal("0.01"))
+                if actual_total > 0 else Decimal("0.00")
+            ),
+        ))
+
     return DailyCostWellSummary(
         well=DailyCostWellHeader(
             id=well.id, well_code=well.well_code, well_name=well.well_name,
@@ -5269,6 +5799,7 @@ def well_cost_summary(
         include_draft=include_draft, totals=totals, afes=positions, daily=daily,
         factors=factors, budget_lines=budget_lines, warnings=warnings,
         progress=progress_rows, mud_cost=mud_reconciliation, lih_cost=lih_summary,
+        forecast=forecast, out_of_scope=out_of_scope, criteria=criteria,
     )
 
 

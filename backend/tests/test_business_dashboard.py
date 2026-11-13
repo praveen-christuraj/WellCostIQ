@@ -221,7 +221,10 @@ def test_business_dashboard_aggregates_plan_budget_and_actuals():
         # 2 x (planned 100 + UPA 300) + NPT 200 once = 1000
         assert Decimal(kpis["actual_amount"]) == Decimal("1000.00")
         assert Decimal(kpis["afe_balance"]) == Decimal("5000.00")
-        assert kpis["actual_days"] == 2          # 2026-10-10 .. 2026-10-11
+        # No spud instant is recorded, so the exact-day engine falls back to the
+        # recorded cost dates and says so; it never invents elapsed precision.
+        assert Decimal(kpis["actual_days"]) == Decimal("2.000")
+        assert kpis["actual_days_basis"] == "cost_dates"
         assert kpis["recorded_days"] == 2
         assert Decimal(kpis["npt_days"]) == Decimal("0")
         assert Decimal(kpis["upa_days"]) == Decimal("0")
@@ -279,7 +282,8 @@ def test_business_dashboard_aggregates_plan_budget_and_actuals():
             "/api/v1/dashboard/business?from=2026-10-11&to=2026-10-11", headers=headers,
         ).json()
         assert Decimal(narrowed["kpis"]["actual_amount"]) == Decimal("400.00")  # 100 planned + 300 UPA
-        assert narrowed["kpis"]["actual_days"] == 1
+        assert Decimal(narrowed["kpis"]["actual_days"]) == Decimal("1.000")
+        assert narrowed["kpis"]["actual_days_basis"] == "cost_dates"
         assert Decimal(narrowed["kpis"]["npt_days"]) == Decimal("0")
         assert Decimal(narrowed["kpis"]["upa_days"]) == Decimal("0")
         # Planned/AFE figures are plan-level and stay whole.
@@ -325,7 +329,8 @@ def test_business_dashboard_aggregates_plan_budget_and_actuals():
         assert payload["sections"][0]["reached"] is True
         assert payload["sections"][0]["active_days"] == 2
         assert Decimal(payload["sections"][0]["planned_days"]) == Decimal("10.00")
-        assert any("Actual days run from the first" in note for note in payload["notes"])
+        # The note must describe elapsed time, not the retired first→last-sheet count.
+        assert any("Actual days are elapsed time" in note for note in payload["notes"])
 
         # Every daily sheet behind the trend can be opened from the panel.
         sheets = payload["sheets"]
@@ -456,3 +461,53 @@ def test_business_dashboard_respects_rbac_and_tenant_scope():
         assert client.get(
             f"/api/v1/dashboard/business/wells/{setup['well']['id']}", headers=south_headers,
         ).status_code == 404
+
+
+def test_dashboard_actual_days_are_exact_fractional_elapsed_time():
+    """Actual days are elapsed time from the spud instant, never a sheet count.
+
+    Fourteen sheets can cover 13.4 days. The operational dashboard must show the
+    same three-decimal duration the NPT/UPA counts use, and label a fallback
+    that has no spud instant instead of presenting it as elapsed time.
+    """
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup(client, headers)
+        well_id = setup["well"]["id"]
+
+        # Spud on 10/10 at 10:00. The last sheet is 11/10, so the count runs to
+        # the end of 11/10: 1 day 14 hours = 1.583 days, not the 2 sheets.
+        progress = client.put(
+            f"/api/v1/daily-cost/wells/{well_id}/progress",
+            headers=headers,
+            json={"scope": "drilling", "spud_at": "2026-10-10T10:00:00"},
+        )
+        assert progress.status_code == 200, progress.text
+        assert Decimal(progress.json()["scopes"][0]["actual_days"]) == Decimal("1.583")
+
+        data = client.get("/api/v1/dashboard/business", headers=headers).json()
+        assert data["kpis"]["actual_days_basis"] == "spud"
+        assert Decimal(data["kpis"]["actual_days"]) == Decimal("1.583")
+        assert data["kpis"]["recorded_days"] == 2
+        well = data["wells"][0]
+        assert Decimal(well["actual_days"]) == Decimal("1.583")
+        assert well["actual_days_basis"] == "spud"
+        # The AFE is clipped to its own cost dates but still counts the same hours.
+        afe = data["afes"][0]
+        assert Decimal(afe["actual_days"]) == Decimal("1.583")
+        assert afe["actual_days_basis"] == "spud"
+        # Planned 10 days against 1.583 actual: the variance keeps its decimals.
+        assert Decimal(data["kpis"]["day_variance"]) == Decimal("-8.42")
+
+        # A recorded completion instant freezes the count at that exact minute.
+        completed = client.put(
+            f"/api/v1/daily-cost/wells/{well_id}/progress",
+            headers=headers,
+            json={"scope": "drilling", "progress_completed_at": "2026-10-11T06:00:00"},
+        )
+        assert completed.status_code == 200, completed.text
+        assert Decimal(completed.json()["scopes"][0]["actual_days"]) == Decimal("0.833")
+
+        frozen = client.get("/api/v1/dashboard/business", headers=headers).json()
+        assert Decimal(frozen["kpis"]["actual_days"]) == Decimal("0.833")
+        assert frozen["kpis"]["actual_days_basis"] == "spud"

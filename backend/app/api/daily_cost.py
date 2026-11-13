@@ -68,6 +68,23 @@ def well_cost_summary(
 
 
 @router.get(
+    "/progress-overview", response_model=list[DailyCostWellProgressReport],
+    dependencies=[Depends(require("daily-cost:read"))],
+)
+def progress_overview(
+    db: Db,
+    user: Current,
+    date_from: date | None = Query(default=None, alias="from"),
+    date_to: date | None = Query(default=None, alias="to"),
+    include_draft: bool = Query(default=True),
+) -> list[DailyCostWellProgressReport]:
+    """Exact spud-based actual days for every well with daily cost, in one call."""
+    return service.progress_overview(
+        db, user.organization_id, date_from=date_from, date_to=date_to, include_draft=include_draft,
+    )
+
+
+@router.get(
     "/wells/{well_id}/progress", response_model=DailyCostWellProgressReport,
     dependencies=[Depends(require("daily-cost:read"))],
 )

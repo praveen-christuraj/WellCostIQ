@@ -80,6 +80,9 @@ CAPABILITIES = {resource: actions for resource, actions in {
         "configure", "submit", "verify", "epicor", "approve", "payment",
         "document-upload", "document-download", "document-delete",
     ),
+    # The in-application guide: read answers from memory and the workspace's own
+    # figures; manage lets a workspace record its own memory entries.
+    "assistant": ("read", "manage"),
     "costing-sets": ("read", "create", "update", "delete", "import", "export"),
     # Reusable templates (AFE estimate, well plan, daily sheet). Read is enough to
     # pick and apply one; changing the library needs its own rights.

@@ -593,7 +593,9 @@ def test_migration_moves_final_review_to_the_well_ladder_and_grants_rollback(tmp
             with pytest.raises(sqlite3.IntegrityError):
                 connection.execute(invalid)
 
-    migrate("-1", op="downgrade")
+    # Downgrade the lifecycle migration itself: `-1` would only step back over the
+    # migration that happens to sit above it, so name the revision it revises.
+    migrate("d7e3a91c4f60", op="downgrade")
     with sqlite3.connect(database) as connection:
         assert wells(connection) == {
             "W-PLAN": ("upcoming", "draft", "upcoming", "draft"),

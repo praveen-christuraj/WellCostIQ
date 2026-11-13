@@ -848,6 +848,9 @@ class DailyCostWellProgress(BaseModel):
     actual_days: Decimal | None
     days_variance: Decimal | None
     as_of_date: date | None
+    # `spud` when the count is elapsed time, `cost_dates` when no spud instant is
+    # recorded and the only honest duration is the recorded cost dates.
+    basis: str = ""
 
 
 class DailyCostWellProgressReport(BaseModel):
@@ -1036,7 +1039,13 @@ class DailyCostDailyRow(BaseModel):
 
 
 class DailyCostFactorRow(BaseModel):
-    """One factor (activity, section, vendor, …) with its share of well spend."""
+    """One factor (activity, section, vendor, …) with its share of well spend.
+
+    The party fields are populated for the Responsible party cut only. There the
+    booked value (what the charging vendor is paid) and the NPT/UPA exposure
+    (what the responsible party caused) are separate measures, because a service
+    can be billed by one provider while its unplanned time belongs to another.
+    """
 
     key: str
     code: str
@@ -1047,6 +1056,13 @@ class DailyCostFactorRow(BaseModel):
     balance: Decimal | None
     share: Decimal
     quantity: Decimal
+    # Responsible-party attribution (party dimension only)
+    booked_amount: Decimal | None = None
+    responsible_amount: Decimal | None = None
+    npt_amount: Decimal | None = None
+    upa_amount: Decimal | None = None
+    npt_days: Decimal | None = None
+    upa_days: Decimal | None = None
 
 
 class DailyCostFactorGroup(BaseModel):
@@ -1154,6 +1170,11 @@ class DailyCostWellTotals(BaseModel):
     has_adjustment: bool = False
     # Progress-day figures counted from the Well Spud Date & Time (summed over
     # the scopes that have a spud instant). Null means no scope is spudded yet.
+    # `actual_days` is the same exact figure under the name the analysis screens
+    # use; `actual_days_basis` is `spud` or `recorded` when the count had to fall
+    # back to recorded cost dates.
+    actual_days: Decimal | None = None
+    actual_days_basis: str = ""
     spud_actual_days: Decimal | None = None
     spud_days_variance: Decimal | None = None
     # Mud chemicals comparison. ``actual_mud_chemicals`` is the recorded Daily
@@ -1222,6 +1243,80 @@ class DailyCostLihSummary(BaseModel):
     days: list[DailyCostLihDay] = Field(default_factory=list)
 
 
+class DailyCostForecast(BaseModel):
+    """Projected final cost of the well from the rate actually being spent.
+
+    The forecast is deliberately simple and transparent: cost per recorded day
+    multiplied by the planned days still ahead, added to what is spent. It is a
+    warning device, not a budget: when a well is spending faster than the plan
+    the number turns red before the AFE is exhausted.
+    """
+
+    available: bool
+    currency: str = ""
+    # `recorded` = cost per recorded cost date; `spud` = per exact elapsed day.
+    basis: str = "recorded"
+    elapsed_days: Decimal | None = None
+    recorded_days: int = 0
+    planned_days: Decimal = Decimal("0")
+    remaining_planned_days: Decimal = Decimal("0")
+    run_rate: Decimal = Decimal("0")
+    actual_to_date: Decimal = Decimal("0")
+    forecast_final_cost: Decimal = Decimal("0")
+    planned_final_cost: Decimal = Decimal("0")
+    forecast_variance: Decimal = Decimal("0")
+    forecast_over_budget: bool = False
+    days_to_budget: Decimal | None = None
+    note: str = ""
+
+
+class DailyCostOutOfScopeLine(BaseModel):
+    """One recorded cost with no AFE allowance behind it."""
+
+    budget_key: str
+    cost_group: str
+    item_code: str = ""
+    item_name: str = ""
+    service_group: str = ""
+    actual: Decimal
+    npt: Decimal = Decimal("0")
+    upa: Decimal = Decimal("0")
+
+
+class DailyCostOutOfScope(BaseModel):
+    """Spend the AFE estimate did not anticipate: out-of-scope by definition."""
+
+    available: bool
+    currency: str = ""
+    amount: Decimal = Decimal("0")
+    line_count: int = 0
+    share_percent: Decimal = Decimal("0")
+    planned_amount: Decimal = Decimal("0")
+    other_expenses: Decimal = Decimal("0")
+    unbudgeted: Decimal = Decimal("0")
+    lines: list[DailyCostOutOfScopeLine] = []
+
+
+class DailyCostCriteriaRow(BaseModel):
+    """One section → phase → activity → classification cell of the ledger.
+
+    The page pivots these rows on any two of the four factors, so "cost in this
+    phase, under that activity" is a table rather than a new report.
+    """
+
+    section_code: str = ""
+    section_name: str = ""
+    phase_code: str = ""
+    phase_name: str = ""
+    activity_code: str = ""
+    activity_name: str = ""
+    classification: str = "Planned"
+    actual: Decimal = Decimal("0")
+    npt: Decimal = Decimal("0")
+    upa: Decimal = Decimal("0")
+    share: Decimal = Decimal("0")
+
+
 class DailyCostWellSummary(BaseModel):
     """Everything captured from the AFE and the daily sheets, costed for the whole well.
 
@@ -1248,6 +1343,11 @@ class DailyCostWellSummary(BaseModel):
     mud_cost: DailyCostMudReconciliation | None = None
     # Present whenever the well has LIH register entries in the reported window.
     lih_cost: DailyCostLihSummary | None = None
+    # What the current spend rate projects to, and how much of it is out of scope.
+    forecast: DailyCostForecast | None = None
+    out_of_scope: DailyCostOutOfScope | None = None
+    # Fine-grained section/phase/activity/classification cells for the criteria pivot.
+    criteria: list[DailyCostCriteriaRow] = Field(default_factory=list)
 
 
 DailyCostDayOut.model_rebuild()

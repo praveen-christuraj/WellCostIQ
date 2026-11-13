@@ -26,8 +26,8 @@ import { useColorMode } from '../context/ThemeContext'
 import { api, body } from '../lib/api'
 import { chartPalette } from '../designSystem'
 import {
-  AFE_STATUS_LABELS, currentYearFilters, EMPTY_FILTERS, compactMoney, count, dashboardQuery, decimal, displayDate,
-  displayDateTime, money, percent, presetRange,
+  AFE_STATUS_LABELS, currentYearFilters, EMPTY_FILTERS, compactMoney, count, dashboardQuery, days, daysBasis, decimal,
+  displayDate, displayDateTime, money, percent, presetRange,
   type BusinessDashboard as BusinessDashboardData, type DashboardAfeRow, type DashboardFilters,
   type DashboardRigRow, type DashboardWellRow, type Money,
 } from '../lib/businessDashboard'
@@ -171,7 +171,7 @@ export default function BusinessDashboard() {
       grid: { left: 8, right: 26, top: 30, bottom: 8, containLabel: true },
       legend: { top: 0, textStyle: { color: axis.text }, itemWidth: 12, itemHeight: 8 },
       tooltip: {
-        trigger: 'axis', axisPointer: { type: 'shadow' },
+        trigger: 'axis', axisPointer: { type: 'shadow', snap: true },
         valueFormatter: value => (value === '-' ? '—' : money(String(value ?? 0), currency)),
       },
       xAxis: { type: 'value', axisLabel: { color: axis.text, fontSize: 10.5 }, splitLine: { lineStyle: { color: axis.line } } },
@@ -192,8 +192,10 @@ export default function BusinessDashboard() {
       grid: { left: 8, right: 30, top: 30, bottom: 8, containLabel: true },
       legend: { top: 0, textStyle: { color: axis.text }, itemWidth: 12, itemHeight: 8 },
       tooltip: {
-        trigger: 'axis', axisPointer: { type: 'shadow' },
-        valueFormatter: value => `${Number(value ?? 0).toLocaleString()} d`,
+        trigger: 'axis', axisPointer: { type: 'shadow', snap: true },
+        valueFormatter: value => `${Number(value ?? 0).toLocaleString(undefined, {
+          minimumFractionDigits: 3, maximumFractionDigits: 3,
+        })} d`,
       },
       xAxis: { type: 'value', axisLabel: { color: axis.text, fontSize: 10.5 }, splitLine: { lineStyle: { color: axis.line } } },
       yAxis: {
@@ -206,7 +208,7 @@ export default function BusinessDashboard() {
         {
           name: 'Productive days', type: 'bar', stack: 'days', barMaxWidth: 16,
           itemStyle: { color: palette.series[2] },
-          data: rows.map(row => Math.max((row.actual_days ?? 0) - Number(row.npt_days ?? 0) - Number(row.upa_days ?? 0), 0)),
+          data: rows.map(row => Math.max(Number(row.actual_days ?? 0) - Number(row.npt_days ?? 0) - Number(row.upa_days ?? 0), 0)),
         },
         {
           name: 'UPA days', type: 'bar', stack: 'days', barMaxWidth: 16,
@@ -233,7 +235,7 @@ export default function BusinessDashboard() {
       animation: false,
       grid: { left: 12, right: 16, top: 30, bottom: 26, containLabel: true },
       legend: { top: 0, textStyle: { color: axis.text }, itemWidth: 12, itemHeight: 8 },
-      tooltip: { trigger: 'axis', valueFormatter: value => money(String(value ?? 0), currency) },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross', snap: true }, valueFormatter: value => money(String(value ?? 0), currency) },
       xAxis: {
         type: 'category',
         data: rows.map(row => row.cost_date.slice(5)),
@@ -259,9 +261,22 @@ export default function BusinessDashboard() {
 
   const mixOption: EChartsOption = useMemo(() => {
     const rows = (data?.cost_groups ?? []).filter(row => Number(row.actual ?? 0) > 0)
+    const total = rows.reduce((sum, row) => sum + Number(row.actual ?? 0), 0)
     return {
       animation: false,
-      tooltip: { trigger: 'item', valueFormatter: value => money(String(value ?? 0), currency) },
+      tooltip: {
+        trigger: 'item',
+        // The slice under the cursor is named with its exact value and share, so
+        // a thin ring segment can never show the neighbouring group's figure.
+        formatter: (params: unknown) => {
+          const item = params as { name?: string; value?: number | string; percent?: number; marker?: string }
+          const value = Number(item.value ?? 0)
+          const share = item.percent ?? (total > 0 ? (value / total) * 100 : 0)
+          return `${item.marker ?? ''}<b>${item.name ?? ''}</b><br/>`
+            + `${money(String(value), currency)}<br/>`
+            + `${Number(share).toFixed(1)}% of actual cost`
+        },
+      },
       legend: { bottom: 0, textStyle: { color: axis.text }, itemWidth: 12, itemHeight: 8 },
       series: [{
         type: 'pie',
@@ -285,7 +300,7 @@ export default function BusinessDashboard() {
       animation: false,
       grid: { left: 8, right: 48, top: 8, bottom: 8, containLabel: true },
       tooltip: {
-        trigger: 'axis', axisPointer: { type: 'shadow' },
+        trigger: 'axis', axisPointer: { type: 'shadow', snap: true },
         formatter: (params: unknown) => {
           const items = params as { dataIndex: number }[]
           const row = rows[items[0]?.dataIndex ?? 0]
@@ -350,18 +365,21 @@ export default function BusinessDashboard() {
     }
     if (caps.actuals) {
       columns.push({
-        headerName: 'ACTUAL DAYS', field: 'actual_days', minWidth: 140, flex: 0.8,
-        headerTooltip: 'Calendar days from the first to the last day of the cost register, including any missing sheet inside that span.',
+        headerName: 'ACTUAL DAYS', field: 'actual_days', minWidth: 155, flex: 0.85,
+        headerTooltip: 'Exact elapsed days from the Well Spud Date & Time (or the Progress Completed Date & Time) to the end of the last cost date, at three decimals. The number of cost sheets is not the duration.',
         cellRenderer: (params: ICellRendererParams<DashboardWellRow>) => params.data && <Box>
-          <Typography fontSize={12.5} fontWeight={700}>{count(params.data.actual_days)} <Typography component="span" fontSize={10} color="text.secondary">days</Typography></Typography>
-          <Typography fontSize={10} color="text.secondary">{count(params.data.recorded_days)} recorded · {count(params.data.sheets)} sheets</Typography>
+          <Typography fontSize={12.5} fontWeight={700}>{days(params.data.actual_days)} <Typography component="span" fontSize={10} color="text.secondary">days</Typography></Typography>
+          <Typography fontSize={10} color="text.secondary">
+            {params.data.actual_days_basis === 'spud' ? 'From spud · ' : params.data.actual_days_basis === 'cost_dates' ? 'Cost dates only · ' : ''}
+            {count(params.data.recorded_days)} recorded · {count(params.data.sheets)} sheets
+          </Typography>
         </Box>,
       })
       columns.push({
         headerName: 'NPT / UPA', field: 'npt_days', minWidth: 120, flex: 0.65,
         cellRenderer: (params: ICellRendererParams<DashboardWellRow>) => params.data && <Box display="flex" gap={.5} alignItems="center">
-          <Tag tone="error">{decimal(params.data.npt_days, 2)} NPT</Tag>
-          <Tag tone="warning">{decimal(params.data.upa_days, 2)} UPA</Tag>
+          <Tag tone="error">{decimal(params.data.npt_days, 3)} NPT</Tag>
+          <Tag tone="warning">{decimal(params.data.upa_days, 3)} UPA</Tag>
         </Box>,
       })
     }
@@ -451,10 +469,11 @@ export default function BusinessDashboard() {
         cellRenderer: (params: ICellRendererParams<DashboardAfeRow>) => params.data && <BalanceCell value={params.data.afe_balance} currency={params.data.currency}/>,
       },
       {
-        headerName: 'DAYS', field: 'actual_days', minWidth: 130, flex: 0.65,
+        headerName: 'DAYS', field: 'actual_days', minWidth: 145, flex: 0.7,
+        headerTooltip: 'Exact elapsed days clipped to this AFE\'s own cost dates, at three decimals — not the number of sheets.',
         cellRenderer: (params: ICellRendererParams<DashboardAfeRow>) => params.data && <Box>
-          <Typography fontSize={12}>{count(params.data.actual_days)} <Typography component="span" fontSize={10} color="text.secondary">days</Typography></Typography>
-          <Typography fontSize={10} color="text.secondary">{decimal(params.data.npt_days, 2)} NPT · {decimal(params.data.upa_days, 2)} UPA</Typography>
+          <Typography fontSize={12}>{days(params.data.actual_days)} <Typography component="span" fontSize={10} color="text.secondary">days</Typography></Typography>
+          <Typography fontSize={10} color="text.secondary">{decimal(params.data.npt_days, 3)} NPT · {decimal(params.data.upa_days, 3)} UPA</Typography>
         </Box>,
       },
       {
@@ -487,9 +506,10 @@ export default function BusinessDashboard() {
     ]
     if (caps.plan) columns.push({ headerName: 'PLANNED DAYS', field: 'planned_days', minWidth: 130, flex: 0.7, valueFormatter: params => decimal(String(params.value ?? ''), 2) })
     if (caps.actuals) columns.push({
-      headerName: 'ACTUAL DAYS', field: 'actual_days', minWidth: 135, flex: 0.7,
+      headerName: 'ACTUAL DAYS', field: 'actual_days', minWidth: 150, flex: 0.75,
+      headerTooltip: 'Sum of the exact elapsed days of the rig\'s wells, at three decimals.',
       cellRenderer: (params: ICellRendererParams<DashboardRigRow>) => params.data && <Box>
-        <Typography fontSize={12.5} fontWeight={700}>{count(params.data.actual_days)}</Typography>
+        <Typography fontSize={12.5} fontWeight={700}>{days(params.data.actual_days)}</Typography>
         <Typography fontSize={10} color="text.secondary">{count(params.data.recorded_days)} recorded · {count(params.data.draft_sheets)} draft sheets</Typography>
       </Box>,
     })
@@ -590,16 +610,16 @@ export default function BusinessDashboard() {
     caps.actuals && {
       key: 'actual-days',
       label: 'Actual days',
-      value: decimal(data!.kpis.actual_days),
-      hint: `${count(data!.kpis.recorded_days)} recorded · ${data!.kpis.day_variance === null ? '—' : `${Number(data!.kpis.day_variance) >= 0 ? '+' : ''}${decimal(data!.kpis.day_variance, 1)} vs plan`}`,
+      value: days(data!.kpis.actual_days),
+      hint: `${count(data!.kpis.recorded_days)} recorded · ${data!.kpis.day_variance === null ? '—' : `${Number(data!.kpis.day_variance) >= 0 ? '+' : ''}${decimal(data!.kpis.day_variance, 3)} vs plan`}`,
       icon: <AlignVerticalBottomRounded fontSize="small"/>,
       tone: (data!.kpis.day_variance !== null && Number(data!.kpis.day_variance) > 0 ? 'warning' : 'default') as 'warning' | 'default',
-      title: 'Calendar days from the first to the last day of each well\'s cost register, summed across wells.',
+      title: `Exact elapsed days from each well's Well Spud Date & Time to its last cost date (or Progress Completed date & time), at three decimals. ${daysBasis(data!.kpis.actual_days_basis)}`,
     },
     caps.actuals && {
       key: 'npt',
       label: 'NPT / UPA days',
-      value: `${decimal(data!.kpis.npt_days, 2)} / ${decimal(data!.kpis.upa_days, 2)}`,
+      value: `${decimal(data!.kpis.npt_days, 3)} / ${decimal(data!.kpis.upa_days, 3)}`,
       hint: `${compactMoney(data!.kpis.npt_amount, currency)} NPT · ${compactMoney(data!.kpis.upa_amount, currency)} UPA`,
       icon: <EventBusyOutlined fontSize="small"/>,
       tone: (Number(data!.kpis.npt_days ?? 0) > 0 ? 'error' : 'default') as 'error' | 'default',
@@ -773,8 +793,8 @@ export default function BusinessDashboard() {
             {[
               { label: 'Rigs in scope', value: count(data.kpis.rigs), hint: `${count(data.kpis.draft_wells)} wells still in configuration draft` },
               { label: 'Over budget', value: `${count(data.kpis.over_budget_wells)} / ${count(data.kpis.over_budget_afes)}`, hint: 'Wells / AFEs above their effective plan', alert: Boolean(data.kpis.over_budget_wells) },
-              { label: 'Recording days', value: count(data.kpis.recorded_days), hint: `${count(data.kpis.actual_days)} calendar days in scope` },
-              { label: 'Unplanned (UPA)', value: compactMoney(data.kpis.upa_amount, currency), hint: `${decimal(data.kpis.upa_days, 2)} UPA days in the cost register` },
+              { label: 'Recording days', value: count(data.kpis.recorded_days), hint: `${days(data.kpis.actual_days)} actual days in scope` },
+              { label: 'Unplanned (UPA)', value: compactMoney(data.kpis.upa_amount, currency), hint: `${decimal(data.kpis.upa_days, 3)} UPA days in the cost register` },
             ].map((fact, index) => <Box key={fact.label} sx={{ px: 2.1, py: 1.5, borderLeft: index === 0 ? 0 : '1px solid', borderColor: 'divider', borderTop: { xs: index >= 2 ? '1px solid' : 0, md: 0 } }}>
               <Typography sx={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'text.secondary' }}>{fact.label}</Typography>
               <Typography sx={{ fontSize: 17, fontWeight: 700, mt: .35, letterSpacing: '-.4px', color: fact.alert ? 'error.main' : 'text.primary' }} className="tnum">{fact.value}</Typography>
