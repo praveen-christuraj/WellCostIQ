@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 UsageReportKey = Literal["mud-chemicals", "drill-bits", "tangibles", "services", "vendors"]
 UsageReportMode = Literal["usage", "cost"]
 UsageScope = Literal["drilling", "completion"]
-WellLifecycle = Literal["active", "final_review", "completed"]
+WellLifecycle = Literal["upcoming", "active", "final_review", "completed"]
 
 
 class _Strict(BaseModel):
@@ -48,6 +48,11 @@ class UsageWellOption(_Strict):
     config_status: str
     completion_status: str
     completion_config_status: str
+    # Roll-up of the live scopes — what the well-status filter uses when no
+    # scope is chosen — and which scopes are in Deleted Entries.
+    tracking_status: str = "upcoming"
+    drilling_is_deleted: bool = False
+    completion_is_deleted: bool = False
     # Configuration scopes the well actually carries costs/plans for.
     scopes: list[str] = Field(default_factory=list)
     has_costs: bool = False
@@ -238,7 +243,7 @@ class UsageReportExportAudit(_Strict):
     rig_id: str = Field(default="", max_length=36)
     well_ids: list[str] = Field(default_factory=list, max_length=500)
     scope: Literal["", "drilling", "completion"] = ""
-    lifecycle: Literal["", "active", "final_review", "completed"] = ""
+    lifecycle: Literal["", "upcoming", "active", "final_review", "completed"] = ""
     currency: str = Field(default="", max_length=10)
     date_from: date | None = None
     date_to: date | None = None

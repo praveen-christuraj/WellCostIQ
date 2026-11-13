@@ -11,6 +11,7 @@ import {
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag } from '../components/Common'
+import { isOpenWellStatus } from '../lib/rigWell'
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
 import { BulkDailyCostPrintDialog } from '../components/daily-cost/BulkDailyCostPrintDialog'
 import { useAuth } from '../context/AuthContext'
@@ -37,8 +38,8 @@ type CostTab = 'register' | 'history' | 'final_review' | 'completed'
 const TABS: { key: CostTab; label: string; hint: string }[] = [
   { key: 'register', label: 'Daily cost register', hint: 'One row per rig: the latest saved daily sheet, ready to continue.' },
   { key: 'history', label: 'Other daily cost registers', hint: 'Every earlier sheet, including superseded days of an active rig.' },
-  { key: 'final_review', label: 'Wells for final review', hint: 'Wells whose costs are closed for review before completion.' },
-  { key: 'completed', label: 'Completed wells', hint: 'Wells that finished, kept for reference and reporting.' },
+  { key: 'final_review', label: 'Wells in final review', hint: 'Well scopes in Final review: no new sheets; existing sheets are corrected and submitted before sign-off.' },
+  { key: 'completed', label: 'Completed wells', hint: 'Well scopes signed off as Completed. Their sheets are locked and kept for reference and reporting.' },
 ]
 
 /**
@@ -171,8 +172,9 @@ export default function DailyCostManagement() {
     const well = wellsById[row.well_id]
     const afe = afesById[row.afe_id]
     if (!well || !afe) return 'register'
+    // The review tabs follow the well status of the sheet's own scope.
     const state = scopeState(well, afe.configuration_scope as 'drilling' | 'completion')
-    if (state.config_status === 'final_review') return 'final_review'
+    if (state.status === 'final_review') return 'final_review'
     if (state.status === 'completed') return 'completed'
     return 'register'
   }
@@ -218,23 +220,29 @@ export default function DailyCostManagement() {
     }
   }, [rows, deletedView, perRigView, latestRowIds, wellsById, afesById]) // rowTab reads the reference maps
 
-  // Wells whose at least one non-deleted scope is configured can take new daily sheets; the sheet's scope follows its AFE.
-  const wells = useMemo(() => reference?.wells.filter(well => {
-    const drillingReady = !well.drilling_is_deleted && well.status === 'active' && well.config_status === 'configured'
-    const completionReady = !well.completion_is_deleted && well.completion_status === 'active' && well.completion_config_status === 'configured'
-    return drillingReady || completionReady
-  }) ?? [], [reference])
+  // A scope takes new daily sheets while it is Upcoming or Active on a Configured
+  // plan — the rule the API applies. An Upcoming scope is included on purpose: its
+  // first daily sheet is what starts it. The sheet's scope follows its AFE.
+  const scopeReady = (well: DailyCostReference['wells'][number], scope: 'drilling' | 'completion') => {
+    const state = scopeState(well, scope)
+    const deleted = scope === 'completion' ? well.completion_is_deleted : well.drilling_is_deleted
+    return !deleted && isOpenWellStatus(state.status) && state.config_status === 'configured'
+  }
+  const wells = useMemo(
+    () => reference?.wells.filter(well => scopeReady(well, 'drilling') || scopeReady(well, 'completion')) ?? [],
+    [reference],
+  )
   const selectedWell = wells.find(well => well.id === wellId)
+  // Only the AFEs of a scope that can take a sheet, so the picker never offers a
+  // combination the API would refuse.
   const afes = useMemo(() => reference?.afes.filter(afe => {
     if (afe.well_id !== wellId) return false
     const well = wellsById[afe.well_id]
-    const afeScope = afe.configuration_scope ?? 'drilling'
-    if (well && (afeScope === 'completion' ? well.completion_is_deleted : well.drilling_is_deleted)) return false
-    return true
+    return !well || scopeReady(well, afe.configuration_scope ?? 'drilling')
   }) ?? [], [reference, wellId, wellsById])
   const selectedAfe = afes.find(afe => afe.id === afeId)
   const selectedScope: 'drilling' | 'completion' = selectedAfe?.configuration_scope
-    ?? (selectedWell && (selectedWell.drilling_is_deleted || selectedWell.config_status !== 'configured') ? 'completion' : 'drilling')
+    ?? (selectedWell && !scopeReady(selectedWell, 'drilling') ? 'completion' : 'drilling')
   const needsUsdExchangeRate = Boolean(selectedAfe && selectedAfe.standard_currency.toUpperCase() !== 'USD')
   const usdRateValid = !needsUsdExchangeRate || (Number.isFinite(Number(usdExchangeRate)) && Number(usdExchangeRate) > 0)
   const createDateValid = isValidCostDate(costDate)

@@ -18,7 +18,8 @@ import { SowAdjustmentDialog } from '../components/afe/SowAdjustmentDialog'
 import { ServiceLineDialog } from '../components/afe/ServiceLineDialog'
 import { TangibleLineDialog } from '../components/afe/TangibleLineDialog'
 import { useAuth } from '../context/AuthContext'
-import { formatDepth } from '../lib/rigWell'
+import { formatDepth, isOpenWellStatus, trackingLabel } from '../lib/rigWell'
+import { PlanStatusTag, WellStatusTag } from '../components/WellLifecycle'
 import { formatDepthMeters } from '../lib/units'
 import { ApiError, api, body } from '../lib/api'
 import {
@@ -877,7 +878,9 @@ export default function AfeEstimate() {
       Reusable costing sets could not be loaded: {costingSetError}. You can still edit and save this estimate as usual.
     </Alert>}
     {saved.well.config_status !== 'configured' && <Alert severity="warning" sx={{ mb: 1.5 }}>
-      The well plan is in Draft. Mark the well as Configured in Rig & Well Management before saving or submitting this estimate.
+      {isOpenWellStatus(saved.well.status)
+        ? 'The well plan is in Draft. Mark it as Configured in Rig & Well Management before saving or submitting this estimate.'
+        : `This well scope is in ${trackingLabel(saved.well.status)} and its plan is closed, so this estimate is read-only. Return the scope to Active in Rig & Well Management to change it.`}
     </Alert>}
     {!editable && afe.status === 'draft' && !can('afe:estimate') && <Alert severity="info" sx={{ mb: 1.5 }}>You can view this estimate. Changing it requires the AFE estimate permission.</Alert>}
     {editable && incompleteCount > 0 && <Alert severity="warning" sx={{ mb: 1.5 }}>
@@ -899,8 +902,10 @@ export default function AfeEstimate() {
           <Typography color="text.secondary" fontSize={12} mt={.3}>{saved.well.well_code} · {saved.well.well_name} · {saved.well.well_location} · Block {saved.well.block}</Typography>
         </Box>
         <Box display="flex" gap={1} alignItems="center" flexWrap="wrap">
-          <Tag tone={saved.well.config_status === 'configured' ? 'info' : 'warning'}>Plan {saved.well.config_status}</Tag>
-          <Tag>{saved.well.status}</Tag>
+          <Typography fontSize={11} fontWeight={700} color="text.secondary">Well status</Typography>
+          <WellStatusTag status={saved.well.status}/>
+          <Typography fontSize={11} fontWeight={700} color="text.secondary">Plan status</Typography>
+          <PlanStatusTag status={saved.well.config_status}/>
           <Typography fontSize={12} color="text.secondary">Planned {daysText(saved.well.total_days)}{saved.well.total_depth ? ` · ${formatDepth(saved.well.total_depth, saved.well.depth_unit)}` : ''}</Typography>
           <Button component={RouterLink} to="/rig-well/wells" size="small">Edit plan</Button>
         </Box>

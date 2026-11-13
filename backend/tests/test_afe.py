@@ -370,7 +370,7 @@ def test_afe_register_requires_configured_well_and_matching_rig_and_unique_codes
 
         unconfigured = client.post("/api/v1/afe/afes", headers=headers, json=body)
         assert unconfigured.status_code == 422
-        assert "Configure the well" in unconfigured.json()["detail"]
+        assert "Configure the drilling sections and phases" in unconfigured.json()["detail"]
 
         _configure_well(client, headers, well["id"], master)
         mismatch = client.post("/api/v1/afe/afes", headers=headers, json={**body, "rig_id": other_rig["id"]})
@@ -767,7 +767,7 @@ def test_afe_needs_a_configured_plan_for_create_estimate_save_and_submit():
         blocked_save = client.put(url, headers=headers, json=day_rate_only)
         assert blocked_save.status_code == 409 and "Configured" in blocked_save.json()["detail"]
         blocked_submit = client.post(f"/api/v1/afe/afes/{afe.json()['id']}/status", headers=headers, json={"action": "submit", "remarks": ""})
-        assert blocked_submit.status_code == 409 and "not Configured" in blocked_submit.json()["detail"]
+        assert blocked_submit.status_code == 409 and "Mark it as Configured" in blocked_submit.json()["detail"]
 
 
 def test_mixed_currency_estimate_needs_standard_currency_and_rates_then_converts_totals():
@@ -869,17 +869,20 @@ def test_scoped_plans_keep_rows_units_days_and_lifecycles_independent():
             response = client.post(f"{url}/transition", headers=headers, json={"scope": scope, "action": action, "remarks": "Checked scope"})
             assert response.status_code == 200, response.text
 
-        transition("drilling", "final_review")
-        transition("drilling", "complete")
-        transition("completion", "configure")
-        transition("completion", "final_review")
-        transition("completion", "complete")
+        # Each scope walks its own ladders: Upcoming -> Active -> Final review -> Completed.
+        for action in ("start", "final_review", "complete"):
+            transition("drilling", action)
+        for action in ("configure", "start", "final_review", "complete"):
+            transition("completion", action)
         completion = client.get(f"{url}/configuration?scope=completion", headers=headers).json()
-        assert completion["status"] == "completed" and completion["config_status"] == "final_review"
-        transition("completion", "activate")
-        transition("completion", "draft")
+        assert completion["status"] == "completed" and completion["config_status"] == "completed"
+        # ... and back down one step at a time, without touching the other scope.
+        for action in ("reopen", "reactivate", "draft"):
+            transition("completion", action)
+        completion = client.get(f"{url}/configuration?scope=completion", headers=headers).json()
+        assert completion["status"] == "active" and completion["config_status"] == "draft"
         assert client.get(f"{url}/configuration", headers=headers).json()["status"] == "completed"
-        assert client.get(f"{url}/configuration", headers=headers).json()["config_status"] == "final_review"
+        assert client.get(f"{url}/configuration", headers=headers).json()["config_status"] == "completed"
         assert client.put(f"{url}/configuration", headers=headers, json=plan).status_code == 200
         with SessionLocal() as db:
             assert any("completion" in entry.summary for entry in db.scalars(select(AuditLog)).all())
@@ -902,8 +905,9 @@ def test_afe_prices_and_validates_only_the_selected_configuration_scope():
         assert client.put(f"{url}/configuration", headers=headers, json=plan).status_code == 200
         assert client.post("/api/v1/afe/afes", headers=headers, json=afe_body).status_code == 422
         assert client.post(f"{url}/transition", headers=headers, json={"scope": "completion", "action": "configure", "remarks": "Checked"}).status_code == 200
-        assert client.post(f"{url}/transition", headers=headers, json={"scope": "drilling", "action": "final_review", "remarks": "Drilling finished"}).status_code == 200
-        assert client.post(f"{url}/transition", headers=headers, json={"scope": "drilling", "action": "complete", "remarks": "Drilling finished"}).status_code == 200
+        for action in ("start", "final_review", "complete"):
+            moved = client.post(f"{url}/transition", headers=headers, json={"scope": "drilling", "action": action, "remarks": "Drilling finished"})
+            assert moved.status_code == 200, moved.text
         response = client.post("/api/v1/afe/afes", headers=headers, json=afe_body)
         assert response.status_code == 200, response.text
         completion = response.json()
@@ -945,7 +949,7 @@ def test_afe_prices_and_validates_only_the_selected_configuration_scope():
         # Drilling is completed: its estimate can no longer be rewritten.
         assert client.put(f"/api/v1/afe/afes/{drilling['id']}/estimate", headers=headers, json=payload).status_code == 409
         reference = client.get("/api/v1/afe/reference", headers=headers).json()["wells"][0]
-        assert reference["config_status"] == "final_review" and reference["completion_config_status"] == "draft"
+        assert reference["config_status"] == "completed" and reference["completion_config_status"] == "draft"
         assert reference["completion_section_count"] == 1
 
 

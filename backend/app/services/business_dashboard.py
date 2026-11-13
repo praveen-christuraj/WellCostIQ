@@ -564,7 +564,9 @@ def dashboard(
         typed_wells = {afe.well_id for afe in all_afes if afe.afe_type == afe_type}
         wells = [well for well in wells if well.id in typed_wells]
     if well_status:
-        wells = [well for well in wells if well.status == well_status]
+        # The roll-up of the live scopes, exactly as the well register shows it:
+        # a Completion-only well is not judged by a Drilling scope it no longer has.
+        wells = [well for well in wells if well.tracking_status == well_status]
 
     well_ids = [well.id for well in wells]
 
@@ -898,8 +900,8 @@ def dashboard(
             well_name=well.well_name,
             well_location=well.well_location,
             block=well.block,
-            status=well.status,
-            config_status=well.config_status,
+            status=well.tracking_status,
+            config_status=well.tracking_plan_status,
             depth_unit="m",
             configured_depth_unit=well.depth_unit,
             rig_id=well.rig_id,
@@ -1023,14 +1025,20 @@ def dashboard(
 
     # ---- slices -----------------------------------------------------------------
     well_statuses = [
+        # The four well statuses add up to every well in the selection.
+        DashboardSlice(key="upcoming", label="Upcoming wells", count=sum(1 for row in well_rows if row.status == "upcoming")),
         DashboardSlice(key="active", label="Active wells", count=sum(1 for row in well_rows if row.status == "active")),
+        DashboardSlice(
+            key="final_review", label="Wells in final review",
+            count=sum(1 for row in well_rows if row.status == "final_review"),
+        ),
         DashboardSlice(key="completed", label="Completed wells", count=sum(1 for row in well_rows if row.status == "completed")),
         DashboardSlice(
-            key="configured", label="Configuration complete",
+            key="configured", label="Plan configured",
             count=sum(1 for row in well_rows if row.config_status == "configured"),
         ),
         DashboardSlice(
-            key="draft", label="Configuration in draft",
+            key="draft", label="Plan in draft",
             count=sum(1 for row in well_rows if row.config_status == "draft"),
         ),
         DashboardSlice(key="tracking", label="Cost tracking started", count=kpis.wells_with_actuals or 0),

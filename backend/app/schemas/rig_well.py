@@ -228,9 +228,35 @@ class WellUpdate(BaseModel):
         return _trim_optional(value)
 
 
+# The two ladders of a configuration scope. ``app.services.well_lifecycle`` owns
+# the rules; these aliases only keep every payload on the same vocabulary.
+WellStatus = Literal["upcoming", "active", "final_review", "completed"]
+PlanStatus = Literal["draft", "configured", "completed"]
+
+
+class WellTransitionOption(BaseModel):
+    """One status move the register may offer for a scope right now."""
+
+    action: str
+    label: str
+    description: str
+    ladder: Literal["well", "plan"]
+    direction: Literal["forward", "rollback"]
+    to_status: WellStatus
+    to_plan: PlanStatus
+    permission: str
+    # Whether the viewer holds ``permission``. A register hides a move the viewer
+    # may never make, and shows a permitted-but-blocked one disabled with ``reason``.
+    permitted: bool = True
+    # False when a precondition is missing or the viewer lacks the permission;
+    # ``reason`` then says what to do, so the menu can show it instead of failing.
+    allowed: bool
+    reason: str = ""
+
+
 class WellOut(BaseModel):
-    completion_status: Literal["upcoming", "active", "completed"] = "upcoming"
-    completion_config_status: Literal["draft", "configured", "final_review"] = "draft"
+    completion_status: WellStatus = "upcoming"
+    completion_config_status: PlanStatus = "draft"
     completion_section_count: int = 0
     id: str
     rig_id: str
@@ -246,13 +272,18 @@ class WellOut(BaseModel):
     block: str
     objective: str
     remarks: str
-    status: Literal["upcoming", "active", "completed"]
-    config_status: Literal["draft", "configured", "final_review"]
+    status: WellStatus
+    config_status: PlanStatus
     # Roll-up of the live scopes: what the registers and dashboards segregate on.
-    tracking_status: Literal["upcoming", "active", "completed"] = "upcoming"
+    tracking_status: WellStatus = "upcoming"
     upcoming_scope_count: int = 0
     active_scope_count: int = 0
+    final_review_scope_count: int = 0
     completed_scope_count: int = 0
+    # The status moves each live scope can make now, decided by the server so the
+    # register never offers a move the API would refuse.
+    drilling_transitions: list[WellTransitionOption] = Field(default_factory=list)
+    completion_transitions: list[WellTransitionOption] = Field(default_factory=list)
     depth_unit: Literal["m", "ft"]
     completion_depth_unit: Literal["m", "ft"]
     standard_depth_unit: Literal["m"] = "m"
@@ -351,21 +382,25 @@ class WellConfigurationOut(BaseModel):
     well_name: str
     rig_code: str
     rig_name: str
-    status: Literal["upcoming", "active", "completed"]
-    config_status: Literal["draft", "configured", "final_review"]
+    status: WellStatus
+    config_status: PlanStatus
     depth_unit: Literal["m", "ft"]
     standard_depth_unit: Literal["m"] = "m"
     total_depth: Decimal | None = None
     total_depth_m: Decimal | None = None
     total_days: Decimal
     sections: list[ConfigurationSectionOut]
+    transitions: list[WellTransitionOption] = Field(default_factory=list)
 
 
 class WellTransitionIn(BaseModel):
     scope: Literal["drilling", "completion"] = "drilling"
-    # `configure`/`draft`/`final_review` walk the plan; `complete`/`activate` and
-    # `start`/`defer` walk the tracking status (upcoming → active → completed).
-    action: Literal["configure", "draft", "final_review", "complete", "activate", "start", "defer"]
+    # Forward: `configure` (plan), `start`, `final_review`, `complete` (well).
+    # Rollback, always one step: `draft` (plan), `defer`, `reactivate`, `reopen`.
+    # See app.services.well_lifecycle for the full table.
+    action: Literal[
+        "configure", "draft", "start", "defer", "final_review", "reactivate", "complete", "reopen"
+    ]
     remarks: str = Field(min_length=3, max_length=500)
 
     model_config = ConfigDict(extra="forbid")
@@ -617,8 +652,11 @@ class RigWellOverview(BaseModel):
     deleted_wells: int
     active_sub_activities: int
     deleted_sub_activities: int
+    # Plan ladder of the wells that are still open (upcoming or active): a well is
+    # counted once, as configured when any open scope is, otherwise as draft.
     configured_wells: int
     draft_wells: int
+    # Well ladder. upcoming + active + final review + completed = every live well.
     final_review_wells: int = 0
     completed_wells: int
     activity_counts: list[RigWellActivityCount]

@@ -44,7 +44,7 @@ from app.models import (
 )
 from app.models.daily_cost import OTHER_EXPENSE_TYPE_LABELS
 from app.models.entities import User
-from app.models.rig_well import now as _model_now, uid
+from app.models.rig_well import WELL_CLOSED_STATUSES, now as _model_now, uid
 from app.schemas.afe import AfeEstimateOut
 from app.schemas.daily_cost import (
     ALL_COST_GROUPS, OTHER_EXPENSE_MIN_REMARKS, TRACKED_COST_GROUPS,
@@ -69,6 +69,7 @@ from app.services import afe as afe_service
 from app.services import audit
 from app.services import lih_cost as lih_cost_service
 from app.services import mud_cost as mud_cost_service
+from app.services import well_lifecycle
 from app.models.catalogue import CatalogueOption
 from app.core.precision import DECIMAL_QUANT
 from app.domain.service_groups import service_group_rank
@@ -374,19 +375,41 @@ def _well_or_422(
         raise HTTPException(status_code=422, detail="Select an active well from this workspace")
     if well.rig is None or well.rig.organization_id != organization_id or well.rig.is_deleted:
         raise HTTPException(status_code=409, detail="Restore the well's rig before tracking daily costs")
-    if well.scope_is_deleted(scope):
+    # One rule, shared with AFEs and SOW adjustments: a scope takes new costs
+    # only while it is upcoming or active on a configured plan. A scope in final
+    # review or completed is a state conflict (409); a plan that is not signed
+    # off yet is missing input (422).
+    blocker = well_lifecycle.planning_blocker(well, scope, "starting a daily cost sheet")
+    if blocker:
+        closed = well.scope_is_deleted(scope) or well.scope_value(scope, "status") in WELL_CLOSED_STATUSES
+        raise HTTPException(status_code=409 if closed else 422, detail=blocker)
+    return well
+
+
+def _require_scope_not_signed_off(db: Session, entry: DailyCostEntry, purpose: str) -> None:
+    """Freeze the sheets of a scope that has been signed off as Completed.
+
+    Final review is when sheets are corrected and submitted, so they stay
+    editable there. Once the scope is Completed its cost is the record: changing
+    a sheet first needs the scope rolled back to Final review, which is audited
+    and needs ``rig-well:rollback``.
+    """
+    well = db.get(Well, entry.well_id)
+    if well is None:
+        return
+    scope = (
+        entry.afe.configuration_scope
+        if entry.afe is not None and entry.afe.configuration_scope in ("drilling", "completion")
+        else "drilling"
+    )
+    if not well.scope_is_deleted(scope) and well.scope_value(scope, "status") == "completed":
         raise HTTPException(
             status_code=409,
-            detail=f"Restore the {scope} scope on {well.well_code} in Rig & Well Management before entering daily costs.",
+            detail=(
+                f"The {scope} scope of {well.well_code} is Completed, so its daily cost sheets are locked. "
+                f"Return the scope to Final review in Rig & Well Management before {purpose}."
+            ),
         )
-    if well.scope_value(scope, "status") == "completed":
-        raise HTTPException(status_code=409, detail=f"Daily costs cannot be started for a completed {scope} scope")
-    if well.scope_value(scope, "config_status") != "configured" or not well.sections_for_scope(scope):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Configure and sign off the well's {scope} section and phase plan before tracking costs",
-        )
-    return well
 
 
 def _estimate_for_daily_cost(db: Session, organization_id: str, afe: Afe) -> AfeEstimateOut:
@@ -1090,8 +1113,7 @@ def create_entry(db: Session, organization_id: str, data: DailyCostEntryCreate, 
             # Costing a day is the moment operations start: an upcoming scope is
             # promoted so the register, the dashboards and the budget plan against
             # the same well without the operator remembering to press a button.
-            if well.scope_value(entry_scope, "status") == "upcoming":
-                well.set_scope_value(entry_scope, "status", "active")
+            if well_lifecycle.auto_start(well, entry_scope):
                 audit.record(
                     db, organization_id=organization_id, actor=user, action="update", entity_type="well",
                     entity_label=well.well_code,
@@ -3144,6 +3166,7 @@ def update_entry_date(
     try:
         with _WRITE_LOCK:
             entry = _get_entry(db, entry_id, organization_id, deleted=False, lock=True)
+            _require_scope_not_signed_off(db, entry, "changing a sheet's date")
             if entry.status != "draft":
                 raise HTTPException(
                     status_code=409,
@@ -3210,6 +3233,7 @@ def save_day(
     try:
         with _WRITE_LOCK:
             entry = _get_entry(db, entry_id, organization_id, deleted=False, lock=True)
+            _require_scope_not_signed_off(db, entry, "editing a daily cost sheet")
             if entry.status != "draft":
                 raise HTTPException(status_code=409, detail="Submitted daily cost sheets are read-only. Reopen the sheet with the authorized workflow first.")
             service_rows, consumable_rows, tangible_rows, other_rows, extra_rates, entry_usd_fx = _normalize_payload(db, entry, payload)
@@ -3633,6 +3657,7 @@ def reopen_entry(
 ) -> DailyCostDayOut:
     with _WRITE_LOCK:
         entry = _get_entry(db, entry_id, organization_id, deleted=False, lock=True)
+        _require_scope_not_signed_off(db, entry, "reopening a daily cost sheet")
         if entry.status != "submitted":
             raise HTTPException(status_code=409, detail="Only a Submitted daily cost sheet can be reopened")
         # Late reopens (older than the amendment threshold) are amendments:
@@ -3698,6 +3723,7 @@ def soft_delete_entry(
 ) -> DailyCostEntryOut:
     with _WRITE_LOCK:
         entry = _get_entry(db, entry_id, organization_id, deleted=False, lock=True)
+        _require_scope_not_signed_off(db, entry, "deleting a daily cost sheet")
         if entry.status != "draft":
             raise HTTPException(status_code=409, detail="Reopen a submitted daily sheet before moving it to Deleted Entries")
         entry.is_deleted = True
@@ -3732,6 +3758,8 @@ def bulk_soft_delete(
 ) -> int:
     with _WRITE_LOCK:
         rows = _selected_entries(db, organization_id, data.ids, deleted=False)
+        for row in rows:
+            _require_scope_not_signed_off(db, row, "deleting daily cost sheets")
         if any(row.status != "draft" for row in rows):
             raise HTTPException(status_code=409, detail="Submitted sheets must be reopened before they can be deleted")
         timestamp = _now()
@@ -3751,6 +3779,7 @@ def restore_entry(
 ) -> DailyCostEntryOut:
     with _WRITE_LOCK:
         entry = _get_entry(db, entry_id, organization_id, deleted=True, lock=True)
+        _require_scope_not_signed_off(db, entry, "restoring a daily cost sheet")
         duplicate = db.scalar(select(DailyCostEntry.id).where(
             DailyCostEntry.organization_id == organization_id, DailyCostEntry.well_id == entry.well_id,
             DailyCostEntry.afe_id == entry.afe_id, DailyCostEntry.cost_date == entry.cost_date,
@@ -3774,6 +3803,7 @@ def bulk_restore(
     with _WRITE_LOCK:
         rows = _selected_entries(db, organization_id, data.ids, deleted=True)
         for row in rows:
+            _require_scope_not_signed_off(db, row, "restoring daily cost sheets")
             duplicate = db.scalar(select(DailyCostEntry.id).where(
                 DailyCostEntry.organization_id == organization_id, DailyCostEntry.well_id == row.well_id,
                 DailyCostEntry.afe_id == row.afe_id, DailyCostEntry.cost_date == row.cost_date,
@@ -4413,8 +4443,7 @@ def update_well_progress(
             # (planning) scope is flagged active here as well. The Well status
             # register and the daily-cost register can never then disagree.
             tracking_note = ""
-            if new_spud is not None and well.scope_value(data.scope, "status") == "upcoming":
-                well.set_scope_value(data.scope, "status", "active")
+            if new_spud is not None and well_lifecycle.auto_start(well, data.scope):
                 tracking_note = f"; the {scope_label.lower()} scope is now flagged active (spudged)"
             db.flush()
 
@@ -5361,6 +5390,7 @@ def import_daily_cost(
 ) -> DailyCostImportResponse:
     """Validate a whole CSV/XLSX-import payload before appending any lines."""
     entry = _get_entry(db, entry_id, organization_id, deleted=False)
+    _require_scope_not_signed_off(db, entry, "importing daily cost lines")
     if entry.status != "draft":
         raise HTTPException(status_code=409, detail="Submitted daily cost sheets are read-only")
     activity_rows = db.scalars(select(Activity).where(

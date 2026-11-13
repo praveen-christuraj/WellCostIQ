@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Box, MenuItem, TextField, Typography } from '@mui/material'
 import { ErrorMessage, FormDialog, useFormDirty } from '../Common'
+import { isOpenWellStatus, trackingLabel } from '../../lib/rigWell'
 import { api, body } from '../../lib/api'
 import { AFE_TYPES, type Afe, type AfeReference, type AfeType } from '../../lib/afe'
 
@@ -8,8 +9,8 @@ type Form = { configuration_scope: 'drilling' | 'completion'; rig_id: string; we
 
 const emptyForm = (): Form => ({ configuration_scope: 'drilling', rig_id: '', well_id: '', afe_code: '', afe_name: '', afe_type: 'Drilling', remarks: '' })
 
-// Create or edit an AFE header. Rig and well come from Rig & Well Management. The well must be active
-// and its plan must be marked Configured, because the estimate prices against its sections and phases.
+// Create or edit an AFE header. Rig and well come from Rig & Well Management. The well scope must be
+// Upcoming or Active with its plan marked Configured, because the estimate prices against its sections and phases.
 export function AfeFormDialog({ open, record, reference, onClose, onSaved }: {
   open: boolean
   record: Afe | null
@@ -36,11 +37,14 @@ export function AfeFormDialog({ open, record, reference, onClose, onSaved }: {
     : { status: well.status, config_status: well.config_status, section_count: well.section_count, is_deleted: Boolean(well.drilling_is_deleted) }
   const wellEligible = (well: AfeReference['wells'][number]) => {
     const plan = scopeState(well)
-    return (!plan.is_deleted && plan.status === 'active' && plan.config_status === 'configured' && plan.section_count > 0)
+    // The same rule the API applies: a budget is raised against a configured plan
+    // of a scope that is still Upcoming or Active. An upcoming well is budgeted
+    // before it starts, so it must be selectable here.
+    return (!plan.is_deleted && isOpenWellStatus(plan.status) && plan.config_status === 'configured' && plan.section_count > 0)
       || (well.id === record?.well_id && form.configuration_scope === record.configuration_scope)
   }
-  // The well picker lists only wells whose chosen scope is active and marked
-  // Configured (plus the well being edited, so it stays selectable).
+  // The well picker lists only wells whose chosen scope is Upcoming or Active on a
+  // Configured plan (plus the well being edited, so it stays selectable).
   const wells = useMemo(() => {
     const list = rigWells.filter(wellEligible)
     const selected = rigWells.find(well => well.id === form.well_id)
@@ -50,7 +54,7 @@ export function AfeFormDialog({ open, record, reference, onClose, onSaved }: {
   const selectedWell = wells.find(well => well.id === form.well_id)
   const wellNote = (well: AfeReference['wells'][number]) => {
     const plan = scopeState(well)
-    return plan.is_deleted ? ' · scope deleted' : plan.section_count === 0 ? ' · no scoped plan saved' : plan.status !== 'active' ? ' · scope completed' : plan.config_status !== 'configured' ? ' · scope not configured' : ''
+    return plan.is_deleted ? ' · scope deleted' : plan.section_count === 0 ? ' · no scoped plan saved' : !isOpenWellStatus(plan.status) ? ` · ${trackingLabel(plan.status).toLowerCase()}, plan closed` : plan.config_status !== 'configured' ? ' · plan not configured' : ''
   }
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm(current => ({ ...current, [key]: value }))
@@ -113,7 +117,7 @@ export function AfeFormDialog({ open, record, reference, onClose, onSaved }: {
       <TextField
         select label="Well" required value={form.well_id} onChange={event => set('well_id', event.target.value)}
         disabled={!form.rig_id}
-        helperText={!form.rig_id ? 'Choose a rig first.' : !rigWells.length ? 'This rig has no wells yet.' : !wells.length ? 'No well on this rig has an active scope marked Configured.' : selectedWell && !wellEligible(selectedWell) ? 'This scoped plan is not active or not marked Configured.' : 'The selected scope must be active and have a plan marked Configured.'}
+        helperText={!form.rig_id ? 'Choose a rig first.' : !rigWells.length ? 'This rig has no wells yet.' : !wells.length ? 'No well on this rig has an Upcoming or Active scope with a Configured plan.' : selectedWell && !wellEligible(selectedWell) ? 'This scope is closed (Final review or Completed) or its plan is not Configured.' : 'The selected scope must be Upcoming or Active with a Configured plan.'}
         error={Boolean(selectedWell) && !wellEligible(selectedWell!)}
       >
         {wells.map(well => <MenuItem key={well.id} value={well.id} disabled={!wellEligible(well)}>

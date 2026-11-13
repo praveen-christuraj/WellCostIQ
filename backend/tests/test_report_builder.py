@@ -114,6 +114,7 @@ def fresh_database():
                  created_at=datetime(2026, 1, 15, 10, 0)),
             Well(organization_id=north.id, rig_id=rig.id, block_id=block.id, well_code="W2", well_name="Beta",
                  well_location="Offshore", objective="Development", status="completed",
+                 config_status="completed",
                  created_at=datetime(2026, 2, 10, 10, 0)),
             Well(organization_id=north.id, rig_id=rig.id, block_id=block.id, well_code="W3", well_name="Gamma",
                  well_location="Onshore", objective="Exploration", status="active",

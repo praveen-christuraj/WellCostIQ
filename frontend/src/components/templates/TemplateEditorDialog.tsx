@@ -36,7 +36,10 @@ export function TemplateEditorDialog({ open, templateId, initialKind, onClose, o
   const [form, setForm] = useState<TemplateInput>(() => emptyTemplate(initialKind))
   const [reference, setReference] = useState<AfeReference | null>(null)
   const [scopes, setScopes] = useState<{ sections: ScopeOption[]; phases: ScopeOption[] }>({ sections: [], phases: [] })
-  const [sectionsWithPhases, setSectionsWithPhases] = useState<Record<string, ScopeOption[]>>({})
+  // A well plan template links hole sections and phases by Master Data *id*; an
+  // AFE or daily sheet template links them by *code*. The two pickers therefore
+  // need their own option lists, each keyed by what the template stores.
+  const [planScopes, setPlanScopes] = useState<{ sections: ScopeOption[]; phases: ScopeOption[] }>({ sections: [], phases: [] })
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -62,24 +65,14 @@ export function TemplateEditorDialog({ open, templateId, initialKind, onClose, o
         sections: masterSections.filter(row => !row.is_deleted).map(row => ({ code: row.code, label: `${row.code} · ${row.name}` })),
         phases: masterPhases.filter(row => !row.is_deleted).map(row => ({ code: row.code, label: `${row.code} · ${row.name}` })),
       })
-      // A well plan template stores sections by id and phases by id; read the
-      // workspace's own plans so the editor offers exactly what exists.
-      const wells = afeReference.wells ?? []
-      const plans: Record<string, ScopeOption[]> = {}
-      await Promise.all(wells.slice(0, 12).map(async well => {
-        try {
-          const configuration = await api<{ sections: { hole_section_id: string; phases: { phase_id: string; phase_code: string; phase_name: string }[] }[] }>(
-            `/rig-well/wells/${well.id}/configuration`,
-          )
-          for (const section of configuration.sections ?? []) {
-            if (plans[section.hole_section_id]) continue
-            plans[section.hole_section_id] = (section.phases ?? []).map(phase => ({
-              code: phase.phase_id, label: `${phase.phase_code} · ${phase.phase_name}`,
-            }))
-          }
-        } catch { /* a well without a plan simply adds nothing */ }
-      }))
-      setSectionsWithPhases(plans)
+      // Master Data is the only source the well plan editor needs. (It used to
+      // read the saved plan of up to twelve wells as well; the result was never
+      // used, and a well without that scope answered 409 and raised an error
+      // pop-up on a page that had nothing wrong with it.)
+      setPlanScopes({
+        sections: masterSections.filter(row => !row.is_deleted).map(row => ({ code: row.id, label: `${row.code} · ${row.name}` })),
+        phases: masterPhases.filter(row => !row.is_deleted).map(row => ({ code: row.id, label: `${row.code} · ${row.name}` })),
+      })
     } catch (caught) {
       setLoadError(caught instanceof Error ? caught.message : 'Master Data could not be loaded')
     } finally {
@@ -113,6 +106,7 @@ export function TemplateEditorDialog({ open, templateId, initialKind, onClose, o
 
   const kind = form.template_kind
   const sectionOptions = scopes.sections
+  const planSectionOptions = planScopes.sections
   const serviceOptions = reference?.services ?? []
   const tangibleOptions = reference?.tangibles.filter(item => !form.afe_type || item.scope === form.afe_type || !item.scope) ?? []
   const bitOptions = reference?.drill_bits ?? []
@@ -270,8 +264,8 @@ export function TemplateEditorDialog({ open, templateId, initialKind, onClose, o
       </Box>}
 
       {kind === 'well' ? <WellSectionEditor
-        form={form} sectionOptions={sectionOptions} phaseOptions={scopes.phases}
-        sectionsWithPhases={sectionsWithPhases} totalDays={totalDays}
+        form={form} sectionOptions={planSectionOptions} phaseOptions={planScopes.phases}
+        totalDays={totalDays}
         addSectionId={addSectionId} setAddSectionId={setAddSectionId} onAddSection={addSection}
         update={update}
       /> : <LineEditor
@@ -491,7 +485,6 @@ function WellSectionEditor({ form, sectionOptions, phaseOptions, totalDays, addS
   form: TemplateInput
   sectionOptions: ScopeOption[]
   phaseOptions: ScopeOption[]
-  sectionsWithPhases: Record<string, ScopeOption[]>
   totalDays: number
   addSectionId: string
   setAddSectionId: (value: string) => void

@@ -2239,3 +2239,76 @@ def test_scoped_day_rate_allowances_fan_out_once_per_section_and_club_actuals():
         # The scope is already one printed row: it stays one row, not a club of one.
         assert club_row["club_count"] == 0
         assert club_row["section_label"].endswith("Intermediate hole")
+
+
+def test_daily_sheets_follow_the_well_status_ladder():
+    """Sheets are entered while Active, corrected in Final review and frozen once Completed."""
+
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup_daily_sheet(client, headers)
+        well_url = f"/api/v1/rig-well/wells/{setup['well']['id']}"
+        entry_id = setup["entry"]["id"]
+        entry_url = f"/api/v1/daily-cost/entries/{entry_id}"
+
+        def move(action):
+            return client.post(f"{well_url}/transition", headers=headers, json={
+                "action": action, "scope": "drilling", "remarks": f"Lifecycle check: {action}",
+            })
+
+        def state():
+            body = client.get(f"{well_url}/configuration", headers=headers).json()
+            return body["status"], body["config_status"]
+
+        def new_sheet(cost_date):
+            return client.post("/api/v1/daily-cost/entries", headers=headers, json={
+                "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": cost_date, "remarks": "",
+            })
+
+        # The first daily sheet is what starts an Upcoming well.
+        assert state() == ("active", "configured")
+        # A well with daily cost cannot be rolled back to "never started".
+        deferred = move("defer")
+        assert deferred.status_code == 409 and "1 daily cost sheet" in deferred.json()["detail"]
+        assert state() == ("active", "configured")
+
+        # Final review: no new sheets, but the existing ones are still corrected and submitted.
+        assert move("final_review").status_code == 200
+        assert state() == ("final_review", "completed")
+        refused = new_sheet("2026-10-11")
+        assert refused.status_code == 409 and "Final review" in refused.json()["detail"]
+        redated = client.patch(f"{entry_url}/date", headers=headers, json={"cost_date": "2026-10-09"})
+        assert redated.status_code == 200, redated.text
+
+        # A sheet left in Draft holds the sign-off back.
+        blocked = move("complete")
+        assert blocked.status_code == 409 and "in Draft" in blocked.json()["detail"]
+        assert state() == ("final_review", "completed")
+        submitted = client.post(f"{entry_url}/submit", headers=headers, json={"remarks": "Reviewed"})
+        assert submitted.status_code == 200, submitted.text
+        assert move("complete").status_code == 200
+        assert state() == ("completed", "completed")
+
+        # Completed: the cost is the record, so every sheet of the scope is locked.
+        locked = [
+            client.post(f"{entry_url}/reopen", headers=headers, json={"remarks": "Correcting shift report"}),
+            client.patch(f"{entry_url}/date", headers=headers, json={"cost_date": "2026-10-08"}),
+            client.delete(entry_url, headers=headers),
+            client.post("/api/v1/daily-cost/entries/bulk-delete", headers=headers, json={"ids": [entry_id]}),
+            new_sheet("2026-10-11"),
+        ]
+        for response in locked:
+            assert response.status_code == 409, response.text
+            assert "Completed" in response.json()["detail"]
+        assert client.get(entry_url, headers=headers).json()["entry"]["status"] == "submitted"
+
+        # Rolling back one step (audited, rig-well:rollback) unlocks them again.
+        assert move("reopen").status_code == 200
+        assert state() == ("final_review", "completed")
+        reopened = client.post(f"{entry_url}/reopen", headers=headers, json={"remarks": "Correcting shift report"})
+        assert reopened.status_code == 200, reopened.text
+        # ... and new sheets need the well back in Active.
+        assert new_sheet("2026-10-11").status_code == 409
+        assert move("reactivate").status_code == 200
+        assert state() == ("active", "configured")
+        assert new_sheet("2026-10-11").status_code == 201

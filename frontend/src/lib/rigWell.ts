@@ -43,12 +43,44 @@ export type RigOption = {
 
 export type WellConfigurationScope = 'drilling' | 'completion'
 
-/** How far a scope has travelled: planned, running, or finished. */
-export type WellStatus = 'upcoming' | 'active' | 'completed'
+/**
+ * The two ladders of a configuration scope. The server owns the rules
+ * (`app.services.well_lifecycle`); the UI only prints these and offers the moves
+ * the server lists in `drilling_transitions` / `completion_transitions`.
+ *
+ *   Well status  upcoming → active → final_review → completed
+ *   Plan status  draft → configured → completed
+ *
+ * A scope in final review or completed always carries a completed plan.
+ */
+export type WellStatus = 'upcoming' | 'active' | 'final_review' | 'completed'
+export type PlanStatus = 'draft' | 'configured' | 'completed'
+export const WELL_STATUSES: WellStatus[] = ['upcoming', 'active', 'final_review', 'completed']
+export const PLAN_STATUSES: PlanStatus[] = ['draft', 'configured', 'completed']
+
+export type WellTransitionAction =
+  | 'configure' | 'draft' | 'start' | 'defer' | 'final_review' | 'reactivate' | 'complete' | 'reopen'
+
+/** One status move the server offers for a scope right now. */
+export type WellTransitionOption = {
+  action: WellTransitionAction
+  label: string
+  description: string
+  ladder: 'well' | 'plan'
+  direction: 'forward' | 'rollback'
+  to_status: WellStatus
+  to_plan: PlanStatus
+  permission: string
+  /** Whether the signed-in user holds `permission`; moves they may never make are hidden. */
+  permitted?: boolean
+  /** False when a precondition is missing; `reason` then says what to do first. */
+  allowed: boolean
+  reason: string
+}
 
 export type Well = {
   completion_status: WellStatus
-  completion_config_status: 'draft' | 'configured' | 'final_review'
+  completion_config_status: PlanStatus
   /** The scope this row represents when the page lists scope-segregated wells. */
   scope?: WellConfigurationScope
   completion_section_count: number
@@ -68,12 +100,16 @@ export type Well = {
   objective: string
   remarks: string
   status: WellStatus
-  config_status: 'draft' | 'configured' | 'final_review'
-  /** Roll-up of the live scopes: the well's own Upcoming / Active / Completed flag. */
+  config_status: PlanStatus
+  /** Roll-up of the live scopes: the well's own Upcoming / Active / Final review / Completed flag. */
   tracking_status?: WellStatus
   upcoming_scope_count?: number
   active_scope_count?: number
+  final_review_scope_count?: number
   completed_scope_count?: number
+  /** Status moves each live scope can make now, as decided by the server. */
+  drilling_transitions?: WellTransitionOption[]
+  completion_transitions?: WellTransitionOption[]
   depth_unit: 'm' | 'ft'
   completion_depth_unit: 'm' | 'ft'
   standard_depth_unit?: 'm'
@@ -135,7 +171,8 @@ export type WellConfiguration = {
   rig_code: string
   rig_name: string
   status: WellStatus
-  config_status: 'draft' | 'configured' | 'final_review'
+  config_status: PlanStatus
+  transitions?: WellTransitionOption[]
   depth_unit: 'm' | 'ft'
   completion_depth_unit?: 'm' | 'ft'
   standard_depth_unit?: 'm'
@@ -313,11 +350,51 @@ export function scopeLabel(scope: WellConfigurationScope): string {
   return scope === 'completion' ? 'Completion' : 'Drilling'
 }
 
-/** The tracking flag as every register prints it. */
+/** The well status as every register, picker and report prints it. */
 export function trackingLabel(status: WellStatus | string | undefined | null): string {
   if (status === 'completed') return 'Completed'
+  if (status === 'final_review') return 'Final review'
   if (status === 'upcoming') return 'Upcoming'
   return 'Active'
+}
+
+/** The plan status as every register, picker and report prints it. */
+export function planLabel(status: PlanStatus | string | undefined | null): string {
+  if (status === 'completed') return 'Completed'
+  if (status === 'configured') return 'Configured'
+  return 'Draft'
+}
+
+type StatusTone = 'neutral' | 'success' | 'info' | 'warning' | 'error'
+
+/** One tone per well status, shared by every page so a colour always means the same thing. */
+export function wellStatusTone(status: WellStatus | string | undefined | null): StatusTone {
+  if (status === 'completed') return 'neutral'
+  if (status === 'final_review') return 'warning'
+  // A planned, never-started scope is not running yet, so it is not a success green.
+  if (status === 'upcoming') return 'info'
+  return 'success'
+}
+
+/** One tone per plan status: draft still needs work, configured is signed off, completed is closed. */
+export function planStatusTone(status: PlanStatus | string | undefined | null): StatusTone {
+  if (status === 'completed') return 'neutral'
+  if (status === 'configured') return 'success'
+  return 'warning'
+}
+
+/** True while a scope still takes plan edits, AFEs, adjustments and daily costs. */
+export function isOpenWellStatus(status: WellStatus | string | undefined | null): boolean {
+  return status === 'upcoming' || status === 'active'
+}
+
+/** The moves the server offers for one scope of a well. */
+export function scopeTransitions(
+  well: Pick<Well, 'drilling_transitions' | 'completion_transitions'> | null | undefined,
+  scope: WellConfigurationScope,
+): WellTransitionOption[] {
+  if (!well) return []
+  return (scope === 'completion' ? well.completion_transitions : well.drilling_transitions) ?? []
 }
 
 /** The well's own flag, matching the backend roll-up over its live scopes. */
@@ -331,6 +408,7 @@ export function wellTrackingStatus(
   const statuses = scopes.length ? scopes : [well.status, well.completion_status]
   if (statuses.every((status) => status === 'completed')) return 'completed'
   if (statuses.every((status) => status === 'upcoming')) return 'upcoming'
+  if (statuses.every((status) => status === 'final_review' || status === 'completed')) return 'final_review'
   return 'active'
 }
 

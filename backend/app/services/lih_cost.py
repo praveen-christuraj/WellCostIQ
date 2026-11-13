@@ -368,7 +368,7 @@ def reference_data(db: Session, organization_id: str) -> LihCostReference:
         wells=[
             LihCostWellOption(
                 id=row.id, rig_id=row.rig_id, well_code=row.well_code, well_name=row.well_name,
-                status=row.status, config_status=row.config_status,
+                status=row.tracking_status, config_status=row.tracking_plan_status,
                 display_name=f"{row.well_code} · {row.well_name}",
             )
             for row in wells

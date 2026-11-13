@@ -97,8 +97,8 @@ export default function RigWellOverview() {
       emphasis: { label: { show: true, fontSize: 13, fontWeight: 700, color: theme.palette.text.primary, formatter: '{b}\n{c}' } },
       itemStyle: { borderColor: theme.palette.background.paper, borderWidth: 3 },
       data: [
-        { name: 'Draft', value: overview?.draft_wells ?? 0, itemStyle: { color: lifecycleColours[0] } },
-        { name: 'Configured', value: overview?.configured_wells ?? 0, itemStyle: { color: lifecycleColours[1] } },
+        { name: 'Upcoming', value: overview?.upcoming_wells ?? 0, itemStyle: { color: lifecycleColours[0] } },
+        { name: 'Active', value: overview?.active_wells ?? 0, itemStyle: { color: lifecycleColours[1] } },
         { name: 'Final review', value: overview?.final_review_wells ?? 0, itemStyle: { color: lifecycleColours[2] } },
         { name: 'Completed', value: overview?.completed_wells ?? 0, itemStyle: { color: lifecycleColours[3] } },
       ],
@@ -108,7 +108,8 @@ export default function RigWellOverview() {
   // Block counts cover every well whose scope is still live (upcoming included),
   // so each block's share is taken over that same population.
   const openWells = (overview?.block_counts ?? []).reduce((total, block) => total + block.well_count, 0)
-  const lifecycleTotal = (overview?.draft_wells ?? 0) + (overview?.configured_wells ?? 0)
+  // The four well statuses partition the live wells, so they always add up.
+  const lifecycleTotal = (overview?.upcoming_wells ?? 0) + (overview?.active_wells ?? 0)
     + (overview?.final_review_wells ?? 0) + (overview?.completed_wells ?? 0)
 
   return <>
@@ -129,13 +130,17 @@ export default function RigWellOverview() {
       <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: 'repeat(4, minmax(0,1fr))' } }}>
         <StatCard label="Active blocks" value={overview.active_blocks.toLocaleString()} hint={`${overview.deleted_blocks} retained in Deleted entries`} icon={<GridViewOutlined fontSize="small"/>}/>
         <StatCard label="Active rigs" value={overview.active_rigs.toLocaleString()} hint={`${overview.deleted_rigs} retained in Deleted entries`} icon={<BusinessOutlined fontSize="small"/>}/>
-        <StatCard label="Upcoming wells" value={overview.upcoming_wells.toLocaleString()} hint="Created and under planning — not yet spudded" icon={<ScheduleOutlined fontSize="small"/>}/>
-        <StatCard label="Active wells" value={overview.active_wells.toLocaleString()} hint={`${overview.deleted_wells} deleted wells`} icon={<LanguageOutlined fontSize="small"/>}/>
         <StatCard label="Sub activities" value={overview.active_sub_activities.toLocaleString()} hint={`${overview.deleted_sub_activities} retained in Deleted entries`} icon={<TaskAltOutlined fontSize="small"/>}/>
-        <StatCard label="Configured" value={overview.configured_wells.toLocaleString()} hint={`${overview.completed_wells} completed wells`} icon={<TaskAltOutlined fontSize="small"/>} tone="positive"/>
-        <StatCard label="In planning" value={overview.draft_wells.toLocaleString()} hint="Live wells whose plan is still a draft" icon={<FactCheckOutlined fontSize="small"/>} tone={overview.draft_wells ? 'warning' : 'default'}/>
-        <StatCard label="In final review" value={overview.final_review_wells.toLocaleString()} hint="Scopes marked for final review" icon={<FactCheckOutlined fontSize="small"/>} tone={overview.final_review_wells ? 'warning' : 'default'}/>
-        <SectionCard bodyPadding={1.75} sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <StatCard label="Wells" value={lifecycleTotal.toLocaleString()} hint={`${overview.deleted_wells} in Deleted entries`} icon={<LanguageOutlined fontSize="small"/>}/>
+        {/* Well status: the four values partition the wells above. */}
+        <StatCard label="Upcoming wells" value={overview.upcoming_wells.toLocaleString()} hint="Well status · under planning, not yet started" icon={<ScheduleOutlined fontSize="small"/>}/>
+        <StatCard label="Active wells" value={overview.active_wells.toLocaleString()} hint="Well status · operations running" icon={<LanguageOutlined fontSize="small"/>} tone="positive"/>
+        <StatCard label="Wells in final review" value={overview.final_review_wells.toLocaleString()} hint="Well status · operations ended, costs under review" icon={<FactCheckOutlined fontSize="small"/>} tone={overview.final_review_wells ? 'warning' : 'default'}/>
+        <StatCard label="Completed wells" value={overview.completed_wells.toLocaleString()} hint="Well status · signed off" icon={<TaskAltOutlined fontSize="small"/>}/>
+        {/* Plan status of the wells that are still upcoming or active. */}
+        <StatCard label="Plan configured" value={overview.configured_wells.toLocaleString()} hint="Plan status · open wells with a signed-off plan" icon={<TaskAltOutlined fontSize="small"/>} tone="positive"/>
+        <StatCard label="Plan in draft" value={overview.draft_wells.toLocaleString()} hint="Plan status · open wells whose plan is still a draft" icon={<FactCheckOutlined fontSize="small"/>} tone={overview.draft_wells ? 'warning' : 'default'}/>
+        <SectionCard bodyPadding={1.75} sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gridColumn: { xs: 'span 2', lg: 'span 2' } }}>
           <Typography sx={{ fontSize: 9.5, fontWeight: 750, letterSpacing: '.11em', textTransform: 'uppercase', color: 'text.secondary' }}>Directory structure</Typography>
           <Typography fontWeight={700} fontSize={13} sx={{ mt: .6 }}>Block → Rig → Well → Sub activity</Typography>
           <Typography color="text.secondary" fontSize={11} sx={{ mt: .5, lineHeight: 1.45 }}>
@@ -176,13 +181,13 @@ export default function RigWellOverview() {
         </SectionCard>
 
         <ChartPanel
-          title="Well lifecycle"
-          subtitle="Where the active wells sit in the plan → configure → final review → complete path."
+          title="Wells by well status"
+          subtitle="Where every well sits on the Upcoming → Active → Final review → Completed ladder."
           meta={lifecycleTotal ? <Tag tone="neutral">{lifecycleTotal} wells</Tag> : undefined}
           height={286}
           empty={!lifecycleTotal}
-          emptyMessage="No active wells to classify yet."
-          caption="Counts come from the well configuration state the API reports; a well appears once in the stage it currently holds."
+          emptyMessage="No wells to classify yet."
+          caption="A well appears once, under the roll-up of its live scopes: Completed when every scope is, Upcoming while none has started, Final review once none is operating, otherwise Active."
         >
           <InteractiveChart option={lifecycleOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>

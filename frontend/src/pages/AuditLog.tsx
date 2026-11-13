@@ -7,7 +7,7 @@ import type { AuditEntry, AuditPage } from '../lib/types'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { DataTable } from '../components/DataTable'
 
-const ACTIONS = ['login', 'login_failed', 'logout', 'create', 'update', 'delete', 'soft_delete', 'restore', 'permanent_delete', 'import', 'export', 'assign']
+const ACTIONS = ['login', 'login_failed', 'logout', 'create', 'update', 'delete', 'soft_delete', 'restore', 'rollback', 'permanent_delete', 'import', 'export', 'assign']
 const ENTITIES = ['auth', 'user', 'role', 'permission', 'master_data', 'rig', 'well', 'well_configuration', 'well_sub_activity', 'rig_well_export', 'rig_well_deleted', 'afe', 'afe_estimate', 'afe_export', 'database_browser']
 
 // Other Managements → Audit Log: read-only action trail with server-side filters and export.

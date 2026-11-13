@@ -83,6 +83,7 @@ from app.schemas.afe import (
     WellScopeOut,
 )
 from app.services import audit
+from app.services import well_lifecycle
 from app.models.entities import User
 from app.services.catalogue import options_by_id
 from app.services.retention import (
@@ -1407,21 +1408,12 @@ def _check_well_and_rig(db: Session, organization_id: str, rig_id: str, well_id:
         raise HTTPException(status_code=422, detail="The selected well does not belong to the selected rig.")
     if well.rig is None or well.rig.is_deleted:
         raise HTTPException(status_code=409, detail="Restore the well's rig before creating AFEs for this well.")
-    if well.scope_is_deleted(configuration_scope):
-        raise HTTPException(
-            status_code=422,
-            detail=f"The {configuration_scope} scope on well {well.well_code} is deleted. Restore or add it in Rig & Well Management first.",
-        )
-    if not well.sections_for_scope(configuration_scope):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Configure the well's sections and phases in Rig & Well Management before creating an AFE ({configuration_scope} scope).",
-        )
-    if well.scope_value(configuration_scope, "config_status") != "configured":
-        raise HTTPException(
-            status_code=422,
-            detail=f"Mark the well's plan as Configured in Rig & Well Management before creating an AFE for this well ({configuration_scope} scope).",
-        )
+    # A budget is raised against a signed-off plan of a scope that is still
+    # upcoming or active. The wording and the rule are shared with daily costs
+    # and SOW adjustments (``well_lifecycle.planning_blocker``).
+    blocker = well_lifecycle.planning_blocker(well, configuration_scope, "creating an AFE")
+    if blocker:
+        raise HTTPException(status_code=422, detail=blocker)
     return well
 
 
@@ -1729,8 +1721,11 @@ def change_status(
         if not afe.estimate_saved_at:
             raise HTTPException(status_code=409, detail="Save the AFE cost estimate before submitting.")
         well = _wells_by_id(db, organization_id, [afe.well_id]).get(afe.well_id)
-        if well is None or well.scope_value(afe.configuration_scope, "config_status") != "configured":
-            raise HTTPException(status_code=409, detail="The well's plan is not Configured. Configure the well before submitting this AFE.")
+        if well is None:
+            raise HTTPException(status_code=409, detail="The well of this AFE no longer exists in this workspace.")
+        blocker = well_lifecycle.planning_blocker(well, afe.configuration_scope, "submitting this AFE")
+        if blocker:
+            raise HTTPException(status_code=409, detail=blocker)
         priced = _stored_priced(afe, well, _lookups_for_afes(db, organization_id, [afe]))
         if priced.result.total is None:
             raise HTTPException(status_code=409, detail="The saved estimate mixes currencies without a complete conversion. Save it with a standard currency and rates first.")
@@ -1926,11 +1921,11 @@ def save_estimate(
             raise HTTPException(status_code=409, detail="Restore this AFE before editing its estimate.")
         _require_draft(afe, "edit its cost estimate")
         well = _wells_by_id(db, organization_id, [afe.well_id]).get(afe.well_id)
-        if well is None or well.scope_value(afe.configuration_scope, "config_status") != "configured":
-            raise HTTPException(
-                status_code=409,
-                detail="The well's plan is in Draft. Mark the well as Configured in Rig & Well Management before saving this estimate.",
-            )
+        if well is None:
+            raise HTTPException(status_code=409, detail="The well of this AFE no longer exists in this workspace.")
+        blocker = well_lifecycle.planning_blocker(well, afe.configuration_scope, "saving this estimate")
+        if blocker:
+            raise HTTPException(status_code=409, detail=blocker)
         scope = _scope_for_well(well, afe.configuration_scope)
         resolved = _validate_request(db, organization_id, scope, payload)
 

@@ -1,4 +1,4 @@
-.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check afe-scope-dialog-check afe-print-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check
+.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -125,3 +125,13 @@ afe-print-check:
 		--bundle --platform=node --format=esm --jsx=automatic \
 		--outfile=node_modules/.cache/afe-print-check.mjs --loader:.jsx=jsx --log-level=error \
 		--external:jsdom && node node_modules/.cache/afe-print-check.mjs
+
+# Well status and plan status ladders: register tabs, the status menu per ladder
+# step (forward and one-step rollback), the confirmation dialog, and the CSS
+# rule that keeps the hidden print sheet out of the on-screen report View.
+well-lifecycle-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/well-lifecycle-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic \
+		--outfile=node_modules/.cache/well-lifecycle-check.mjs --loader:.jsx=jsx --log-level=error \
+		--external:jsdom && node node_modules/.cache/well-lifecycle-check.mjs

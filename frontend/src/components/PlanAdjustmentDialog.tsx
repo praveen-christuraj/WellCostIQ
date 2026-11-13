@@ -11,7 +11,7 @@ import {
   type AdjustmentScope, type LineChange, type PlanSectionEntry, type PlanSectionRow,
   type WellPlanAdjustment,
 } from '../lib/sowAdjustment'
-import { formatDays, type MasterConfigurationOption, type RigWellConfigurationOptions, type Well, type WellConfiguration } from '../lib/rigWell'
+import { formatDays, isOpenWellStatus, planLabel, trackingLabel, type MasterConfigurationOption, type RigWellConfigurationOptions, type Well, type WellConfiguration } from '../lib/rigWell'
 
 type PhaseInput = {
   key: string
@@ -112,6 +112,8 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
   const openDraft = adjustments.find(item => item.configuration_scope === scope && item.status === 'draft' && item.id !== editingId) ?? null
   const scoped = adjustments.filter(item => item.configuration_scope === scope)
   const configured = scope === 'drilling' ? well.config_status === 'configured' : well.completion_config_status === 'configured'
+  const scopeStatus = scope === 'drilling' ? well.status : well.completion_status
+  const planClosed = !isOpenWellStatus(scopeStatus)
   const depthUnit: 'm' | 'ft' = (configuration?.depth_unit as 'm' | 'ft') ?? well.depth_unit ?? 'm'
 
   const totalDays = useMemo(
@@ -363,10 +365,14 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
           : <>
             <Alert severity="info">
               Configured {scope} plan: {formatDays(configuredTotalDays)} across {configuredSections} section(s)
-              {configuration ? ` · Plan ${configuration.config_status}` : ''}
+              {configuration ? ` · Plan status ${planLabel(configuration.config_status)} · Well status ${trackingLabel(configuration.status)}` : ''}
               {scope === 'drilling' && well.has_plan_adjustment && well.adjusted_total_days != null && <> · Effective {formatDays(well.adjusted_total_days)} (Rev {well.plan_revision})</>}
             </Alert>
-            {!configured && <Alert severity="warning">Mark the {scope} plan as Configured before recording an adjustment — only adjustments to a configured plan are allowed.</Alert>}
+            {!configured && <Alert severity="warning">
+              {planClosed
+                ? `The ${scope} scope is in ${trackingLabel(scopeStatus)} and its plan is closed. Return the scope to Active in the well register before recording an adjustment.`
+                : `Mark the ${scope} plan as Configured before recording an adjustment — only adjustments to a configured plan are allowed.`}
+            </Alert>}
             {canAdjust && configured && <Box sx={{ p: 1.8, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
               <Typography fontWeight={800} fontSize={14} mb={.3}>{editingId ? 'Edit draft revision' : 'New adjustment draft'}</Typography>
               <Typography color="text.secondary" fontSize={12} mb={1.5}>

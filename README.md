@@ -70,7 +70,7 @@ Seeding is idempotent (it never touches an existing owner), never creates tables
 
 ## Quality and structure
 
-`cd backend && ../.venv/bin/python -m pytest -q` · `cd frontend && npm run build` · `make ui-check` (design-layer assertions) · `make templates-check` (reusable templates) · `make catalogue-check` (catalogue tables and bulk price revision) · `make graph`.
+`cd backend && ../.venv/bin/python -m pytest -q` · `cd frontend && npm run build` · `make ui-check` (design-layer assertions) · `make templates-check` (reusable templates) · `make well-lifecycle-check` (well/plan status ladders and the on-screen report view) · `make catalogue-check` (catalogue tables and bulk price revision) · `make graph`.
 Set `TEST_DATABASE_URL` (for example a PostgreSQL URL) to run the backend suite against a real server: `cd backend && TEST_DATABASE_URL="postgresql+psycopg://user:pass@host:5432/db" ../.venv/bin/python -m pytest -q`. SQLite ignores `FOR UPDATE` and is lenient about bare `GROUP BY` columns, so PostgreSQL-only failures (row locks over an outer join, ungrouped projections) are caught by that run.
 
 - `backend/app/api`, `models`, `schemas`, `core`, `services`, `seed.py`, `bootstrap.py` — API, persistence, validation, security, provisioning and the first-run administrator bootstrap.

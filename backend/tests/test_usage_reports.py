@@ -364,6 +364,9 @@ def test_reference_lists_blocks_wells_scopes_and_currencies():
         assert well_codes["WELL-01"]["status"] == "active"
         assert well_codes["WELL-01"]["config_status"] == "configured"
         assert "drilling" in well_codes["WELL-01"]["scopes"]
+        # The roll-up of the live scopes is what the well-status filter uses.
+        assert well_codes["WELL-01"]["tracking_status"] == "active"
+        assert well_codes["WELL-01"]["drilling_is_deleted"] is False
         assert well_codes["WELL-01"]["has_costs"] is True
         assert {row["code"] for row in data["currencies"]} == {"USD", "EUR"}
         assert data["default_currency"] == "USD"
@@ -554,6 +557,10 @@ def test_filters_block_scope_lifecycle_date_range_and_explicit_wells():
         assert {column["well_code"] for column in lifecycle["wells"]} == {"WELL-01", "WELL-02"}
         completed = _get(client, "/api/v1/usage-reports/matrix/mud-chemicals?lifecycle=completed", headers)
         assert completed["wells"] == []
+        # Every step of the well status ladder is a filter value; anything else is refused.
+        for step in ("upcoming", "final_review"):
+            assert _get(client, f"/api/v1/usage-reports/matrix/mud-chemicals?lifecycle={step}", headers)["wells"] == []
+        assert client.get("/api/v1/usage-reports/matrix/mud-chemicals?lifecycle=archived", headers=headers).status_code == 422
 
         # Submitted-only filtering excludes the draft sheets (none were submitted).
         drafts_excluded = _get(

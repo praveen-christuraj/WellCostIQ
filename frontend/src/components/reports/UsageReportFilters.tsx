@@ -10,12 +10,13 @@ export function wellMatches(well: UsageWellOption, filters: UsageReportFilters):
   if (filters.blockId && well.block_id !== filters.blockId) return false
   if (filters.scope && !well.scopes.includes(filters.scope)) return false
   if (filters.lifecycle) {
-    const completion = filters.scope === 'completion'
-    const status = completion ? well.completion_status : well.status
-    const configStatus = completion ? well.completion_config_status : well.config_status
-    if (filters.lifecycle === 'active' && status !== 'active') return false
-    if (filters.lifecycle === 'completed' && status !== 'completed') return false
-    if (filters.lifecycle === 'final_review' && configStatus !== 'final_review') return false
+    // The same rule as the API: with a scope the report follows that scope's own
+    // well status; without one it follows the well's roll-up.
+    if (filters.scope) {
+      const completion = filters.scope === 'completion'
+      if (completion ? well.completion_is_deleted : well.drilling_is_deleted) return false
+      if ((completion ? well.completion_status : well.status) !== filters.lifecycle) return false
+    } else if ((well.tracking_status ?? well.status) !== filters.lifecycle) return false
   }
   return true
 }

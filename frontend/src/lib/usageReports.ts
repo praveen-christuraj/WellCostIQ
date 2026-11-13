@@ -8,7 +8,7 @@ export type NptUpaKey = 'npt-upa'
 export type AnyReportKey = UsageReportKey | NptUpaKey
 export type UsageMode = 'usage' | 'cost'
 export type ScopeFilter = '' | 'drilling' | 'completion'
-export type LifecycleFilter = '' | 'active' | 'final_review' | 'completed'
+export type LifecycleFilter = '' | 'upcoming' | 'active' | 'final_review' | 'completed'
 
 export interface UsageReportFilters {
   blockId: string
@@ -47,6 +47,10 @@ export interface UsageWellOption {
   config_status: string
   completion_status: string
   completion_config_status: string
+  /** Roll-up of the live scopes, used when no scope is chosen. */
+  tracking_status?: string
+  drilling_is_deleted?: boolean
+  completion_is_deleted?: boolean
   scopes: string[]
   has_costs: boolean
 }
@@ -330,8 +334,9 @@ export function formatDateText(value: string | null): string {
 
 export const LIFECYCLE_OPTIONS: { value: LifecycleFilter; label: string }[] = [
   { value: '', label: 'All well statuses' },
+  { value: 'upcoming', label: 'Upcoming wells' },
   { value: 'active', label: 'Active wells' },
-  { value: 'final_review', label: 'Wells under final review' },
+  { value: 'final_review', label: 'Wells in final review' },
   { value: 'completed', label: 'Completed wells' },
 ]
 

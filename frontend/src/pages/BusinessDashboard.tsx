@@ -14,6 +14,7 @@ import {
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { trackingLabel, wellStatusTone, WELL_STATUSES } from '../lib/rigWell'
 import { ChartPanel } from '../components/ui/ChartPanel'
 import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { DatasetState } from '../components/ui/DatasetState'
@@ -329,9 +330,10 @@ export default function BusinessDashboard() {
         </Box>,
       },
       {
-        headerName: 'STATUS', field: 'status', minWidth: 130, flex: 0.7,
-        cellRenderer: (params: ICellRendererParams<DashboardWellRow>) => params.data && <Tag tone={params.data.status === 'completed' ? 'info' : 'success'}>
-          {params.data.status === 'completed' ? 'Completed' : 'Active'}
+        headerName: 'WELL STATUS', field: 'status', minWidth: 130, flex: 0.7,
+        valueFormatter: params => trackingLabel(params.value),
+        cellRenderer: (params: ICellRendererParams<DashboardWellRow>) => params.data && <Tag tone={wellStatusTone(params.data.status)}>
+          {trackingLabel(params.data.status)}
         </Tag>,
       },
     ]
@@ -692,8 +694,7 @@ export default function BusinessDashboard() {
           </TextField>
           <TextField select size="small" label="Well status" value={filters.status} onChange={event => setFilter('status', event.target.value)}>
             <MenuItem value="">Any status</MenuItem>
-            <MenuItem value="active">Active</MenuItem>
-            <MenuItem value="completed">Completed</MenuItem>
+            {WELL_STATUSES.map(status => <MenuItem key={status} value={status}>{trackingLabel(status)}</MenuItem>)}
           </TextField>
         </>}
       </Box>

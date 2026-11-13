@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import { AddRounded, ArrowDownwardRounded, ArrowUpwardRounded, DeleteOutlineRounded, PostAddOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, Card, CardContent, CircularProgress, Divider, MenuItem, Paper, TextField, Typography } from '@mui/material'
+import { AddRounded, ArrowDownwardRounded, ArrowUpwardRounded, DeleteOutlineRounded, PostAddOutlined, UndoRounded } from '@mui/icons-material'
+import { Alert, Box, Button, Card, CardContent, CircularProgress, Divider, MenuItem, Paper, TextField, Tooltip, Typography } from '@mui/material'
 import { ErrorMessage, FormDialog, Tag } from './Common'
 import { TemplatePickerDialog } from './templates/TemplatePickerDialog'
+import { PlanStatusTag, WellStatusTag, WellTransitionDialog } from './WellLifecycle'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
-import type { MasterConfigurationOption, RigWellConfigurationOptions, Well, WellConfiguration } from '../lib/rigWell'
+import { isOpenWellStatus, trackingLabel, type MasterConfigurationOption, type RigWellConfigurationOptions, type Well, type WellConfiguration, type WellTransitionOption } from '../lib/rigWell'
 import type { Template } from '../lib/recordTemplates'
 import { formatDepthMeters } from '../lib/units'
 
@@ -38,9 +39,7 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
   const [options, setOptions] = useState<RigWellConfigurationOptions>({ hole_sections: [], phases: [] })
   const [scope, setScope] = useState<'drilling' | 'completion'>('drilling')
   const [revision, setRevision] = useState(0)
-  const [transition, setTransition] = useState<'configure' | 'draft' | 'final_review' | 'complete' | 'activate' | null>(null)
-  const [transitionRemarks, setTransitionRemarks] = useState('')
-  const [transitionError, setTransitionError] = useState('')
+  const [transition, setTransition] = useState<WellTransitionOption | null>(null)
   const [dirty, setDirty] = useState(false)
   useEffect(() => {
     if (!open) return
@@ -99,7 +98,9 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
     void api(`/record-templates/${template.id}/apply`, { method: 'POST', silent: true }).catch(() => undefined)
   }
 
-  const readOnly = !can('rig-well:update') || !configuration || configuration.status === 'completed' || configuration.config_status !== 'draft'
+  // The plan is editable only as a Draft of a scope that is still upcoming or
+  // active — exactly the rule the API enforces when the plan is saved.
+  const readOnly = !can('rig-well:update') || !configuration || !isOpenWellStatus(configuration.status) || configuration.config_status !== 'draft'
   const totalDays = useMemo(
     () => sections.reduce((total, section) => total + section.phases.reduce((sum, phase) => sum + numberValue(phase.days), 0), 0),
     [sections],
@@ -249,22 +250,10 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
 
   const optionById = (items: MasterConfigurationOption[], id: string) => items.find(item => item.id === id)
 
-  const transitionLabels = { configure: 'Mark configured', draft: 'Reopen as Draft', final_review: 'Mark for final review', complete: 'Mark completed', activate: 'Reactivate scope' }
-  const confirmTransition = async () => {
-    if (!well || !transition) return
-    setSaving(true)
-    setTransitionError('')
-    try {
-      await api(`/rig-well/wells/${well.id}/transition`, {
-        method: 'POST', body: body({ scope, action: transition, remarks: transitionRemarks.trim() }),
-      })
-      setTransition(null)
-      setRevision(value => value + 1)
-      onSaved()
-    } catch (caught) {
-      setTransitionError(caught instanceof Error ? caught.message : 'Scope status could not be changed')
-    } finally { setSaving(false) }
-  }
+  // Moves the server offers for this scope; one the role may not make is hidden.
+  const moves = (configuration?.transitions ?? []).filter(
+    option => option.permitted !== false,
+  )
 
   return <><FormDialog
     open={open}
@@ -287,18 +276,36 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
     {loading ? <Box py={8} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={26}/></Box> : <Box display="grid" gap={2} pt={.5}>
       {configuration && <Box display="flex" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap" sx={{ bgcolor: 'action.hover', borderRadius: 2, px: 2, py: 1.3 }}>
         <Box><Typography fontSize={12} fontWeight={800}>{configuration.rig_code} / {configuration.well_code} — {configuration.well_name}</Typography><Typography fontSize={11} color="text.secondary" mt={.25}>Plan total · {sections.length} section(s) · {totalDays.toFixed(2)} days</Typography></Box>
-        <Box display="flex" gap={1} alignItems="center"><Tag tone={configuration.config_status === 'configured' ? 'success' : 'warning'}>{configuration.config_status}</Tag><Tag tone={configuration.status === 'completed' ? 'neutral' : 'info'}>{configuration.status}</Tag></Box>
+        <Box display="grid" gridTemplateColumns="max-content max-content" columnGap={1} rowGap={.5} alignItems="center">
+          <Typography fontSize={11} fontWeight={700} color="text.secondary">Well status</Typography><WellStatusTag status={configuration.status} />
+          <Typography fontSize={11} fontWeight={700} color="text.secondary">Plan status</Typography><PlanStatusTag status={configuration.config_status} />
+        </Box>
       </Box>}
 
-      {configuration && can('rig-well:update') && <Box display="flex" gap={1} flexWrap="wrap">
-        {(configuration.status === 'completed' ? ['activate'] as const
-          : configuration.config_status === 'configured' ? ['draft', 'final_review'] as const
-          : configuration.config_status === 'final_review' ? ['complete'] as const
-          : configuration.sections.length ? ['configure'] as const : []).map(action =>
-          <Button key={action} size="small" variant="outlined" disabled={saving || dirty} onClick={() => { setTransitionRemarks(''); setTransitionError(''); setTransition(action) }}>{transitionLabels[action]}</Button>)}
+      {configuration && moves.length > 0 && <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
+        {moves.map(option => (
+          <Tooltip key={option.action} title={option.allowed ? option.description : option.reason}>
+            <span>
+              <Button
+                size="small"
+                variant={option.direction === 'rollback' ? 'text' : 'outlined'}
+                color={option.direction === 'rollback' ? 'inherit' : 'primary'}
+                startIcon={option.direction === 'rollback' ? <UndoRounded sx={{ fontSize: 15 }} /> : undefined}
+                disabled={saving || dirty || !option.allowed}
+                onClick={() => setTransition(option)}
+              >
+                {option.label}
+              </Button>
+            </span>
+          </Tooltip>
+        ))}
       </Box>}
       {!can('rig-well:update') && configuration && <Alert severity="info">Your role has view-only access to this well plan. Contact an administrator if you need update access.</Alert>}
-      {can('rig-well:update') && configuration && readOnly && <Alert severity="info">This well plan is read-only while the well is {configuration.status === 'completed' ? 'completed' : 'configured'}. Reactivate this scope and reopen its plan as Draft before editing.</Alert>}
+      {can('rig-well:update') && configuration && readOnly && <Alert severity="info">
+        {isOpenWellStatus(configuration.status)
+          ? 'This plan is Configured, so it is read-only. Reopen it as Draft to edit it.'
+          : `This scope is in ${trackingLabel(configuration.status)} and its plan is closed. Return the scope to Active, then reopen the plan as Draft, to edit it.`}
+      </Alert>}
       {options.hole_sections.length === 0 && <Alert severity="warning" action={can('master-data:read') ? <Button component={RouterLink} to="/master-data/records?module=hole-sections" size="small">Hole Sections</Button> : undefined}>No active Hole Sections are configured for this workspace yet.</Alert>}
       {options.phases.length === 0 && <Alert severity="warning" action={can('master-data:read') ? <Button component={RouterLink} to="/master-data/records?module=phases" size="small">Phases</Button> : undefined}>No active Phases are configured for this workspace yet.</Alert>}
 
@@ -387,13 +394,14 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
       onClose={() => setTemplatePickerOpen(false)}
       onApply={template => applyWellTemplate(template)}
     />
-    <FormDialog open={!!transition} title={`${transition ? transitionLabels[transition] : 'Update scope'} · ${scope}`}
-      subtitle="This change applies only to the selected well configuration scope."
-      onClose={() => { if (!saving) setTransition(null) }} onSubmit={() => void confirmTransition()}
-      busy={saving} submitDisabled={transitionRemarks.trim().length < 3} submitLabel={transition ? transitionLabels[transition] : 'Confirm'}>
-      <TextField label="Reason / audit note" required fullWidth multiline minRows={3} value={transitionRemarks}
-        onChange={event => setTransitionRemarks(event.target.value)} inputProps={{ maxLength: 500 }}/>
-      <ErrorMessage message={transitionError}/>
-    </FormDialog>
+    <WellTransitionDialog
+      well={well}
+      scope={scope}
+      option={transition}
+      status={configuration?.status ?? 'upcoming'}
+      plan={configuration?.config_status ?? 'draft'}
+      onClose={() => setTransition(null)}
+      onDone={() => { setTransition(null); setRevision(value => value + 1); onSaved() }}
+    />
   </>
 }

@@ -49,6 +49,10 @@ CAPABILITIES = {resource: actions for resource, actions in {
         # Well plan SOW adjustments revise planned days without rewriting the
         # configured plan. Kept separate from ordinary configuration edits.
         "plan-adjust",
+        # Rolling a well scope or its plan back one step (Configured -> Draft,
+        # Active -> Upcoming, Final review -> Active, Completed -> Final review).
+        # Separate from "update" so undoing a sign-off can be granted on its own.
+        "rollback",
     ),
     # AFE register and cost estimation. Status moves are separately grantable so that
     # estimators, reviewers and approvers can be given different authority.

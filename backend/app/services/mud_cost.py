@@ -215,8 +215,8 @@ def reference_data(db: Session, organization_id: str) -> MudCostReference:
             well_code=well.well_code,
             well_name=well.well_name,
             display_name=f"{well.well_code} — {well.well_name}" + (" · deleted" if well.is_deleted else ""),
-            status=well.status,
-            config_status=well.config_status,
+            status=well.tracking_status,
+            config_status=well.tracking_plan_status,
             is_deleted=well.is_deleted,
             sections=list(section_options.get(well.id, {}).values()),
         )
