@@ -74,7 +74,12 @@ class DashboardKpis(BaseModel):
     wells_with_actuals: int | None = None
     # Days
     planned_days: Decimal | None = None
-    actual_days: int | None = None
+    # Exact elapsed days (three decimals) from the well spud instant, the same
+    # basis as the NPT/UPA day counts. `actual_days_basis` says `spud` when the
+    # figure is elapsed time, `cost_dates` when no spud instant is recorded and
+    # the count falls back to recorded cost dates, `mixed` when both occur.
+    actual_days: Decimal | None = None
+    actual_days_basis: str = ""
     recorded_days: int | None = None
     npt_days: Decimal | None = None
     upa_days: Decimal | None = None
@@ -144,7 +149,8 @@ class DashboardWellRow(BaseModel):
     upa_amount: Decimal | None = None
     first_cost_date: date | None = None
     last_cost_date: date | None = None
-    actual_days: int | None = None
+    actual_days: Decimal | None = None
+    actual_days_basis: str = ""
     recorded_days: int | None = None
     sheets: int | None = None
     draft_sheets: int | None = None
@@ -179,7 +185,8 @@ class DashboardAfeRow(BaseModel):
     conversion_pending: bool = False
     first_cost_date: date | None = None
     last_cost_date: date | None = None
-    actual_days: int | None = None
+    actual_days: Decimal | None = None
+    actual_days_basis: str = ""
     recorded_days: int | None = None
     sheets: int | None = None
     npt_days: Decimal | None = None
@@ -196,7 +203,8 @@ class DashboardRigRow(BaseModel):
     active_wells: int = 0
     completed_wells: int = 0
     planned_days: Decimal | None = None
-    actual_days: int | None = None
+    actual_days: Decimal | None = None
+    actual_days_basis: str = ""
     recorded_days: int | None = None
     npt_days: Decimal | None = None
     upa_days: Decimal | None = None

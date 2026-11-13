@@ -7,6 +7,7 @@ digraph WellCostIQ {
   "backend/app/__init__.py";
   "backend/app/api/__init__.py";
   "backend/app/api/afe.py";
+  "backend/app/api/assistant.py";
   "backend/app/api/audit.py";
   "backend/app/api/auth.py";
   "backend/app/api/backup.py";
@@ -52,6 +53,7 @@ digraph WellCostIQ {
   "backend/app/main.py";
   "backend/app/models/__init__.py";
   "backend/app/models/afe.py";
+  "backend/app/models/assistant.py";
   "backend/app/models/backup.py";
   "backend/app/models/catalogue.py";
   "backend/app/models/costing_set.py";
@@ -73,6 +75,7 @@ digraph WellCostIQ {
   "backend/app/models/well_sub_activity.py";
   "backend/app/schemas/__init__.py";
   "backend/app/schemas/afe.py";
+  "backend/app/schemas/assistant.py";
   "backend/app/schemas/backup.py";
   "backend/app/schemas/business_dashboard.py";
   "backend/app/schemas/catalogue.py";
@@ -97,6 +100,7 @@ digraph WellCostIQ {
   "backend/app/seed.py";
   "backend/app/services/__init__.py";
   "backend/app/services/afe.py";
+  "backend/app/services/assistant.py";
   "backend/app/services/audit.py";
   "backend/app/services/backup.py";
   "backend/app/services/business_dashboard.py";
@@ -158,6 +162,8 @@ digraph WellCostIQ {
   "frontend/src/components/afe/ServiceLineDialog.tsx";
   "frontend/src/components/afe/SowAdjustmentDialog.tsx";
   "frontend/src/components/afe/TangibleLineDialog.tsx";
+  "frontend/src/components/assistant/AnswerCard.tsx";
+  "frontend/src/components/assistant/AssistantLauncher.tsx";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx";
   "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx";
@@ -168,6 +174,7 @@ digraph WellCostIQ {
   "frontend/src/components/catalogue/ReviseRateDialog.tsx";
   "frontend/src/components/daily-cost/ActivityAllocationEditor.tsx";
   "frontend/src/components/daily-cost/BulkDailyCostPrintDialog.tsx";
+  "frontend/src/components/daily-cost/CostCriteriaPivot.tsx";
   "frontend/src/components/daily-cost/CreateWellSubActivity.tsx";
   "frontend/src/components/daily-cost/DailyCostBulkScopeDialog.tsx";
   "frontend/src/components/daily-cost/DailyCostLineDialog.tsx";
@@ -206,6 +213,7 @@ digraph WellCostIQ {
   "frontend/src/lib/afe.ts";
   "frontend/src/lib/api.ts";
   "frontend/src/lib/appInfo.ts";
+  "frontend/src/lib/assistant.ts";
   "frontend/src/lib/backup.ts";
   "frontend/src/lib/businessDashboard.ts";
   "frontend/src/lib/catalogue.ts";
@@ -240,6 +248,7 @@ digraph WellCostIQ {
   "frontend/src/pages/AfeManagement.tsx";
   "frontend/src/pages/AfeOverview.tsx";
   "frontend/src/pages/Assignments.tsx";
+  "frontend/src/pages/Assistant.tsx";
   "frontend/src/pages/AuditLog.tsx";
   "frontend/src/pages/BackupRecovery.tsx";
   "frontend/src/pages/Blocks.tsx";
@@ -304,6 +313,9 @@ digraph WellCostIQ {
   "backend/app/api/afe.py" -> "backend/app/api/deps.py";
   "backend/app/api/afe.py" -> "backend/app/schemas/afe.py";
   "backend/app/api/afe.py" -> "backend/app/services/__init__.py";
+  "backend/app/api/assistant.py" -> "backend/app/api/deps.py";
+  "backend/app/api/assistant.py" -> "backend/app/schemas/assistant.py";
+  "backend/app/api/assistant.py" -> "backend/app/services/__init__.py";
   "backend/app/api/audit.py" -> "backend/app/api/deps.py";
   "backend/app/api/audit.py" -> "backend/app/models/__init__.py";
   "backend/app/api/audit.py" -> "backend/app/schemas/rbac.py";
@@ -451,6 +463,7 @@ digraph WellCostIQ {
   "backend/app/main.py" -> "backend/app/services/__init__.py";
   "backend/app/main.py" -> "backend/app/services/catalogue.py";
   "backend/app/models/__init__.py" -> "backend/app/models/afe.py";
+  "backend/app/models/__init__.py" -> "backend/app/models/assistant.py";
   "backend/app/models/__init__.py" -> "backend/app/models/backup.py";
   "backend/app/models/__init__.py" -> "backend/app/models/catalogue.py";
   "backend/app/models/__init__.py" -> "backend/app/models/costing_set.py";
@@ -472,6 +485,8 @@ digraph WellCostIQ {
   "backend/app/models/__init__.py" -> "backend/app/models/well_sub_activity.py";
   "backend/app/models/afe.py" -> "backend/app/core/database.py";
   "backend/app/models/afe.py" -> "backend/app/models/rig_well.py";
+  "backend/app/models/assistant.py" -> "backend/app/core/database.py";
+  "backend/app/models/assistant.py" -> "backend/app/models/entities.py";
   "backend/app/models/backup.py" -> "backend/app/core/database.py";
   "backend/app/models/backup.py" -> "backend/app/models/entities.py";
   "backend/app/models/catalogue.py" -> "backend/app/core/database.py";
@@ -544,6 +559,10 @@ digraph WellCostIQ {
   "backend/app/services/afe.py" -> "backend/app/services/__init__.py";
   "backend/app/services/afe.py" -> "backend/app/services/catalogue.py";
   "backend/app/services/afe.py" -> "backend/app/services/retention.py";
+  "backend/app/services/assistant.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/assistant.py" -> "backend/app/models/assistant.py";
+  "backend/app/services/assistant.py" -> "backend/app/schemas/assistant.py";
+  "backend/app/services/assistant.py" -> "backend/app/services/daily_cost.py";
   "backend/app/services/audit.py" -> "backend/app/core/request_security.py";
   "backend/app/services/audit.py" -> "backend/app/models/__init__.py";
   "backend/app/services/backup.py" -> "backend/app/core/config.py";
@@ -579,6 +598,7 @@ digraph WellCostIQ {
   "backend/app/services/daily_cost.py" -> "backend/app/schemas/afe.py";
   "backend/app/services/daily_cost.py" -> "backend/app/schemas/daily_cost.py";
   "backend/app/services/daily_cost.py" -> "backend/app/services/__init__.py";
+  "backend/app/services/daily_cost.py" -> "backend/app/services/operational_time.py";
   "backend/app/services/daily_cost.py" -> "backend/app/services/sow_adjustment.py";
   "backend/app/services/database_browser.py" -> "backend/app/core/spreadsheets.py";
   "backend/app/services/dependencies.py" -> "backend/app/core/database.py";
@@ -655,6 +675,7 @@ digraph WellCostIQ {
   "frontend/src/App.tsx" -> "frontend/src/pages/AfeManagement.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/AfeOverview.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/Assignments.tsx";
+  "frontend/src/App.tsx" -> "frontend/src/pages/Assistant.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/AuditLog.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/BackupRecovery.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/Blocks.tsx";
@@ -726,6 +747,7 @@ digraph WellCostIQ {
   "frontend/src/components/Layout.tsx" -> "frontend/src/components/Brand.tsx";
   "frontend/src/components/Layout.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/Layout.tsx" -> "frontend/src/components/NotificationBell.tsx";
+  "frontend/src/components/Layout.tsx" -> "frontend/src/components/assistant/AssistantLauncher.tsx";
   "frontend/src/components/Layout.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/components/Layout.tsx" -> "frontend/src/context/ThemeContext.tsx";
   "frontend/src/components/Layout.tsx" -> "frontend/src/designSystem.ts";
@@ -838,6 +860,12 @@ digraph WellCostIQ {
   "frontend/src/components/afe/TangibleLineDialog.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/afe/TangibleLineDialog.tsx" -> "frontend/src/components/afe/LinePickers.tsx";
   "frontend/src/components/afe/TangibleLineDialog.tsx" -> "frontend/src/lib/afe.ts";
+  "frontend/src/components/assistant/AnswerCard.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/assistant/AnswerCard.tsx" -> "frontend/src/lib/assistant.ts";
+  "frontend/src/components/assistant/AssistantLauncher.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/assistant/AssistantLauncher.tsx" -> "frontend/src/components/assistant/AnswerCard.tsx";
+  "frontend/src/components/assistant/AssistantLauncher.tsx" -> "frontend/src/context/AuthContext.tsx";
+  "frontend/src/components/assistant/AssistantLauncher.tsx" -> "frontend/src/lib/assistant.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/context/AuthContext.tsx";
@@ -885,6 +913,7 @@ digraph WellCostIQ {
   "frontend/src/components/daily-cost/BulkDailyCostPrintDialog.tsx" -> "frontend/src/lib/lihCost.ts";
   "frontend/src/components/daily-cost/BulkDailyCostPrintDialog.tsx" -> "frontend/src/lib/mudCost.ts";
   "frontend/src/components/daily-cost/BulkDailyCostPrintDialog.tsx" -> "frontend/src/lib/ndtInspection.ts";
+  "frontend/src/components/daily-cost/CostCriteriaPivot.tsx" -> "frontend/src/lib/dailyCost.ts";
   "frontend/src/components/daily-cost/CreateWellSubActivity.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/daily-cost/CreateWellSubActivity.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/components/daily-cost/CreateWellSubActivity.tsx" -> "frontend/src/lib/api.ts";
@@ -977,6 +1006,7 @@ digraph WellCostIQ {
   "frontend/src/context/AuthContext.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/context/AuthContext.tsx" -> "frontend/src/lib/types.ts";
   "frontend/src/context/ThemeContext.tsx" -> "frontend/src/theme.ts";
+  "frontend/src/lib/assistant.ts" -> "frontend/src/lib/api.ts";
   "frontend/src/lib/dailyAllocations.ts" -> "frontend/src/lib/dailyCost.ts";
   "frontend/src/lib/dailyCost.ts" -> "frontend/src/lib/units.ts";
   "frontend/src/lib/idvsSheet.ts" -> "frontend/src/lib/invoiceCalculations.ts";
@@ -1043,6 +1073,10 @@ digraph WellCostIQ {
   "frontend/src/pages/Assignments.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/Assignments.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/Assignments.tsx" -> "frontend/src/lib/types.ts";
+  "frontend/src/pages/Assistant.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/pages/Assistant.tsx" -> "frontend/src/components/assistant/AnswerCard.tsx";
+  "frontend/src/pages/Assistant.tsx" -> "frontend/src/context/AuthContext.tsx";
+  "frontend/src/pages/Assistant.tsx" -> "frontend/src/lib/assistant.ts";
   "frontend/src/pages/AuditLog.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/AuditLog.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/pages/AuditLog.tsx" -> "frontend/src/lib/api.ts";
@@ -1106,6 +1140,7 @@ digraph WellCostIQ {
   "frontend/src/pages/CustomReports.tsx" -> "frontend/src/lib/reportBuilder.ts";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/DataTable.tsx";
+  "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/CostCriteriaPivot.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/WellCostPrintDialog.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/WellProgressPanel.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";

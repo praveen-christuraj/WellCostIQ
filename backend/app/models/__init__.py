@@ -126,3 +126,4 @@ from app.models.report_builder import (
     ReportDefinitionSort,
     ReportDefinitionVersion,
 )
+from app.models.assistant import AssistantConversation, AssistantMemory

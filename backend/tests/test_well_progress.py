@@ -402,3 +402,36 @@ def test_milestone_label_is_saved_once_with_the_register():
         entries = audits.get("items", audits) if isinstance(audits, dict) else audits
         summaries = [str(item.get("summary", "")) for item in entries]
         assert any("milestone label" in summary.lower() for summary in summaries)
+
+
+def test_progress_overview_returns_exact_days_for_every_tracked_well():
+    """One call feeds the whole-register pages with the same exact day counts."""
+    with TestClient(app) as client:
+        headers = login(client)
+        well, afe, _service, _hole, _phase = setup_well(client, headers)
+        _post(client, "/api/v1/daily-cost/entries", headers, {
+            "well_id": well["id"], "afe_id": afe["id"], "cost_date": "2026-10-20", "remarks": "",
+        })
+        client.put(f"/api/v1/daily-cost/wells/{well['id']}/progress", headers=headers, json={
+            "scope": "drilling", "spud_at": "2026-10-19T10:00:00",
+        })
+
+        overview = client.get("/api/v1/daily-cost/progress-overview", headers=headers)
+        assert overview.status_code == 200, overview.text
+        rows = overview.json()
+        assert [row["well_id"] for row in rows] == [well["id"]]
+        drilling = rows[0]["scopes"][0]
+        assert Decimal(drilling["actual_days"]) == Decimal("1.583")
+        assert drilling["basis"] == "spud"
+        assert rows[0]["scopes"][1]["actual_days"] is None
+
+        # A window ends the count at the last cost date inside it; a window with
+        # no sheet reports no duration rather than an invented one.
+        narrowed = client.get(
+            "/api/v1/daily-cost/progress-overview", headers=headers, params={"to": "2026-10-18"},
+        )
+        assert narrowed.status_code == 200, narrowed.text
+        assert narrowed.json()[0]["scopes"][0]["actual_days"] is None
+
+        other = login(client, "south")
+        assert client.get("/api/v1/daily-cost/progress-overview", headers=other).json() == []

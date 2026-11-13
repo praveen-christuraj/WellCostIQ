@@ -38,7 +38,8 @@ export type DashboardKpis = {
   afes: number | null
   wells_with_actuals: number | null
   planned_days: Money
-  actual_days: number | null
+  actual_days: Money
+  actual_days_basis: string
   recorded_days: number | null
   npt_days: Money
   upa_days: Money
@@ -102,7 +103,8 @@ export type DashboardWellRow = {
   upa_amount: Money
   first_cost_date: string | null
   last_cost_date: string | null
-  actual_days: number | null
+  actual_days: Money
+  actual_days_basis: string
   recorded_days: number | null
   sheets: number | null
   draft_sheets: number | null
@@ -137,7 +139,8 @@ export type DashboardAfeRow = {
   conversion_pending: boolean
   first_cost_date: string | null
   last_cost_date: string | null
-  actual_days: number | null
+  actual_days: Money
+  actual_days_basis: string
   recorded_days: number | null
   sheets: number | null
   npt_days: Money
@@ -154,7 +157,8 @@ export type DashboardRigRow = {
   active_wells: number
   completed_wells: number
   planned_days: Money
-  actual_days: number | null
+  actual_days: Money
+  actual_days_basis: string
   recorded_days: number | null
   npt_days: Money
   upa_days: Money
@@ -338,6 +342,22 @@ export function decimal(value: Money | number | undefined, digits = 0): string {
 export function percent(value: Money | number | undefined): string {
   if (value === null || value === undefined || value === '') return '—'
   return `${Number(value).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+}
+
+/** Exact elapsed days: three decimals, e.g. 13.417, never a rounded sheet count. */
+export function days(value: Money | number | null | undefined, digits = 3): string {
+  return decimal(value, digits)
+}
+
+const DAYS_BASIS_TEXT: Record<string, string> = {
+  spud: 'from the spud instant',
+  cost_dates: 'recorded cost dates — enter the Well Spud Date & Time for exact elapsed days',
+  mixed: 'spud and recorded cost dates — enter a spud instant for the wells without one',
+}
+
+/** Footnote for an actual-day figure, so its basis is never implied. */
+export function daysBasis(basis: string | null | undefined): string {
+  return DAYS_BASIS_TEXT[basis ?? ''] ?? ''
 }
 
 export function count(value: number | null | undefined): string {

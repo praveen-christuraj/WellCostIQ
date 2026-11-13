@@ -1,4 +1,4 @@
-.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check
+.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -23,6 +23,16 @@ ui-check:
 # Restore the pre-design-layer interface. Use it if the enhanced UI is rejected.
 ui-rollback:
 	bash scripts/ui-rollback.sh
+
+# In-application guide: the answer card shows the sentence, the labelled figures
+# with the capability that guards each one, the steps, the proving pages, and it
+# refuses honestly (jsdom is a locked dev dependency).
+assistant-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/assistant-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/assistant-check.mjs --loader:.jsx=jsx --external:jsdom && \
+		node node_modules/.cache/assistant-check.mjs
 
 # Full daily/well printing and list-only register regressions (jsdom is a locked dev dependency).
 daily-cost-check:

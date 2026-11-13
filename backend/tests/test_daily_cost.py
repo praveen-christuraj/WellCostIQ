@@ -2312,3 +2312,107 @@ def test_daily_sheets_follow_the_well_status_ladder():
         assert move("reactivate").status_code == 200
         assert state() == ("active", "configured")
         assert new_sheet("2026-10-11").status_code == 201
+
+
+def test_responsible_party_separates_booked_cost_from_npt_upa_liability():
+    """A vendor is paid for the hours it works; the party that caused the delay owns them.
+
+    Service provider A stands by for the whole operation and bills every hour.
+    Provider B caused 14 unplanned hours, so B carries the UPA exposure. The
+    party tab must show both without double counting the ledger.
+    """
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup_daily_sheet(client, headers)
+        entry_id = setup["entry"]["id"]
+        rate = client.get(f"/api/v1/daily-cost/entries/{entry_id}/baseline", headers=headers).json()["service_rates"][0]
+
+        # Provider B becomes the responsible party recorded on the UPA sub-activity.
+        vendor_b = _post(client, "/api/v1/master-data/vendors", headers, {
+            "vendor_code": "VEND-02", "vendor_name": "Delta Wireline", "category": "Drilling", "status": "active",
+        })
+        updated = client.patch(
+            f"/api/v1/rig-well/sub-activities/{setup['sub_upa']['id']}?well_id={setup['well']['id']}",
+            headers=headers, json={
+                "responsible_party": "Delta Wireline", "vendor_id": vendor_b["id"],
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["responsible_party"] == "Delta Wireline"
+
+        saved = client.put(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers, json={
+            "remarks": "24 hours: 10 planned, 14 unplanned",
+            "services": [
+                {
+                    "activity_id": setup["activity"]["id"], "hole_section_id": setup["hole"]["id"],
+                    "phase_id": setup["phase"]["id"], "sub_activity_id": setup["sub1"]["id"],
+                    "vendor_id": setup["vendor"]["id"], "quantity": "10", "quantity_unit": "hours",
+                    "currency": "USD", "service_id": setup["service"]["id"],
+                    "baseline_service_rate_id": rate["id"], "charging_basis": "Day Rate",
+                    "charge_category": "Operation",
+                },
+                {
+                    "activity_id": setup["activity_upa"]["id"], "hole_section_id": setup["hole"]["id"],
+                    "phase_id": setup["phase"]["id"], "sub_activity_id": setup["sub_upa"]["id"],
+                    "vendor_id": setup["vendor"]["id"], "quantity": "14", "quantity_unit": "hours",
+                    "currency": "USD", "service_id": setup["service"]["id"],
+                    "baseline_service_rate_id": rate["id"], "charging_basis": "Day Rate",
+                    "charge_category": "Operation",
+                },
+            ],
+            "consumables": [], "tangibles": [],
+        })
+        assert saved.status_code == 200, saved.text
+        assert client.post(f"/api/v1/daily-cost/entries/{entry_id}/submit", headers=headers,
+                           json={"remarks": "reviewed"}).status_code == 200
+
+        data = client.get(f"/api/v1/daily-cost/wells/{setup['well']['id']}/cost-summary", headers=headers).json()
+        factors = {group["dimension"]: group for group in data["factors"]}
+        party_rows = {row["name"]: row for row in factors["party"]["rows"]}
+
+        # Provider A is booked for the whole 24 hours (10 planned + 14 unplanned)
+        # at the 100-per-day rate: 41.67 planned + 58.33 unplanned.
+        assert Decimal(party_rows["Acme Services"]["booked_amount"]) == Decimal("100.0000000000")
+        assert Decimal(party_rows["Acme Services"]["responsible_amount"]) == Decimal("0.00")
+        # Provider B is not paid by this ledger but owns the 14-hour UPA exposure.
+        assert Decimal(party_rows["Delta Wireline"]["booked_amount"]) == Decimal("0.00")
+        assert Decimal(party_rows["Delta Wireline"]["responsible_amount"]).quantize(Decimal("0.01")) == Decimal("58.33")
+        assert Decimal(party_rows["Delta Wireline"]["upa_amount"]).quantize(Decimal("0.01")) == Decimal("58.33")
+        assert Decimal(party_rows["Delta Wireline"]["upa_days"]) == Decimal("0.583")
+        assert "Responsible party" in party_rows["Delta Wireline"]["detail"]
+        # Booking reconciles with the ledger; responsibility is a second measure.
+        assert abs(
+            sum(Decimal(row["booked_amount"]) for row in factors["party"]["rows"])
+            - Decimal(data["totals"]["actual"])
+        ) < Decimal("0.000001")
+        assert abs(
+            sum(Decimal(row["responsible_amount"]) for row in factors["party"]["rows"])
+            - (Decimal(data["totals"]["upa"]) + Decimal(data["totals"]["npt"]))
+        ) < Decimal("0.000001")
+
+        # Criteria cells are available for the multi-factor pivot.
+        assert data["criteria"], "the criteria pivot needs section/phase/activity cells"
+        upa_cell = next(row for row in data["criteria"] if row["classification"] == "UPA")
+        assert upa_cell["activity_code"] == "UPA"
+        assert upa_cell["phase_code"] == "DRILL"
+        assert Decimal(upa_cell["upa"]).quantize(Decimal("0.01")) == Decimal("58.33")
+
+        # Forecast: 100 per recorded day against 10 planned days.
+        forecast = data["forecast"]
+        assert forecast["available"] is True
+        assert Decimal(forecast["run_rate"]) == Decimal("100.00")
+        assert Decimal(forecast["remaining_planned_days"]) == Decimal("9")
+        # 100.00 already spent + 100.00 per day over the 9 planned days ahead.
+        assert Decimal(forecast["forecast_final_cost"]) == Decimal("1000.00")
+        assert Decimal(forecast["forecast_variance"]) == Decimal("-5000.00")
+        assert Decimal(forecast["planned_final_cost"]) == Decimal("6000.00")
+        assert forecast["forecast_over_budget"] is False
+        assert forecast["basis"] == "recorded"
+
+        # Out-of-scope spend: nothing unbudgeted here beyond other expenses.
+        out_of_scope = data["out_of_scope"]
+        assert out_of_scope["available"] is True
+        assert Decimal(out_of_scope["other_expenses"]) == Decimal("0.00")
+        assert Decimal(out_of_scope["amount"]) == Decimal(out_of_scope["unbudgeted"]) + Decimal(
+            out_of_scope["other_expenses"]
+        )

@@ -8,7 +8,7 @@ import { ErrorMessage, PageHeading } from '../components/Common'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import type { Afe } from '../lib/afe'
-import type { DailyCostEntry } from '../lib/dailyCost'
+import type { DailyCostEntry, WellProgressReport } from '../lib/dailyCost'
 import type { LihCostEntry } from '../lib/lihCost'
 import { formatDepth, type Well } from '../lib/rigWell'
 import { formatDepthMeters } from '../lib/units'
@@ -31,12 +31,14 @@ type CostRow = {
   actual_depth_m: string
   planned_days: number
   adjusted_planned_days: number | null
+  /** Exact elapsed days from the spud instant, three decimals; null when no spud is recorded. */
   actual_days: number | null
+  actual_days_basis: string
   first_cost_date: string
 }
 
 type CurrencyAmounts = Map<string, number>
-type Sources = { wells: Well[]; afes: Afe[]; entries: DailyCostEntry[]; lih: LihCostEntry[] }
+type Sources = { wells: Well[]; afes: Afe[]; entries: DailyCostEntry[]; lih: LihCostEntry[]; progress: WellProgressReport[] }
 
 function addAmount(amounts: CurrencyAmounts, currency: string, value: string | number | null | undefined) {
   if (value == null || value === '') return
@@ -54,10 +56,17 @@ function amountText(amounts: CurrencyAmounts, hasRecords: boolean, pending = fal
     .join(' · ')
 }
 
-function daySpan(first: string, last: string): number {
-  const start = Date.parse(`${first}T00:00:00Z`)
-  const end = Date.parse(`${last}T00:00:00Z`)
-  return Math.max(1, Math.floor((end - start) / 86_400_000) + 1)
+/** Sum of one well's exact elapsed days across the scopes that have a spud instant. */
+function exactDays(progress: WellProgressReport | undefined): { days: number | null; basis: string } {
+  const rows = (progress?.scopes ?? []).filter(scope => scope.actual_days != null)
+  if (!rows.length) return { days: null, basis: '' }
+  const days = rows.reduce((total, scope) => total + Number(scope.actual_days), 0)
+  const bases = new Set(rows.map(scope => scope.basis || 'spud'))
+  return { days, basis: bases.size === 1 ? [...bases][0] : 'mixed' }
+}
+
+function exactDaysText(days: number | null): string {
+  return days === null ? '—' : days.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
 }
 
 function StatCard({ label, value, note, icon }: { label: string; value: string; note: string; icon: ReactNode }) {
@@ -73,7 +82,7 @@ function StatCard({ label, value, note, icon }: { label: string; value: string; 
 
 export default function WellCostComparisonReport() {
   const { can } = useAuth()
-  const [sources, setSources] = useState<Sources>({ wells: [], afes: [], entries: [], lih: [] })
+  const [sources, setSources] = useState<Sources>({ wells: [], afes: [], entries: [], lih: [], progress: [] })
   const [loading, setLoading] = useState(true)
   const [loadErrors, setLoadErrors] = useState<string[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
@@ -87,13 +96,15 @@ export default function WellCostComparisonReport() {
   const load = useCallback(async () => {
     setLoading(true)
     setLoadErrors([])
-    const [wellsResult, afesResult, entriesResult, lihResult] = await Promise.allSettled([
+    const [wellsResult, afesResult, entriesResult, lihResult, progressResult] = await Promise.allSettled([
       api<Well[]>('/rig-well/wells'),
       canReadAfe ? api<Afe[]>('/afe/afes') : Promise.resolve([] as Afe[]),
       canReadDaily ? api<DailyCostEntry[]>('/daily-cost/entries') : Promise.resolve([] as DailyCostEntry[]),
       // LIH is a separate register, so it is read alongside the daily actuals
       // and deducted from the AFE in this comparison too.
       canReadDaily ? api<LihCostEntry[]>('/lih-cost/entries') : Promise.resolve([] as LihCostEntry[]),
+      // Exact elapsed days per scope: a sheet count is never a duration.
+      canReadDaily ? api<WellProgressReport[]>('/daily-cost/progress-overview') : Promise.resolve([] as WellProgressReport[]),
     ])
     const errors: string[] = []
     const wells = wellsResult.status === 'fulfilled' ? wellsResult.value : []
@@ -104,7 +115,9 @@ export default function WellCostComparisonReport() {
     if (entriesResult.status === 'rejected') errors.push(`Daily actuals: ${entriesResult.reason instanceof Error ? entriesResult.reason.message : 'could not be loaded'}`)
     const lih = lihResult.status === 'fulfilled' ? lihResult.value : []
     if (lihResult.status === 'rejected') errors.push(`LIH cost register: ${lihResult.reason instanceof Error ? lihResult.reason.message : 'could not be loaded'}`)
-    setSources({ wells, afes, entries, lih })
+    const progress = progressResult.status === 'fulfilled' ? progressResult.value : []
+    if (progressResult.status === 'rejected') errors.push(`Well progress days: ${progressResult.reason instanceof Error ? progressResult.reason.message : 'could not be loaded'}`)
+    setSources({ wells, afes, entries, lih, progress })
     setLoadErrors(errors)
     setLoading(false)
   }, [canReadAfe, canReadDaily, refreshKey])
@@ -134,6 +147,7 @@ export default function WellCostComparisonReport() {
       actualByWell.set(entry.well_id, group)
     }
 
+    const progressByWell = new Map(sources.progress.map(row => [row.well_id, row]))
     return sources.wells.map(well => {
       const afes = afesByWell.get(well.id) ?? []
       const entries = actualByWell.get(well.id) ?? []
@@ -193,7 +207,6 @@ export default function WellCostComparisonReport() {
 
       const dates = entries.map(entry => String(entry.cost_date)).sort()
       const firstDate = dates[0] ?? ''
-      const lastDate = dates.at(-1) ?? ''
       const totalUsd = entries.reduce((sum, entry) => sum + Number(entry.total_cost_usd ?? entry.total_cost ?? 0), 0)
       const latestDepthEntry = [...entries]
         .filter(entry => entry.actual_depth != null && entry.actual_depth !== '')
@@ -223,7 +236,10 @@ export default function WellCostComparisonReport() {
         adjusted_planned_days: well.has_plan_adjustment && well.adjusted_total_days != null
           ? Number(well.adjusted_total_days)
           : null,
-        actual_days: firstDate ? daySpan(firstDate, lastDate) : null,
+        ...(() => {
+          const exact = exactDays(progressByWell.get(well.id))
+          return { actual_days: exact.days, actual_days_basis: exact.basis }
+        })(),
         first_cost_date: firstDate,
       }
     })
@@ -280,7 +296,11 @@ export default function WellCostComparisonReport() {
       headerTooltip: 'Adjusted planned days from the approved plan adjustment',
       valueFormatter: params => params.value == null ? '—' : Number(params.value).toLocaleString(undefined, { maximumFractionDigits: 2 }),
     },
-    { headerName: 'ACTUAL DAYS', field: 'actual_days', minWidth: 125, valueFormatter: params => params.value == null ? '—' : Number(params.value).toLocaleString() },
+    {
+      headerName: 'ACTUAL DAYS', field: 'actual_days', minWidth: 145,
+      headerTooltip: 'Exact elapsed days from the Well Spud Date & Time to the last cost date (or Progress Completed date & time), at three decimals. A blank means no spud instant is recorded for the well.',
+      valueFormatter: params => exactDaysText(params.value as number | null),
+    },
     { headerName: 'FIRST COST DATE', field: 'first_cost_date', minWidth: 155, valueFormatter: params => params.value ? new Date(`${params.value}T00:00:00`).toLocaleDateString() : '—' },
   ], [])
 
@@ -293,7 +313,7 @@ export default function WellCostComparisonReport() {
     <PageHeading
       eyebrow="REPORTS / WELL-WISE COST COMPARISONS"
       title="Well-wise cost comparisons"
-      subtitle="Compare well plans, AFE budgets and actual daily costs. Actual days span the first through the latest daily cost date."
+      subtitle="Compare well plans, AFE budgets and actual daily costs. Actual days are exact elapsed time from each well's spud instant, at three decimals — never a count of daily sheets."
       action={<Box display="flex" gap={1} flexWrap="wrap">
         <Button component={RouterLink} to="/reports" variant="outlined" startIcon={<ArrowBackRounded/>}>Reports</Button>
         <Button variant="outlined" startIcon={<RefreshRounded/>} onClick={() => setRefreshKey(value => value + 1)} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</Button>

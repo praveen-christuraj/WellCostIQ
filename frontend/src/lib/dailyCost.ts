@@ -276,6 +276,8 @@ export type WellProgressScope = {
   is_completed: boolean
   planned_days: string; actual_days: string | null; days_variance: string | null
   as_of_date: string | null
+  /** `spud` = elapsed time; `cost_dates` = no spud instant was recorded. */
+  basis?: string
 }
 export type WellProgressReport = {
   well_id: string; well_code: string; well_name: string; scopes: WellProgressScope[]
@@ -478,6 +480,11 @@ export type DailyCostDailyRow = {
 export type DailyCostFactorRow = {
   key: string; code: string; name: string; detail: string; amount: string
   planned: string | null; balance: string | null; share: string; quantity: string
+  // Responsible-party cut only: what the party books as a service provider and
+  // the NPT/UPA exposure its responsibility caused (two different measures).
+  booked_amount?: string | null; responsible_amount?: string | null
+  npt_amount?: string | null; upa_amount?: string | null
+  npt_days?: string | null; upa_days?: string | null
 }
 export type DailyCostFactorDimension =
   | 'cost_group' | 'classification' | 'section' | 'phase' | 'activity'
@@ -498,7 +505,9 @@ export type DailyCostWellTotals = {
   adjusted_planned: string | null; adjusted_balance: string | null; adjusted_used_percent: string | null
   adjusted_planned_days: string | null; has_adjustment: boolean
   // Progress days counted from the Well Spud Date & Time (null until a spud
-  // date is entered on any scope).
+  // date is entered on any scope). `actual_days` is the exact three-decimal
+  // figure; the basis says whether it is elapsed time or recorded cost dates.
+  actual_days?: string | null; actual_days_basis?: string
   spud_actual_days: string | null; spud_days_variance: string | null
   // Mud chemicals comparison: the recorded actual and the reconciled amount
   // that the final AFE comparison uses. comparison_* are the final figures.
@@ -567,6 +576,37 @@ export type DailyCostWellSummary = {
   progress: WellProgressScope[]
   mud_cost: DailyCostMudReconciliation | null
   lih_cost: DailyCostLihSummary | null
+  forecast?: DailyCostForecast | null
+  out_of_scope?: DailyCostOutOfScope | null
+  criteria?: DailyCostCriteriaRow[]
+}
+
+/** Projected final cost from the rate actually being spent. */
+export type DailyCostForecast = {
+  available: boolean; currency: string; basis: string
+  elapsed_days: string | null; recorded_days: number
+  planned_days: string; remaining_planned_days: string; run_rate: string
+  actual_to_date: string; forecast_final_cost: string; planned_final_cost: string
+  forecast_variance: string; forecast_over_budget: boolean
+  days_to_budget: string | null; note: string
+}
+
+/** Spend with no AFE allowance behind it: out of scope by definition. */
+export type DailyCostOutOfScope = {
+  available: boolean; currency: string; amount: string; line_count: number
+  share_percent: string; planned_amount: string; other_expenses: string; unbudgeted: string
+  lines: Array<{
+    budget_key: string; cost_group: string; item_code: string; item_name: string
+    service_group: string; actual: string; npt: string; upa: string
+  }>
+}
+
+/** One section → phase → activity → classification cell of the ledger. */
+export type DailyCostCriteriaRow = {
+  section_code: string; section_name: string
+  phase_code: string; phase_name: string
+  activity_code: string; activity_name: string
+  classification: string; actual: string; npt: string; upa: string; share: string
 }
 
 /** Server-side register filters, so the daily basis stays quick on a long well. */

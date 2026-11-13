@@ -66,6 +66,7 @@ const TangiblesUsageReport = lazy(() => import('./pages/reports/TangiblesUsageRe
 const ServiceWiseCostReport = lazy(() => import('./pages/reports/ServiceWiseCostReport'))
 const VendorWiseCostReport = lazy(() => import('./pages/reports/VendorWiseCostReport'))
 const NptUpaReport = lazy(() => import('./pages/reports/NptUpaReport'))
+const Assistant = lazy(() => import('./pages/Assistant'))
 
 // Every listed permission is required (AND).
 function Guard({ permission, children }: { permission: string | string[]; children: ReactNode }) {
@@ -120,6 +121,7 @@ export default function App() {
           <Route path="other-management/database/:tableName" element={<Guard permission="database-browser:read"><DatabaseTableView/></Guard>}/>
           <Route path="other-management/tasks" element={<Guard permission="tasks:read"><TaskManager/></Guard>}/>
           <Route path="other-management/notifications" element={<Notifications/>}/>
+          <Route path="assistant" element={<Guard permission="assistant:read"><Assistant/></Guard>}/>
           <Route path="master-data" element={<Guard permission="master-data:read"><MasterDataOverview/></Guard>}/>
           <Route path="master-data/records" element={<Guard permission="master-data:read"><MasterDataRecords/></Guard>}/>
           <Route path="master-data/services" element={<Guard permission="master-data:read"><Services/></Guard>}/>
