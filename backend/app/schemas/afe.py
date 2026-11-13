@@ -217,6 +217,41 @@ class SectionRateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ScopeRateIn(BaseModel):
+    """A Day Rate unit rate for one section (and optional phase) of one line."""
+
+    hole_section_id: str = Field(min_length=1, max_length=36)
+    phase_id: str | None = Field(default=None, max_length=36)
+    category: ChargeCategory
+    unit_rate: Decimal10 = Field(ge=0, le=Decimal("100000000"))
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("phase_id", mode="before")
+    @classmethod
+    def blank_to_none(cls, value: Any) -> Any:
+        value = _trim(value)
+        return value or None
+
+
+class ScopeDaysIn(BaseModel):
+    """An explicit day (or hour) quantity for one section (and optional phase)."""
+
+    hole_section_id: str = Field(min_length=1, max_length=36)
+    phase_id: str | None = Field(default=None, max_length=36)
+    category: ChargeCategory
+    quantity: Decimal10 = Field(ge=0, le=Decimal("100000"))
+    quantity_unit: QuantityUnit = "days"
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("phase_id", mode="before")
+    @classmethod
+    def blank_to_none(cls, value: Any) -> Any:
+        value = _trim(value)
+        return value or None
+
+
 class ServiceLineIn(BaseModel):
     client_key: str | None = Field(default=None, max_length=64)
     service_id: str = Field(min_length=1, max_length=36)
@@ -229,6 +264,10 @@ class ServiceLineIn(BaseModel):
     rates: list[RateIn] = Field(default_factory=list, max_length=8)
     charges: list[ChargeIn] = Field(default_factory=list, max_length=50)
     section_rates: list[SectionRateIn] = Field(default_factory=list, max_length=200)
+    # Day Rate scope rows: one dialog configures every section and phase, with a
+    # rate that differs per scope and (optionally) that scope's own days.
+    scope_rates: list[ScopeRateIn] = Field(default_factory=list, max_length=500)
+    scope_days: list[ScopeDaysIn] = Field(default_factory=list, max_length=200)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -390,6 +429,25 @@ class SectionRateOut(DecimalResponseModel):
     amount: Decimal
 
 
+class ScopeRateOut(DecimalResponseModel):
+    hole_section_id: str
+    section_label: str
+    phase_id: str | None
+    phase_label: str
+    category: str
+    unit_rate: Decimal
+
+
+class ScopeDaysOut(DecimalResponseModel):
+    hole_section_id: str
+    section_label: str
+    phase_id: str | None
+    phase_label: str
+    category: str
+    quantity: Decimal
+    quantity_unit: str
+
+
 class ServiceLineOut(DecimalResponseModel):
     id: str | None
     client_key: str | None
@@ -411,6 +469,11 @@ class ServiceLineOut(DecimalResponseModel):
     rates: list[RateOut]
     charges: list[ChargeOut]
     section_rates: list[SectionRateOut]
+    scope_rates: list[ScopeRateOut] = Field(default_factory=list)
+    scope_days: list[ScopeDaysOut] = Field(default_factory=list)
+    # Scopes the service is used on, in well-plan order; one row per section and
+    # phase the estimate priced, so the report can total the service once there.
+    scopes: list[SectionRateOut] = Field(default_factory=list)
     amount: Decimal
     warnings: list[str]
     components: list[ComponentOut]

@@ -43,6 +43,8 @@ from app.models.sow_adjustment import (
     AfeSowServiceCharge,
     AfeSowServiceLine,
     AfeSowServiceRate,
+    AfeSowServiceScopeDays,
+    AfeSowServiceScopeRate,
     AfeSowServiceSectionRate,
     AfeSowTangibleLine,
     DailyCostAmendment,
@@ -775,6 +777,33 @@ def _before_afe_rows(db: Session, afe: Afe, adjustment: AfeSowAdjustment) -> Non
             )
             for entry in line.section_rates
         ]
+        row.scope_rates = [
+            AfeSowServiceScopeRate(
+                organization_id=organization_id,
+                plan_side="before",
+                pair_key=row.pair_key,
+                hole_section_id=entry.hole_section_id,
+                phase_id=entry.phase_id,
+                charge_category=entry.charge_category,
+                unit_rate=Decimal(entry.unit_rate),
+                sort_order=entry.sort_order,
+            )
+            for entry in line.scope_rates
+        ]
+        row.scope_days = [
+            AfeSowServiceScopeDays(
+                organization_id=organization_id,
+                plan_side="before",
+                pair_key=row.pair_key,
+                charge_category=entry.charge_category,
+                hole_section_id=entry.hole_section_id,
+                phase_id=entry.phase_id,
+                quantity=Decimal(entry.quantity),
+                quantity_unit=entry.quantity_unit,
+                sort_order=entry.sort_order,
+            )
+            for entry in line.scope_days
+        ]
         rows.append(row)
     for index, line in enumerate(afe.consumable_lines):
         rows.append(
@@ -871,6 +900,33 @@ def _after_afe_rows(
             )
             for order, (section_id, phase_id, amount) in enumerate(row.section_rates)
         ]
+        line.scope_rates = [
+            AfeSowServiceScopeRate(
+                organization_id=organization_id,
+                plan_side="after",
+                pair_key=pair_key,
+                hole_section_id=section_id,
+                phase_id=phase_id,
+                charge_category=category,
+                unit_rate=rate,
+                sort_order=order,
+            )
+            for order, (section_id, phase_id, category, rate) in enumerate(row.scope_rates)
+        ]
+        line.scope_days = [
+            AfeSowServiceScopeDays(
+                organization_id=organization_id,
+                plan_side="after",
+                pair_key=pair_key,
+                charge_category=category,
+                hole_section_id=section_id,
+                phase_id=phase_id,
+                quantity=quantity,
+                quantity_unit=unit,
+                sort_order=order,
+            )
+            for order, (section_id, phase_id, category, quantity, unit) in enumerate(row.scope_days)
+        ]
         rows.append(line)
     for index, row in enumerate(resolved.consumables):
         rows.append(
@@ -936,6 +992,14 @@ def _sow_resolved(
         section_rates = tuple(
             (entry.hole_section_id, entry.phase_id, Decimal(entry.amount)) for entry in row.section_rates
         )
+        scope_rates = tuple(
+            (entry.hole_section_id, entry.phase_id, entry.charge_category, Decimal(entry.unit_rate))
+            for entry in row.scope_rates
+        )
+        scope_days = tuple(
+            (entry.hole_section_id, entry.phase_id, entry.charge_category, Decimal(entry.quantity), entry.quantity_unit)
+            for entry in row.scope_days
+        )
         resolved.services.append(
             afe_service.RService(
                 key=row.pair_key,
@@ -950,6 +1014,11 @@ def _sow_resolved(
                 rates=rates,
                 charges=charges,
                 section_rates=section_rates,
+                scope_rates=scope_rates,
+                scope_days=scope_days,
+                scopes=afe_service._service_scopes(
+                    row.charging_basis, row.hole_section_id, row.phase_id, scope_rates, scope_days, section_rates
+                ),
                 line=engine.ServiceLine(
                     key=row.pair_key,
                     label=afe_service._service_label(service),
@@ -963,6 +1032,14 @@ def _sow_resolved(
                     section_rates=tuple(
                         engine.SectionRateInput(section_id, phase_id, amount)
                         for section_id, phase_id, amount in section_rates
+                    ),
+                    service_rates=tuple(
+                        engine.ServiceRateInput(category, rate, section_id, phase_id)
+                        for section_id, phase_id, category, rate in scope_rates
+                    ),
+                    scope_days=tuple(
+                        engine.ScopeDaysInput(category, qty, unit, section_id, phase_id)
+                        for section_id, phase_id, category, qty, unit in scope_days
                     ),
                 ),
             )

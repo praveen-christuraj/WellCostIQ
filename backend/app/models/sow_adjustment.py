@@ -202,6 +202,14 @@ class AfeSowServiceLine(SowLineRecord):
         back_populates="line", cascade="all, delete-orphan", order_by="AfeSowServiceSectionRate.sort_order",
         lazy="selectin", passive_deletes=True,
     )
+    scope_rates: Mapped[list["AfeSowServiceScopeRate"]] = relationship(
+        back_populates="line", cascade="all, delete-orphan", order_by="AfeSowServiceScopeRate.sort_order",
+        lazy="selectin", passive_deletes=True,
+    )
+    scope_days: Mapped[list["AfeSowServiceScopeDays"]] = relationship(
+        back_populates="line", cascade="all, delete-orphan", order_by="AfeSowServiceScopeDays.sort_order",
+        lazy="selectin", passive_deletes=True,
+    )
 
 
 class AfeSowServiceRate(SowLineRecord):
@@ -263,6 +271,59 @@ class AfeSowServiceSectionRate(SowLineRecord):
     amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
 
     line: Mapped[AfeSowServiceLine] = relationship(back_populates="section_rates", lazy="joined")
+
+
+class AfeSowServiceScopeRate(SowLineRecord):
+    """A revised Day Rate unit rate for one section (and optional phase)."""
+
+    __tablename__ = "afe_sow_service_scope_rates"
+    __table_args__ = (
+        UniqueConstraint(
+            "line_id", "hole_section_id", "phase_id", "charge_category", name="uq_afe_sow_scope_rates_scope"
+        ),
+        CheckConstraint(_in("charge_category", CHARGE_CATEGORIES), name="ck_afe_sow_scope_rates_category"),
+        CheckConstraint("unit_rate >= 0", name="ck_afe_sow_scope_rates_rate"),
+    )
+
+    line_id: Mapped[str] = mapped_column(
+        ForeignKey("afe_sow_service_lines.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    hole_section_id: Mapped[str] = mapped_column(
+        ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    phase_id: Mapped[str | None] = mapped_column(
+        ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+
+    line: Mapped[AfeSowServiceLine] = relationship(back_populates="scope_rates", lazy="joined")
+
+
+class AfeSowServiceScopeDays(SowLineRecord):
+    """A revised explicit day (or hour) quantity for one scope of a service line."""
+
+    __tablename__ = "afe_sow_service_scope_days"
+    __table_args__ = (
+        CheckConstraint(_in("charge_category", CHARGE_CATEGORIES), name="ck_afe_sow_scope_days_category"),
+        CheckConstraint(_in("quantity_unit", ("days", "hours")), name="ck_afe_sow_scope_days_unit"),
+        CheckConstraint("quantity >= 0", name="ck_afe_sow_scope_days_qty"),
+    )
+
+    line_id: Mapped[str] = mapped_column(
+        ForeignKey("afe_sow_service_lines.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
+    hole_section_id: Mapped[str] = mapped_column(
+        ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    phase_id: Mapped[str | None] = mapped_column(
+        ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    quantity_unit: Mapped[str] = mapped_column(String(10), default="days", server_default="days", nullable=False)
+
+    line: Mapped[AfeSowServiceLine] = relationship(back_populates="scope_days", lazy="joined")
 
 
 class AfeSowConsumableLine(SowLineRecord):

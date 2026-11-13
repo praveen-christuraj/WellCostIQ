@@ -666,6 +666,17 @@ class DailyCostBudgetComparison(BaseModel):
     actual_planned: Decimal = Decimal("0")
     actual_upa: Decimal = Decimal("0")
     actual_npt: Decimal = Decimal("0")
+    # Scope the allowance was priced on. A Day Rate service configured once for
+    # the whole well owns one allowance per section and phase; these fields let
+    # a report print that service once per section, phase, activity and
+    # sub-activity while still clubbing each scope's totals.
+    hole_section_id: str | None = None
+    section_label: str = ""
+    phase_id: str | None = None
+    phase_label: str = ""
+    # Set when a row sums several allowances of the same service and scope, so
+    # the report prints the service once for that section and phase.
+    club_count: int = 0
 
 
 class DailyCostComparison(BaseModel):

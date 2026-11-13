@@ -267,10 +267,19 @@ export default function AfeEstimate() {
       const out = shown?.services.find(item => item.client_key === line.client_key) ?? null
       const service = reference.services.find(item => item.id === line.service_id)
       const warnings = out?.warnings.length ?? 0
+      const scopedRateCount = new Set(
+        line.scope_rates.filter(rate => rate.hole_section_id && toNumber(rate.unit_rate) > 0)
+          .map(rate => `${rate.hole_section_id}|${rate.phase_id ?? ''}`),
+      ).size
+      const sectionRateCount = line.section_rates.filter(rate => toNumber(rate.amount) > 0).length
       const basisDetail = line.charging_basis === 'Day Rate'
-        ? `${line.rates.length} unit rate${line.rates.length === 1 ? '' : 's'}${line.charges.length ? ` · ${line.charges.length} day entr${line.charges.length === 1 ? 'y' : 'ies'}` : ''}`
+        ? [
+          `${line.rates.length} well-wide rate${line.rates.length === 1 ? '' : 's'}`,
+          scopedRateCount ? `${scopedRateCount} section rate${scopedRateCount === 1 ? '' : 's'}` : '',
+          line.charges.length ? `${line.charges.length} day entr${line.charges.length === 1 ? 'y' : 'ies'}` : '',
+        ].filter(Boolean).join(' · ')
         : line.charging_basis === 'Per Service Rate' ? amountText(line.service_amount, line.currency)
-          : `${line.section_rates.filter(rate => toNumber(rate.amount) > 0).length} section rate(s)`
+          : `${sectionRateCount} section rate(s)`
       return {
         key: line.client_key,
         service: service ? `${service.service_code} · ${service.service_name}` : 'Service removed from master data',
@@ -278,7 +287,9 @@ export default function AfeEstimate() {
         group: service?.service_group ?? out?.service_group ?? '',
         basis: line.charging_basis,
         basis_detail: basisDetail,
-        scope: line.charging_basis === 'Per Section Rate' ? 'Per section' : [sectionLabel(saved.well, line.hole_section_id), phaseLabel(saved.well, line.hole_section_id, line.phase_id)].filter(Boolean).join(' · '),
+        scope: line.charging_basis === 'Per Section Rate' ? 'Per section'
+          : line.charging_basis === 'Day Rate' && scopedRateCount > 1 ? `${scopedRateCount} sections`
+            : [sectionLabel(saved.well, line.hole_section_id), phaseLabel(saved.well, line.hole_section_id, line.phase_id)].filter(Boolean).join(' · '),
         currency: line.currency,
         amount: out ? toNumber(out.amount) : null,
         amount_text: out ? amountText(out.amount, line.currency) : problems.length ? 'Incomplete' : 'Pricing…',

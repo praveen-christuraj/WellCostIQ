@@ -24,6 +24,7 @@ digraph WellCostIQ {
   "backend/app/api/mud_cost.py";
   "backend/app/api/ndt_inspection.py";
   "backend/app/api/rbac.py";
+  "backend/app/api/record_templates.py";
   "backend/app/api/report_builder.py";
   "backend/app/api/rig_well.py";
   "backend/app/api/security.py";
@@ -62,6 +63,7 @@ digraph WellCostIQ {
   "backend/app/models/master_data.py";
   "backend/app/models/mud_cost.py";
   "backend/app/models/ndt_inspection.py";
+  "backend/app/models/record_template.py";
   "backend/app/models/report_builder.py";
   "backend/app/models/rig_well.py";
   "backend/app/models/security.py";
@@ -84,6 +86,7 @@ digraph WellCostIQ {
   "backend/app/schemas/mud_cost.py";
   "backend/app/schemas/ndt_inspection.py";
   "backend/app/schemas/rbac.py";
+  "backend/app/schemas/record_template.py";
   "backend/app/schemas/report_builder.py";
   "backend/app/schemas/rig_well.py";
   "backend/app/schemas/security.py";
@@ -111,6 +114,7 @@ digraph WellCostIQ {
   "backend/app/services/operational_time.py";
   "backend/app/services/password_policy.py";
   "backend/app/services/provisioning.py";
+  "backend/app/services/record_template.py";
   "backend/app/services/report_catalog.py";
   "backend/app/services/report_engine.py";
   "backend/app/services/report_formula.py";
@@ -153,6 +157,7 @@ digraph WellCostIQ {
   "frontend/src/components/afe/SowAdjustmentDialog.tsx";
   "frontend/src/components/afe/TangibleLineDialog.tsx";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx";
+  "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx";
   "frontend/src/components/catalogue/MasterSelect.tsx";
   "frontend/src/components/catalogue/OptionSelect.tsx";
@@ -182,11 +187,14 @@ digraph WellCostIQ {
   "frontend/src/components/reports/UsageMatrix.tsx";
   "frontend/src/components/reports/UsageReportFilters.tsx";
   "frontend/src/components/reports/UsageReportShell.tsx";
+  "frontend/src/components/templates/TemplateEditorDialog.tsx";
+  "frontend/src/components/templates/TemplatePickerDialog.tsx";
   "frontend/src/components/ui/ChartPanel.tsx";
   "frontend/src/components/ui/ContextBar.tsx";
   "frontend/src/components/ui/DatasetState.tsx";
   "frontend/src/components/ui/FinancialValue.tsx";
   "frontend/src/components/ui/InteractiveChart.tsx";
+  "frontend/src/components/ui/ReportViewDialog.tsx";
   "frontend/src/components/ui/SectionCard.tsx";
   "frontend/src/components/ui/StatCard.tsx";
   "frontend/src/context/AuthContext.tsx";
@@ -213,6 +221,7 @@ digraph WellCostIQ {
   "frontend/src/lib/masterData.ts";
   "frontend/src/lib/mudCost.ts";
   "frontend/src/lib/ndtInspection.ts";
+  "frontend/src/lib/recordTemplates.ts";
   "frontend/src/lib/reportBuilder.ts";
   "frontend/src/lib/rigWell.ts";
   "frontend/src/lib/serviceGroups.ts";
@@ -274,6 +283,7 @@ digraph WellCostIQ {
   "frontend/src/pages/Services.tsx";
   "frontend/src/pages/Tangibles.tsx";
   "frontend/src/pages/TaskManager.tsx";
+  "frontend/src/pages/Templates.tsx";
   "frontend/src/pages/Users.tsx";
   "frontend/src/pages/Vendors.tsx";
   "frontend/src/pages/WellCostComparisonReport.tsx";
@@ -367,6 +377,9 @@ digraph WellCostIQ {
   "backend/app/api/rbac.py" -> "backend/app/models/__init__.py";
   "backend/app/api/rbac.py" -> "backend/app/schemas/rbac.py";
   "backend/app/api/rbac.py" -> "backend/app/services/__init__.py";
+  "backend/app/api/record_templates.py" -> "backend/app/api/deps.py";
+  "backend/app/api/record_templates.py" -> "backend/app/schemas/record_template.py";
+  "backend/app/api/record_templates.py" -> "backend/app/services/__init__.py";
   "backend/app/api/report_builder.py" -> "backend/app/api/deps.py";
   "backend/app/api/report_builder.py" -> "backend/app/models/__init__.py";
   "backend/app/api/report_builder.py" -> "backend/app/schemas/report_builder.py";
@@ -446,6 +459,7 @@ digraph WellCostIQ {
   "backend/app/models/__init__.py" -> "backend/app/models/master_data.py";
   "backend/app/models/__init__.py" -> "backend/app/models/mud_cost.py";
   "backend/app/models/__init__.py" -> "backend/app/models/ndt_inspection.py";
+  "backend/app/models/__init__.py" -> "backend/app/models/record_template.py";
   "backend/app/models/__init__.py" -> "backend/app/models/report_builder.py";
   "backend/app/models/__init__.py" -> "backend/app/models/rig_well.py";
   "backend/app/models/__init__.py" -> "backend/app/models/security.py";
@@ -477,6 +491,8 @@ digraph WellCostIQ {
   "backend/app/models/mud_cost.py" -> "backend/app/models/rig_well.py";
   "backend/app/models/ndt_inspection.py" -> "backend/app/core/database.py";
   "backend/app/models/ndt_inspection.py" -> "backend/app/models/rig_well.py";
+  "backend/app/models/record_template.py" -> "backend/app/core/database.py";
+  "backend/app/models/record_template.py" -> "backend/app/models/entities.py";
   "backend/app/models/report_builder.py" -> "backend/app/core/database.py";
   "backend/app/models/report_builder.py" -> "backend/app/models/entities.py";
   "backend/app/models/rig_well.py" -> "backend/app/core/database.py";
@@ -598,6 +614,10 @@ digraph WellCostIQ {
   "backend/app/services/provisioning.py" -> "backend/app/core/security.py";
   "backend/app/services/provisioning.py" -> "backend/app/core/time.py";
   "backend/app/services/provisioning.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/record_template.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/record_template.py" -> "backend/app/models/record_template.py";
+  "backend/app/services/record_template.py" -> "backend/app/schemas/record_template.py";
+  "backend/app/services/record_template.py" -> "backend/app/services/__init__.py";
   "backend/app/services/report_catalog.py" -> "backend/app/services/database_browser.py";
   "backend/app/services/report_engine.py" -> "backend/app/core/spreadsheets.py";
   "backend/app/services/report_engine.py" -> "backend/app/models/__init__.py";
@@ -674,6 +694,7 @@ digraph WellCostIQ {
   "frontend/src/App.tsx" -> "frontend/src/pages/Services.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/Tangibles.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/TaskManager.tsx";
+  "frontend/src/App.tsx" -> "frontend/src/pages/Templates.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/Users.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/Vendors.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/WellCostComparisonReport.tsx";
@@ -733,8 +754,10 @@ digraph WellCostIQ {
   "frontend/src/components/VendorPoKpis.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/VendorPoKpis.tsx" -> "frontend/src/lib/vendorMaster.ts";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/components/templates/TemplatePickerDialog.tsx";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/lib/recordTemplates.ts";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/lib/units.ts";
   "frontend/src/components/afe/AfeDeletedTab.tsx" -> "frontend/src/components/Common.tsx";
@@ -812,9 +835,14 @@ digraph WellCostIQ {
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/businessDashboard.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/units.ts";
+  "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx" -> "frontend/src/lib/catalogue.ts";
+  "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx" -> "frontend/src/lib/export.ts";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/components/ImportDialog.tsx";
+  "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/components/catalogue/PriceHistoryDialog.tsx";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/components/catalogue/PricedItemFormDialog.tsx";
   "frontend/src/components/catalogue/CatalogueItemRegister.tsx" -> "frontend/src/components/catalogue/ReviseRateDialog.tsx";
@@ -924,7 +952,16 @@ digraph WellCostIQ {
   "frontend/src/components/reports/UsageReportShell.tsx" -> "frontend/src/components/reports/UsageReportFilters.tsx";
   "frontend/src/components/reports/UsageReportShell.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/components/reports/UsageReportShell.tsx" -> "frontend/src/lib/usageReports.ts";
+  "frontend/src/components/templates/TemplateEditorDialog.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/templates/TemplateEditorDialog.tsx" -> "frontend/src/lib/afe.ts";
+  "frontend/src/components/templates/TemplateEditorDialog.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/components/templates/TemplateEditorDialog.tsx" -> "frontend/src/lib/recordTemplates.ts";
+  "frontend/src/components/templates/TemplatePickerDialog.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/templates/TemplatePickerDialog.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/components/templates/TemplatePickerDialog.tsx" -> "frontend/src/lib/recordTemplates.ts";
   "frontend/src/components/ui/ChartPanel.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
+  "frontend/src/components/ui/ReportViewDialog.tsx" -> "frontend/src/context/ThemeContext.tsx";
+  "frontend/src/components/ui/ReportViewDialog.tsx" -> "frontend/src/designSystem.ts";
   "frontend/src/context/AuthContext.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/context/AuthContext.tsx" -> "frontend/src/lib/types.ts";
   "frontend/src/context/ThemeContext.tsx" -> "frontend/src/theme.ts";
@@ -960,11 +997,14 @@ digraph WellCostIQ {
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/afe/ServiceLineDialog.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/afe/SowAdjustmentDialog.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/afe/TangibleLineDialog.tsx";
+  "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/templates/TemplatePickerDialog.tsx";
+  "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/ui/ReportViewDialog.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/lib/afe.ts";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/lib/costingSets.ts";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/lib/masterData.ts";
+  "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/lib/recordTemplates.ts";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/lib/serviceGroups.ts";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/lib/units.ts";
@@ -1080,6 +1120,8 @@ digraph WellCostIQ {
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/DailyCostPrintSheet.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/WellCostPrintDialog.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/WellProgressPanel.tsx";
+  "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/templates/TemplatePickerDialog.tsx";
+  "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/ui/ReportViewDialog.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/activeScope.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/api.ts";
@@ -1089,6 +1131,7 @@ digraph WellCostIQ {
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/lihCost.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/mudCost.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/ndtInspection.ts";
+  "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/recordTemplates.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/sowAdjustment.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/units.ts";
   "frontend/src/pages/DatabaseBrowser.tsx" -> "frontend/src/components/Common.tsx";
@@ -1336,6 +1379,12 @@ digraph WellCostIQ {
   "frontend/src/pages/TaskManager.tsx" -> "frontend/src/lib/export.ts";
   "frontend/src/pages/TaskManager.tsx" -> "frontend/src/lib/types.ts";
   "frontend/src/pages/TaskManager.tsx" -> "frontend/src/lib/workflowTypes.ts";
+  "frontend/src/pages/Templates.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/pages/Templates.tsx" -> "frontend/src/components/DataTable.tsx";
+  "frontend/src/pages/Templates.tsx" -> "frontend/src/components/templates/TemplateEditorDialog.tsx";
+  "frontend/src/pages/Templates.tsx" -> "frontend/src/context/AuthContext.tsx";
+  "frontend/src/pages/Templates.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/pages/Templates.tsx" -> "frontend/src/lib/recordTemplates.ts";
   "frontend/src/pages/Users.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/Users.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/pages/Users.tsx" -> "frontend/src/components/ImportDialog.tsx";

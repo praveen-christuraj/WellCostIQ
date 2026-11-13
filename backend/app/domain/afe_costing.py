@@ -11,8 +11,16 @@ Rules
 * Day Rate services charge ``days x unit rate`` per day-based category. Hours
   convert with ``/ 24``. An explicit Operation quantity replaces the planned
   Operation days; otherwise the planned days of the line's scope are used.
-* A well-wide Day Rate line (no section) is split across the configured sections
-  by each section's planned days, so every section shows its own share.
+* A Day Rate service is configured in **one dialog spanning the whole well**.
+  Each charge category (Operation, Standby, Mobilization, ...) may carry one
+  shared rate for every scope, or its own rate for each (section, optional
+  phase) where that scope's rate differs. A shared rate applies to every scope
+  the service is used on; a scope rate overrides it for that scope alone. Each
+  category is therefore priced once per scope — never duplicated — and the
+  line's amount is the sum of all of them.
+* A Day Rate line with no scope rows at all is split across the configured
+  sections by each section's planned days, so every section shows its own share
+  (one-time categories stay well-level).
 * Per Section Rate charges one amount per (section, optional phase). Per Service
   Rate charges one lump sum for its section and phase.
 * Consumables and tangibles cost ``quantity x effective rate``. The effective
@@ -178,6 +186,40 @@ class SectionRateInput:
 
 
 @dataclass(frozen=True)
+class ServiceRateInput:
+    """One entered unit rate for a charge category.
+
+    A row without ``section_id`` is the shared rate for that category and applies
+    to every scope of the line. A row with ``section_id`` (and an optional
+    ``phase_id``) is the rate for that scope only and overrides the shared one.
+    """
+
+    category: str
+    unit_rate: Decimal
+    section_id: str | None = None
+    phase_id: str | None = None
+
+    @property
+    def is_scope_rate(self) -> bool:
+        return self.section_id is not None
+
+
+@dataclass(frozen=True)
+class ScopeDaysInput:
+    """Explicit day quantity for one (section, optional phase) of a line."""
+
+    category: str
+    quantity: Decimal
+    unit: str = UNIT_DAYS
+    section_id: str | None = None
+    phase_id: str | None = None
+
+    @property
+    def is_scope_days(self) -> bool:
+        return self.section_id is not None
+
+
+@dataclass(frozen=True)
 class ServiceLine:
     key: str
     label: str
@@ -189,12 +231,40 @@ class ServiceLine:
     rates: tuple[RateInput, ...] = ()
     charges: tuple[ChargeInput, ...] = ()
     section_rates: tuple[SectionRateInput, ...] = ()
+    # Scope-aware rate card. Any entry here takes precedence over ``rates`` and
+    # ``charges``; a shared rate (no section) covers every scope of the line.
+    service_rates: tuple[ServiceRateInput, ...] = ()
+    scope_days: tuple[ScopeDaysInput, ...] = ()
 
     def rate_for(self, category: str) -> Decimal:
         for rate in self.rates:
             if rate.category == category:
                 return Decimal(rate.unit_rate)
         return Decimal("0")
+
+    def scope_rate_for(self, category: str, section_id: str | None, phase_id: str | None) -> Decimal | None:
+        """The scoped rate when one is entered for exactly this (section, phase)."""
+
+        look_section, look_phase = (section_id, phase_id) if section_id is not None else (None, None)
+        for rate in self.service_rates:
+            if rate.category != category:
+                continue
+            if rate.section_id == look_section and rate.phase_id == look_phase:
+                return Decimal(rate.unit_rate)
+        return None
+
+    def shared_rate_for(self, category: str) -> Decimal | None:
+        for rate in self.service_rates:
+            if rate.category == category and rate.section_id is None:
+                return Decimal(rate.unit_rate)
+        return self.rate_for(category) if not self.service_rates else None
+
+    def scope_days_for(self, category: str, section_id: str | None, phase_id: str | None) -> Decimal | None:
+        look_section, look_phase = (section_id, phase_id) if section_id is not None else (None, None)
+        for row in self.scope_days:
+            if row.category == category and row.section_id == look_section and row.phase_id == look_phase:
+                return normalize_days(row.quantity, row.unit)
+        return None
 
 
 @dataclass(frozen=True)
@@ -353,6 +423,9 @@ class EstimateResult:
 # Line pricing
 # ---------------------------------------------------------------------------
 
+ScopeKey = tuple[str | None, str | None]
+_SECTION_WARNING = "Section is not in the well configuration"
+
 
 def _section_text(section: SectionScope | None, phase: PhaseScope | None) -> str:
     return " · ".join(text for text in (section.label if section else "", phase.label if phase else "") if text) or "whole well"
@@ -380,73 +453,278 @@ def _day_component(
     )
 
 
-def _daily_components(line: ServiceLine, well: WellScope, warnings: list[str]) -> list[Component]:
-    scope_section = well.section(line.section_id)
-    scope_phase = scope_section.phase(line.phase_id) if scope_section else None
-    entries: list[tuple[str, Decimal, Decimal]] = []
-    explicit_operation = Decimal("0")
+def _resolve_scope(
+    well: WellScope,
+    section_id: str | None,
+    phase_id: str | None,
+    warnings: list[str],
+    category: str,
+) -> tuple[SectionScope | None, PhaseScope | None] | None:
+    """The configured section and phase, or None when the scope is not in the plan."""
 
+    if section_id is None:
+        return None, None
+    section = well.section(section_id)
+    if section is None:
+        warnings.append(f"{category}: {_SECTION_WARNING.lower()}; the amount is shown as well-level")
+        return None
+    if phase_id is not None:
+        phase = section.phase(phase_id)
+        if phase is None:
+            warnings.append(f"{category}: the phase is not planned under {section.label}; the amount is shown at section level")
+            return section, None
+        return section, phase
+    return section, None
+
+
+def _scope_rates(line: ServiceLine) -> dict[tuple[str, str | None, str | None], Decimal]:
+    """Entered per-scope rates, keyed by (category, section, phase)."""
+
+    rates: dict[tuple[str, str | None, str | None], Decimal] = {}
+    for rate in line.service_rates:
+        if rate.section_id is None:
+            continue
+        rates[(rate.category, rate.section_id, rate.phase_id)] = Decimal(rate.unit_rate)
+    return rates
+
+
+def _shared_rate(line: ServiceLine, category: str) -> Decimal | None:
+    """One rate for every scope of the category: a shared row, else a legacy rate."""
+
+    for rate in line.service_rates:
+        if rate.category == category and rate.section_id is None:
+            return Decimal(rate.unit_rate)
+    if line.service_rates:
+        # A scope-aware line prices only the categories it actually carries rates for.
+        return None
+    legacy = line.rate_for(category)
+    return legacy if legacy != 0 or any(rate.category == category for rate in line.rates) else None
+
+
+def _explicit_days(line: ServiceLine) -> tuple[dict[tuple[str, str | None, str | None], Decimal], dict[str, Decimal]]:
+    """Explicit day quantities, split into scoped rows and whole-line rows."""
+
+    scoped: dict[tuple[str, str | None, str | None], Decimal] = {}
+    shared: dict[str, Decimal] = {}
+    for row in line.scope_days:
+        days = normalize_days(row.quantity, row.unit)
+        if days == 0:
+            continue
+        if row.section_id is None:
+            shared[row.category] = shared.get(row.category, Decimal("0")) + days
+        else:
+            key = (row.category, row.section_id, row.phase_id)
+            scoped[key] = scoped.get(key, Decimal("0")) + days
     for charge in line.charges:
         if charge.category in ONE_TIME_CATEGORIES:
-            warnings.append(f"{charge.category} is a one-time charge; the entered quantity was ignored")
             continue
         days = normalize_days(charge.quantity, charge.unit)
         if days == 0:
             continue
-        rate = line.rate_for(charge.category)
-        if rate == 0:
-            warnings.append(f"{charge.category}: {days} day(s) entered without a unit rate, so not priced")
-            continue
-        entries.append((charge.category, days, rate))
-        if charge.category == "Operation":
-            explicit_operation += days
+        shared[charge.category] = shared.get(charge.category, Decimal("0")) + days
+    return scoped, shared
 
-    operation_rate = line.rate_for("Operation")
-    if explicit_operation == 0 and operation_rate != 0:
-        planned = well.planned_days(line.section_id, line.phase_id)
-        if planned == 0:
-            warnings.append("Operation rate entered but the well configuration has no planned days for this scope")
-        else:
-            entries.append(("Operation", planned, operation_rate))
+
+def _covered_scopes(line: ServiceLine, well: WellScope) -> list[ScopeKey]:
+    """Which (section, phase) pairs the service is used on.
+
+    Scope rows entered in the dialog decide it when there are any; otherwise the
+    line's own section (and phase); otherwise the whole well, which the caller
+    splits across every configured section.
+    """
+
+    covered: list[ScopeKey] = []
+    for rate in line.service_rates:
+        if rate.section_id is None:
+            continue
+        key = (rate.section_id, rate.phase_id)
+        if key not in covered:
+            covered.append(key)
+    for row in line.scope_days:
+        if row.section_id is None:
+            continue
+        key = (row.section_id, row.phase_id)
+        if key not in covered:
+            covered.append(key)
+    if not covered and line.section_id is not None:
+        covered.append((line.section_id, line.phase_id))
+    return covered
+
+
+def _daily_components(line: ServiceLine, well: WellScope, warnings: list[str]) -> list[Component]:
+    """Price every day-based category once per scope the service covers.
+
+    A shared rate applies to every covered scope; a scope rate overrides it for
+    that scope alone. Each category is therefore never priced twice for the same
+    scope, and the line's amount is the sum of all the scopes it covers.
+    """
+
+    scope_rates = _scope_rates(line)
+    scoped_days, shared_days = _explicit_days(line)
+    covered = _covered_scopes(line, well)
+    well_wide = not covered
 
     components: list[Component] = []
-    for category, days, rate in entries:
-        if line.section_id is not None:
-            if scope_section is None:
-                warnings.append("Section is not in the well configuration; days are shown as well-level")
+    for category in DAY_CATEGORIES:
+        rate_scopes = [key for key in covered if (category, key[0], key[1]) in scope_rates]
+        shared = _shared_rate(line, category)
+        entries: list[tuple[Decimal, Decimal, str | None, str | None]] = []
+
+        # 1. A scope rate prices its own scope with that scope's days. When one
+        # phase of a section carries its own rate, a rate for the whole section
+        # covers only the remaining phases, so a phase is never priced twice.
+        phased_sections = {
+            rate_section for rate_category, rate_section, rate_phase in scope_rates
+            if rate_category == category and rate_phase is not None
+        }
+        for section_id, phase_id in rate_scopes:
+            rate = scope_rates[(category, section_id, phase_id)]
+            days = scoped_days.get((category, section_id, phase_id))
+            if days is None and not (phase_id is None and section_id in phased_sections):
+                days = shared_days.get(category)
+            if days is None:
+                days = _scope_days_or_free_phases(
+                    well, category, section_id, phase_id, scope_rates, section_id in phased_sections
+                )
+            entries.append((days, rate, section_id, phase_id))
+
+        if shared is not None:
+            if rate_scopes:
+                # The shared rate covers the remaining scopes of the line only
+                # when the line itself names one section; a well-wide line with
+                # some scoped rates has no other scope to fall back to.
+                if line.section_id is not None and (line.section_id, line.phase_id) not in rate_scopes:
+                    days = scoped_days.get((category, line.section_id, line.phase_id))
+                    if days is None:
+                        days = shared_days.get(category)
+                    if days is None:
+                        days = well.planned_days(line.section_id, line.phase_id)
+                    entries.append((days, shared, line.section_id, line.phase_id))
+            elif well_wide:
+                explicit = shared_days.get(category)
+                weighted = [section for section in well.sections if section.days > 0]
+                total_weight = sum((section.days for section in weighted), Decimal("0"))
+                if total_weight == 0:
+                    warnings.append(
+                        "Well-wide day rate has no planned days in the configuration to split across"
+                    )
+                    entries.append((explicit if explicit is not None else well.total_days, shared, None, None))
+                elif explicit is None:
+                    # Each section carries its own planned days.
+                    entries.extend((section.days, shared, section.section_id, None) for section in weighted)
+                else:
+                    # An entered total is split across the sections by their planned days.
+                    for section in weighted:
+                        entries.append((_qty(explicit * section.days / total_weight), shared, section.section_id, None))
+            else:
+                for section_id, phase_id in covered:
+                    if (category, section_id, phase_id) in scope_rates:
+                        continue
+                    days = scoped_days.get((category, section_id, phase_id))
+                    if days is None:
+                        days = shared_days.get(category)
+                    if days is None:
+                        days = well.planned_days(section_id, phase_id)
+                    entries.append((days, shared, section_id, phase_id))
+
+        for days, rate, section_id, phase_id in entries:
+            if days == 0:
+                continue
+            if rate == 0:
+                warnings.append(f"{category}: {days} day(s) entered without a unit rate, so not priced")
+                continue
+            resolved = _resolve_scope(well, section_id, phase_id, warnings, category)
+            if resolved is None:
+                section, phase = None, None
+            else:
+                section, phase = resolved
             components.append(
                 _day_component(
                     category,
                     days,
                     rate,
-                    scope_section,
-                    scope_phase,
-                    _section_text(scope_section, scope_phase),
+                    section,
+                    phase,
+                    _section_text(section, phase) if (section or phase) else WELL_LEVEL_LABEL,
                 )
             )
-            continue
 
-        # Well-wide: split across the configured sections by their planned days.
-        weighted = [section for section in well.sections if section.days > 0]
-        total_weight = sum((section.days for section in weighted), Decimal("0"))
-        if total_weight == 0:
-            warnings.append("Well-wide day rate has no planned days in the configuration to split across")
-            components.append(_day_component(category, days, rate, None, None, WELL_LEVEL_LABEL))
+    # Explicit days entered without any rate are reported, never silently priced.
+    for category, days in shared_days.items():
+        if category in ONE_TIME_CATEGORIES:
             continue
-        for section in weighted:
-            share = _qty(days * section.days / total_weight)
-            components.append(_day_component(category, share, rate, section, None, section.label))
+        if _shared_rate(line, category) is None and not any(
+            key[0] == category for key in scope_rates
+        ):
+            warnings.append(f"{category}: {days} day(s) entered without a unit rate, so not priced")
     return components
 
 
-def _one_time_components(line: ServiceLine, well: WellScope) -> list[Component]:
-    section = well.section(line.section_id)
-    phase = section.phase(line.phase_id) if section else None
+def _scope_days_or_free_phases(
+    well: WellScope,
+    category: str,
+    section_id: str,
+    phase_id: str | None,
+    scope_rates: dict[tuple[str, str | None, str | None], Decimal],
+    section_has_phase_rates: bool,
+) -> Decimal:
+    """Days for one scope rate row.
+
+    A phase row uses its own phase days. A whole-section row whose section also
+    has phase rates covers only the phases without a rate of their own, so the
+    phase days are never counted twice.
+    """
+
+    if phase_id is not None:
+        return well.planned_days(section_id, phase_id)
+    if not section_has_phase_rates:
+        return well.planned_days(section_id, None)
+    section = well.section(section_id)
+    if section is None:
+        return Decimal("0")
+    return sum(
+        (
+            phase.days for phase in section.phases
+            if (category, section_id, phase.phase_id) not in scope_rates
+        ),
+        Decimal("0"),
+    )
+
+
+def _one_time_components(line: ServiceLine, well: WellScope, warnings: list[str]) -> list[Component]:
+    """One-time charges: once for the line, or once for each scope rate entered."""
+
+    scope_rates = _scope_rates(line)
     components: list[Component] = []
     for category in ONE_TIME_CATEGORIES:
-        rate = line.rate_for(category)
-        if rate == 0:
+        scoped = [
+            (section_id, phase_id, amount)
+            for (rate_category, section_id, phase_id), amount in scope_rates.items()
+            if rate_category == category
+        ]
+        if scoped:
+            for section_id, phase_id, amount in scoped:
+                resolved = _resolve_scope(well, section_id, phase_id, warnings, category)
+                section, phase = (None, None) if resolved is None else resolved
+                components.append(
+                    Component(
+                        group=GROUP_SERVICES,
+                        category=category,
+                        description=f"{category} — charged once · {_section_text(section, phase) if (section or phase) else WELL_LEVEL_LABEL}",
+                        amount=money(amount),
+                        section_id=section.section_id if section else None,
+                        phase_id=phase.phase_id if phase else None,
+                        quantity=Decimal("1"),
+                        rate=_qty(amount),
+                        unit="lump sum",
+                    )
+                )
             continue
+        rate = _shared_rate(line, category)
+        if rate is None or rate == 0:
+            continue
+        section = well.section(line.section_id)
+        phase = section.phase(line.phase_id) if section and line.phase_id else None
         components.append(
             Component(
                 group=GROUP_SERVICES,
@@ -474,11 +752,21 @@ def estimate_service(line: ServiceLine, well: WellScope) -> LineResult:
             warnings.append("Phase cannot be used without a section from the well configuration")
         elif phase is None:
             warnings.append("Phase is not planned under this section in the well configuration")
+    for row in line.service_rates:
+        if row.section_id is None:
+            continue
+        row_section = well.section(row.section_id)
+        if row_section is None:
+            if _SECTION_WARNING not in warnings:
+                warnings.append(_SECTION_WARNING)
+            continue
+        if row.phase_id is not None and row_section.phase(row.phase_id) is None:
+            warnings.append(f"{row.category}: the phase is not planned under {row_section.label}")
 
     components: list[Component] = []
     if line.charging_basis == BASIS_DAY_RATE:
         components.extend(_daily_components(line, well, warnings))
-        components.extend(_one_time_components(line, well))
+        components.extend(_one_time_components(line, well, warnings))
     elif line.charging_basis == BASIS_PER_SECTION:
         if not line.section_rates:
             warnings.append("Per Section Rate service has no section amount entered")

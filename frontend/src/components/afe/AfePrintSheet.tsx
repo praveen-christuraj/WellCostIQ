@@ -56,6 +56,31 @@ function basisDetail(line: ServiceLineOut) {
   }
 
   const scope = [line.section_label ? nameOnly(line.section_label) : '', line.phase_label ? nameOnly(line.phase_label) : ''].filter(Boolean).join(' · ')
+  // A Day Rate service configured for several sections prints one detail row per
+  // section and phase; the service itself is still one row, with one amount.
+  const scopeRates = line.scope_rates ?? []
+  const sectionRateDetail = scopeRates.length
+    ? <>
+      {line.rates.map(rate => {
+        const charge = line.charges.find(item => item.category === rate.category)
+        const quantity = charge ? ` × ${quantityText(charge.quantity)} ${charge.quantity_unit}` : ''
+        return <div className="ps-sub" key={`shared:${rate.category}`}>Every section · {rate.category} {amountText(rate.unit_rate, line.currency)}{quantity}</div>
+      })}
+      {scopeRates.map((rate, index) => {
+        const scopeLabel = [rate.section_label ? nameOnly(rate.section_label) : 'Section', rate.phase_label ? nameOnly(rate.phase_label) : '']
+          .filter(Boolean).join(' · ')
+        const days = (line.scope_days ?? []).find(row =>
+          row.category === rate.category && row.hole_section_id === rate.hole_section_id && row.phase_id === rate.phase_id)
+        return <div className="ps-sub" key={`${rate.hole_section_id}-${rate.phase_id ?? ''}-${rate.category}-${index}`}>
+          {scopeLabel}: {rate.category} {amountText(rate.unit_rate, line.currency)}
+          {days ? ` × ${quantityText(days.quantity)} ${days.quantity_unit}` : ''}
+        </div>
+      })}
+    </>
+    : null
+  if (sectionRateDetail) {
+    return <>{sectionRateDetail}{scope && <div className="ps-sub">{scope}</div>}</>
+  }
   return <>
     {line.charging_basis === 'Day Rate'
       ? (line.rates.length ? line.rates.map(rate => {
@@ -134,7 +159,9 @@ export function AfePrintSheet({ estimate, preview = false }: { estimate: AfeEsti
   // Count entered-rate detail plus each group's heading and total for print compaction.
   const pageOneDetailRows = printServices.reduce((count, line) => count + Math.max(1,
     line.charging_basis === 'Per Section Rate' ? line.section_rates.length
-      : line.charging_basis === 'Day Rate' ? line.rates.length : 1), 0)
+      : line.charging_basis === 'Day Rate'
+        ? Math.max(line.rates.length, (line.scope_rates ?? []).length + line.rates.length)
+        : 1), 0)
     + printGroups.length * 2 + consumableCategories.length + well.sections.length + 8
 
   return <div className={`afe-print-sheet afe-cost-print-sheet${preview ? ' afe-print-sheet--preview' : ''}`} aria-hidden={preview ? undefined : 'true'}>

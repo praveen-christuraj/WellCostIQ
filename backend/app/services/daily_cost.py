@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from app.models.daily_cost import DailyCostServiceCostItem
 
+import hashlib
 import logging
 import re
 import threading
@@ -317,6 +318,20 @@ def _section_map(baseline: DailyCostBaseline) -> dict[str, DailyCostBaselineSect
     return {section.hole_section_id: section for section in baseline.well_sections}
 
 
+def _scope_labels(baseline: DailyCostBaseline) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
+    """Printed section and phase labels for one locked well plan."""
+
+    sections = {
+        section.hole_section_id: _label(section.section_code_snapshot, section.section_name_snapshot)
+        for section in baseline.well_sections
+    }
+    phases = {
+        (section.hole_section_id, phase.phase_id): _label(phase.phase_code_snapshot, phase.phase_name_snapshot)
+        for section in baseline.well_sections for phase in section.phases
+    }
+    return sections, phases
+
+
 def _section_option(section: DailyCostBaselineSection) -> DailyCostSectionOption:
     return DailyCostSectionOption(
         hole_section_id=section.hole_section_id, section_code=section.section_code_snapshot,
@@ -516,11 +531,15 @@ def _make_budget_line(
     item_key: str, item_code: str, item_name: str, source_line_id: str,
     section_id: str | None, phase_id: str | None, quantity: Decimal,
     unit_rate: Decimal, native_amount: Decimal, currency: str, fx_rate: Decimal,
-    uom: str, sort_order: int, service_group: str = "",
+    uom: str, sort_order: int, service_group: str = "", scope_key: str = "",
 ) -> DailyCostBaselineBudgetLine:
     return DailyCostBaselineBudgetLine(
         id=uid(), organization_id=organization_id, baseline_id=baseline.id, cost_group=cost_group,
-        budget_kind=budget_kind, item_key=item_key, item_code_snapshot=item_code, item_name_snapshot=item_name,
+        budget_kind=budget_kind,
+        # A Day Rate service configured once for the whole well fans out to one
+        # allowance per section and phase; the scope suffix keeps every
+        # allowance and every budget_key distinct and clubbed per scope.
+        item_key=f"{item_key}{scope_key}"[:64], item_code_snapshot=item_code, item_name_snapshot=item_name,
         service_group=(service_group or "").strip(),
         source_afe_line_id=source_line_id, section_id=section_id, phase_id=phase_id,
         quantity=Decimal(quantity), unit_rate=_rate(unit_rate), native_amount=_money(native_amount),
@@ -529,11 +548,83 @@ def _make_budget_line(
     )
 
 
+def _scope_key(section_id: str | None, phase_id: str | None) -> str:
+    """A short, stable suffix that keeps one allowance per service scope.
+
+    ``item_key``/``budget_key`` are the clubbing keys of the daily report, so a
+    service priced on several scopes needs a distinct key per scope; the digest
+    keeps the key inside the column length without depending on the plan order.
+    """
+
+    digest = hashlib.sha1(f"{section_id or ''}|{phase_id or ''}".encode("utf-8"), usedforsecurity=False).hexdigest()
+    return f"~{digest[:8]}"
+
+
+def _service_budget_scopes(line: Any, standard_currency: str) -> list[tuple[str, str | None, str | None, Decimal]]:
+    """Split one AFE service allowance into one allowance per priced scope.
+
+    A Day Rate service configured once for the whole well contributes one
+    planned allowance for each section and phase it is used on, so the daily
+    sheet reconciles each scope separately and the report still prints the
+    service once. A single-scope line keeps the untouched legacy item key.
+    """
+
+    configured_scopes = any(
+        getattr(row, "hole_section_id", None) for row in (getattr(line, "scope_rates", ()) or ())
+    ) or any(
+        getattr(row, "hole_section_id", None) for row in (getattr(line, "scope_days", ()) or ())
+    )
+    if not configured_scopes:
+        # One allowance for the line, exactly as before: a well-wide rate card
+        # is already a single clubbed allowance and keeps its leg-through key.
+        return [("", line.hole_section_id, line.phase_id, Decimal(line.amount))]
+    components = getattr(line, "components", ()) or ()
+    grouped: dict[tuple[str | None, str | None], Decimal] = {}
+    for component in components:
+        key = (component.section_id, component.phase_id)
+        grouped[key] = grouped.get(key, Decimal("0")) + Decimal(component.amount)
+    if len(grouped) <= 1:
+        section_id, phase_id = next(iter(grouped), (None, None))
+        return [("", section_id, phase_id, Decimal(line.amount))]
+    ordered = sorted(
+        grouped.items(),
+        key=lambda item: (
+            item[0][0] is None,
+            str(item[0][0] or ""),
+            str(item[0][1] or ""),
+        ),
+    )
+    return [(_scope_key(section_id, phase_id), section_id, phase_id, amount) for (section_id, phase_id), amount in ordered]
+
+
 def _service_rate_snapshots(organization_id: str, line: Any, order: int) -> list[DailyCostBaselineServiceRate]:
+    """Freeze the AFE rate card as daily-selectable rates.
+
+    A Day Rate service configured once for the whole well contributes one rate
+    row per section (and phase) it is priced on, so the daily sheet matches the
+    right rate for the scope the activity happened in.
+    """
+
     service_rates: list[DailyCostBaselineServiceRate] = []
     currency = line.currency.upper()
     if line.charging_basis == "Day Rate":
-        for index, row in enumerate(line.rates):
+        index = 0
+        seen: set[tuple[str, str | None, str | None]] = set()
+        for row in getattr(line, "scope_rates", ()):
+            key = (row.category, row.hole_section_id, row.phase_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            service_rates.append(DailyCostBaselineServiceRate(
+                id=uid(), organization_id=organization_id, service_id=line.service_id,
+                source_afe_line_id=line.id, service_code_snapshot=line.service_code,
+                service_name_snapshot=line.service_name, charging_basis=line.charging_basis,
+                rate_kind="day_rate", charge_category=row.category, hole_section_id=row.hole_section_id,
+                phase_id=row.phase_id, unit_rate=_rate(row.unit_rate), currency=currency,
+                sort_order=order * 100 + index,
+            ))
+            index += 1
+        for row in line.rates:
             service_rates.append(DailyCostBaselineServiceRate(
                 id=uid(), organization_id=organization_id, service_id=line.service_id,
                 source_afe_line_id=line.id, service_code_snapshot=line.service_code,
@@ -542,6 +633,7 @@ def _service_rate_snapshots(organization_id: str, line: Any, order: int) -> list
                 phase_id=line.phase_id, unit_rate=_rate(row.unit_rate), currency=currency,
                 sort_order=order * 100 + index,
             ))
+            index += 1
     elif line.charging_basis == "Per Service Rate":
         service_rates.append(DailyCostBaselineServiceRate(
             id=uid(), organization_id=organization_id, service_id=line.service_id,
@@ -633,14 +725,18 @@ def _ensure_afe_baseline(
             currency, factor = line.currency.upper(), conversion.get(line.currency.upper())
             if factor is None or factor <= 0:
                 raise HTTPException(status_code=422, detail=f"AFE is missing a conversion factor for {currency}")
-            budgets.append(_make_budget_line(
-                organization_id, baseline, cost_group="Services", budget_kind="service", item_key=line.id,
-                item_code=line.service_code, item_name=line.service_name, source_line_id=line.id,
-                section_id=line.hole_section_id, phase_id=line.phase_id, quantity=Decimal("1"),
-                unit_rate=Decimal(line.service_amount), native_amount=Decimal(line.amount), currency=currency,
-                fx_rate=factor, uom="", sort_order=order, service_group=line.service_group,
-            ))
-            order += 1
+            for scope_key, section_id, phase_id, native_amount in _service_budget_scopes(
+                line, estimate.summary.currency.standard_currency
+            ):
+                budgets.append(_make_budget_line(
+                    organization_id, baseline, cost_group="Services", budget_kind="service",
+                    item_key=line.id, item_code=line.service_code, item_name=line.service_name,
+                    source_line_id=line.id, section_id=section_id, phase_id=phase_id, quantity=Decimal("1"),
+                    unit_rate=Decimal(line.service_amount), native_amount=native_amount, currency=currency,
+                    fx_rate=factor, uom="", sort_order=order, service_group=line.service_group,
+                    scope_key=scope_key,
+                ))
+                order += 1
             service_rates.extend(_service_rate_snapshots(organization_id, line, order))
 
         for line in estimate.consumables:
@@ -1416,6 +1512,24 @@ def _service_rate_or_422(
             raise HTTPException(status_code=422, detail=f"Service {service.service_code}: charge category must match the selected Day Rate")
         return rate
     if classification == "Planned":
+        # A service configured once for the whole well has one locked rate per
+        # section and phase: resolve the rate of the scope this line records,
+        # so the daily sheet never mixes one section's rate into another's.
+        candidates = [
+            row for row in baseline.service_rates
+            if row.service_id == service.id and row.is_current
+        ]
+        for candidate in candidates:
+            if candidate.hole_section_id and candidate.hole_section_id != line.hole_section_id:
+                continue
+            if candidate.phase_id and candidate.phase_id != line.phase_id:
+                continue
+            if line.charge_category and candidate.rate_kind == "day_rate" and candidate.charge_category != line.charge_category:
+                continue
+            if line.charging_basis and candidate.charging_basis != line.charging_basis:
+                continue
+            return candidate
+    if classification == "Planned":
         raise HTTPException(
             status_code=422,
             detail=f"Service {service.service_code}: select its saved AFE rate, or record the service under a UPA/NPT Master Data Activity with a justified rate.",
@@ -1493,21 +1607,23 @@ def _normalise_service(
         source = "afe_baseline"
         rate_id = rate.id
         budget_key = f"service:{rate.source_afe_line_id}"
-        matching = budgets.get(budget_key, [])
+        matching = _service_budgets_for(budgets, rate.source_afe_line_id)
         # AFE saves replace their source rows. Reconnect a revised service to
         # its original locked allowance only when the mapping is unambiguous.
         # Do not inflate or rewrite the locked budget when a basis changes.
         if not matching:
             candidates = {row.id: row for previous in entry.baseline.service_rates
                           if previous.service_id == service.id
-                          for row in budgets.get(f"service:{previous.source_afe_line_id}", [])}
-            scoped = [row for row in candidates.values()
-                      if row.section_id == line.hole_section_id and row.phase_id == line.phase_id]
-            resolved = scoped if len(scoped) == 1 else list(candidates.values())
-            if len(resolved) == 1:
-                matching = resolved
-                budget_key = f"service:{resolved[0].item_key}"
+                          for row in _service_budgets_for(budgets, previous.source_afe_line_id)}
+            matching, budget_key = _match_service_budget(candidates, line, budget_key)
         budget = matching[0] if matching else None
+        # One AFE service can be priced on several scopes; match the allowance
+        # of the scope the activity was recorded in, then club that scope.
+        if rate.source_afe_line_id and len(matching) > 1:
+            scoped_budget = _budget_for_scope(matching, line.hole_section_id, line.phase_id)
+            if scoped_budget is not None:
+                budget = scoped_budget
+                budget_key = f"service:{budget.item_key}"
         if line.hole_section_id:
             _validate_scope(entry.baseline, hole_section_id=line.hole_section_id, phase_id=line.phase_id, require_section=True)
     else:
@@ -1584,6 +1700,65 @@ def _normalise_service(
     if audit_change:
         base["_override_audit"] = audit_change
     return base, old, label
+
+
+def _service_budgets_for(
+    budgets: dict[str, list[DailyCostBaselineBudgetLine]], source_line_id: str,
+) -> list[DailyCostBaselineBudgetLine]:
+    """Every locked allowance of one AFE service line, one per priced scope.
+
+    A scope-aware line keys its allowances ``service:<line id>~<scope>``; a
+    single-scope line keeps the plain ``service:<line id>`` key, so both forms
+    are returned together.
+    """
+
+    exact = budgets.get(f"service:{source_line_id}")
+    if exact is not None:
+        return exact
+    prefix = f"service:{source_line_id}~"
+    return [row for key, rows in budgets.items() if key.startswith(prefix) for row in rows]
+
+
+def _budget_for_scope(
+    matching: Sequence[DailyCostBaselineBudgetLine], section_id: str | None, phase_id: str | None,
+) -> DailyCostBaselineBudgetLine | None:
+    """The allowance of exactly this scope, when the scope identifies only one.
+
+    A rate entered for a whole section prices every phase under it, so an exact
+    (section, phase) allowance is preferred and a section-only allowance is the
+    fallback; anything still ambiguous stays unmatched rather than mis-clubbed.
+    """
+
+    exact = [row for row in matching if row.section_id == section_id and row.phase_id == phase_id]
+    if len(exact) == 1:
+        return exact[0]
+    section_only = [row for row in matching if row.section_id == section_id]
+    if len(section_only) == 1:
+        return section_only[0]
+    return None
+
+
+def _match_service_budget(
+    candidates: dict[str, DailyCostBaselineBudgetLine],
+    line: DailyCostServiceLineIn,
+    fallback_key: str,
+) -> tuple[list[DailyCostBaselineBudgetLine], str]:
+    """Match a service actual to the allowance of the line's own scope.
+
+    A service priced on several scopes has one allowance per scope, so the
+    scoped match wins; whole-well allowances remain the fallback.
+    """
+
+    scoped = [
+        row for row in candidates.values()
+        if row.section_id == line.hole_section_id and row.phase_id == line.phase_id
+    ]
+    if len(scoped) == 1:
+        return scoped, f"service:{scoped[0].item_key}"
+    resolved = scoped if scoped else list(candidates.values())
+    if len(resolved) == 1:
+        return resolved, f"service:{resolved[0].item_key}"
+    return [], fallback_key
 
 
 def _weighted_rate(lines: Sequence[DailyCostBaselineBudgetLine]) -> Decimal:
@@ -2457,6 +2632,63 @@ def _entry_out(
     )
 
 
+def _club_scoped_service_rows(lines: list[DailyCostBudgetComparison]) -> list[DailyCostBudgetComparison]:
+    """Print one service row per (section, phase) however many allowances it owns.
+
+    A Day Rate service configured once for the whole well is priced on several
+    sections, so it owns one locked allowance per section and phase. The report
+    prints that service once for each section, phase, activity and sub-activity,
+    with the scope totals clubbed. Rows carry no scope keep their own key, and
+    the section and phase are part of the club key, so a service used twice in
+    the same scope is summed rather than printed twice.
+    """
+
+    clubbed: dict[tuple[str, str, str, str], DailyCostBudgetComparison] = {}
+    order: list[tuple[str, str, str, str]] = []
+    result: list[DailyCostBudgetComparison] = []
+    for row in lines:
+        # Only locked allowances are clubbed: an unbudgeted actual has no scope
+        # of its own and keeps the key that names it.
+        if row.cost_group != "Services" or not row.is_planned:
+            result.append(row)
+            continue
+        key = (row.item_code, row.hole_section_id or "", row.phase_id or "", row.service_group or "")
+        current = clubbed.get(key)
+        if current is None:
+            clubbed[key] = row.model_copy(deep=True)
+            order.append(key)
+            continue
+        current.planned = _money(Decimal(current.planned) + Decimal(row.planned))
+        current.actual_to_date = _money(Decimal(current.actual_to_date) + Decimal(row.actual_to_date))
+        current.actual_prior = _money(Decimal(current.actual_prior) + Decimal(row.actual_prior))
+        current.actual_today = _money(Decimal(current.actual_today) + Decimal(row.actual_today))
+        current.actual_planned = _money(Decimal(current.actual_planned) + Decimal(row.actual_planned))
+        current.actual_upa = _money(Decimal(current.actual_upa) + Decimal(row.actual_upa))
+        current.actual_npt = _money(Decimal(current.actual_npt) + Decimal(row.actual_npt))
+        current.balance = _money(Decimal(current.balance) + Decimal(row.balance))
+        current.is_planned = current.is_planned or row.is_planned
+        current.club_count += 1
+    for key in order:
+        row = clubbed[key]
+        if row.club_count:
+            row.budget_key = f"{row.budget_key}~club"
+            row.item_name = f"{row.item_name} · {_scope_text(row.section_label, row.phase_label)}"
+        result.append(row)
+    return result
+
+
+def _scope_text(section_label: str, phase_label: str) -> str:
+    """``Surface · Drilling`` for a clubbed scope row, using printed labels."""
+
+    parts = [_label_name(section_label), _label_name(phase_label)]
+    return " · ".join(part for part in parts if part) or "Whole well"
+
+
+def _label_name(value: str) -> str:
+    parts = [part.strip() for part in (value or "").split(" · ") if part.strip()]
+    return parts[1] if len(parts) > 1 else (parts[0] if parts else "")
+
+
 def _service_report_groups(
     db: Session,
     organization_id: str,
@@ -2680,6 +2912,7 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
                     unplanned_meta[(group, row.budget_key)] = (code, name or kind, line_group)
 
     comparison_lines: list[DailyCostBudgetComparison] = []
+    section_labels, phase_labels = _scope_labels(entry.baseline)
     keys = set(planned_keys) | set(actual_by_key)
     unplanned_live_groups = _live_unplanned_service_groups(
         db, entry.organization_id, (key for _, key in unplanned_meta)
@@ -2716,8 +2949,14 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
                 actual_planned=_money(actual_by_class[(group, key, "Planned")]),
                 actual_upa=_money(actual_by_class[(group, key, "UPA")]),
                 actual_npt=_money(actual_by_class[(group, key, "NPT")]),
+                hole_section_id=metadata.section_id if metadata else None,
+                section_label=section_labels.get(metadata.section_id or "", "") if metadata else "",
+                phase_id=metadata.phase_id if metadata else None,
+                phase_label=phase_labels.get((metadata.section_id or "", metadata.phase_id or ""), "") if metadata else "",
             )
         )
+
+    comparison_lines = _club_scoped_service_rows(comparison_lines)
 
     groups = [
         DailyCostComparisonGroup(

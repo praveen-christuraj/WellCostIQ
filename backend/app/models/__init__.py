@@ -11,6 +11,8 @@ from app.models.afe import (
     AfeServiceCharge,
     AfeServiceLine,
     AfeServiceRate,
+    AfeServiceScopeDays,
+    AfeServiceScopeRate,
     AfeServiceSectionRate,
     AfeTangibleLine,
 )
@@ -96,6 +98,8 @@ from app.models.sow_adjustment import (
     AfeSowServiceCharge,
     AfeSowServiceLine,
     AfeSowServiceRate,
+    AfeSowServiceScopeDays,
+    AfeSowServiceScopeRate,
     AfeSowServiceSectionRate,
     AfeSowTangibleLine,
     DailyCostAmendment,

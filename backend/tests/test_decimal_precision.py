@@ -17,6 +17,8 @@ from app.schemas.afe import (
     ExchangeRateIn,
     ExchangeRateOut,
     RateIn,
+    ScopeDaysIn,
+    ScopeRateIn,
     ServiceLineOut,
     TangibleLineOut,
 )
@@ -54,6 +56,16 @@ def test_shared_decimal_contract_accepts_ten_places_and_rejects_eleven():
         ),
         (UnitRevise, {"unit_rate": TEN_PLACES, "currency": "USD", "reason": "precision correction"}, "unit_rate"),
         (RateIn, {"category": "Operation", "unit_rate": TEN_PLACES}, "unit_rate"),
+        (
+            ScopeRateIn,
+            {"hole_section_id": "section", "category": "Operation", "unit_rate": TEN_PLACES},
+            "unit_rate",
+        ),
+        (
+            ScopeDaysIn,
+            {"hole_section_id": "section", "category": "Operation", "quantity": TEN_PLACES},
+            "quantity",
+        ),
         (ExchangeRateIn, {"currency_code": "EUR", "rate": TEN_PLACES}, "rate"),
         (MudCostLineIn, {"line_code": "opening_stock", "amount": TEN_PLACES}, "amount"),
         (

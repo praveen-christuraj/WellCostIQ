@@ -151,10 +151,25 @@ export type ServiceLineOut = {
   rates: { category: ChargeCategory; unit_rate: string }[]
   charges: { category: ChargeCategory; quantity: string; quantity_unit: QuantityUnit }[]
   section_rates: { hole_section_id: string; section_label: string; phase_id: string | null; phase_label: string; amount: string }[]
+  scope_rates: ScopeRateOut[]
+  scope_days: ScopeDaysOut[]
+  // Every (section, phase) the service is priced on, one entry per scope.
+  scopes: { hole_section_id: string; section_label: string; phase_id: string | null; phase_label: string }[]
   amount: string
   warnings: string[]
   components: AfeComponent[]
 }
+
+export type ScopeRateOut = {
+  hole_section_id: string
+  section_label: string
+  phase_id: string | null
+  phase_label: string
+  category: ChargeCategory
+  unit_rate: string
+}
+
+export type ScopeDaysOut = ScopeRateOut & { quantity: string; quantity_unit: QuantityUnit }
 
 export type ConsumableLineOut = {
   id: string | null
@@ -355,6 +370,25 @@ export type ServiceLineInput = {
   rates: { category: ChargeCategory; unit_rate: string }[]
   charges: { category: ChargeCategory; quantity: string; quantity_unit: QuantityUnit }[]
   section_rates: { hole_section_id: string; phase_id: string | null; amount: string }[]
+  // One dialog configures the whole well: a rate (and optional days) per section
+  // and phase. A rate row without a section is shared by every scope of the line.
+  scope_rates: ScopeRateIn[]
+  scope_days: ScopeDaysIn[]
+}
+
+export type ScopeRateIn = {
+  hole_section_id: string | null
+  phase_id: string | null
+  category: ChargeCategory
+  unit_rate: string
+}
+
+export type ScopeDaysIn = {
+  hole_section_id: string | null
+  phase_id: string | null
+  category: ChargeCategory
+  quantity: string
+  quantity_unit: QuantityUnit
 }
 
 export type ConsumableLineInput = {
@@ -398,6 +432,7 @@ export function emptyServiceLine(basis: ChargingBasis = 'Day Rate'): ServiceLine
   return {
     client_key: newKey(), service_id: '', charging_basis: basis, hole_section_id: null, phase_id: null,
     currency: '', service_amount: '0', remarks: '', rates: [], charges: [], section_rates: [],
+    scope_rates: [], scope_days: [],
   }
 }
 
@@ -429,6 +464,13 @@ export function estimateToInput(estimate: AfeEstimate): EstimateInput {
       rates: line.rates.map(rate => ({ category: rate.category, unit_rate: rate.unit_rate })),
       charges: line.charges.map(charge => ({ category: charge.category, quantity: charge.quantity, quantity_unit: charge.quantity_unit })),
       section_rates: line.section_rates.map(rate => ({ hole_section_id: rate.hole_section_id, phase_id: rate.phase_id, amount: rate.amount })),
+      scope_rates: line.scope_rates.map(rate => ({
+        hole_section_id: rate.hole_section_id, phase_id: rate.phase_id, category: rate.category, unit_rate: rate.unit_rate,
+      })),
+      scope_days: line.scope_days.map(row => ({
+        hole_section_id: row.hole_section_id, phase_id: row.phase_id, category: row.category,
+        quantity: row.quantity, quantity_unit: row.quantity_unit,
+      })),
     })),
     consumables: estimate.consumables.map(line => ({
       client_key: line.client_key ?? line.id ?? newKey(),
@@ -560,7 +602,21 @@ export function serviceProblems(line: ServiceLineInput): string[] {
     problems.push('Numbers must be plain decimals such as 12 or 0.73.')
   }
   if (line.charging_basis === 'Day Rate') {
-    if (!line.rates.some(rate => toNumber(rate.unit_rate) > 0)) problems.push('Enter at least one unit rate for a day-rate service.')
+    if (line.scope_rates.some(rate => !isDecimalText(rate.unit_rate)) || line.scope_days.some(row => !isDecimalText(row.quantity))) {
+      problems.push('Scope rates and days must be plain decimals such as 12 or 0.73.')
+    }
+    // A Day Rate service is priced either by its shared rate card or by the
+    // rates entered for each section and phase; either way one rate is required.
+    if (!line.rates.some(rate => toNumber(rate.unit_rate) > 0) && !line.scope_rates.some(rate => toNumber(rate.unit_rate) > 0)) {
+      problems.push('Enter a unit rate — either for the whole service or for a section.')
+    }
+    const seenScopes = new Set<string>()
+    for (const rate of line.scope_rates) {
+      if (!rate.hole_section_id) continue
+      const key = `${rate.hole_section_id}|${rate.phase_id ?? ''}|${rate.category}`
+      if (seenScopes.has(key)) problems.push(`${rate.category} has more than one rate for the same section and phase.`)
+      seenScopes.add(key)
+    }
   }
   if (line.charging_basis === 'Per Service Rate') {
     if (!line.hole_section_id) problems.push('Choose the section for a per-service charge.')

@@ -59,6 +59,13 @@ function serviceOutToInput(line: ServiceLineOut): SowServiceLineInput {
     rates: line.rates.map(rate => ({ category: rate.category, unit_rate: rate.unit_rate })),
     charges: line.charges.map(charge => ({ category: charge.category, quantity: charge.quantity, quantity_unit: charge.quantity_unit })),
     section_rates: line.section_rates.map(rate => ({ hole_section_id: rate.hole_section_id, phase_id: rate.phase_id, amount: rate.amount })),
+    scope_rates: line.scope_rates.map(rate => ({
+      hole_section_id: rate.hole_section_id, phase_id: rate.phase_id, category: rate.category, unit_rate: rate.unit_rate,
+    })),
+    scope_days: line.scope_days.map(row => ({
+      hole_section_id: row.hole_section_id, phase_id: row.phase_id, category: row.category,
+      quantity: row.quantity, quantity_unit: row.quantity_unit,
+    })),
   }
 }
 
