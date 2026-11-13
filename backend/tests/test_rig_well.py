@@ -27,6 +27,7 @@ RIG_WELL_PERMISSIONS = [
     "rig-well:permanent-delete",
     "rig-well:import",
     "rig-well:export",
+    "rig-well:rollback",
 ]
 MASTER_DATA_PERMISSIONS = [
     "master-data:read",
@@ -271,19 +272,34 @@ def test_configuration_uses_workspace_master_data_and_enforces_lifecycle_and_dep
             f"/api/v1/rig-well/wells/{well['id']}/transition", headers=headers,
             json={"action": "configure", "remarks": "Plan checked"},
         ).status_code == 200
-        # A scope passes through "marked for final review" before completion.
-        marked = client.post(
-            f"/api/v1/rig-well/wells/{well['id']}/transition", headers=headers,
-            json={"action": "final_review", "scope": "drilling", "remarks": "Ready for final review"},
-        )
+        transition_url = f"/api/v1/rig-well/wells/{well['id']}/transition"
+
+        def move(action: str, remarks: str):
+            return client.post(
+                transition_url, headers=headers,
+                json={"action": action, "scope": "drilling", "remarks": remarks},
+            )
+
+        # Final review is a *well* status that follows Active, so an upcoming scope
+        # cannot skip to it, and nothing can be completed without passing through it.
+        skipped = move("final_review", "Too early")
+        assert skipped.status_code == 409
+        assert "Upcoming" in skipped.json()["detail"]
+        assert move("complete", "Too early").status_code == 409
+        started = move("start", "Rig on location")
+        assert started.status_code == 200, started.text
+        assert (started.json()["status"], started.json()["config_status"]) == ("active", "configured")
+        marked = move("final_review", "Operations ended")
         assert marked.status_code == 200, marked.text
-        assert marked.json()["config_status"] == "final_review"
-        completed = client.post(
-            f"/api/v1/rig-well/wells/{well['id']}/transition", headers=headers,
-            json={"action": "complete", "scope": "drilling", "remarks": "Operations complete"},
-        )
+        # Leaving operations closes the plan: the two ladders meet here.
+        assert (marked.json()["status"], marked.json()["config_status"]) == ("final_review", "completed")
+        assert marked.json()["final_review_scope_count"] == 1
+        review = client.get("/api/v1/rig-well/overview", headers=headers).json()
+        # Completion is still upcoming, so the well as a whole is still active.
+        assert (review["active_wells"], review["final_review_wells"]) == (1, 0)
+        completed = move("complete", "Costs reviewed")
         assert completed.status_code == 200, completed.text
-        assert completed.json()["status"] == "completed"
+        assert (completed.json()["status"], completed.json()["config_status"]) == ("completed", "completed")
         # Only the Drilling scope has finished. The live Completion scope keeps the
         # well itself active: the flag is per scope, and the well rolls up.
         assert completed.json()["tracking_status"] == "active"
@@ -300,18 +316,42 @@ def test_configuration_uses_workspace_master_data_and_enforces_lifecycle_and_dep
         lifecycle = client.get("/api/v1/rig-well/overview", headers=headers).json()
         assert lifecycle["active_wells"] == 0
         assert lifecycle["configured_wells"] == 0
+        assert lifecycle["draft_wells"] == 0
         assert lifecycle["final_review_wells"] == 0
         assert lifecycle["completed_wells"] == 1
         locked = client.put(f"/api/v1/rig-well/wells/{well['id']}/configuration", headers=headers, json=payload)
         assert locked.status_code == 409
-        assert client.post(
-            f"/api/v1/rig-well/wells/{well['id']}/transition", headers=headers,
-            json={"action": "activate", "remarks": "Restart well"},
+        # A closed plan cannot be reopened directly: the scope walks back one step
+        # at a time, and each step lands on exactly the previous status.
+        assert move("draft", "Update plan").status_code == 409
+        assert move("reactivate", "Skip a step").status_code == 409
+        reopened = move("reopen", "Late invoice found")
+        assert reopened.status_code == 200, reopened.text
+        assert (reopened.json()["status"], reopened.json()["config_status"]) == ("final_review", "completed")
+        assert client.get("/api/v1/rig-well/overview", headers=headers).json()["final_review_wells"] == 1
+        assert [
+            item["tracking_status"]
+            for item in client.get("/api/v1/rig-well/wells?status=final_review", headers=headers).json()
+        ] == ["final_review"]
+        reactivated = move("reactivate", "Restart well")
+        assert reactivated.status_code == 200, reactivated.text
+        assert (reactivated.json()["status"], reactivated.json()["config_status"]) == ("active", "configured")
+        drafted = move("draft", "Update plan")
+        assert drafted.status_code == 200, drafted.text
+        assert (drafted.json()["status"], drafted.json()["config_status"]) == ("active", "draft")
+        assert client.put(
+            f"/api/v1/rig-well/wells/{well['id']}/configuration", headers=headers, json=payload
         ).status_code == 200
-        assert client.post(
-            f"/api/v1/rig-well/wells/{well['id']}/transition", headers=headers,
-            json={"action": "draft", "remarks": "Update plan"},
-        ).status_code == 200
+        with SessionLocal() as db:
+            actions = [
+                (entry.action, entry.summary)
+                for entry in db.query(AuditLog).filter(AuditLog.entity_type == "well").order_by(AuditLog.created_at)
+            ]
+        rollbacks = [summary for action, summary in actions if action == "rollback"]
+        assert len(rollbacks) == 3
+        assert any("Completed → Final review" in summary and "Late invoice found" in summary for summary in rollbacks)
+        assert any("Final review → Active" in summary for summary in rollbacks)
+        assert any("Configured → Draft" in summary for summary in rollbacks)
 
 
 def test_deletion_dependencies_block_rig_children_and_preserve_master_data_references():

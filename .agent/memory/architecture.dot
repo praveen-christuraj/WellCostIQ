@@ -122,6 +122,7 @@ digraph WellCostIQ {
   "backend/app/services/retention.py";
   "backend/app/services/sow_adjustment.py";
   "backend/app/services/usage_reports.py";
+  "backend/app/services/well_lifecycle.py";
   "backend/app/services/workflow.py";
   "frontend/src/App.tsx";
   "frontend/src/components/AdvancedItemSelector.tsx";
@@ -141,6 +142,7 @@ digraph WellCostIQ {
   "frontend/src/components/VendorFormDialog.tsx";
   "frontend/src/components/VendorPoKpis.tsx";
   "frontend/src/components/WellConfigurationDialog.tsx";
+  "frontend/src/components/WellLifecycle.tsx";
   "frontend/src/components/afe/AfeDeletedTab.tsx";
   "frontend/src/components/afe/AfeEstimationTab.tsx";
   "frontend/src/components/afe/AfeFormDialog.tsx";
@@ -389,6 +391,7 @@ digraph WellCostIQ {
   "backend/app/api/rig_well.py" -> "backend/app/api/deps.py";
   "backend/app/api/rig_well.py" -> "backend/app/core/units.py";
   "backend/app/api/rig_well.py" -> "backend/app/models/__init__.py";
+  "backend/app/api/rig_well.py" -> "backend/app/models/rig_well.py";
   "backend/app/api/rig_well.py" -> "backend/app/models/sow_adjustment.py";
   "backend/app/api/rig_well.py" -> "backend/app/schemas/rig_well.py";
   "backend/app/api/rig_well.py" -> "backend/app/services/__init__.py";
@@ -638,9 +641,12 @@ digraph WellCostIQ {
   "backend/app/services/sow_adjustment.py" -> "backend/app/schemas/sow_adjustment.py";
   "backend/app/services/sow_adjustment.py" -> "backend/app/services/__init__.py";
   "backend/app/services/usage_reports.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/usage_reports.py" -> "backend/app/models/rig_well.py";
   "backend/app/services/usage_reports.py" -> "backend/app/schemas/usage_reports.py";
   "backend/app/services/usage_reports.py" -> "backend/app/services/__init__.py";
   "backend/app/services/usage_reports.py" -> "backend/app/services/operational_time.py";
+  "backend/app/services/well_lifecycle.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/well_lifecycle.py" -> "backend/app/models/rig_well.py";
   "backend/app/services/workflow.py" -> "backend/app/models/__init__.py";
   "frontend/src/App.tsx" -> "frontend/src/components/Layout.tsx";
   "frontend/src/App.tsx" -> "frontend/src/components/PasswordChangeGate.tsx";
@@ -754,12 +760,16 @@ digraph WellCostIQ {
   "frontend/src/components/VendorPoKpis.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/VendorPoKpis.tsx" -> "frontend/src/lib/vendorMaster.ts";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/components/WellLifecycle.tsx";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/components/templates/TemplatePickerDialog.tsx";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/lib/recordTemplates.ts";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/components/WellConfigurationDialog.tsx" -> "frontend/src/lib/units.ts";
+  "frontend/src/components/WellLifecycle.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/WellLifecycle.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/components/WellLifecycle.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/components/afe/AfeDeletedTab.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/afe/AfeDeletedTab.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/components/afe/AfeDeletedTab.tsx" -> "frontend/src/components/afe/AfeShared.tsx";
@@ -775,6 +785,7 @@ digraph WellCostIQ {
   "frontend/src/components/afe/AfeFormDialog.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/afe/AfeFormDialog.tsx" -> "frontend/src/lib/afe.ts";
   "frontend/src/components/afe/AfeFormDialog.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/components/afe/AfeFormDialog.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/components/afe/AfePrintSheet.tsx" -> "frontend/src/lib/afe.ts";
   "frontend/src/components/afe/AfePrintSheet.tsx" -> "frontend/src/lib/appInfo.ts";
   "frontend/src/components/afe/AfePrintSheet.tsx" -> "frontend/src/lib/serviceGroups.ts";
@@ -834,6 +845,7 @@ digraph WellCostIQ {
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/designSystem.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/businessDashboard.ts";
+  "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/components/business-dashboard/DrillThroughPanel.tsx" -> "frontend/src/lib/units.ts";
   "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/catalogue/BulkPriceRevisionDialog.tsx" -> "frontend/src/lib/api.ts";
@@ -988,6 +1000,7 @@ digraph WellCostIQ {
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/CostingSetPickerDialog.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/DataTable.tsx";
+  "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/WellLifecycle.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/afe/AfePrintSheet.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/afe/AfeScopeAssignmentDialog.tsx";
   "frontend/src/pages/AfeEstimate.tsx" -> "frontend/src/components/afe/AfeShared.tsx";
@@ -1059,6 +1072,7 @@ digraph WellCostIQ {
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/designSystem.ts";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/lib/businessDashboard.ts";
+  "frontend/src/pages/BusinessDashboard.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/pages/CatalogueLists.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/CatalogueLists.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/pages/CatalogueLists.tsx" -> "frontend/src/components/MasterDataTabs.tsx";
@@ -1110,6 +1124,7 @@ digraph WellCostIQ {
   "frontend/src/pages/DailyCostManagement.tsx" -> "frontend/src/lib/activeScope.ts";
   "frontend/src/pages/DailyCostManagement.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/DailyCostManagement.tsx" -> "frontend/src/lib/dailyCost.ts";
+  "frontend/src/pages/DailyCostManagement.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/pages/DailyCostManagement.tsx" -> "frontend/src/lib/units.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/AdvancedItemSelector.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/Common.tsx";
@@ -1414,6 +1429,7 @@ digraph WellCostIQ {
   "frontend/src/pages/WellSubActivities.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/WellSubActivities.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/pages/WellSubActivities.tsx" -> "frontend/src/components/ImportDialog.tsx";
+  "frontend/src/pages/WellSubActivities.tsx" -> "frontend/src/components/WellLifecycle.tsx";
   "frontend/src/pages/WellSubActivities.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/pages/WellSubActivities.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/WellSubActivities.tsx" -> "frontend/src/lib/export.ts";
@@ -1423,6 +1439,7 @@ digraph WellCostIQ {
   "frontend/src/pages/Wells.tsx" -> "frontend/src/components/ImportDialog.tsx";
   "frontend/src/pages/Wells.tsx" -> "frontend/src/components/PlanAdjustmentDialog.tsx";
   "frontend/src/pages/Wells.tsx" -> "frontend/src/components/WellConfigurationDialog.tsx";
+  "frontend/src/pages/Wells.tsx" -> "frontend/src/components/WellLifecycle.tsx";
   "frontend/src/pages/Wells.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/pages/Wells.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/Wells.tsx" -> "frontend/src/lib/export.ts";

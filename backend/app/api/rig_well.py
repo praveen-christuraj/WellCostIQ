@@ -4,10 +4,13 @@ Blocks group wells by concession / field area and rigs own wells. Well
 configuration uses the workspace's Hole Sections and Phases master data, while
 well sub activities are tied to one well and one workspace Activity and to a
 Master Data vendor when the responsible party is one. Every configuration scope
-tracks its own Upcoming / Active / Completed status, so a well that is created
-and still being planned is segregated from one a rig is actually drilling. All
-business rows are soft-deleted first, exports/imports and lifecycle changes
-are audited, and every lookup is organization-scoped.
+carries its own well status (Upcoming / Active / Final review / Completed) and
+plan status (Draft / Configured / Completed), so a well that is created and
+still being planned is segregated from one a rig is actually drilling and from
+one whose costs are closed for review. The rules of both ladders, including the
+one-step rollbacks, live in ``app.services.well_lifecycle``. All business rows
+are soft-deleted first, exports/imports and lifecycle changes are audited, and
+every lookup is organization-scoped.
 """
 
 from collections import defaultdict
@@ -46,6 +49,8 @@ from app.models import (
     WellSection,
     WellSubActivity,
 )
+from app.models.rig_well import WELL_CLOSED_STATUSES, rolled_up_plan, rolled_up_status
+from app.services import well_lifecycle
 from app.services.daily_cost import classify_activity
 from app.services.retention import (
     AFE_LABEL,
@@ -85,6 +90,7 @@ from app.schemas.rig_well import (
     WellConfigurationOut,
     WellCreate,
     WellOut,
+    WellTransitionOption,
     WellSubActivityCreate,
     WellSubActivityOut,
     WellSubActivityUpdate,
@@ -186,7 +192,8 @@ def _open_well_clause() -> Any:
     """Wells that still have work ahead: not deleted, and not every scope completed.
 
     Blocks and rigs count the wells they hold, so a well that is created and
-    still upcoming belongs in the total just as much as one being drilled.
+    still upcoming belongs in the total just as much as one being drilled, and a
+    well in final review stays counted until it is signed off as completed.
     """
     return or_(
         and_(Well.drilling_is_deleted.is_(False), Well.status != "completed"),
@@ -250,14 +257,14 @@ def _any_scope_status_clause(scope: str | None, status: str) -> Any:
 
 
 def _well_tracking_clause(status: str) -> Any:
-    """Wells whose *roll-up* tracking status is ``status``, written in SQL.
+    """Wells whose *roll-up* well status is ``status``, written in SQL.
 
-    The same rule as ``Well.tracking_status``: completed only when every live
-    scope is completed, upcoming only while every live scope is still under
-    planning, and active for every mix in between. The register filter and the
-    overview cards then answer the same question — a well whose Drilling scope is
-    running while its Completion plan waits appears once, under Active, never in
-    both buckets.
+    The same rule as ``rolled_up_status``: completed only when every live scope
+    is completed, upcoming only while every live scope is still under planning,
+    in final review once no live scope is operating any more, and active for
+    every other mix. The register filter and the overview cards then answer the
+    same question — a well whose Drilling scope is running while its Completion
+    plan waits appears once, under Active, never in two buckets.
     """
 
     def every_live_scope(decision: Any) -> Any:
@@ -268,12 +275,15 @@ def _well_tracking_clause(status: str) -> Any:
 
     fully_done = every_live_scope(lambda column: column == "completed")
     fully_planned = every_live_scope(lambda column: column == "upcoming")
+    fully_closed = every_live_scope(lambda column: column.in_(WELL_CLOSED_STATUSES))
     if status == "completed":
         flag = fully_done
     elif status == "upcoming":
         flag = fully_planned
+    elif status == "final_review":
+        flag = and_(fully_closed, fully_done.is_(False))
     else:
-        flag = and_(fully_done.is_(False), fully_planned.is_(False))
+        flag = and_(fully_closed.is_(False), fully_planned.is_(False))
     return and_(Well.is_deleted.is_(False), flag)
 
 
@@ -290,20 +300,23 @@ def _any_scope_plan_clause(scope: str | None, plan: str) -> Any:
 
 
 def _tracked_wells_counts(rows: list[tuple[Any, ...]]) -> dict[str, int]:
-    """Well counts by tracking status and by plan status, from live scopes only.
+    """Well counts by well status and by plan status, from live scopes only.
 
-    ``Well.tracking_status`` is the same roll-up in Python; keeping both here
-    means the overview cards and the register can never disagree. A well is
-    upcoming while *every* live scope is still under planning, completed only
-    when every one of them is completed, and active in every mix in between.
+    The four well-status counts use ``rolled_up_status`` — the rule behind
+    ``Well.tracking_status`` and the register filter — so the overview cards and
+    the register can never disagree, and they always add up to the live wells.
+    The plan counts describe the wells that are still open (upcoming or active):
+    a well is counted once, as configured when any of its open scopes is, and
+    as draft otherwise. A closed scope's plan is always completed, so it has no
+    plan work left to count.
     """
     counts = {
         "upcoming_wells": 0,
         "active_wells": 0,
+        "final_review_wells": 0,
         "completed_wells": 0,
         "draft_wells": 0,
         "configured_wells": 0,
-        "final_review_wells": 0,
     }
     for drilling_status, completion_status, drilling_plan, completion_plan, drilling_deleted, completion_deleted in rows:
         scopes = [
@@ -316,24 +329,26 @@ def _tracked_wells_counts(rows: list[tuple[Any, ...]]) -> dict[str, int]:
         ]
         if not scopes:
             continue
-        statuses = [status for status, _plan in scopes]
-        if all(status == "upcoming" for status in statuses):
-            counts["upcoming_wells"] += 1
-        elif all(status == "completed" for status in statuses):
-            counts["completed_wells"] += 1
-        else:
-            counts["active_wells"] += 1
-        # The plan ladder counts a well once, at the furthest live scope, so the
-        # cards add up to the register instead of double-counting a well whose
-        # Completion plan has not been started yet.
-        open_plans = [plan for status, plan in scopes if status != "completed"]
-        if "final_review" in open_plans:
-            counts["final_review_wells"] += 1
-        elif "configured" in open_plans:
-            counts["configured_wells"] += 1
-        elif open_plans:
-            counts["draft_wells"] += 1
+        counts[f"{rolled_up_status([status for status, _plan in scopes])}_wells"] += 1
+        plan = rolled_up_plan(scopes)
+        if plan != "completed":
+            counts[f"{plan}_wells"] += 1
     return counts
+
+
+def _can(user: Any) -> Any:
+    """A permission test for one user, for the lifecycle service."""
+    if owner(user):
+        return lambda _key: True
+    keys = granted(user)
+    return lambda key: key in keys
+
+
+def _transition_options(well: Well, scope: str, user: Any | None) -> list[WellTransitionOption]:
+    return [
+        WellTransitionOption(**option)
+        for option in well_lifecycle.available_transitions(well, scope, _can(user) if user is not None else None)
+    ]
 
 
 def _scope_label(scope: str) -> str:
@@ -502,8 +517,9 @@ def _scoped_sub_activity_counts(
     return {(str(well_id), str(scope)): int(value) for well_id, scope, value in rows}
 
 
-def _well_out_for(db: Session, organization_id: str, well: Well) -> WellOut:
+def _well_out_for(db: Session, user: Any, well: Well) -> WellOut:
     """Single-well output enriched with scoped sub-activity counts and effective plan adjustment."""
+    organization_id = user.organization_id
     scoped_counts = _scoped_sub_activity_counts(db, organization_id, [well.id])
     drilling_count = scoped_counts.get((well.id, "drilling"), 0)
     completion_count = scoped_counts.get((well.id, "completion"), 0)
@@ -514,6 +530,7 @@ def _well_out_for(db: Session, organization_id: str, well: Well) -> WellOut:
         drilling_sub_activity_count=drilling_count,
         completion_sub_activity_count=completion_count,
         plan_adjustment=plan_map.get(well.id),
+        user=user,
     )
 
 
@@ -528,6 +545,7 @@ def _well_out(
     drilling_sub_activity_count: int = 0,
     completion_sub_activity_count: int = 0,
     plan_adjustment: Any | None = None,
+    user: Any | None = None,
 ) -> WellOut:
     drilling_depth, drilling_days = _well_totals(well.sections)
     completion_depth, completion_days = _section_totals(well.completion_sections)
@@ -554,7 +572,10 @@ def _well_out(
         tracking_status=well.tracking_status,
         upcoming_scope_count=sum(1 for scope in well.live_scopes if well.scope_value(scope, "status") == "upcoming"),
         active_scope_count=sum(1 for scope in well.live_scopes if well.scope_value(scope, "status") == "active"),
+        final_review_scope_count=sum(1 for scope in well.live_scopes if well.scope_value(scope, "status") == "final_review"),
         completed_scope_count=sum(1 for scope in well.live_scopes if well.scope_value(scope, "status") == "completed"),
+        drilling_transitions=_transition_options(well, "drilling", user),
+        completion_transitions=_transition_options(well, "completion", user),
         config_status=well.config_status,
         depth_unit=well.depth_unit,
         standard_depth_unit="m",
@@ -585,7 +606,7 @@ def _well_out(
     )
 
 
-def _well_configuration_out(well: Well, scope: str = "drilling") -> WellConfigurationOut:
+def _well_configuration_out(well: Well, scope: str = "drilling", user: Any | None = None) -> WellConfigurationOut:
     scoped_sections = well.sections_for_scope(scope)
     scope_unit = well.scope_value(scope, "depth_unit")
     total_depth = scoped_sections[-1].to_depth if scoped_sections else None
@@ -634,6 +655,7 @@ def _well_configuration_out(well: Well, scope: str = "drilling") -> WellConfigur
         total_depth_m=depth_to_meters(total_depth, scope_unit),
         total_days=total_days,
         sections=sections,
+        transitions=_transition_options(well, scope, user),
     )
 
 
@@ -1831,8 +1853,9 @@ def _purge_well_scope_data(
     for section in list(well.sections_for_scope(scope)):
         db.delete(section)
     db.flush()
-    well.set_scope_value(scope, "status", "active")
-    well.set_scope_value(scope, "config_status", "draft")
+    # A purged scope has no plan and no history left, so if it is added again it
+    # starts at the first rung of both ladders (Upcoming / Draft) like a new one.
+    well_lifecycle.reset_scope(well, scope)
     well.set_scope_value(scope, "depth_unit", "m")
     if scope == "completion":
         well.completion_spud_at = None
@@ -1876,17 +1899,18 @@ def list_wells(
     user: Current,
     rig_id: str | None = None,
     block_id: str | None = None,
-    status: Literal["upcoming", "active", "completed"] | None = None,
+    status: Literal["upcoming", "active", "final_review", "completed"] | None = None,
     scope: Literal["drilling", "completion"] | None = None,
-    config_status: Literal["draft", "configured", "final_review"] | None = None,
+    config_status: Literal["draft", "configured", "completed"] | None = None,
     block: str | None = Query(default=None, max_length=200),
     search: str | None = Query(default=None, max_length=200),
 ) -> list[WellOut]:
-    """Well register rows, optionally segregated by tracking status.
+    """Well register rows, optionally segregated by well status.
 
-    ``status`` is the Upcoming / Active / Completed flag of a scope: with
-    ``scope`` it must be that scope's own status, without it any live scope may
-    carry it. ``config_status`` stays the plan workflow of both scopes.
+    ``status`` is the Upcoming / Active / Final review / Completed flag: with
+    ``scope`` it must be that scope's own status, without it the well's roll-up
+    decides. ``config_status`` is the Draft / Configured / Completed plan status
+    of the given scope (or of any live scope).
     """
     statement = (
         select(Well)
@@ -1952,6 +1976,7 @@ def list_wells(
             drilling_sub_activity_count=scoped_counts.get((well.id, "drilling"), 0),
             completion_sub_activity_count=scoped_counts.get((well.id, "completion"), 0),
             plan_adjustment=plan_map.get(well.id),
+            user=user,
         )
         for well in wells
     ]
@@ -2003,7 +2028,7 @@ def create_well(data: WellCreate, request: Request, db: Db, user: Current) -> We
         )
         _commit(db)
         db.refresh(existing)
-        return _well_out_for(db, user.organization_id, existing)
+        return _well_out_for(db, user, existing)
     well = Well(
         organization_id=user.organization_id,
         rig_id=rig.id,
@@ -2033,7 +2058,7 @@ def create_well(data: WellCreate, request: Request, db: Db, user: Current) -> We
     )
     _commit(db)
     db.refresh(well)
-    return _well_out_for(db, user.organization_id, well)
+    return _well_out_for(db, user, well)
 
 
 @router.post(
@@ -2052,6 +2077,10 @@ def activate_well_scope(
     _rig_or_404(db, well.rig_id, user.organization_id, include_deleted=False)
     if not well.scope_is_deleted(scope):
         raise HTTPException(status_code=409, detail=f"The {_scope_label(scope)} scope is already active")
+    if well.scope_is_purged(scope) or not well.sections_for_scope(scope):
+        # Nothing of the old scope survives (it was purged or never planned), so
+        # the scope that is added now starts like a new one: Upcoming / Draft.
+        well_lifecycle.reset_scope(well, scope)
     if scope == "completion":
         well.completion_is_deleted = False
         well.completion_deleted_at = None
@@ -2073,7 +2102,7 @@ def activate_well_scope(
     )
     _commit(db)
     db.refresh(well)
-    return _well_out_for(db, user.organization_id, well)
+    return _well_out_for(db, user, well)
 
 
 @router.patch(
@@ -2132,7 +2161,7 @@ def update_well(well_id: str, data: WellUpdate, request: Request, db: Db, user: 
         )
         _commit(db)
         db.refresh(well)
-    return _well_out_for(db, user.organization_id, well)
+    return _well_out_for(db, user, well)
 
 
 @router.delete(
@@ -2185,7 +2214,7 @@ def soft_delete_well(
         )
         _commit(db)
         db.refresh(well)
-        return _well_out_for(db, user.organization_id, well)
+        return _well_out_for(db, user, well)
 
     active_children = _count_children(
         db, WellSubActivity, user.organization_id, well_id=well.id, is_deleted=False
@@ -2220,7 +2249,7 @@ def soft_delete_well(
     )
     _commit(db)
     db.refresh(well)
-    return _well_out_for(db, user.organization_id, well)
+    return _well_out_for(db, user, well)
 
 
 @router.post(
@@ -2270,7 +2299,7 @@ def restore_well(
         )
         _commit(db)
         db.refresh(well)
-        return _well_out_for(db, user.organization_id, well)
+        return _well_out_for(db, user, well)
 
     if not well.is_deleted:
         raise HTTPException(status_code=409, detail="Only a deleted well can be restored")
@@ -2291,7 +2320,7 @@ def restore_well(
     )
     _commit(db)
     db.refresh(well)
-    return _well_out_for(db, user.organization_id, well)
+    return _well_out_for(db, user, well)
 
 
 @router.delete(
@@ -2651,7 +2680,7 @@ def get_well_configuration(well_id: str, db: Db, user: Current, scope: Literal["
             status_code=409,
             detail=f"Restore or add the {_scope_label(scope)} scope on well {well.well_code} before viewing or editing its configuration",
         )
-    return _well_configuration_out(well, scope)
+    return _well_configuration_out(well, scope, user)
 
 
 @router.put(
@@ -2672,10 +2701,20 @@ def save_well_configuration(
             status_code=409,
             detail=f"Restore or add the {_scope_label(data.scope)} scope on well {well.well_code} before editing its configuration",
         )
-    if well.scope_value(data.scope, "status") == "completed":
-        raise HTTPException(status_code=409, detail="Reactivate the completed well before editing its configuration")
+    scope_status = well.scope_value(data.scope, "status")
+    if scope_status in WELL_CLOSED_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"The {data.scope} scope of {well.well_code} is in {well_lifecycle.status_label(scope_status)} "
+                "and its plan is closed. Return the scope to Active and reopen the plan as Draft before editing it."
+            ),
+        )
     if well.scope_value(data.scope, "config_status") != "draft":
-        raise HTTPException(status_code=409, detail="Reopen the configured well as Draft before editing its configuration")
+        raise HTTPException(
+            status_code=409,
+            detail=f"The {data.scope} plan of {well.well_code} is Configured. Reopen it as Draft before editing it.",
+        )
 
     seen_sections: set[str] = set()
     previous_to_depth: Decimal | None = None
@@ -2746,13 +2785,12 @@ def save_well_configuration(
     )
     _commit(db)
     db.expire(well, ["sections", "completion_sections"])
-    return _well_configuration_out(well, data.scope)
+    return _well_configuration_out(well, data.scope, user)
 
 
 @router.post(
     "/wells/{well_id}/transition",
     response_model=WellOut,
-    dependencies=[Depends(require("rig-well:update"))],
 )
 def transition_well(
     well_id: str,
@@ -2761,140 +2799,36 @@ def transition_well(
     db: Db,
     user: Current,
 ) -> WellOut:
+    """Move one scope one step along its well-status or plan-status ladder.
+
+    The route itself only requires a signed-in user of the workspace: the
+    capability depends on the direction of the move, and is decided — together
+    with every state rule — by ``well_lifecycle.apply_transition``. Forward moves
+    need ``rig-well:update``; rollbacks need ``rig-well:rollback``. A user with
+    neither is refused before any state is read back to them.
+    """
+    can = _can(user)
+    if not (can(well_lifecycle.UPDATE_PERMISSION) or can(well_lifecycle.ROLLBACK_PERMISSION)):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Permission denied. This action needs one of: "
+                f"{well_lifecycle.UPDATE_PERMISSION}, {well_lifecycle.ROLLBACK_PERMISSION}."
+            ),
+        )
     well = _well_or_404(db, well_id, user.organization_id, include_deleted=False)
-    if well.scope_is_deleted(data.scope):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Restore or add the {_scope_label(data.scope)} scope on well {well.well_code} before changing its lifecycle state",
-        )
-    action = data.action
-    status = well.scope_value(data.scope, "status")
-    # The plan ladder (draft → configured → final review) is walked while the scope
-    # is being planned (upcoming) or already drilling (active); only a completed
-    # scope is locked, and only `activate` unlocks it.
-    if action in ("configure", "draft", "final_review") and status == "completed":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Reactivate the {data.scope} scope before editing its plan",
-        )
-    if action == "configure":
-        if well.scope_value(data.scope, "config_status") != "draft":
-            raise HTTPException(status_code=409, detail="The well is already configured")
-        if not well.sections_for_scope(data.scope):
-            raise HTTPException(status_code=409, detail="Save at least one section and phase before marking the well configured")
-        well.set_scope_value(data.scope, "config_status", "configured")
-        label = "configured"
-    elif action == "draft":
-        if well.scope_value(data.scope, "config_status") != "configured":
-            raise HTTPException(status_code=409, detail="The well is already in Draft")
-        well.set_scope_value(data.scope, "config_status", "draft")
-        label = "Draft"
-    elif action == "final_review":
-        if well.scope_value(data.scope, "config_status") != "configured":
-            raise HTTPException(status_code=409, detail="The well is already marked for final review")
-        if not well.sections_for_scope(data.scope):
-            raise HTTPException(status_code=409, detail="Save at least one section and phase before marking the scope for final review")
-        well.set_scope_value(data.scope, "config_status", "final_review")
-        label = "marked for final review"
-    elif action == "start":
-        # Upcoming → active: the rig is moving / operations have begun, so the
-        # scope leaves the planning bucket and starts consuming the programme.
-        if status != "upcoming":
-            raise HTTPException(
-                status_code=409,
-                detail=f"The {data.scope} scope is already {status}; only an upcoming scope can be started",
-            )
-        if not well.sections_for_scope(data.scope):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Save the {data.scope} section and phase plan before starting this scope",
-            )
-        if well.scope_value(data.scope, "config_status") == "draft":
-            raise HTTPException(
-                status_code=409,
-                detail=f"Mark the {data.scope} plan as configured before starting the scope",
-            )
-        well.set_scope_value(data.scope, "status", "active")
-        label = "started (now active)"
-    elif action == "defer":
-        # active → upcoming: allowed only while nothing has been budgeted or
-        # booked, so a start that was recorded too early can be undone honestly.
-        if status != "active":
-            raise HTTPException(
-                status_code=409,
-                detail=f"Only an active {data.scope} scope can be moved back to upcoming",
-            )
-        blockers: list[str] = []
-        afes = int(
-            db.scalar(
-                select(func.count(Afe.id)).where(
-                    Afe.organization_id == user.organization_id,
-                    Afe.well_id == well.id,
-                    Afe.configuration_scope == data.scope,
-                    Afe.is_deleted.is_(False),
-                )
-            )
-            or 0
-        )
-        if afes:
-            blockers.append(f"{afes} active AFE(s)")
-        sheets = int(
-            db.scalar(
-                select(func.count(DailyCostEntry.id))
-                .join(Afe, DailyCostEntry.afe_id == Afe.id)
-                .where(
-                    DailyCostEntry.organization_id == user.organization_id,
-                    DailyCostEntry.well_id == well.id,
-                    DailyCostEntry.is_deleted.is_(False),
-                    Afe.organization_id == user.organization_id,
-                    Afe.configuration_scope == data.scope,
-                )
-            )
-            or 0
-        )
-        if sheets:
-            blockers.append(f"{sheets} daily-cost sheet(s)")
-        # The milestone columns are named per scope (``drilling_spud_at`` /
-        # ``completion_spud_at``), so they are read directly rather than through
-        # ``scope_value``, which prefixes only the completion side.
-        if getattr(well, f"{data.scope}_spud_at", None) is not None:
-            blockers.append("a recorded spud date & time")
-        if blockers:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"The {data.scope} scope cannot return to upcoming while it has "
-                    + ", ".join(blockers)
-                    + ". Delete those records first."
-                ),
-            )
-        well.set_scope_value(data.scope, "status", "upcoming")
-        label = "returned to planning (upcoming)"
-    elif action == "complete":
-        if status == "completed":
-            raise HTTPException(status_code=409, detail="The well is already completed")
-        if (
-            well.scope_value(data.scope, "config_status") != "final_review"
-            or not well.sections_for_scope(data.scope)
-        ):
-            raise HTTPException(status_code=409, detail="Mark the scope for final review before marking it completed")
-        well.set_scope_value(data.scope, "status", "completed")
-        label = "completed"
-    else:
-        if status != "completed":
-            raise HTTPException(status_code=409, detail="Only a completed well can be reactivated")
-        well.set_scope_value(data.scope, "status", "active")
-        well.set_scope_value(data.scope, "config_status", "configured")
-        label = "reactivated"
+    applied = well_lifecycle.apply_transition(db, well, data.scope, data.action, can)
     _record_audit(
-        db, user=user, action="update", entity_type="well", record_id=well.id,
+        db, user=user,
+        action="rollback" if applied.transition.direction == "rollback" else "update",
+        entity_type="well", record_id=well.id,
         entity_label=well.well_code,
-        summary=f"Changed well {well.well_code} {data.scope} scope to {label}: {data.remarks.strip()}",
+        summary=applied.summary(well, data.scope, data.remarks),
         request=request,
     )
     _commit(db)
     db.refresh(well)
-    return _well_out_for(db, user.organization_id, well)
+    return _well_out_for(db, user, well)
 
 
 # ---------------------------------------------------------------------------

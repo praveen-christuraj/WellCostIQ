@@ -76,6 +76,7 @@ from app.schemas.sow_adjustment import (
 )
 from app.services import afe as afe_service
 from app.services import audit
+from app.services import well_lifecycle
 
 # Reopening a submitted sheet whose cost date is older than this needs the
 # dedicated daily-cost:amend capability in addition to daily-cost:reopen.
@@ -157,6 +158,28 @@ def _well_or_404(db: Session, well_id: str, organization_id: str) -> Well:
     if well is None:
         raise HTTPException(status_code=404, detail="Well not found in this workspace")
     return well
+
+
+def _require_open_scope(db: Session, organization_id: str, afe: Afe, purpose: str) -> None:
+    """An AFE revision changes the budget of a scope that is still being executed.
+
+    The estimate behind it is priced against the well's signed-off plan, so the
+    scope must be upcoming or active on a configured plan — the same rule that
+    guards the AFE estimate itself and daily costs. Voiding is never blocked.
+    """
+    well = db.scalars(
+        select(Well)
+        .options(
+            selectinload(Well.sections).selectinload(WellSection.phases),
+            selectinload(Well.completion_sections).selectinload(WellSection.phases),
+        )
+        .where(Well.id == afe.well_id, Well.organization_id == organization_id)
+    ).unique().first()
+    if well is None:
+        return
+    blocker = well_lifecycle.planning_blocker(well, afe.configuration_scope, purpose)
+    if blocker:
+        raise HTTPException(status_code=409, detail=blocker)
 
 
 def _well_scope_days(well: Well, scope: str) -> tuple[Decimal, int]:
@@ -523,11 +546,12 @@ def create_well_plan_adjustment(
     request: Request | None,
 ) -> WellPlanAdjustmentOut:
     well = _well_or_404(db, well_id, organization_id)
-    if well.scope_value(data.configuration_scope, "config_status") != "configured":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Mark the {data.configuration_scope} plan of {well.well_code} as Configured before recording a plan adjustment",
-        )
+    # An adjustment revises a signed-off plan that is still being executed. A
+    # draft plan is simply edited; a scope in final review or completed has a
+    # closed plan and must be returned to Active first.
+    blocker = well_lifecycle.planning_blocker(well, data.configuration_scope, "recording a plan adjustment")
+    if blocker:
+        raise HTTPException(status_code=409, detail=blocker)
     open_draft = db.scalar(
         select(WellPlanAdjustment.revision_number).where(
             WellPlanAdjustment.organization_id == organization_id,
@@ -661,6 +685,13 @@ def _set_well_plan_status(
     if status == "approved":
         if row.status != "draft":
             raise HTTPException(status_code=409, detail="Only a draft plan adjustment can be approved")
+        # Approval is the moment the revision becomes the effective plan, so the
+        # scope must still be open on a configured plan *now* — not only when the
+        # draft was recorded. Voiding stays possible in any state.
+        if well is not None:
+            blocker = well_lifecycle.planning_blocker(well, row.configuration_scope, "approving a plan adjustment")
+            if blocker:
+                raise HTTPException(status_code=409, detail=blocker)
         row.status = "approved"
         row.approved_by = _actor_name(user)
         row.approved_at = _now()
@@ -1367,6 +1398,7 @@ def create_afe_adjustment(
             status_code=409,
             detail=f"{afe.afe_code} is still a Draft — edit the estimate directly instead of recording an SOW adjustment",
         )
+    _require_open_scope(db, organization_id, afe, "recording an SOW adjustment")
     if afe.estimate_saved_at is None:
         raise HTTPException(status_code=422, detail=f"Save the estimate for {afe.afe_code} before recording an SOW adjustment")
     services, consumables, tangibles, total, currency = _original_totals(db, organization_id, afe)
@@ -1643,6 +1675,8 @@ def _set_afe_adjustment_status(
             raise HTTPException(status_code=409, detail="Only a draft SOW adjustment can be approved")
         if row.original_total is None:
             raise HTTPException(status_code=422, detail="This adjustment has no converted original total and cannot be approved")
+        if afe is not None:
+            _require_open_scope(db, organization_id, afe, "approving an SOW adjustment")
         row.status = "approved"
         row.approved_by = _actor_name(user)
         row.approved_at = _now()

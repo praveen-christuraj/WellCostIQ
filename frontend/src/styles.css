@@ -521,9 +521,6 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
 /* Print sheet: hidden on screen. When printing, the app is hidden and the AFE report is
    shown in its fixed two-page format - summary and sign-off on page 1, the consumable and
    tangible line detail on page 2. Daily Cost printing reuses these rules and the .ps-* classes. */
- When printing, the app is hidden and the AFE report is
-   shown in its fixed two-page format - summary and sign-off on page 1, the consumable and
-   tangible line detail on page 2. Daily Cost printing reuses these rules and the .ps-* classes. */
 .afe-print-sheet { display: none; }
 @media print {
   @page {

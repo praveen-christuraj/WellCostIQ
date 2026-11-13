@@ -109,8 +109,8 @@ export type MudCostWellOption = {
   well_code: string
   well_name: string
   display_name: string
-  status: 'active' | 'completed'
-  config_status: 'draft' | 'configured'
+  status: 'upcoming' | 'active' | 'final_review' | 'completed'
+  config_status: 'draft' | 'configured' | 'completed'
   is_deleted: boolean
   sections: MudCostSectionOption[]
 }

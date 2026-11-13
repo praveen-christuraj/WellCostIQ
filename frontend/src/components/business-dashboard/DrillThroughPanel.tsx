@@ -7,6 +7,7 @@ import {
 } from '@mui/material'
 import { InsightsOutlined, OpenInNewRounded } from '@mui/icons-material'
 import { ErrorMessage, PanelDialog, Tag } from '../Common'
+import { planLabel, planStatusTone, trackingLabel, wellStatusTone } from '../../lib/rigWell'
 import { InteractiveChart } from '../ui/InteractiveChart'
 import { useAuth } from '../../context/AuthContext'
 import { useColorMode } from '../../context/ThemeContext'
@@ -149,10 +150,8 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
     {loading && !detail && <Box py={6} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={26}/></Box>}
     {detail && <>
       <Box display="flex" gap={.75} flexWrap="wrap" mb={2}>
-        <Tag tone={detail.well.status === 'completed' ? 'info' : 'success'}>{detail.well.status === 'completed' ? 'Completed well' : 'Active well'}</Tag>
-        <Tag tone={detail.well.config_status === 'configured' ? 'success' : 'warning'}>
-          {detail.well.config_status === 'configured' ? 'Configuration complete' : 'Configuration in draft'}
-        </Tag>
+        <Tag tone={wellStatusTone(detail.well.status)}>Well status: {trackingLabel(detail.well.status)}</Tag>
+        <Tag tone={planStatusTone(detail.well.config_status)}>Plan status: {planLabel(detail.well.config_status)}</Tag>
         {detail.well.has_sow_adjustment && <Tag tone="info">SOW adjusted</Tag>}
         {detail.well.over_budget && <Tag tone="error">Over AFE</Tag>}
       </Box>

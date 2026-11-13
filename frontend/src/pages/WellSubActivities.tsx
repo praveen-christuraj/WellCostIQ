@@ -5,6 +5,7 @@ import { Alert, Box, Button, CircularProgress, MenuItem, Paper, TextField, Typog
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, useFormDirty, Tag } from '../components/Common'
+import { PlanStatusTag, WellStatusTag } from '../components/WellLifecycle'
 import { ImportDialog } from '../components/ImportDialog'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
@@ -389,8 +390,10 @@ export default function WellSubActivities() {
         <Typography fontSize={12} fontWeight={800}>{activeWell.well_code} — {activeWell.well_name}</Typography>
         <Tag tone="info">{scopeLabel(selectedScope)}</Tag>
         <Tag tone="info">{activeWell.rig_code} — {activeWell.rig_name}</Tag>
-        <Tag tone={activeScopeStatus.status === 'active' ? 'success' : 'neutral'}>{activeScopeStatus.status}</Tag>
-        <Tag tone={activeScopeStatus.config_status === 'configured' ? 'info' : 'warning'}>Plan {activeScopeStatus.config_status}</Tag>
+        <Typography fontSize={12} color="text.secondary">Well status</Typography>
+        <WellStatusTag status={activeScopeStatus.status}/>
+        <Typography fontSize={12} color="text.secondary">Plan status</Typography>
+        <PlanStatusTag status={activeScopeStatus.config_status}/>
       </Box>}
     </Paper>
 

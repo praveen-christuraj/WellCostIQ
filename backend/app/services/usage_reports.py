@@ -25,6 +25,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import select, union_all
 from sqlalchemy.orm import Session, joinedload
 
+from app.models.rig_well import WELL_TRACKING_STATUSES
 from app.models import (
     Afe,
     Block,
@@ -197,6 +198,9 @@ def reference_data(db: Session, organization_id: str) -> UsageReference:
                 config_status=row.config_status,
                 completion_status=row.completion_status,
                 completion_config_status=row.completion_config_status,
+                tracking_status=row.tracking_status,
+                drilling_is_deleted=row.drilling_is_deleted,
+                completion_is_deleted=row.completion_is_deleted,
                 scopes=sorted(scope_map.get(row.id, set())),
                 has_costs=row.id in wells_with_costs,
             )
@@ -250,18 +254,18 @@ def _resolve_wells(
         wells = [well for well in wells if scope in scope_map.get(well.id, set())]
 
     if lifecycle:
-        chosen_scope = scope or "drilling"
-        prefix = "completion_" if chosen_scope == "completion" else ""
-        status_field = f"{prefix}status"
-        config_field = f"{prefix}config_status"
-        if lifecycle == "active":
-            wells = [well for well in wells if getattr(well, status_field) == "active"]
-        elif lifecycle == "completed":
-            wells = [well for well in wells if getattr(well, status_field) == "completed"]
-        elif lifecycle == "final_review":
-            wells = [well for well in wells if getattr(well, config_field) == "final_review"]
-        else:
+        # The well status ladder itself. With a scope the report follows that
+        # scope's own status; without one it follows the well's roll-up, so a
+        # Completion-only well is never judged by a Drilling scope it lost.
+        if lifecycle not in WELL_TRACKING_STATUSES:
             raise HTTPException(status_code=422, detail=f"Unknown well lifecycle '{lifecycle}'")
+        if scope:
+            wells = [
+                well for well in wells
+                if not well.scope_is_deleted(scope) and well.scope_value(scope, "status") == lifecycle
+            ]
+        else:
+            wells = [well for well in wells if well.tracking_status == lifecycle]
     return wells
 
 

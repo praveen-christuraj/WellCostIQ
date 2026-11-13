@@ -286,7 +286,8 @@ export default function WellCostComparisonReport() {
 
   const wellsWithAfe = rows.filter(row => row.afe_amount !== '—' && row.afe_amount !== 'Not available').length
   const wellsWithActual = rows.filter(row => row.actual_cost !== '—' && row.actual_cost !== 'Not available').length
-  const wellsConfigured = sources.wells.filter(well => well.config_status === 'configured').length
+  // A plan that is Configured, or Completed because its scope has been closed, is signed off.
+  const wellsConfigured = sources.wells.filter(well => well.config_status !== 'draft').length
 
   return <>
     <PageHeading
@@ -305,7 +306,7 @@ export default function WellCostComparisonReport() {
       <StatCard label="Wells listed" value={loading ? '—' : rows.length.toLocaleString()} note="Active wells in the register" icon={<AccountBalanceWalletOutlined/>}/>
       <StatCard label="With an AFE" value={loading ? '—' : wellsWithAfe.toLocaleString()} note="Wells with current AFE records" icon={<DownloadOutlined/>}/>
       <StatCard label="With actual costs" value={loading ? '—' : wellsWithActual.toLocaleString()} note="Wells with daily cost entries" icon={<TrendingUpRounded/>}/>
-      <StatCard label="Configured plans" value={loading ? '—' : wellsConfigured.toLocaleString()} note="Wells with planned days configured" icon={<ScheduleOutlined/>}/>
+      <StatCard label="Configured plans" value={loading ? '—' : wellsConfigured.toLocaleString()} note="Wells whose plan is signed off (Configured or Completed)" icon={<ScheduleOutlined/>}/>
     </Box>
     <Alert severity="info" sx={{ mb: 2 }}>
       AFE and actual amounts are grouped by currency. Balance and cost-incurred percentage are calculated only when the well has a single AFE currency that matches its actual-cost currency.

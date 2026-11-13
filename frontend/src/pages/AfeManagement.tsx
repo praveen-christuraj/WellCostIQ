@@ -13,8 +13,8 @@ import type { Afe, AfeReference } from '../lib/afe'
 const TABS = [
   { key: 'afe', label: 'AFE' },
   { key: 'estimation', label: 'AFE Cost Estimation' },
-  { key: 'final_review', label: 'Wells for final review' },
-  { key: 'completed', label: 'Completed Wells' },
+  { key: 'final_review', label: 'Wells in final review' },
+  { key: 'completed', label: 'Completed wells' },
   { key: 'deleted', label: 'Deleted entries' },
 ] as const
 
@@ -22,8 +22,8 @@ type TabKey = typeof TABS[number]['key']
 
 // The AFE register, cost estimation approvals, the well-scope views and deleted
 // entries share one page. The active tab lives in the URL (?tab=) so links and
-// reloads return to the same view. An AFE appears on the "Wells for final review"
-// or "Completed Wells" tab according to its well's scope lifecycle state
+// reloads return to the same view. An AFE appears on the "Wells in final review"
+// or "Completed wells" tab according to the well status of its scope
 // (drilling AFE follows the drilling scope, completion AFE the completion scope),
 // so a well can show on both tabs with different scopes.
 export default function AfeManagement() {
@@ -53,15 +53,9 @@ export default function AfeManagement() {
 
   useEffect(() => { void loadReference(); void load() }, [loadReference, load])
 
-  const wellsById = useMemo(() => Object.fromEntries((reference?.wells ?? []).map(well => [well.id, well])), [reference])
-  const scopeConfigStatus = (well: AfeReference['wells'][number], scope: 'drilling' | 'completion') =>
-    scope === 'completion' ? well.completion_config_status : well.config_status
-
-  const finalReviewRows = useMemo(() => rows.filter(afe => {
-    const well = wellsById[afe.well_id]
-    if (!well) return false
-    return afe.well_status === 'active' && scopeConfigStatus(well, afe.configuration_scope) === 'final_review'
-  }), [rows, wellsById])
+  // `well_status` on an AFE is the well status of the AFE's own scope, so the
+  // two views read the well-status ladder directly.
+  const finalReviewRows = useMemo(() => rows.filter(afe => afe.well_status === 'final_review'), [rows])
 
   const completedRows = useMemo(() => rows.filter(afe => afe.well_status === 'completed'), [rows])
 
@@ -69,7 +63,7 @@ export default function AfeManagement() {
     <PageHeading
       eyebrow="AFE MANAGEMENT / REGISTER AND ESTIMATES"
       title="AFE Management"
-      subtitle="Create well-scoped AFEs, price them against the well plan, and move them through review and approval. AFEs surface on the final-review and completed tabs according to their well's scope lifecycle state."
+      subtitle="Create well-scoped AFEs, price them against the well plan, and move them through review and approval. AFEs surface on the final-review and completed tabs according to the well status of their scope."
       action={<Button component={RouterLink} to="/afe" variant="outlined" startIcon={<DashboardOutlined/>}>Overview</Button>}
     />
     <ErrorMessage message={referenceError}/>
@@ -83,16 +77,16 @@ export default function AfeManagement() {
       {active === 'estimation' && <AfeEstimationTab/>}
       {active === 'final_review' && <>
         <Box sx={{ mb: 1 }}>
-          <Typography fontWeight={800} fontSize={15}>Wells for final review</Typography>
+          <Typography fontWeight={800} fontSize={15}>Wells in final review</Typography>
           <Typography color="text.secondary" fontSize={12}>
-            {finalReviewRows.length} AFE{finalReviewRows.length === 1 ? '' : 's'} whose well scope is marked for final review
+            {finalReviewRows.length} AFE{finalReviewRows.length === 1 ? '' : 's'} whose well scope is in Final review — operations ended, costs under review
           </Typography>
         </Box>
         <AfeScopeList afees={finalReviewRows} exportName="afes-final-review"/>
       </>}
       {active === 'completed' && <>
         <Box sx={{ mb: 1 }}>
-          <Typography fontWeight={800} fontSize={15}>Completed Wells</Typography>
+          <Typography fontWeight={800} fontSize={15}>Completed wells</Typography>
           <Typography color="text.secondary" fontSize={12}>
             {completedRows.length} AFE{completedRows.length === 1 ? '' : 's'} whose well scope is completed
           </Typography>

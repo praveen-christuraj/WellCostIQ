@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import { AddRounded, ArrowDropDownRounded, DeleteOutlineRounded, EditOutlined, ListAltRounded, TuneRounded } from '@mui/icons-material'
-import { Alert, Box, Button, CircularProgress, IconButton, Menu, MenuItem, Paper, Tab, Tabs, TextField, Tooltip, Typography } from '@mui/material'
+import { Alert, Box, Button, CircularProgress, Divider, IconButton, ListItemText, ListSubheader, Menu, MenuItem, Paper, Tab, Tabs, TextField, Tooltip, Typography } from '@mui/material'
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag, useFormDirty } from '../components/Common'
 import { ImportDialog } from '../components/ImportDialog'
 import { PlanAdjustmentDialog } from '../components/PlanAdjustmentDialog'
 import { WellConfigurationDialog } from '../components/WellConfigurationDialog'
+import { PlanStatusTag, WellStatusTag, WellTransitionDialog } from '../components/WellLifecycle'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import type { ImportRow } from '../lib/export'
@@ -15,6 +16,9 @@ import {
   emptyWellForm,
   formatDays,
   formatDepth,
+  planLabel,
+  scopeTransitions,
+  trackingLabel,
   WELL_IMPORT_HEADERS,
   WELL_IMPORT_OPTIONAL_HEADERS,
   type BlockOption,
@@ -23,22 +27,34 @@ import {
   type Well,
   type WellConfigurationScope,
   type WellPayload,
+  type WellStatus,
+  type WellTransitionOption,
 } from '../lib/rigWell'
 
-type WellTab = 'upcoming' | 'configured' | 'final_review' | 'completed'
+// One tab per well status, in ladder order. Each tab lists the scopes that carry
+// that status, so a well drilling with its completion still planned shows its
+// Drilling scope under Active and its Completion scope under Upcoming. The plan
+// status (Draft / Configured / Completed) is a column, never a tab of its own.
+type WellTab = WellStatus
 
-// The register is segregated by the scope's own tracking flag first — Upcoming,
-// Active or Completed — and the plan workflow (draft → configured → final review)
-// splits the active wells inside it. Each tab reads one scope's status column, so
-// a well drilling with its completion still planned is listed in both buckets.
-const TABS: { key: WellTab; label: string }[] = [
-  { key: 'upcoming', label: 'Upcoming wells' },
-  { key: 'configured', label: 'Configured wells' },
-  { key: 'final_review', label: 'Wells for final review' },
-  { key: 'completed', label: 'Completed wells' },
+const TABS: { key: WellTab; label: string; hint: string }[] = [
+  {
+    key: 'upcoming', label: 'Upcoming',
+    hint: 'Created and under planning — budgetable once the plan is configured, not yet started. Starting a scope moves it to Active.',
+  },
+  {
+    key: 'active', label: 'Active',
+    hint: 'Operations are running. Daily costs, AFEs and plan adjustments are accepted while the plan is Configured.',
+  },
+  {
+    key: 'final_review', label: 'Final review',
+    hint: 'Operations have ended and the plan is closed. Costs are reviewed here before the scope is signed off as Completed.',
+  },
+  {
+    key: 'completed', label: 'Completed',
+    hint: 'Signed off. Plan and daily costs are locked; a completed scope can be rolled back to Final review.',
+  },
 ]
-
-type TransitionAction = 'configure' | 'draft' | 'final_review' | 'start' | 'defer' | 'complete' | 'activate'
 
 type ScopeRow = { well: Well; scope: WellConfigurationScope }
 
@@ -70,20 +86,7 @@ function scopeName(scope: WellConfigurationScope) {
   return scope === 'drilling' ? 'Drilling' : 'Completion'
 }
 
-function planTone(config_status: string) {
-  if (config_status === 'configured') return 'success'
-  if (config_status === 'final_review') return 'warning'
-  return 'warning'
-}
-
-function statusTone(status: string) {
-  if (status === 'completed') return 'neutral'
-  // A planned, never-spudded scope is not running yet, so it is not a success green.
-  if (status === 'upcoming') return 'info'
-  return 'success'
-}
-
-function WellActions({
+export function WellActions({
   well,
   scope,
   canEdit,
@@ -104,7 +107,7 @@ function WellActions({
   onEdit: () => void
   onConfigure: () => void
   onDelete: () => void
-  onTransition: (action: TransitionAction) => void
+  onTransition: (option: WellTransitionOption) => void
   onAdjustPlan: () => void
   onActivateOtherScope: (otherScope: WellConfigurationScope) => void
 }) {
@@ -115,7 +118,32 @@ function WellActions({
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   const menuOpen = Boolean(anchor)
   const close = () => setAnchor(null)
-  const action = (next: TransitionAction) => { close(); onTransition(next) }
+  // The server lists every move that starts at this scope's status and says
+  // whether it is possible now. A move the role is not allowed to make is not
+  // offered at all; a move with a missing precondition is shown with the reason.
+  const moves = scopeTransitions(well, scope).filter(option => option.permitted !== false)
+  const forward = moves.filter(option => option.direction === 'forward')
+  const rollback = moves.filter(option => option.direction === 'rollback')
+  const moveItem = (option: WellTransitionOption) => (
+    <MenuItem
+      key={option.action}
+      disabled={!option.allowed}
+      onClick={() => { if (!option.allowed) return; close(); onTransition(option) }}
+      sx={{ alignItems: 'flex-start', whiteSpace: 'normal', maxWidth: 380, '&.Mui-disabled': { opacity: 1 } }}
+    >
+      <ListItemText
+        primary={option.label}
+        secondary={option.allowed ? undefined : option.reason}
+        primaryTypographyProps={{ fontSize: 13, color: option.allowed ? 'text.primary' : 'text.disabled' }}
+        secondaryTypographyProps={{ fontSize: 11.5, color: 'text.secondary' }}
+      />
+    </MenuItem>
+  )
+  const subheader = (text: string) => (
+    <ListSubheader key={text} sx={{ lineHeight: '28px', fontSize: 10.5, fontWeight: 800, letterSpacing: '.06em', bgcolor: 'transparent' }}>
+      {text}
+    </ListSubheader>
+  )
   return (
     <Box display="flex" alignItems="center" height="100%" gap={.1}>
       {canEdit && <Button size="small" aria-label={`Edit well ${well.well_code}`} onClick={onEdit} startIcon={<EditOutlined sx={{ fontSize: 15 }}/>}>Edit</Button>}
@@ -132,66 +160,23 @@ function WellActions({
           <ListAltRounded fontSize="small"/>
         </IconButton>
       </Tooltip>
-      {canAdjustPlan && plan.config_status === 'configured' && <Tooltip title={`SOW plan adjustments (${label.toLowerCase()} planned days)`}>
+      {canAdjustPlan && plan.config_status !== 'draft' && <Tooltip title={`SOW plan adjustments (${label.toLowerCase()} planned days)`}>
         <Button size="small" onClick={onAdjustPlan}>Plan adj.</Button>
       </Tooltip>}
-      {(canEdit || canDelete) && <>
-        <Button size="small" color="inherit" endIcon={<ArrowDropDownRounded/>} onClick={event => setAnchor(event.currentTarget)}>Status</Button>
+      {(moves.length > 0 || canEdit || canDelete) && <>
+        <Button size="small" color="inherit" endIcon={<ArrowDropDownRounded/>} aria-label={`Change ${label} status of ${well.well_code}`} onClick={event => setAnchor(event.currentTarget)}>Status</Button>
         <Menu anchorEl={anchor} open={menuOpen} onClose={close}>
-          {canEdit && plan.status === 'completed' && <MenuItem onClick={() => action('activate')}>Reactivate {label} scope</MenuItem>}
-          {canEdit && plan.status !== 'completed' && plan.config_status === 'draft' && plan.section_count > 0 && <MenuItem onClick={() => action('configure')}>Mark {label} configured</MenuItem>}
-          {canEdit && plan.status !== 'completed' && plan.config_status === 'draft' && plan.section_count === 0 && <MenuItem disabled>Save a {label.toLowerCase()} plan before configuring</MenuItem>}
-          {canEdit && plan.status !== 'completed' && plan.config_status === 'configured' && <MenuItem onClick={() => action('draft')}>Reopen {label} as Draft</MenuItem>}
-          {canEdit && plan.status !== 'completed' && plan.config_status === 'configured' && <MenuItem onClick={() => action('final_review')}>Mark {label} for final review</MenuItem>}
-          {canEdit && plan.status !== 'completed' && plan.config_status === 'final_review' && <MenuItem onClick={() => action('complete')}>Mark {label} completed</MenuItem>}
-          {/* Spud moment: the scope leaves the planning bucket and starts consuming the programme. */}
-          {canEdit && plan.status === 'upcoming' && plan.config_status !== 'draft' && <MenuItem onClick={() => action('start')}>Start {label} scope (mark active)</MenuItem>}
-          {canEdit && plan.status === 'upcoming' && plan.config_status === 'draft' && <MenuItem disabled>Mark the {label.toLowerCase()} plan configured before starting</MenuItem>}
-          {canEdit && plan.status === 'active' && <MenuItem onClick={() => action('defer')}>Move {label} back to Upcoming</MenuItem>}
+          {forward.length > 0 && subheader('MOVE FORWARD')}
+          {forward.map(moveItem)}
+          {rollback.length > 0 && subheader('ROLL BACK ONE STEP')}
+          {rollback.map(moveItem)}
+          {moves.length > 0 && (canEdit && otherIsMissing || canDelete) && <Divider key="divider" />}
           {canEdit && otherIsMissing && <MenuItem onClick={() => { close(); onActivateOtherScope(otherScope) }}>Add {scopeName(otherScope)} scope</MenuItem>}
           {canDelete && <MenuItem sx={{ color: 'error.main' }} onClick={() => { close(); onDelete() }}>Move {label} scope to Deleted Entries</MenuItem>}
         </Menu>
       </>}
     </Box>
   )
-}
-
-const transitionCopy: Record<TransitionAction, { title: (scope: string) => string; label: (scope: string) => string; description: string }> = {
-  configure: {
-    title: scope => `Mark ${scope} plan as configured?`,
-    label: scope => `Mark ${scope} configured`,
-    description: 'The saved plan becomes a configured well baseline. Reopen it as Draft before editing.',
-  },
-  draft: {
-    title: scope => `Reopen ${scope} plan as Draft?`,
-    label: scope => `Reopen ${scope} as Draft`,
-    description: 'This unlocks the well plan for edits. The change is recorded in the audit trail.',
-  },
-  final_review: {
-    title: scope => `Mark ${scope} scope for final review?`,
-    label: scope => `Mark ${scope} for final review`,
-    description: 'The configured plan moves to final review. From there the scope can be marked completed.',
-  },
-  start: {
-    title: scope => `Start the ${scope} scope?`,
-    label: scope => `Start ${scope} scope`,
-    description: 'Operations have begun, so the scope leaves the Upcoming (planning) bucket and becomes Active. Budget and MIS reports start counting it against the programme.',
-  },
-  defer: {
-    title: scope => `Move ${scope} back to Upcoming?`,
-    label: scope => `Move ${scope} to Upcoming`,
-    description: 'Undo a start that was recorded too early. This is refused while the scope has AFEs, daily-cost sheets or a spud date & time, because those prove it ran.',
-  },
-  complete: {
-    title: scope => `Mark ${scope} scope completed?`,
-    label: scope => `Complete ${scope} scope`,
-    description: 'Only this scope is marked complete. Its plan stays read-only until this scope is reactivated.',
-  },
-  activate: {
-    title: scope => `Reactivate ${scope} scope?`,
-    label: scope => `Reactivate ${scope} scope`,
-    description: 'The scope returns to Active with its plan marked Configured.',
-  },
 }
 
 const SCOPE_PRESETS: { value: string; label: string; scopes: WellConfigurationScope[] }[] = [
@@ -233,10 +218,7 @@ export default function Wells() {
   const [configurationTarget, setConfigurationTarget] = useState<ScopeRow | null>(null)
   const [adjustTarget, setAdjustTarget] = useState<ScopeRow | null>(null)
   const [transitionTarget, setTransitionTarget] = useState<ScopeRow | null>(null)
-  const [transitionAction, setTransitionAction] = useState<TransitionAction>('configure')
-  const [transitionRemarks, setTransitionRemarks] = useState('')
-  const [transitionError, setTransitionError] = useState('')
-  const [transitioning, setTransitioning] = useState(false)
+  const [transitionOption, setTransitionOption] = useState<WellTransitionOption | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -268,24 +250,21 @@ export default function Wells() {
     return out
   }), [rows])
 
-  const tabRows = useMemo<ScopeRow[]>(() => scopeRows.filter(row => {
-    const { status, config_status } = scopeState(row.well, row.scope)
-    if (active === 'upcoming') return status === 'upcoming'
-    if (active === 'configured') return status === 'active' && (config_status === 'configured' || config_status === 'draft')
-    if (active === 'final_review') return status === 'active' && config_status === 'final_review'
-    return status === 'completed'
-  }), [scopeRows, active])
+  const tabRows = useMemo<ScopeRow[]>(
+    () => scopeRows.filter(row => scopeState(row.well, row.scope).status === active),
+    [scopeRows, active],
+  )
 
+  // Scope rows per well status (the tabs) and per plan status (the summary line).
   const counts = useMemo(() => {
-    const tally = { upcoming: 0, configured: 0, draft: 0, final_review: 0, completed: 0 }
+    const tally = {
+      upcoming: 0, active: 0, final_review: 0, completed: 0,
+      plan: { draft: 0, configured: 0, completed: 0 },
+    }
     scopeRows.forEach(row => {
       const { status, config_status } = scopeState(row.well, row.scope)
-      if (status === 'completed') tally.completed += 1
-      // Planning scopes are counted in their own bucket, whatever plan stage they reached.
-      else if (status === 'upcoming') tally.upcoming += 1
-      else if (config_status === 'final_review') tally.final_review += 1
-      else if (config_status === 'configured') tally.configured += 1
-      else tally.draft += 1
+      tally[status] += 1
+      tally.plan[config_status] += 1
     })
     return tally
   }, [scopeRows])
@@ -408,29 +387,25 @@ export default function Wells() {
     })
   }
 
-  const openTransition = (row: ScopeRow, action: TransitionAction) => {
+  const openTransition = (row: ScopeRow, option: WellTransitionOption) => {
     setTransitionTarget(row)
-    setTransitionAction(action)
-    setTransitionRemarks('')
-    setTransitionError('')
+    setTransitionOption(option)
   }
-  const confirmTransition = async () => {
-    if (!transitionTarget) return
-    setTransitioning(true)
-    setTransitionError('')
-    try {
-      await api(`/rig-well/wells/${transitionTarget.well.id}/transition`, {
-        method: 'POST',
-        body: body({ action: transitionAction, scope: transitionTarget.scope, remarks: transitionRemarks.trim() }),
-      })
-      setNotice(`${transitionTarget.well.well_code} · ${scopeName(transitionTarget.scope)}: ${transitionCopy[transitionAction].label(scopeName(transitionTarget.scope)).toLowerCase()} was recorded.`)
-      setTransitionTarget(null)
-      await load()
-    } catch (caught) {
-      setTransitionError(caught instanceof Error ? caught.message : 'Well scope status could not be updated')
-    } finally {
-      setTransitioning(false)
+  const closeTransition = () => { setTransitionTarget(null); setTransitionOption(null) }
+  const transitionDone = (option: WellTransitionOption) => {
+    if (transitionTarget) {
+      const state = scopeState(transitionTarget.well, transitionTarget.scope)
+      const changes = [
+        state.status !== option.to_status ? `well status ${trackingLabel(state.status)} → ${trackingLabel(option.to_status)}` : '',
+        state.config_status !== option.to_plan ? `plan status ${planLabel(state.config_status)} → ${planLabel(option.to_plan)}` : '',
+      ].filter(Boolean).join(', ')
+      setNotice(
+        `${transitionTarget.well.well_code} · ${scopeName(transitionTarget.scope)}: `
+        + `${option.direction === 'rollback' ? 'rolled back' : 'updated'} — ${changes}.`,
+      )
     }
+    closeTransition()
+    void load()
   }
 
   const columns = useMemo<ColDef<ScopeRow>[]>(() => [
@@ -440,14 +415,14 @@ export default function Wells() {
     { headerName: 'BLOCK', field: 'well.block_code', minWidth: 190, flex: 1, valueFormatter: params => params.data ? `${params.data.well.block_code} \u2014 ${params.data.well.block_name}` : '' },
     { headerName: 'SCOPE', field: 'scope', minWidth: 115, maxWidth: 130, cellRenderer: ({ data }: { data: ScopeRow }) => <Box display="flex" alignItems="center" height="100%"><Tag tone="info">{scopeName(data.scope)}</Tag></Box> },
     {
-      headerName: 'SCOPE STATUS', minWidth: 135, maxWidth: 155,
-      valueGetter: params => params.data ? scopeState(params.data.well, params.data.scope).status : '',
-      cellRenderer: ({ data }: { data: ScopeRow }) => <Box display="flex" alignItems="center" height="100%"><Tag tone={statusTone(scopeState(data.well, data.scope).status)}>{scopeState(data.well, data.scope).status}</Tag></Box>,
+      headerName: 'WELL STATUS', minWidth: 135, maxWidth: 155,
+      valueGetter: params => params.data ? trackingLabel(scopeState(params.data.well, params.data.scope).status) : '',
+      cellRenderer: ({ data }: { data: ScopeRow }) => <Box display="flex" alignItems="center" height="100%"><WellStatusTag status={scopeState(data.well, data.scope).status} /></Box>,
     },
     {
-      headerName: 'PLAN', minWidth: 135, maxWidth: 155,
-      valueGetter: params => params.data ? scopeState(params.data.well, params.data.scope).config_status : '',
-      cellRenderer: ({ data }: { data: ScopeRow }) => <Box display="flex" alignItems="center" height="100%"><Tag tone={planTone(scopeState(data.well, data.scope).config_status)}>{scopeState(data.well, data.scope).config_status}</Tag></Box>,
+      headerName: 'PLAN STATUS', minWidth: 135, maxWidth: 155,
+      valueGetter: params => params.data ? planLabel(scopeState(params.data.well, params.data.scope).config_status) : '',
+      cellRenderer: ({ data }: { data: ScopeRow }) => <Box display="flex" alignItems="center" height="100%"><PlanStatusTag status={scopeState(data.well, data.scope).config_status} /></Box>,
     },
     {
       headerName: 'PLANNED DEPTH (m)', minWidth: 165,
@@ -486,22 +461,22 @@ export default function Wells() {
         onEdit={() => openEdit(data.well)}
         onConfigure={() => setConfigurationTarget(data)}
         onDelete={() => openDelete(data)}
-        onTransition={action => openTransition(data, action)}
+        onTransition={option => openTransition(data, option)}
         onAdjustPlan={() => setAdjustTarget(data)}
         onActivateOtherScope={otherScope => void activateScope(data.well, otherScope)}
       />,
     },
   ], [can])
 
-  const transition = transitionTarget ? transitionCopy[transitionAction] : null
-  const transitionScope = transitionTarget ? scopeName(transitionTarget.scope) : ''
+  const transitionState = transitionTarget ? scopeState(transitionTarget.well, transitionTarget.scope) : null
+  const activeTab = TABS.find(tab => tab.key === active) ?? TABS[0]
 
   return (
     <>
       <PageHeading
         eyebrow="RIG & WELL MANAGEMENT / WELL REGISTER"
         title="Wells"
-        subtitle="Every well belongs to one active rig. Each well tracks its Drilling and Completion scopes separately, with its own plan, sub activities, AFEs and cost registers. Unused scopes can be moved to Deleted Entries independently."
+        subtitle="Every well belongs to one active rig. Each well tracks its Drilling and Completion scopes separately. A scope has a well status (Upcoming, Active, Final review, Completed) and a plan status (Draft, Configured, Completed); every status move can be rolled back one step from the Status menu."
         action={<Box display="flex" gap={1} flexWrap="wrap">
           <Button component={RouterLink} to="/rig-well/deleted" variant="outlined" startIcon={<DeleteOutlineRounded/>}>Deleted entries</Button>
           {can('rig-well:create') && <Button variant="contained" startIcon={<AddRounded/>} onClick={openCreate} disabled={!rigs.length || !blocks.length}>Add well</Button>}
@@ -515,19 +490,18 @@ export default function Wells() {
 
       <Box borderBottom={1} borderColor="divider" mb={2}>
         <Tabs value={active} onChange={(_event, value: WellTab) => setParams(value === 'upcoming' ? {} : { tab: value })} aria-label="Well register tabs">
-          {TABS.map(tab => <Tab key={tab.key} value={tab.key} label={tab.label} id={`wells-tab-${tab.key}`} aria-controls={`wells-panel-${tab.key}`} />)}
+          {TABS.map(tab => <Tab key={tab.key} value={tab.key} label={`${tab.label} (${counts[tab.key]})`} id={`wells-tab-${tab.key}`} aria-controls={`wells-panel-${tab.key}`} />)}
         </Tabs>
       </Box>
       <Box role="tabpanel" id={`wells-panel-${active}`} aria-labelledby={`wells-tab-${active}`}>
         <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.2 }, mb: 1.8, borderRadius: 2 }}>
           <Box display="flex" justifyContent="space-between" alignItems="center" gap={2} flexWrap="wrap">
             <Box>
-              <Typography fontWeight={800} fontSize={15}>{TABS.find(tab => tab.key === active)?.label}</Typography>
-              {active === 'upcoming' && <Typography color="text.secondary" fontSize={11.5} mt={.25}>
-                Created and under planning — budgetable, not yet spudded. Starting a scope moves it to Active.
-              </Typography>}
+              <Typography fontWeight={800} fontSize={15}>{activeTab.label} well scopes</Typography>
+              <Typography color="text.secondary" fontSize={11.5} mt={.25}>{activeTab.hint}</Typography>
               <Typography color="text.secondary" fontSize={12} mt={.35}>
-                {counts.upcoming} upcoming · {counts.configured} configured · {counts.draft} in draft · {counts.final_review} for final review · {counts.completed} completed
+                Well status: {counts.upcoming} upcoming · {counts.active} active · {counts.final_review} in final review · {counts.completed} completed.
+                {' '}Plan status: {counts.plan.draft} draft · {counts.plan.configured} configured · {counts.plan.completed} completed
                 {blockFilter ? ` · segregated to ${blocks.find(block => block.id === blockFilter)?.display_name ?? 'the selected block'}` : '.'}
               </Typography>
             </Box>
@@ -660,22 +634,15 @@ export default function Wells() {
         onChanged={() => { setNotice('Plan adjustment recorded.'); void load() }}
       />}
 
-      <FormDialog
-        open={!!transitionTarget}
-        title={transition ? transition.title(transitionScope) : 'Update well scope'}
-        subtitle={transition ? transition.description : ''}
-        onClose={() => { if (!transitioning) { setTransitionTarget(null); setTransitionError('') } }}
-        onSubmit={() => void confirmTransition()}
-        busy={transitioning}
-        submitDisabled={transitionRemarks.trim().length < 3}
-        submitLabel={transition ? transition.label(transitionScope) : 'Confirm'}
-      >
-        <Box display="grid" gap={1.7} pt={.5}>
-          {transitionTarget && <Typography fontSize={13}>{transitionTarget.well.well_code} — {transitionTarget.well.well_name} ({transitionTarget.well.rig_code}) · {transitionScope}</Typography>}
-          <TextField label="Reason / audit note" required fullWidth multiline minRows={3} value={transitionRemarks} onChange={event => setTransitionRemarks(event.target.value)} inputProps={{ maxLength: 500 }} helperText="At least 3 characters. This note is stored in the audit trail." />
-          <ErrorMessage message={transitionError} />
-        </Box>
-      </FormDialog>
+      <WellTransitionDialog
+        well={transitionTarget?.well ?? null}
+        scope={transitionTarget?.scope ?? 'drilling'}
+        option={transitionOption}
+        status={transitionState?.status ?? 'upcoming'}
+        plan={transitionState?.config_status ?? 'draft'}
+        onClose={closeTransition}
+        onDone={transitionDone}
+      />
     </>
   )
 }

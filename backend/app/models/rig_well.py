@@ -5,15 +5,25 @@ may carry independent Drilling and Completion plans.  The configuration rows are
 replaced as a single audited draft, while blocks, rigs and wells use the common
 soft-delete lifecycle.
 
-Every configuration scope carries its own *tracking* status — ``upcoming``,
-``active`` or ``completed`` — next to its plan (configuration) status.  Tracking
-answers "when does this well consume budget?", the plan status answers "how far
-is the plan itself?".  A scope is created **upcoming** (the well exists on the
-programme and is being planned / costed, which is what makes budget plotting and
-MIS reporting possible before a rig moves), moves to **active** when operations
-start, and to **completed** when the scope is signed off.  ``Well.tracking_status``
-rolls the live scopes up into the single flag the registers and dashboards
-segregate on.
+Every configuration scope carries two independent, linear ladders:
+
+* the **well status** — ``upcoming`` → ``active`` → ``final_review`` →
+  ``completed`` — answers "where is the scope operationally?".  A scope is
+  created **upcoming** (on the programme, being planned and costed, which is what
+  makes budget plotting and MIS reporting possible before a rig moves), becomes
+  **active** when operations start, is sent to **final review** when operations
+  end and its costs are closed for review, and is **completed** when signed off;
+* the **plan status** — ``draft`` → ``configured`` → ``completed`` — answers
+  "how far is the plan itself?".  A draft is editable, a configured plan is the
+  signed-off baseline every AFE, SOW adjustment and daily sheet is built on, and
+  a completed plan is the executed, closed plan of a scope that left operations.
+
+The two ladders meet at one point only: a scope in final review or completed
+always carries a completed plan, and a scope that is upcoming or active never
+does.  Every move — forward or back — is one step, and lives in
+``app.services.well_lifecycle`` so no other module spells a rule of its own.
+``Well.tracking_status`` rolls the live scopes up into the single flag the
+registers and dashboards segregate on.
 """
 
 from datetime import datetime, timezone
@@ -37,11 +47,45 @@ from app.core.database import Base
 from app.models.master_data import HoleSection, Phase
 
 
-# Per-scope well tracking status. Order matters: it is the lifecycle sequence.
-WELL_TRACKING_STATUSES: tuple[str, ...] = ("upcoming", "active", "completed")
-# Plan (configuration) status, independent of the tracking status above.
-WELL_PLAN_STATUSES: tuple[str, ...] = ("draft", "configured", "final_review")
+# Per-scope well status. Order matters: it is the lifecycle sequence.
+WELL_TRACKING_STATUSES: tuple[str, ...] = ("upcoming", "active", "final_review", "completed")
+# Plan (configuration) status. Order matters here too.
+WELL_PLAN_STATUSES: tuple[str, ...] = ("draft", "configured", "completed")
+# Well statuses whose plan is closed: operations have ended, so the plan is the
+# executed plan and is read-only until the scope is rolled back to active.
+WELL_CLOSED_STATUSES: tuple[str, ...] = ("final_review", "completed")
+# Well statuses that still accept planning, budgeting and daily costing.
+WELL_OPEN_STATUSES: tuple[str, ...] = ("upcoming", "active")
 WELL_SCOPES: tuple[str, ...] = ("drilling", "completion")
+
+
+def rolled_up_status(statuses: list[str]) -> str:
+    """One well status for a set of scope statuses.
+
+    Kept as a plain function so the register filter, the overview cards and the
+    dashboards all apply exactly the same rule to rows they read without loading
+    a ``Well``.
+    """
+    if statuses and all(value == "completed" for value in statuses):
+        return "completed"
+    if statuses and all(value == "upcoming" for value in statuses):
+        return "upcoming"
+    if statuses and all(value in WELL_CLOSED_STATUSES for value in statuses):
+        return "final_review"
+    return "active"
+
+
+def rolled_up_plan(scopes: list[tuple[str, str]]) -> str:
+    """One plan status for a set of ``(well status, plan status)`` scope pairs.
+
+    Only the scopes that are still open (upcoming or active) have plan work
+    left: the well is configured when any of them is, and draft otherwise. A
+    well with no open scope left carries a completed plan.
+    """
+    open_plans = [plan for status, plan in scopes if status in WELL_OPEN_STATUSES]
+    if not open_plans:
+        return "completed" if scopes else "draft"
+    return "configured" if "configured" in open_plans else "draft"
 
 
 def uid() -> str:
@@ -111,10 +155,21 @@ class Well(RigWellRecord):
     __tablename__ = "wells"
     __table_args__ = (
         UniqueConstraint("organization_id", "well_code", name="uq_wells_org_code"),
-        CheckConstraint("status IN ('upcoming', 'active', 'completed')", name="ck_wells_status"),
-        CheckConstraint("config_status IN ('draft', 'configured', 'final_review')", name="ck_wells_config_status"),
-        CheckConstraint("completion_status IN ('upcoming', 'active', 'completed')", name="ck_wells_completion_status"),
-        CheckConstraint("completion_config_status IN ('draft', 'configured', 'final_review')", name="ck_wells_completion_config_status"),
+        CheckConstraint("status IN ('upcoming', 'active', 'final_review', 'completed')", name="ck_wells_status"),
+        CheckConstraint("config_status IN ('draft', 'configured', 'completed')", name="ck_wells_config_status"),
+        CheckConstraint("completion_status IN ('upcoming', 'active', 'final_review', 'completed')", name="ck_wells_completion_status"),
+        CheckConstraint("completion_config_status IN ('draft', 'configured', 'completed')", name="ck_wells_completion_config_status"),
+        # The one rule that couples the two ladders, enforced for every writer: a
+        # scope in final review or completed carries a completed plan, and a scope
+        # that is upcoming or active never does.
+        CheckConstraint(
+            "(status IN ('final_review', 'completed')) = (config_status = 'completed')",
+            name="ck_wells_status_plan",
+        ),
+        CheckConstraint(
+            "(completion_status IN ('final_review', 'completed')) = (completion_config_status = 'completed')",
+            name="ck_wells_completion_status_plan",
+        ),
         CheckConstraint("completion_depth_unit IN ('m', 'ft')", name="ck_wells_completion_depth_unit"),
         CheckConstraint("depth_unit IN ('m', 'ft')", name="ck_wells_depth_unit"),
         Index("ix_wells_org_rig", "organization_id", "rig_id"),
@@ -133,9 +188,10 @@ class Well(RigWellRecord):
     well_location: Mapped[str] = mapped_column(String(300), nullable=False)
     objective: Mapped[str] = mapped_column(String(500), nullable=False)
     remarks: Mapped[str] = mapped_column(String(1000), default="", server_default="", nullable=False)
-    # Tracking status of the Drilling scope. A well starts life as ``upcoming``:
+    # Well status of the Drilling scope. A well starts life as ``upcoming``:
     # created and under planning, so it can be budgeted and reported before the
-    # rig moves. ``start`` promotes it to ``active``.
+    # rig moves. ``start`` promotes it to ``active``, ``final_review`` closes its
+    # operations for review and ``complete`` signs it off.
     status: Mapped[str] = mapped_column(String(20), default="upcoming", server_default="upcoming", nullable=False)
     config_status: Mapped[str] = mapped_column(
         String(20), default="draft", server_default="draft", nullable=False
@@ -198,18 +254,22 @@ class Well(RigWellRecord):
 
     @property
     def tracking_status(self) -> str:
-        """Upcoming / active / completed roll-up of the well's live scopes.
+        """Upcoming / active / final review / completed roll-up of the live scopes.
 
         Completed only when every live scope is completed, upcoming only while
-        every live scope is still under planning; a mix (for example drilling
-        already active with completion upcoming) is an active well.
+        every live scope is still under planning, and in final review once no
+        live scope is operating any more (each is in final review or completed).
+        Every other mix — for example drilling already active with completion
+        still upcoming — is an active well.
         """
-        statuses = [self.scope_value(scope, "status") for scope in self.live_scopes]
-        if statuses and all(value == "completed" for value in statuses):
-            return "completed"
-        if statuses and all(value == "upcoming" for value in statuses):
-            return "upcoming"
-        return "active"
+        return rolled_up_status([self.scope_value(scope, "status") for scope in self.live_scopes])
+
+    @property
+    def tracking_plan_status(self) -> str:
+        """Draft / configured / completed roll-up of the live scopes' plans."""
+        return rolled_up_plan(
+            [(self.scope_value(scope, "status"), self.scope_value(scope, "config_status")) for scope in self.live_scopes]
+        )
 
     def scope_deleted_at(self, scope: str) -> datetime | None:
         return self.completion_deleted_at if scope == "completion" else self.drilling_deleted_at

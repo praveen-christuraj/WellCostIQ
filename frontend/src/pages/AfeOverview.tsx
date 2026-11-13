@@ -209,7 +209,7 @@ export default function AfeOverview() {
             {[
               { label: 'AFE register', detail: 'Create, edit and open every AFE in this workspace.', to: '/afe/register', icon: DescriptionOutlined },
               { label: 'AFE cost estimation', detail: 'Price services, consumables and tangibles against the well plan.', to: '/afe/register?tab=estimation', icon: TaskAltOutlined },
-              { label: 'Wells for final review', detail: 'AFEs whose well scope is marked for final review.', to: '/afe/register?tab=final_review', icon: FactCheckOutlined },
+              { label: 'Wells in final review', detail: 'AFEs whose well scope is in Final review.', to: '/afe/register?tab=final_review', icon: FactCheckOutlined },
               { label: 'Completed wells', detail: 'AFEs attached to completed well scopes.', to: '/afe/register?tab=completed', icon: LayersOutlined },
               { label: 'Deleted entries', detail: 'Recover or permanently remove a deleted AFE.', to: '/afe/register?tab=deleted', icon: FactCheckOutlined },
             ].map(item => <Box key={item.label} sx={{ display: 'flex', alignItems: 'center', gap: 1.2, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, px: 1.5, py: 1.1, '&:hover': { borderColor: 'text.disabled' } }}>
