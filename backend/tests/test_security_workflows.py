@@ -450,7 +450,8 @@ def test_a_lost_code_is_replaced_and_only_the_newest_code_works():
         assert client.post("/api/v1/auth/reset-password", json={**payload, "reset_code": third}).status_code == 204
         # Used once, never again; and a completed request cannot be re-issued.
         assert client.post("/api/v1/auth/reset-password", json={**payload, "reset_code": third, "new_password": "Another-pass-2027!", "confirm_password": "Another-pass-2027!"}).status_code == 400
-        assert client.post(f"/api/v1/security/password-reset-requests/{row['id']}/reissue", headers=owner, json={"notes": ""}).status_code == 409
+        completed = next(item for item in client.get("/api/v1/security/password-reset-requests?status=completed", headers=owner).json())
+        assert client.post(f"/api/v1/security/password-reset-requests/{completed['id']}/reissue", headers=owner, json={"notes": ""}).status_code == 409
 
 
 def test_a_delegated_reviewer_cannot_approve_a_reset_for_an_owner():
