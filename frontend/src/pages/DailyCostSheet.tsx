@@ -15,6 +15,7 @@ import { DailyCostLineDialog, type DailyCostLineKind, type EditableDailyCostLine
 import { TemplatePickerDialog } from '../components/templates/TemplatePickerDialog'
 import { DailyCostBulkScopeDialog } from '../components/daily-cost/DailyCostBulkScopeDialog'
 import { WellProgressPanel } from '../components/daily-cost/WellProgressPanel'
+import { EntryChecksPanel } from '../components/daily-cost/EntryChecksPanel'
 import { CostingSetPickerDialog } from '../components/CostingSetPickerDialog'
 import { AdvancedSelectorDialog, type AdvancedSelectorItem, type AdvancedSelectorSelection } from '../components/AdvancedItemSelector'
 import { DailyCostPrintSheet, useCostPrint, type CostPrintReport } from '../components/daily-cost/DailyCostPrintSheet'
@@ -33,6 +34,10 @@ import {
   type DailyCostSavePayload, type DailyCostServiceInput, type WellProgressScope,
   type ConsumableCategory, type ConsumableKind, type DailyCostWellSummary, type DailyLeadLagKind,
 } from '../lib/dailyCost'
+import {
+  ENTRY_CHECK_GROUP_LABEL, applyEntryCheck, entryCheckCounts, entryCheckSummary, fetchEntryChecks, reopenEntryChecks,
+  reviewEntryChecks, type EntryCheck, type EntryCheckGroup, type EntryCheckLine, type EntryChecksResult,
+} from '../lib/entryChecks'
 import type { MudCostMaterialBalance, MudCostReconciliation } from '../lib/mudCost'
 import type { LihCostReport } from '../lib/lihCost'
 import type { NdtEntry } from '../lib/ndtInspection'
@@ -44,6 +49,10 @@ import type { Template } from '../lib/recordTemplates'
 type LineGroupKey = 'services' | 'consumables' | 'tangibles' | 'other_expenses'
 const GROUP_KEY: Record<DailyCostLineKind, LineGroupKey> = {
   service: 'services', consumable: 'consumables', tangible: 'tangibles', other: 'other_expenses',
+}
+/** The dialog kind that edits a line of each payload group. */
+const KIND_OF_GROUP: Record<EntryCheckGroup, DailyCostLineKind> = {
+  services: 'service', consumables: 'consumable', tangibles: 'tangible', other_expenses: 'other',
 }
 
 type GridLine = {
@@ -94,6 +103,19 @@ export default function DailyCostSheet() {
     services: [], consumables: [], tangibles: [], other_expenses: [],
   })
   const [preview, setPreview] = useState<DailyCostPreview | null>(null)
+  // Entry checks: values that look mistyped. `savedChecks` describes the saved
+  // sheet; `unsavedChecks` keeps the last preview's findings on screen while
+  // the next preview is calculated, so the panel does not jump on every edit.
+  const [savedChecks, setSavedChecks] = useState<EntryChecksResult | null>(null)
+  const [savedChecksLoading, setSavedChecksLoading] = useState(false)
+  const [savedChecksError, setSavedChecksError] = useState('')
+  const [checksRetry, setChecksRetry] = useState(0)
+  const [unsavedChecks, setUnsavedChecks] = useState<EntryCheck[] | null>(null)
+  // A finding addresses lines by position, so it may only be acted on while the
+  // sheet is exactly the one it was made for: the saved sheet (`day`) it was
+  // read from, or the unsaved payload the preview priced.
+  const [savedChecksDay, setSavedChecksDay] = useState<DailyCostDay | null>(null)
+  const [previewedPayload, setPreviewedPayload] = useState<DailyCostSavePayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [previewError, setPreviewError] = useState('')
@@ -250,6 +272,7 @@ export default function DailyCostSheet() {
           method: 'PUT', body: body(payload), signal: controller.signal,
         })
         setPreview(priced)
+        setPreviewedPayload(payload)
       } catch (caught) {
         if (controller.signal.aborted) return
         setPreview(null)
@@ -263,6 +286,32 @@ export default function DailyCostSheet() {
       controller.abort()
     }
   }, [day, dirty, editable, entryId, leadLagInvalid, loading, payload, previewRetry])
+
+  // Entry checks of the saved sheet: read again whenever the saved sheet changes.
+  useEffect(() => {
+    if (!day) return
+    const controller = new AbortController()
+    setSavedChecksLoading(true)
+    setSavedChecksError('')
+    // Findings of another sheet say nothing about this one.
+    setSavedChecks(current => current && current.entry_id !== entryId ? null : current)
+    fetchEntryChecks(entryId, controller.signal)
+      .then(result => {
+        if (controller.signal.aborted) return
+        setSavedChecks(result)
+        setSavedChecksDay(day)
+      })
+      .catch(caught => {
+        if (!controller.signal.aborted) setSavedChecksError(caught instanceof Error ? caught.message : 'Try again in a moment.')
+      })
+      .finally(() => { if (!controller.signal.aborted) setSavedChecksLoading(false) })
+    return () => controller.abort()
+  }, [day, entryId, checksRetry])
+
+  useEffect(() => {
+    if (!dirty) setUnsavedChecks(null)
+    else if (preview) setUnsavedChecks(preview.entry_checks ?? [])
+  }, [dirty, preview])
 
   useEffect(() => {
     if (!dirty) return
@@ -343,6 +392,16 @@ export default function DailyCostSheet() {
     setNotice('')
     try {
       const updated = await api<DailyCostDay>(`/daily-cost/entries/${entryId}`, { method: 'PUT', body: body(payload) })
+      // The preview priced exactly what was saved, so its findings stand until
+      // the saved sheet's own checks arrive a moment later.
+      const justChecked = previewedPayload === payload ? preview?.entry_checks : undefined
+      if (justChecked) {
+        const counts = entryCheckCounts(justChecked)
+        setSavedChecks(current => current ? {
+          ...current, checks: justChecked, open_warnings: counts.warnings, open_notices: counts.notices, reviewed: counts.reviewed,
+        } : current)
+        setSavedChecksDay(updated)
+      }
       setDay(updated)
       setProgress(current => updated.progress ?? current)
       setPayload(saveFromDay(updated))
@@ -1020,6 +1079,57 @@ export default function DailyCostSheet() {
   }
   const lineCount = payload.services.length + payload.consumables.length + payload.tangibles.length
     + payload.other_expenses.length
+
+  // Entry checks shown beside the sheet: for the unsaved edits while there are
+  // any, otherwise for the saved sheet.
+  const checksEnabled = savedChecks?.enabled !== false
+  const checksSource: 'saved' | 'unsaved' = dirty ? 'unsaved' : 'saved'
+  const shownChecks: EntryCheck[] = dirty
+    ? preview?.entry_checks ?? unsavedChecks ?? savedChecks?.checks ?? []
+    : savedChecks?.checks ?? []
+  const checksStale = dirty
+    ? !preview || previewing || previewedPayload !== payload
+    : savedChecksLoading || savedChecksDay !== day
+  const checksStaleText = !dirty
+    ? 'Reading the saved sheet…'
+    : previewError || leadLagInvalid
+      ? 'Waiting for a valid preview. Correct the error shown on this sheet first.'
+      : 'Recalculating for your unsaved changes…'
+  const openCheckCounts = entryCheckCounts(savedChecks?.checks ?? [])
+  const gridRowsOf: Record<EntryCheckGroup, GridLine[]> = {
+    services, consumables, tangibles, other_expenses: otherExpenses,
+  }
+  const describeCheckLine = (line: EntryCheckLine): string => {
+    const row = gridRowsOf[line.group][line.index]
+    if (!row) return ENTRY_CHECK_GROUP_LABEL[line.group]
+    return [
+      ENTRY_CHECK_GROUP_LABEL[line.group], row.item, row.section,
+      row.subActivity && row.subActivity !== '—' ? row.subActivity : '',
+      `quantity ${row.quantity}${row.quantityUnit ? ` ${row.quantityUnit}` : ''}`,
+    ].filter(Boolean).join(' · ')
+  }
+  const applyCheck = (check: EntryCheck): boolean => {
+    if (!editable) return false
+    const next = applyEntryCheck(payload, check)
+    if (!next) return false
+    setPayload(next)
+    setPreview(null)
+    setPreviewError('')
+    setNotice(`Suggestion applied${check.subject_label ? ` to ${check.subject_label}` : ''}: ${check.suggested_display}. The preview is recalculating; save to commit the change.`)
+    return true
+  }
+  const openCheckLine = (line: EntryCheckLine) => {
+    if (!editable || !payload[line.group][line.index]) return
+    setLineEditor({ kind: KIND_OF_GROUP[line.group], index: line.index })
+  }
+  const keepCheck = async (check: EntryCheck, note: string) => {
+    setSavedChecks(await reviewEntryChecks(entryId, [check], note))
+    setNotice(`Kept as entered: ${check.subject_label || check.title}. The decision is recorded in the audit trail.`)
+  }
+  const reopenCheck = async (check: EntryCheck) => {
+    setSavedChecks(await reopenEntryChecks(entryId, [check.key]))
+    setNotice(`Entry check reopened: ${check.subject_label || check.title}.`)
+  }
   const otherLineCount = payload.other_expenses.length
   const canSubmit = can('daily-cost:submit') && entry.status === 'draft'
   const canReopen = can('daily-cost:reopen') && entry.status === 'submitted'
@@ -1299,6 +1409,16 @@ export default function DailyCostSheet() {
     {dirty && <Alert severity="warning" sx={{ mb: 1.5 }} action={can('daily-cost:update') ? <Button color="inherit" size="small" onClick={() => { setPayload(originalPayload ?? payload); setPreview(null); setPreviewError('') }}>Discard changes</Button> : undefined}>
       Unsaved changes{previewing ? ' · recalculating against the locked AFE baseline…' : hasPreviewForEdits ? ' · preview is current' : ' · save to update the register'}.
     </Alert>}
+
+    {checksEnabled && <EntryChecksPanel
+      checks={shownChecks} source={checksSource}
+      loading={savedChecks === null && !savedChecksError}
+      stale={checksStale} staleText={checksStaleText}
+      error={dirty ? '' : savedChecksError} onRetry={() => setChecksRetry(value => value + 1)}
+      editable={editable} historySheets={savedChecks?.history_sheets ?? null}
+      describeLine={describeCheckLine} onApply={applyCheck} onOpenLine={openCheckLine}
+      onKeep={keepCheck} onReopen={reopenCheck}
+    />}
 
     {standard.toUpperCase() !== 'USD' && (
       <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, mb: 1.5, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1612,6 +1732,10 @@ export default function DailyCostSheet() {
       <Box display="grid" gap={1.5}>
         {statusAction === 'reopen' && Math.floor((Date.now() - Date.parse(`${entry.cost_date}T00:00:00Z`)) / 86_400_000) > 30 && <Alert severity="warning">
           This sheet is more than 30 days old, so reopening it is recorded as an amendment and needs the daily-cost amendment permission.
+        </Alert>}
+        {statusAction === 'submit' && checksEnabled && openCheckCounts.open > 0 && <Alert severity={openCheckCounts.warnings ? 'warning' : 'info'}>
+          Entry checks still open on this sheet: {entryCheckSummary(openCheckCounts)}. They do not stop the submission,
+          but once the sheet is submitted a value can only be corrected or kept as entered after it is reopened.
         </Alert>}
         <TextField label={statusAction === 'reopen' ? 'Reopen reason (required)' : 'Submission remarks (optional)'} value={statusRemarks} onChange={event => setStatusRemarks(event.target.value)} multiline minRows={2} inputProps={{ maxLength: 500 }} helperText={statusAction === 'reopen' ? 'At least 3 characters; recorded in the audit trail.' : 'Optional note recorded with the submission.'}/>
         {statusError && <Alert severity="error">{statusError}</Alert>}

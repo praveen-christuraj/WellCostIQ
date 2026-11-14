@@ -46,6 +46,12 @@ services:
         value: "7"
       - key: BACKUP_MAX_UPLOAD_MB
         value: "2048"
+      # Entry checks on the daily cost sheet: arithmetic over the workspace's own
+      # sheets, inside this service. No model and no outside call.
+      - key: ENTRY_CHECKS_ENABLED
+        value: "true"
+      - key: ENTRY_CHECK_HISTORY_SHEETS
+        value: "30"
       - key: PASSWORD_MAX_AGE_DAYS
         value: "90"
       - key: PASSWORD_EXPIRY_WARNING_DAYS

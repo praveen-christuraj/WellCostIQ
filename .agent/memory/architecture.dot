@@ -3,6 +3,7 @@ digraph WellCostIQ {
   rankdir=LR;
   graph [fontname="Helvetica", bgcolor="transparent"];
   node [shape=box, style="rounded,filled", fillcolor="#e7f5f1", color="#2a8c80", fontname="Helvetica", fontsize=10];
+  ".agent/tools/entry-checks-simulation.py";
   ".agent/tools/graphify.py";
   "backend/app/__init__.py";
   "backend/app/api/__init__.py";
@@ -47,6 +48,8 @@ digraph WellCostIQ {
   "backend/app/core/units.py";
   "backend/app/domain/__init__.py";
   "backend/app/domain/afe_costing.py";
+  "backend/app/domain/entry_rules.py";
+  "backend/app/domain/entry_statistics.py";
   "backend/app/domain/invoice_processing.py";
   "backend/app/domain/mud_cost.py";
   "backend/app/domain/service_groups.py";
@@ -59,6 +62,7 @@ digraph WellCostIQ {
   "backend/app/models/costing_set.py";
   "backend/app/models/daily_cost.py";
   "backend/app/models/entities.py";
+  "backend/app/models/entry_check.py";
   "backend/app/models/fuel_cost.py";
   "backend/app/models/invoice_processing.py";
   "backend/app/models/lih_cost.py";
@@ -82,6 +86,7 @@ digraph WellCostIQ {
   "backend/app/schemas/costing_set.py";
   "backend/app/schemas/daily_cost.py";
   "backend/app/schemas/database_browser.py";
+  "backend/app/schemas/entry_check.py";
   "backend/app/schemas/fuel_cost.py";
   "backend/app/schemas/invoice_processing.py";
   "backend/app/schemas/lih_cost.py";
@@ -110,6 +115,7 @@ digraph WellCostIQ {
   "backend/app/services/daily_cost.py";
   "backend/app/services/database_browser.py";
   "backend/app/services/dependencies.py";
+  "backend/app/services/entry_checks.py";
   "backend/app/services/fuel_cost.py";
   "backend/app/services/invoice_processing.py";
   "backend/app/services/lih_cost.py";
@@ -179,7 +185,9 @@ digraph WellCostIQ {
   "frontend/src/components/daily-cost/DailyCostBulkScopeDialog.tsx";
   "frontend/src/components/daily-cost/DailyCostLineDialog.tsx";
   "frontend/src/components/daily-cost/DailyCostPrintSheet.tsx";
+  "frontend/src/components/daily-cost/EntryChecksPanel.tsx";
   "frontend/src/components/daily-cost/WellCostPrintDialog.tsx";
+  "frontend/src/components/daily-cost/WellEntryChecksCard.tsx";
   "frontend/src/components/daily-cost/WellProgressPanel.tsx";
   "frontend/src/components/fuel-cost/FuelCompanyDialog.tsx";
   "frontend/src/components/fuel-cost/FuelConsumptionDialog.tsx";
@@ -221,6 +229,7 @@ digraph WellCostIQ {
   "frontend/src/lib/dailyAllocations.ts";
   "frontend/src/lib/dailyCost.ts";
   "frontend/src/lib/databaseBrowser.ts";
+  "frontend/src/lib/entryChecks.ts";
   "frontend/src/lib/export.ts";
   "frontend/src/lib/fuelCost.ts";
   "frontend/src/lib/idvsSheet.ts";
@@ -310,6 +319,7 @@ digraph WellCostIQ {
   "frontend/vite.config.ts";
   "scripts/check-staged-secrets.py";
   "scripts/collect-cybersec-evidence.py";
+  ".agent/tools/entry-checks-simulation.py" -> "backend/app/domain/__init__.py";
   "backend/app/api/afe.py" -> "backend/app/api/deps.py";
   "backend/app/api/afe.py" -> "backend/app/schemas/afe.py";
   "backend/app/api/afe.py" -> "backend/app/services/__init__.py";
@@ -354,6 +364,7 @@ digraph WellCostIQ {
   "backend/app/api/costing_sets.py" -> "backend/app/services/__init__.py";
   "backend/app/api/daily_cost.py" -> "backend/app/api/deps.py";
   "backend/app/api/daily_cost.py" -> "backend/app/schemas/daily_cost.py";
+  "backend/app/api/daily_cost.py" -> "backend/app/schemas/entry_check.py";
   "backend/app/api/daily_cost.py" -> "backend/app/services/__init__.py";
   "backend/app/api/database_browser.py" -> "backend/app/api/deps.py";
   "backend/app/api/database_browser.py" -> "backend/app/schemas/database_browser.py";
@@ -454,6 +465,7 @@ digraph WellCostIQ {
   "backend/app/core/security.py" -> "backend/app/models/entities.py";
   "backend/app/core/units.py" -> "backend/app/core/precision.py";
   "backend/app/domain/afe_costing.py" -> "backend/app/core/precision.py";
+  "backend/app/domain/entry_rules.py" -> "backend/app/domain/__init__.py";
   "backend/app/main.py" -> "backend/app/api/__init__.py";
   "backend/app/main.py" -> "backend/app/api/catalogue_items.py";
   "backend/app/main.py" -> "backend/app/api/catalogue_options.py";
@@ -469,6 +481,7 @@ digraph WellCostIQ {
   "backend/app/models/__init__.py" -> "backend/app/models/costing_set.py";
   "backend/app/models/__init__.py" -> "backend/app/models/daily_cost.py";
   "backend/app/models/__init__.py" -> "backend/app/models/entities.py";
+  "backend/app/models/__init__.py" -> "backend/app/models/entry_check.py";
   "backend/app/models/__init__.py" -> "backend/app/models/fuel_cost.py";
   "backend/app/models/__init__.py" -> "backend/app/models/invoice_processing.py";
   "backend/app/models/__init__.py" -> "backend/app/models/lih_cost.py";
@@ -497,6 +510,8 @@ digraph WellCostIQ {
   "backend/app/models/daily_cost.py" -> "backend/app/domain/service_groups.py";
   "backend/app/models/daily_cost.py" -> "backend/app/models/rig_well.py";
   "backend/app/models/entities.py" -> "backend/app/core/database.py";
+  "backend/app/models/entry_check.py" -> "backend/app/core/database.py";
+  "backend/app/models/entry_check.py" -> "backend/app/models/rig_well.py";
   "backend/app/models/fuel_cost.py" -> "backend/app/core/database.py";
   "backend/app/models/fuel_cost.py" -> "backend/app/models/rig_well.py";
   "backend/app/models/invoice_processing.py" -> "backend/app/core/database.py";
@@ -531,6 +546,7 @@ digraph WellCostIQ {
   "backend/app/schemas/afe.py" -> "backend/app/domain/afe_costing.py";
   "backend/app/schemas/catalogue.py" -> "backend/app/core/precision.py";
   "backend/app/schemas/daily_cost.py" -> "backend/app/core/precision.py";
+  "backend/app/schemas/daily_cost.py" -> "backend/app/schemas/entry_check.py";
   "backend/app/schemas/fuel_cost.py" -> "backend/app/core/precision.py";
   "backend/app/schemas/invoice_processing.py" -> "backend/app/core/precision.py";
   "backend/app/schemas/lih_cost.py" -> "backend/app/core/precision.py";
@@ -602,6 +618,17 @@ digraph WellCostIQ {
   "backend/app/services/daily_cost.py" -> "backend/app/services/sow_adjustment.py";
   "backend/app/services/database_browser.py" -> "backend/app/core/spreadsheets.py";
   "backend/app/services/dependencies.py" -> "backend/app/core/database.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/core/config.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/core/database.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/domain/__init__.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/domain/entry_rules.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/models/afe.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/models/daily_cost.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/models/entities.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/models/entry_check.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/models/rig_well.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/schemas/entry_check.py";
+  "backend/app/services/entry_checks.py" -> "backend/app/services/__init__.py";
   "backend/app/services/fuel_cost.py" -> "backend/app/models/__init__.py";
   "backend/app/services/fuel_cost.py" -> "backend/app/models/entities.py";
   "backend/app/services/fuel_cost.py" -> "backend/app/models/rig_well.py";
@@ -938,6 +965,8 @@ digraph WellCostIQ {
   "frontend/src/components/daily-cost/DailyCostPrintSheet.tsx" -> "frontend/src/lib/ndtInspection.ts";
   "frontend/src/components/daily-cost/DailyCostPrintSheet.tsx" -> "frontend/src/lib/serviceGroups.ts";
   "frontend/src/components/daily-cost/DailyCostPrintSheet.tsx" -> "frontend/src/lib/units.ts";
+  "frontend/src/components/daily-cost/EntryChecksPanel.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/daily-cost/EntryChecksPanel.tsx" -> "frontend/src/lib/entryChecks.ts";
   "frontend/src/components/daily-cost/WellCostPrintDialog.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/daily-cost/WellCostPrintDialog.tsx" -> "frontend/src/components/daily-cost/DailyCostPrintSheet.tsx";
   "frontend/src/components/daily-cost/WellCostPrintDialog.tsx" -> "frontend/src/lib/api.ts";
@@ -945,6 +974,9 @@ digraph WellCostIQ {
   "frontend/src/components/daily-cost/WellCostPrintDialog.tsx" -> "frontend/src/lib/lihCost.ts";
   "frontend/src/components/daily-cost/WellCostPrintDialog.tsx" -> "frontend/src/lib/mudCost.ts";
   "frontend/src/components/daily-cost/WellCostPrintDialog.tsx" -> "frontend/src/lib/ndtInspection.ts";
+  "frontend/src/components/daily-cost/WellEntryChecksCard.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/daily-cost/WellEntryChecksCard.tsx" -> "frontend/src/lib/dailyCost.ts";
+  "frontend/src/components/daily-cost/WellEntryChecksCard.tsx" -> "frontend/src/lib/entryChecks.ts";
   "frontend/src/components/daily-cost/WellProgressPanel.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/daily-cost/WellProgressPanel.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/components/daily-cost/WellProgressPanel.tsx" -> "frontend/src/lib/dailyCost.ts";
@@ -1008,7 +1040,11 @@ digraph WellCostIQ {
   "frontend/src/context/ThemeContext.tsx" -> "frontend/src/theme.ts";
   "frontend/src/lib/assistant.ts" -> "frontend/src/lib/api.ts";
   "frontend/src/lib/dailyAllocations.ts" -> "frontend/src/lib/dailyCost.ts";
+  "frontend/src/lib/dailyCost.ts" -> "frontend/src/lib/entryChecks.ts";
   "frontend/src/lib/dailyCost.ts" -> "frontend/src/lib/units.ts";
+  "frontend/src/lib/entryChecks.ts" -> "frontend/src/lib/api.ts";
+  "frontend/src/lib/entryChecks.ts" -> "frontend/src/lib/dailyCost.ts";
+  "frontend/src/lib/entryChecks.ts" -> "frontend/src/lib/units.ts";
   "frontend/src/lib/idvsSheet.ts" -> "frontend/src/lib/invoiceCalculations.ts";
   "frontend/src/lib/idvsSheet.ts" -> "frontend/src/lib/invoiceProcessing.ts";
   "frontend/src/lib/invoiceCalculations.ts" -> "frontend/src/lib/invoiceProcessing.ts";
@@ -1142,6 +1178,7 @@ digraph WellCostIQ {
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/CostCriteriaPivot.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/WellCostPrintDialog.tsx";
+  "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/WellEntryChecksCard.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/daily-cost/WellProgressPanel.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
   "frontend/src/pages/DailyCostAnalysis.tsx" -> "frontend/src/context/AuthContext.tsx";
@@ -1168,6 +1205,7 @@ digraph WellCostIQ {
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/DailyCostBulkScopeDialog.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/DailyCostLineDialog.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/DailyCostPrintSheet.tsx";
+  "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/EntryChecksPanel.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/WellCostPrintDialog.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/daily-cost/WellProgressPanel.tsx";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/components/templates/TemplatePickerDialog.tsx";
@@ -1177,6 +1215,7 @@ digraph WellCostIQ {
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/costingSets.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/dailyCost.ts";
+  "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/entryChecks.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/export.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/lihCost.ts";
   "frontend/src/pages/DailyCostSheet.tsx" -> "frontend/src/lib/mudCost.ts";

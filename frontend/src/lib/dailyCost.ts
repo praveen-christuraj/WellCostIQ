@@ -117,6 +117,7 @@ export type DailyCostBaseline = {
 }
 
 import type { DepthUnit } from './units'
+import type { EntryCheck } from './entryChecks'
 
 export type DailyCostSectionDepth = {
   hole_section_id: string | null
@@ -295,6 +296,8 @@ export type DailyCostPreview = {
   total_cost: string; upa_total: string; npt_total: string
   total_cost_usd?: string; actual_depth?: string | null; depth_unit?: 'm'; section_depths?: DailyCostSectionDepth[]
   warnings: DailyCostWarning[]
+  /** Values of the unsaved sheet that look mistyped. Advice only; see `lib/entryChecks`. */
+  entry_checks?: EntryCheck[]
 }
 export type DailyCostOverview = {
   active_entries: number; deleted_entries: number; submitted_entries: number; draft_entries: number

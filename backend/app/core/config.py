@@ -169,6 +169,16 @@ class Settings(BaseSettings):
     # The in-process scheduler is safe to leave on; it only acts when a workspace enables a schedule.
     backup_scheduler_enabled: bool = True
     backup_max_upload_mb: int = 2048
+    # Entry checks on daily cost sheets. They are advice computed from the
+    # workspace's own sheets: no model, no outside service. Turning them off
+    # hides every finding and stops the profile refresh.
+    entry_checks_enabled: bool = True
+    # How many sheets of the same AFE, nearest in date, a sheet is compared with.
+    entry_check_history_sheets: int = 30
+    # Workspace item profiles: how far back they read the cost ledger, and how
+    # long one is used before it is rebuilt.
+    entry_check_profile_window_days: int = 730
+    entry_check_profile_max_age_hours: int = 24
     # Optional unattended seeding for a first boot with no terminal. Leave blank to be asked.
     seed_org_slug: str = ""
     seed_org_name: str = ""
@@ -268,6 +278,12 @@ class Settings(BaseSettings):
             raise ValueError("MAX_FAILED_LOGINS must be between 1 and 20")
         if not 1 <= self.lockout_minutes <= 1440:
             raise ValueError("LOCKOUT_MINUTES must be between 1 and 1440")
+        if not 5 <= self.entry_check_history_sheets <= 120:
+            raise ValueError("ENTRY_CHECK_HISTORY_SHEETS must be between 5 and 120")
+        if not 30 <= self.entry_check_profile_window_days <= 3650:
+            raise ValueError("ENTRY_CHECK_PROFILE_WINDOW_DAYS must be between 30 and 3650")
+        if not 1 <= self.entry_check_profile_max_age_hours <= 720:
+            raise ValueError("ENTRY_CHECK_PROFILE_MAX_AGE_HOURS must be between 1 and 720")
 
         if self.is_production:
             if not self.secret_key or self.secret_key in PLACEHOLDER_SECRETS or len(self.secret_key) < 32:

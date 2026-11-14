@@ -1,4 +1,4 @@
-.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check
+.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -59,6 +59,25 @@ daily-cost-date-check:
 		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
 		--outfile=node_modules/.cache/daily-cost-date-check.mjs --external:jsdom && \
 		node node_modules/.cache/daily-cost-date-check.mjs
+
+# Daily-sheet entry checks: findings beside the sheet, applying a suggestion to
+# the unsaved sheet only, keeping a value as entered (audited) and reopening it,
+# read-only sheets, actions waiting while findings are out of date, a failed
+# read, a deployment with the checks turned off, the well card, and the same
+# words and actions under the light and the dark theme.
+entry-checks-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/entry-checks-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/entry-checks-check.mjs --external:jsdom && \
+		node node_modules/.cache/entry-checks-check.mjs
+
+# What the entry checks catch, what they flag by mistake and how often an
+# offered correction is the intended value: prints the two tables quoted in
+# docs/entry-checks.md. Standard library only, seeded, about a minute. Run it
+# after changing a threshold in backend/app/domain/entry_statistics.py.
+entry-checks-simulation:
+	python3 .agent/tools/entry-checks-simulation.py
 
 # Mud type / Cost/BBL configuration dialog rules (section-scoped reconciliation).
 mud-cost-reconciliation-check:
