@@ -152,8 +152,13 @@ export default function BusinessDashboard() {
   // wells A, B, C, A opened C. The identity travels with the point instead.
   const plottedWellId = (row: DashboardWellRow) => chartRowId('well', row.well_id)
 
+  // One plotted array per chart, used by BOTH the option and the click
+  // resolver. Building the reversed copy inside the option and resolving the
+  // click against the unreversed source is what opened the wrong well.
+  const costRows = useMemo(() => [...chartWells].reverse(), [chartWells])
+
   const costOption: EChartsOption = useMemo(() => {
-    const rows = [...chartWells].reverse()
+    const rows = costRows
     const series: EChartsOption['series'] = []
     if (caps.budget) {
       series.push({
@@ -193,10 +198,12 @@ export default function BusinessDashboard() {
       },
       series,
     }
-  }, [chartWells, caps, currency, palette, axis])
+  }, [costRows, caps, currency, palette, axis])
+
+  const daysRows = useMemo(() => [...daysWells].reverse(), [daysWells])
 
   const daysOption: EChartsOption = useMemo(() => {
-    const rows = [...daysWells].reverse()
+    const rows = daysRows
     return {
       animation: false,
       grid: { left: 8, right: 30, top: 30, bottom: 8, containLabel: true },
@@ -237,7 +244,7 @@ export default function BusinessDashboard() {
         }] : []),
       ] : [],
     }
-  }, [daysWells, caps, palette, axis])
+  }, [daysRows, caps, palette, axis])
 
   const trendOption: EChartsOption = useMemo(() => {
     const rows = data?.daily ?? []
@@ -301,11 +308,13 @@ export default function BusinessDashboard() {
     }
   }, [data, currency, theme.palette.background.paper, palette, axis])
 
+  const depthRows = useMemo(() => [...(data?.wells ?? [])]
+    .filter(row => row.depth_progress_percent !== null)
+    .sort((a, b) => Number(a.depth_progress_percent ?? 0) - Number(b.depth_progress_percent ?? 0))
+    .slice(-10), [data])
+
   const depthOption: EChartsOption = useMemo(() => {
-    const rows = [...(data?.wells ?? [])]
-      .filter(row => row.depth_progress_percent !== null)
-      .sort((a, b) => Number(a.depth_progress_percent ?? 0) - Number(b.depth_progress_percent ?? 0))
-      .slice(-10)
+    const rows = depthRows
     return {
       animation: false,
       grid: { left: 8, right: 48, top: 8, bottom: 8, containLabel: true },
@@ -317,8 +326,9 @@ export default function BusinessDashboard() {
         formatter: (params: unknown) => {
           const point = (params as { dataIndex?: number; data?: unknown }[])[0]
           const identity = (point?.data as { chartRowId?: string } | undefined)?.chartRowId ?? ''
-          const row = rows.find(candidate => chartRowId('well', candidate.well_id) === identity)
-            ?? rows[point?.dataIndex ?? 0]
+          const row = identity
+            ? rows.find(candidate => chartRowId('well', candidate.well_id) === identity)
+            : rows[point?.dataIndex ?? 0]
           if (!row) return ''
           return `${row.well_code}<br/>${percent(row.depth_progress_percent)} · ${decimal(row.actual_depth, 0)} of ${decimal(row.planned_depth, 0)} m`
         },
@@ -341,12 +351,14 @@ export default function BusinessDashboard() {
         data: chartData(rows, plottedWellId, row => Number(row.depth_progress_percent ?? 0), row => row.well_code),
       }],
     }
-  }, [data, palette, axis])
+  }, [depthRows, palette, axis])
 
   // Resolve the click to the well that was plotted, by identity first, so the
   // drill-through always opens the well under the pointer.
-  const drillToWell = chartDrillHandler<DashboardWellRow>(chartWells, plottedWellId, row => setDrillWell(row.well_id))
-  const drillToDaysWell = chartDrillHandler<DashboardWellRow>(daysWells, plottedWellId, row => setDrillWell(row.well_id))
+  // Each handler is given the very array its chart was plotted from.
+  const drillToWell = chartDrillHandler<DashboardWellRow>(costRows, plottedWellId, row => setDrillWell(row.well_id))
+  const drillToDaysWell = chartDrillHandler<DashboardWellRow>(daysRows, plottedWellId, row => setDrillWell(row.well_id))
+  const drillToDepthWell = chartDrillHandler<DashboardWellRow>(depthRows, plottedWellId, row => setDrillWell(row.well_id))
 
   // ---- table columns ---------------------------------------------------------
   const wellColumns: ColDef<DashboardWellRow>[] = useMemo(() => {
@@ -972,7 +984,7 @@ export default function BusinessDashboard() {
         <ChartPanel
           figureKey="afe-actual"
           title="AFE against actual cost"
-          subtitle="Top wells by effective plan. Select a bar to open that well's drill-through panel."
+          subtitle="Top wells by effective plan. Select a well's bars, its label or its row to open that well's drill-through panel."
           meta={<Tag tone={data.kpis.over_budget_wells ? 'error' : 'success'}>{data.kpis.over_budget_wells ? `${data.kpis.over_budget_wells} over plan` : 'Within plan'}</Tag>}
           height={296}
           empty={!chartWells.length}
@@ -1014,13 +1026,16 @@ export default function BusinessDashboard() {
         <ChartPanel
           figureKey="depth"
           title="Depth progress"
-          subtitle="Deepest section carrying cost against the planned depth, per well."
+          subtitle="Deepest section carrying cost against the planned depth, per well. Select a well to drill in."
           height={268}
           empty={!data.wells.some(row => row.depth_progress_percent !== null)}
           emptyMessage="No depth progress available."
           caption="Progress uses the deepest configured hole section with recorded cost; depth is measured, never summed across sections."
         >
-          <InteractiveChart option={depthOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart
+            option={depthOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
+            onEvents={{ click: drillToDepthWell }}
+          />
         </ChartPanel>
       </Box>
 

@@ -81,6 +81,7 @@ const modules: NavModule[] = [
   ] },
   { label: 'Reports', icon: AssessmentOutlined, items: [
     { label: 'Overview', path: '/reports', icon: AssessmentOutlined, anyOf: ['rig-well:read', 'afe:read', 'daily-cost:read', 'report-builder:read', 'custom-reports:read'] },
+    { label: 'Cost Intelligence', path: '/reports/cost-intelligence', icon: InsightsOutlined, permission: 'cost-intelligence:read' },
     { label: 'Report Builder', path: '/reports/builder', icon: TuneRounded, anyOf: ['report-builder:read', 'report-builder:create', 'report-builder:update'] },
     { label: 'Custom Reports', path: '/reports/custom', icon: AssessmentOutlined, permission: 'custom-reports:read' },
     { label: 'Well-wise cost comparisons', path: '/reports/well-cost-comparison', icon: InsightsOutlined, requires: ['rig-well:read'], anyOf: ['afe:read', 'daily-cost:read'] },

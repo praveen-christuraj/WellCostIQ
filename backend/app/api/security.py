@@ -104,7 +104,38 @@ def ensure_can_act_on(target: User, actor: User, action: str) -> None:
         raise HTTPException(403, f"Only an owner can {action} an owner account.")
 
 
+def recovery_account(db: Db, organization: str, email: str) -> tuple[Organization | None, User | None]:
+    """The workspace and account a public recovery form refers to.
+
+    People type the workspace the way they know it. The Workspace ID is matched
+    first; a workspace *name* is accepted only when exactly one workspace
+    carries it, so a request is not silently dropped because "Acme Energy" was
+    typed for "acme-energy". The public answer is identical either way.
+    """
+    text = organization.strip()
+    org = db.scalar(select(Organization).where(Organization.slug == text.lower()))
+    if not org and text:
+        named = db.scalars(select(Organization).where(func.lower(Organization.name) == text.lower()).limit(2)).all()
+        org = named[0] if len(named) == 1 else None
+    if not org:
+        return None, None
+    user = db.scalar(select(User).where(
+        User.organization_id == org.id, func.lower(User.email) == email.strip().lower()
+    ))
+    return org, user
+
+
 def issue_code(db: Db, row: PasswordResetRequest, reviewer: User, notes: str) -> tuple[str, datetime]:
+    # One live code per account: issuing a new one retires any earlier code that
+    # was never used, so a code lost in transit cannot be redeemed later.
+    for earlier in db.scalars(select(PasswordResetRequest).where(
+        PasswordResetRequest.organization_id == row.organization_id,
+        PasswordResetRequest.user_id == row.user_id,
+        PasswordResetRequest.status == "approved",
+        PasswordResetRequest.id != row.id,
+    )).all():
+        earlier.status = "expired"
+        earlier.reset_token_hash = None
     code = secrets.token_urlsafe(32)
     expires = utcnow() + timedelta(minutes=get_settings().password_reset_minutes)
     row.status = "approved"
@@ -168,33 +199,39 @@ def forgot_password(data: ForgotPasswordIn, request: Request, db: Db):
     throttle(db, request, "forgot-password", get_settings().forgot_password_attempt_limit)
     address = client_ip(request)
 
-    org = db.scalar(select(Organization).where(Organization.slug == data.organization.strip().lower()))
-    user = db.scalar(select(User).where(
-        User.organization_id == org.id, User.email == str(data.email).lower(), User.is_active.is_(True)
-    )) if org else None
+    org, user = recovery_account(db, data.organization, str(data.email))
+    if user and not user.is_active:
+        user = None
     if user:
-        pending = db.scalar(select(PasswordResetRequest).where(
+        row = db.scalar(select(PasswordResetRequest).where(
             PasswordResetRequest.organization_id == org.id,
             PasswordResetRequest.user_id == user.id,
             PasswordResetRequest.status == "pending",
-        ))
-        if not pending:
+        ).order_by(PasswordResetRequest.requested_at.desc()))
+        created = row is None
+        if created:
             row = PasswordResetRequest(
                 organization_id=org.id, request_number=workflow.number("PWR"), user_id=user.id,
                 reason=data.reason.strip(), requested_by_ip=address, initiated_by="user",
             )
             db.add(row)
             db.flush()
-            workflow.create_task(
-                db, organization_id=org.id, title=f"Review password reset for {user.full_name}",
-                description=data.reason.strip() or "The user cannot access their account and requested a password reset.",
-                task_type="password_reset", required_permission="security:password-reset", priority="high",
-                entity_type="password_reset", entity_id=row.id, entity_label=row.request_number,
-                action_path="/security", actor=user,
-            )
             audit.record(db, organization_id=org.id, actor=user, action="request", entity_type="password_reset",
                          entity_id=row.id, entity_label=row.request_number,
                          summary="Requested administrator-approved password reset", request=request)
+        # Asked for on every request, not only the first: `create_task` returns
+        # the open task when there is one, and opens (and announces) a new one
+        # when the earlier task was closed or cancelled while the request was
+        # still waiting. A pending request is therefore never without work in
+        # the Task Manager. The notice opens the Security Centre, which every
+        # reviewer can reach; the Task Manager needs a separate capability.
+        workflow.create_task(
+            db, organization_id=org.id, title=f"Review password reset for {user.full_name}",
+            description=row.reason or "The user cannot access their account and requested a password reset.",
+            task_type="password_reset", required_permission="security:password-reset", priority="high",
+            entity_type="password_reset", entity_id=row.id, entity_label=row.request_number,
+            action_path="/security", actor=user, notify_path="/security",
+        )
     db.commit()
     return {"message": PUBLIC_RESET_MESSAGE}
 
@@ -202,8 +239,7 @@ def forgot_password(data: ForgotPasswordIn, request: Request, db: Db):
 @router.post("/auth/reset-password", status_code=204)
 def reset_password(data: ResetPasswordIn, request: Request, response: Response, db: Db):
     throttle(db, request, "reset-password", get_settings().password_reset_attempt_limit)
-    org = db.scalar(select(Organization).where(Organization.slug == data.organization.strip().lower()))
-    user = db.scalar(select(User).where(User.organization_id == org.id, User.email == str(data.email).lower())) if org else None
+    org, user = recovery_account(db, data.organization, str(data.email))
     row = db.scalar(select(PasswordResetRequest).where(
         PasswordResetRequest.organization_id == org.id,
         PasswordResetRequest.user_id == user.id,
@@ -317,8 +353,11 @@ def security_users(db: Db, user: Current):
 @router.post("/security/password-reset-requests/{row_id}/approve", response_model=ResetCodeOut, dependencies=[Depends(require("security:password-reset"))])
 def approve_reset(row_id: str, data: ReviewResetIn, request: Request, db: Db, user: Current):
     row, target = scoped_reset(db, row_id, user.organization_id, lock=True)
+    ensure_can_act_on(target, user, "issue a reset code for")
     if row.status != "pending":
         raise HTTPException(409, f"This request is already {row.status}. Refresh the list to see the latest state.")
+    if not target.is_active:
+        raise HTTPException(409, "This account is deactivated. Reactivate it in User Management, or reject the request.")
     code, expires = issue_code(db, row, user, data.notes)
     workflow.notify(
         db, organization_id=user.organization_id, recipients=[target], title="A reset code was issued for your account",
@@ -333,9 +372,37 @@ def approve_reset(row_id: str, data: ReviewResetIn, request: Request, db: Db, us
     return ResetCodeOut(request=reset_out(row, target), reset_code=code, expires_at=expires)
 
 
+@router.post("/security/password-reset-requests/{row_id}/reissue", response_model=ResetCodeOut, dependencies=[Depends(require("security:password-reset"))])
+def reissue_reset_code(row_id: str, data: ReviewResetIn, request: Request, db: Db, user: Current):
+    """Replace a code that was lost, mistyped away or left to expire.
+
+    Only a request that was already approved and never used can be re-issued.
+    The earlier code stops working at once and the new one gets a fresh window.
+    """
+    row, target = scoped_reset(db, row_id, user.organization_id, lock=True)
+    ensure_can_act_on(target, user, "issue a reset code for")
+    if row.status not in ("approved", "expired") or not row.reviewed_at:
+        raise HTTPException(409, f"Only an approved request that was never used can get a new code. This one is {row.status}.")
+    if not target.is_active:
+        raise HTTPException(409, "This account is deactivated. Reactivate it in User Management before issuing a reset code.")
+    code, expires = issue_code(db, row, user, data.notes or row.review_notes)
+    workflow.notify(
+        db, organization_id=user.organization_id, recipients=[target], title="A new reset code was issued for your account",
+        message="An administrator replaced your one-time reset code. Only the newest code works.",
+        severity="warning", notification_type="security", actor=user, entity_type="password_reset", entity_id=row.id,
+        action_path="/login",
+    )
+    audit.record(db, organization_id=user.organization_id, actor=user, action="reissue", entity_type="password_reset",
+                 entity_id=row.id, entity_label=row.request_number,
+                 summary=f"Issued a replacement reset code for {target.email}; the earlier code was retired", request=request)
+    db.commit()
+    return ResetCodeOut(request=reset_out(row, target), reset_code=code, expires_at=expires)
+
+
 @router.post("/security/password-reset-requests/{row_id}/reject", response_model=PasswordResetOut, dependencies=[Depends(require("security:password-reset"))])
 def reject_reset(row_id: str, data: ReviewResetIn, request: Request, db: Db, user: Current):
     row, target = scoped_reset(db, row_id, user.organization_id, lock=True)
+    ensure_can_act_on(target, user, "decide a reset request for")
     if row.status != "pending":
         raise HTTPException(409, f"This request is already {row.status}. Refresh the list to see the latest state.")
     row.status = "rejected"

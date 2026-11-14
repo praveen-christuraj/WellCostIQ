@@ -1,17 +1,35 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+
+
+def _trimmed(value):
+    """Recovery forms are filled from a pasted message: surrounding blanks are not input."""
+    return value.strip() if isinstance(value, str) else value
 
 
 class ForgotPasswordIn(BaseModel):
-    organization: str = Field(min_length=1, max_length=80)
+    organization: str = Field(min_length=1, max_length=160)
     email: EmailStr
     reason: str = Field(default="", max_length=1000)
 
+    _trim = field_validator("organization", "email", mode="before")(_trimmed)
+
 
 class ResetPasswordIn(BaseModel):
-    organization: str = Field(min_length=1, max_length=80)
+    organization: str = Field(min_length=1, max_length=160)
     email: EmailStr
     reset_code: str = Field(min_length=20, max_length=256)
+
+    _trim = field_validator("organization", "email", mode="before")(_trimmed)
+
+    @field_validator("reset_code", mode="before")
+    @classmethod
+    def code_without_whitespace(cls, value):
+        # A code copied out of a chat or e-mail arrives with a trailing blank or
+        # wrapped over two lines. The code alphabet has no whitespace, so
+        # removing it cannot turn a wrong code into a right one.
+        return "".join(value.split()) if isinstance(value, str) else value
+
     new_password: str = Field(min_length=12, max_length=128)
     confirm_password: str = Field(min_length=12, max_length=128)
 

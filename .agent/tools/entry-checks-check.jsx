@@ -172,7 +172,7 @@ globalThis.fetch = async (url, init = {}) => {
   const fail = (status, detail) => ({ ok: false, status, json: async () => ({ detail }) })
   if (path.endsWith('/auth/refresh')) return json({ access_token: 'token' })
   if (path.endsWith('/auth/me')) return json(currentUser)
-  if (path === '/api/health') return json({ api_version: '0.11.0' })
+  if (path === '/api/health') return json({ api_version: '0.12.0' })
   if (path.endsWith('/daily-cost/entries/d1/baseline')) return json(baseline)
   if (path.endsWith('/daily-cost/entries/d1/refresh-service-rates')) return json(baseline)
   if (path.endsWith('/daily-cost/entries/d1/amendments')) return json([])
