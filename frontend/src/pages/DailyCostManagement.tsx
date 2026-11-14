@@ -342,11 +342,10 @@ export default function DailyCostManagement() {
       setCreateError(`Enter a positive USD conversion rate for ${selectedAfe.standard_currency.toUpperCase()} so USD values can be standardized across all wells.`)
       return
     }
-    const existing = rows.find(row => row.well_id === selectedWell.id && row.afe_id === selectedAfe.id && row.cost_date === costDate)
-    if (existing) {
-      setCreateError(`A daily cost sheet already exists for ${displayDate(costDate)} under ${selectedAfe.afe_code}. Open the existing sheet above instead.`)
-      return
-    }
+    // The dialog's own duplicate notice is advisory only. The register rows can
+    // be a moment old — a sheet may have been re-dated in another tab — so the
+    // server is asked first and its answer is what decides. Anything other than
+    // a genuine "already exists" conflict still creates the sheet.
     setCreating(true)
     setCreateError('')
     try {
@@ -365,7 +364,11 @@ export default function DailyCostManagement() {
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'The daily cost sheet could not be created'
       setCreateError(message)
-      if (message.toLowerCase().includes('already exists')) void load()
+      const text = message.toLowerCase()
+      if (text.includes('already exists') || text.includes('deleted daily sheet')) {
+        // The register the dialog is checking against is now known to be stale.
+        void load()
+      }
     } finally {
       setCreating(false)
     }
@@ -648,7 +651,7 @@ export default function DailyCostManagement() {
       entries={selected} wells={reference?.wells ?? []}
     />
 
-    <FormDialog open={createOpen} title="Start a daily cost sheet" subtitle="The first sheet locks the AFE estimate, FX factors, well plan, service rates and Master Data catalogue prices for this well/AFE." onClose={() => setCreateOpen(false)} onSubmit={() => void createEntry()} busy={creating} submitLabel="Create daily sheet" submitDisabled={!selectedAfe || !selectedWell || !createDateValid || !usdRateValid || Boolean(selectedDuplicate) || missingSubActivities}>
+    <FormDialog open={createOpen} title="Start a daily cost sheet" subtitle="The first sheet locks the AFE estimate, FX factors, well plan, service rates and Master Data catalogue prices for this well/AFE." onClose={() => setCreateOpen(false)} onSubmit={() => void createEntry()} busy={creating} submitLabel="Create daily sheet" submitDisabled={!selectedAfe || !selectedWell || !createDateValid || !usdRateValid || missingSubActivities}>
       <Box display="grid" gap={1.6}>
         {!wells.length && <Alert severity="warning">Create and sign off a well plan in Rig &amp; Well Management before starting daily cost tracking.</Alert>}
         <TextField select required label="Configured well" value={wellId} onChange={event => {
@@ -680,8 +683,11 @@ export default function DailyCostManagement() {
             helperText={`USD is the standard currency across all wells. Enter the conversion rate for ${selectedAfe.standard_currency.toUpperCase()} to calculate USD values automatically.`}
           />
         )}
-        {selectedDuplicate && <Alert severity="warning" sx={{ py: 0 }} action={<Button component={RouterLink} to={`/daily-cost/entries/${selectedDuplicate.id}`} size="small" color="inherit" onClick={() => setCreateOpen(false)}>Open existing</Button>}>
-          A sheet already exists for this well, AFE and date. Open it to review or continue editing instead of creating a duplicate.
+        {selectedDuplicate && <Alert
+          severity="info" sx={{ py: 0 }}
+          action={<Button component={RouterLink} to={`/daily-cost/entries/${selectedDuplicate.id}`} size="small" color="inherit" onClick={() => setCreateOpen(false)}>Open existing</Button>}
+        >
+          A sheet recorded earlier appears to cover this well, AFE and date. Open it to review or continue editing. If it was re-dated since this register was read, creating the sheet still works — the server checks the day again.
         </Alert>}
         <TextField required type="date" label="Cost date" value={costDate} onChange={event => { setCostDate(event.target.value); setCreateError('') }} error={Boolean(costDate) && !createDateValid} helperText={Boolean(costDate) && !createDateValid ? 'Enter a real calendar date.' : 'Each well + AFE + date can have one sheet.'} InputLabelProps={{ shrink: true }} />
         <TextField label="Shift / day remarks" value={remarks} onChange={event => setRemarks(event.target.value)} multiline minRows={2} inputProps={{ maxLength: 1000 }} />

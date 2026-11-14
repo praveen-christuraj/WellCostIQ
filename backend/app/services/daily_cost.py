@@ -165,6 +165,104 @@ def _label(code: str, name: str) -> str:
     return " — ".join(part for part in (code, name) if part)
 
 
+# The operating date inside a sheet code. The code is a stable identity — it is
+# quoted on the sheet, the printed reports and the audit trail — but the date it
+# shows must follow a draft date correction, so a code is re-derived (and the
+# previous value recorded in the audit trail) when the sheet moves to another
+# day. Kept in one place so the register, imports and reports agree.
+SHEET_CODE_DATE = re.compile(r"-(\d{8})-")
+
+
+def _sheet_code(well_code: str, cost_date: date, afe_code: str) -> str:
+    """The sheet code a well/AFE/date combination gets at creation."""
+    return f"DC-{well_code[:35]}-{cost_date:%Y%m%d}-{afe_code[:35]}"[:100]
+
+
+def _sheet_code_for(entry: DailyCostEntry) -> str:
+    """The code a moved sheet must carry for its new operating date."""
+    return _sheet_code(entry.well_code_snapshot, entry.cost_date, entry.afe_code_snapshot)
+
+
+def _sheet_code_in_use(db: Session, organization_id: str, code: str, *, exclude_id: str) -> bool:
+    """Whether another sheet — active or in Deleted Entries — already owns a code.
+
+    A code is unique per workspace even across soft-deleted sheets (that is the
+    database constraint), so a moved sheet whose new code is taken falls back to
+    a dated suffix rather than failing the save with a conflict the user cannot
+    resolve from the sheet.
+    """
+    return db.scalar(select(DailyCostEntry.id).where(
+        DailyCostEntry.organization_id == organization_id,
+        DailyCostEntry.daily_cost_code == code,
+        DailyCostEntry.id != exclude_id,
+    )) is not None
+
+
+def _reject_taken_day(
+    db: Session,
+    organization_id: str,
+    well: Any,
+    afe: Any,
+    cost_date: date,
+    *,
+    exclude_id: str = "",
+    well_code: str = "",
+    afe_code: str = "",
+) -> None:
+    """Refuse a day that already carries a sheet, and say how to recover it.
+
+    A soft-deleted sheet still owns its well/AFE/date row (the unique constraint
+    is workspace-wide, not conditional on `is_deleted`), so a day that looks free
+    in the register can still be refused by the database. Name the Deleted
+    Entries sheet here instead of letting the save fail with a generic conflict.
+    """
+    taken = db.execute(
+        select(DailyCostEntry.id, DailyCostEntry.daily_cost_code, DailyCostEntry.is_deleted)
+        .where(
+            DailyCostEntry.organization_id == organization_id,
+            DailyCostEntry.well_id == well.id,
+            DailyCostEntry.afe_id == afe.id,
+            DailyCostEntry.cost_date == cost_date,
+            *( [DailyCostEntry.id != exclude_id] if exclude_id else [] ),
+        )
+    ).first()
+    if taken is None:
+        return
+    label = well_code or getattr(well, "well_code", "") or "this well"
+    afe_label = afe_code or getattr(afe, "afe_code", "") or "this AFE"
+    if taken.is_deleted:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{label} already has a deleted daily sheet for {afe_label} on {cost_date.isoformat()} "
+                f"(sheet {taken.daily_cost_code}). Restore it from Deleted Entries to correct it, "
+                "or permanently delete it to record that day again."
+            ),
+        )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"A daily cost sheet already exists for {label}, {afe_label} and {cost_date.isoformat()}. "
+            "Open the existing sheet from the register instead of creating a duplicate."
+        ),
+    )
+
+
+def _moved_sheet_code(db: Session, entry: DailyCostEntry, preferred: str) -> str:
+    """`preferred`, or the same code with a numbered suffix when it is taken."""
+    if not _sheet_code_in_use(db, entry.organization_id, preferred, exclude_id=entry.id):
+        return preferred
+    for attempt in range(2, 100):
+        suffix = f"-{attempt}"
+        candidate = f"{preferred[:100 - len(suffix)]}{suffix}"
+        if not _sheet_code_in_use(db, entry.organization_id, candidate, exclude_id=entry.id):
+            return candidate
+    raise HTTPException(
+        status_code=409,
+        detail="This sheet's code is already used by too many other sheets. Contact the administrator.",
+    )
+
+
 def classify_activity(activity: Any) -> str:
     """Derive the Planned / UPA / NPT classification from a Master Data Activity.
 
@@ -1105,13 +1203,7 @@ def create_entry(db: Session, organization_id: str, data: DailyCostEntryCreate, 
                         "before entering daily costs. Every daily cost line needs the Activity and Sub activity."
                     ),
                 )
-            duplicate = db.scalar(select(DailyCostEntry.id).where(
-                DailyCostEntry.organization_id == organization_id, DailyCostEntry.well_id == well.id,
-                DailyCostEntry.afe_id == afe.id, DailyCostEntry.cost_date == data.cost_date,
-                DailyCostEntry.is_deleted.is_(False),
-            ))
-            if duplicate:
-                raise HTTPException(status_code=409, detail="A daily cost sheet already exists for this well, AFE and date")
+            _reject_taken_day(db, organization_id, well, afe, data.cost_date)
             # Costing a day is the moment operations start: an upcoming scope is
             # promoted so the register, the dashboards and the budget plan against
             # the same well without the operator remembering to press a button.
@@ -1150,7 +1242,7 @@ def create_entry(db: Session, organization_id: str, data: DailyCostEntryCreate, 
                         )
                         if prior_usd_fx is not None:
                             entry_usd_fx = _fx(prior_usd_fx)
-            cost_code = f"DC-{well.well_code[:35]}-{data.cost_date:%Y%m%d}-{afe.afe_code[:35]}"[:100]
+            cost_code = _sheet_code(well.well_code, data.cost_date, afe.afe_code)
             entry = DailyCostEntry(
                 id=uid(), organization_id=organization_id, rig_id=well.rig_id,
                 rig_code_snapshot=well.rig.rig_code, rig_name_snapshot=well.rig.rig_name,
@@ -3175,33 +3267,31 @@ def update_entry_date(
                     detail="Only a Draft daily cost sheet can change date. Reopen a submitted sheet with the authorized workflow first.",
                 )
             if entry.cost_date != data.cost_date:
-                duplicate = db.scalar(select(DailyCostEntry.id).where(
-                    DailyCostEntry.organization_id == organization_id,
-                    DailyCostEntry.well_id == entry.well_id,
-                    DailyCostEntry.afe_id == entry.afe_id,
-                    DailyCostEntry.cost_date == data.cost_date,
-                    DailyCostEntry.is_deleted.is_(False),
-                    DailyCostEntry.id != entry.id,
-                ))
-                if duplicate:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=(
-                            f"A daily cost sheet already exists for {entry.well_code_snapshot}, "
-                            f"{entry.afe_code_snapshot} and {data.cost_date.isoformat()}. Choose another date."
-                        ),
-                    )
+                _reject_taken_day(
+                    db, organization_id, entry.well, entry.afe, data.cost_date,
+                    exclude_id=entry.id,
+                    well_code=entry.well_code_snapshot, afe_code=entry.afe_code_snapshot,
+                )
                 previous_date = entry.cost_date
+                previous_code = entry.daily_cost_code
                 entry.cost_date = data.cost_date
+                # The code embeds the operating date. Leaving the old code behind
+                # is what made the register claim the vacated date was still
+                # taken: the next sheet created for that day derived the same
+                # code and hit the workspace-wide code constraint. Re-derive it
+                # so the sheet's identity states the day it now covers.
+                moved_code = _moved_sheet_code(db, entry, _sheet_code_for(entry))
+                entry.daily_cost_code = moved_code
                 entry.updated_by = _actor_name(user)
                 entry.updated_at = _now()
                 _audit(
                     db, user=user, action="update", entity_type="daily_cost", entity_id=entry.id,
-                    label=entry.daily_cost_code,
+                    label=moved_code,
                     summary=(
                         f"Corrected daily cost sheet date for {entry.well_code_snapshot} under AFE {entry.afe_code_snapshot}: "
                         f"{previous_date.isoformat()} → {data.cost_date.isoformat()}; "
-                        "cost lines, locked rates and AFE budget retained"
+                        + (f"sheet code {previous_code} → {moved_code}; " if previous_code != moved_code else "")
+                        + "cost lines, locked rates and AFE budget retained"
                     ),
                     request=request,
                 )

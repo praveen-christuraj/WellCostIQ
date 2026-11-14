@@ -6,7 +6,7 @@ import { Box, Paper, Typography } from '@mui/material'
  * the actions that act on that subject; the body owns the table, chart or form.
  * Kept deliberately plain: a hairline border, a header rule and generous padding.
  */
-export function SectionCard({ title, subtitle, action, meta, children, footer, bodyPadding = 2, sx }: {
+export function SectionCard({ title, subtitle, action, meta, children, footer, bodyPadding = 2, sx, dataAttributes }: {
   title?: ReactNode
   subtitle?: ReactNode
   action?: ReactNode
@@ -16,9 +16,14 @@ export function SectionCard({ title, subtitle, action, meta, children, footer, b
   /** Padding around the body. Pass 0 when the body is a table that owns its own frame. */
   bodyPadding?: number | string
   sx?: object
+  /**
+   * Inert `data-*` markers. The PDF export uses them to find an exportable
+   * figure and to read its own title and caption; nothing in the UI reads them.
+   */
+  dataAttributes?: Record<string, string>
 }) {
   const hasHead = Boolean(title || subtitle || action || meta)
-  return <Paper variant="outlined" sx={{ borderColor: 'divider', borderRadius: 2.5, overflow: 'hidden', bgcolor: 'background.paper', ...sx }}>
+  return <Paper variant="outlined" {...dataAttributes} sx={{ borderColor: 'divider', borderRadius: 2.5, overflow: 'hidden', bgcolor: 'background.paper', ...sx }}>
     {hasHead && <Box className="panel-head" sx={{ px: 2.25, pt: 1.9, pb: subtitle ? 1.4 : 1.75, borderBottom: '1px solid', borderColor: 'divider', alignItems: subtitle ? 'flex-start' : 'center' }}>
       <Box sx={{ minWidth: 0 }}>
         {title ? <Typography className="panel-title">{title}</Typography> : null}
