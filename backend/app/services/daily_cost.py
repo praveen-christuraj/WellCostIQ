@@ -68,6 +68,7 @@ from app.schemas.daily_cost import (
 )
 from app.services import afe as afe_service
 from app.services import audit
+from app.services import entry_checks
 from app.services import lih_cost as lih_cost_service
 from app.services import mud_cost as mud_cost_service
 from app.services import well_lifecycle
@@ -3393,6 +3394,12 @@ def preview_day(
     override_count = sum(1 for row in all_rows if row.override_rate is not None)
     if override_count:
         warnings.append(DailyCostWarnings(code="override-preview", severity="info", message=f"{override_count} daily rate override(s) are priced and will be auditable."))
+    # Advice only: values that look mistyped next to the other sheets of this
+    # AFE. The call never raises and never changes a priced figure above.
+    checks = entry_checks.checks_for_preview(
+        db, entry, service_rows, consumable_rows, tangible_rows, other_rows,
+        total=total, entry_usd_fx=_entry_usd_fx,
+    )
     return DailyCostPreviewOut(
         services=services_out,
         consumables=consumables_out,
@@ -3410,6 +3417,7 @@ def preview_day(
         depth_unit="m",
         section_depths=preview_section_depths,
         warnings=warnings,
+        entry_checks=checks,
     )
 
 

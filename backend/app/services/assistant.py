@@ -250,6 +250,32 @@ SYSTEM_MEMORY: tuple[dict[str, Any], ...] = (
         ),
     },
     {
+        "memory_key": "entry-checks",
+        "title": "Entry checks: values that look mistyped",
+        "category": "data-entry",
+        "keywords": (
+            "entry check checks mistyped typo typing mistake unusual anomaly outlier suggestion suggested "
+            "keep entered zero decimal"
+        ),
+        "route": "/daily-cost",
+        "permission": "daily-cost:read",
+        "sort_order": 57,
+        "body": (
+            "A daily cost sheet compares each quantity, rate override, exchange rate and depth with the "
+            "other sheets of the same AFE, the rates locked for the well and the locked well plan, and "
+            "points out a value that looks mistyped: one zero too many, hours entered as days, feet "
+            "entered as metres, the same line entered twice. It is arithmetic over this workspace's own "
+            "sheets, with no model and no outside service. A check is advice only: it never stops a save "
+            "and never changes a figure by itself."
+        ),
+        "steps": (
+            "Read the Entry checks section above the cost lines; each check says what it was compared with.\n"
+            "Apply the suggested value when the check is right; it edits the unsaved sheet, which you still save.\n"
+            "Keep as entered when the value is right, with a short note; the decision is written to the audit log.\n"
+            "Reopen a kept value while the sheet is a Draft if it needs another look."
+        ),
+    },
+    {
         "memory_key": "entry-sub-activity",
         "title": "Why the Well Sub-activity is required on a cost line",
         "category": "data-entry",

@@ -17,6 +17,7 @@ import { ErrorMessage, PageHeading, Tag, useUnsavedChangesGuard } from '../compo
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
 import { WellProgressPanel } from '../components/daily-cost/WellProgressPanel'
 import { CostCriteriaPivot } from '../components/daily-cost/CostCriteriaPivot'
+import { WellEntryChecksCard } from '../components/daily-cost/WellEntryChecksCard'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { api, body } from '../lib/api'
@@ -383,6 +384,8 @@ export default function DailyCostAnalysis() {
 
     {summary && <>
       {summary.warnings.map(warning => <Alert key={warning.code} severity={warning.severity} icon={warning.severity === 'info' ? undefined : <WarningAmberRounded/>} sx={{ mb: 1.4 }}>{warning.message}</Alert>)}
+      {/* Which daily sheets of this well still carry a value that looks mistyped. */}
+      {selectedWell && <WellEntryChecksCard wellId={selectedWell} refreshKey={summary}/>}
 
       <Box display="grid" gap={1.3} mb={1.8} sx={{ gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)', lg: `repeat(${comparisonCardCount}, 1fr)` } }}>
         <StatCard label="AFE planned" value={dailyMoney(summary.totals.planned, currency)} hint={`${summary.afes.length} AFE locked on this well`} icon={<AccountBalanceWalletOutlined fontSize="small"/>}/>

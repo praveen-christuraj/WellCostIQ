@@ -85,6 +85,12 @@ services:
       TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-172.28.0.0/16}
       BACKUP_DIRECTORY: /app/backups
       BACKUP_MAX_UPLOAD_MB: ${BACKUP_MAX_UPLOAD_MB:-2048}
+      # Entry checks on the daily cost sheet (statistics over the workspace's own
+      # sheets; no model, no outside service). Set the first to false to hide them.
+      ENTRY_CHECKS_ENABLED: ${ENTRY_CHECKS_ENABLED:-true}
+      ENTRY_CHECK_HISTORY_SHEETS: ${ENTRY_CHECK_HISTORY_SHEETS:-30}
+      ENTRY_CHECK_PROFILE_WINDOW_DAYS: ${ENTRY_CHECK_PROFILE_WINDOW_DAYS:-730}
+      ENTRY_CHECK_PROFILE_MAX_AGE_HOURS: ${ENTRY_CHECK_PROFILE_MAX_AGE_HOURS:-24}
       ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
       REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
       # Password lifecycle: age in days, reuse depth and sign-in lockout.

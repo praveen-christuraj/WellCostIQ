@@ -3,7 +3,7 @@
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 
 from app.api.deps import Current, Db, require
 from app.schemas.daily_cost import (
@@ -28,9 +28,22 @@ from app.schemas.daily_cost import (
     DailyCostWellProgressUpdate,
     DailyCostWellSummary,
 )
+from app.schemas.entry_check import (
+    DailyCostCheckReopenIn,
+    DailyCostCheckReviewIn,
+    DailyCostEntryChecksOut,
+    DailyCostWellChecksOut,
+)
 from app.services import daily_cost as service
+from app.services import entry_checks
 
 router = APIRouter(prefix="/daily-cost", tags=["Daily Cost Management"])
+
+
+def _refresh_profiles_later(background: BackgroundTasks, organization_id: str) -> None:
+    """Rebuild stale workspace item profiles once the response has been sent."""
+    if entry_checks.has_pending_refresh(organization_id):
+        background.add_task(entry_checks.run_pending_profile_refresh, organization_id)
 
 
 @router.get("/reference", response_model=DailyCostReference, dependencies=[Depends(require("daily-cost:read"))])
@@ -65,6 +78,23 @@ def well_cost_summary(
     return service.well_cost_summary(
         db, user.organization_id, well_id, date_from=date_from, date_to=date_to, include_draft=include_draft,
     )
+
+
+@router.get(
+    "/wells/{well_id}/checks", response_model=DailyCostWellChecksOut,
+    dependencies=[Depends(require("daily-cost:read"))],
+)
+def well_entry_checks(
+    well_id: str,
+    background: BackgroundTasks,
+    db: Db,
+    user: Current,
+    afe_id: str | None = Query(default=None, max_length=36),
+) -> DailyCostWellChecksOut:
+    """Entry checks across a well's saved sheets, newest sheet first."""
+    result = entry_checks.checks_for_well(db, user.organization_id, well_id, afe_id)
+    _refresh_profiles_later(background, user.organization_id)
+    return result
 
 
 @router.get(
@@ -203,8 +233,45 @@ def get_entry(entry_id: str, db: Db, user: Current) -> DailyCostDayOut:
 
 
 @router.put("/entries/{entry_id}/preview", response_model=DailyCostPreviewOut, dependencies=[Depends(require("daily-cost:read"))])
-def preview_entry(entry_id: str, data: DailyCostSaveIn, db: Db, user: Current) -> DailyCostPreviewOut:
-    return service.preview_day(db, user.organization_id, entry_id, data)
+def preview_entry(
+    entry_id: str, data: DailyCostSaveIn, background: BackgroundTasks, db: Db, user: Current,
+) -> DailyCostPreviewOut:
+    preview = service.preview_day(db, user.organization_id, entry_id, data)
+    _refresh_profiles_later(background, user.organization_id)
+    return preview
+
+
+@router.get(
+    "/entries/{entry_id}/checks", response_model=DailyCostEntryChecksOut,
+    dependencies=[Depends(require("daily-cost:read"))],
+)
+def entry_checks_for_sheet(entry_id: str, background: BackgroundTasks, db: Db, user: Current) -> DailyCostEntryChecksOut:
+    """Values on the saved sheet that look mistyped next to the other sheets of its AFE."""
+    result = entry_checks.checks_for_entry(db, user.organization_id, entry_id)
+    _refresh_profiles_later(background, user.organization_id)
+    return result
+
+
+@router.post(
+    "/entries/{entry_id}/checks/review", response_model=DailyCostEntryChecksOut,
+    dependencies=[Depends(require("daily-cost:update"))],
+)
+def review_entry_checks(
+    entry_id: str, data: DailyCostCheckReviewIn, request: Request, db: Db, user: Current,
+) -> DailyCostEntryChecksOut:
+    """Keep the values behind these findings as entered (Draft sheets only, audited)."""
+    return entry_checks.review_checks(db, user.organization_id, entry_id, data, user, request)
+
+
+@router.post(
+    "/entries/{entry_id}/checks/reopen", response_model=DailyCostEntryChecksOut,
+    dependencies=[Depends(require("daily-cost:update"))],
+)
+def reopen_entry_checks(
+    entry_id: str, data: DailyCostCheckReopenIn, request: Request, db: Db, user: Current,
+) -> DailyCostEntryChecksOut:
+    """Withdraw reviews so the findings are open again (Draft sheets only, audited)."""
+    return entry_checks.reopen_checks(db, user.organization_id, entry_id, data, user, request)
 
 
 @router.put("/entries/{entry_id}", response_model=DailyCostDayOut, dependencies=[Depends(require("daily-cost:update"))])

@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.precision import Decimal10
+from app.schemas.entry_check import DailyCostEntryCheck
 
 # Classification (Planned / UPA / NPT) is no longer entered on daily cost
 # lines: the Master Data Activity already carries that meaning, so every line's
@@ -912,6 +913,9 @@ class DailyCostPreviewOut(BaseModel):
     depth_unit: Literal["m"] = "m"
     section_depths: list[DailyCostSectionDepthOut] = Field(default_factory=list)
     warnings: list[DailyCostWarnings]
+    # Advice on the unsaved lines: values that look mistyped next to the other
+    # sheets of this AFE. Never blocks a save; empty when nothing stands out.
+    entry_checks: list[DailyCostEntryCheck] = Field(default_factory=list)
 
 
 class DailyCostGroupSummary(BaseModel):

@@ -5,7 +5,7 @@ which one produced the answer:
 
 | Question | Source | Example |
 | --- | --- | --- |
-| How does this application work? | **Memory** — 21 shipped entries, quoted verbatim | "How are actual days calculated?" |
+| How does this application work? | **Memory** — 22 shipped entries, quoted verbatim | "How are actual days calculated?" |
 | What does *my* workspace say? | The same services the pages use, under the caller's permissions | "AFE balance on WELL-01" |
 
 There is **no model call anywhere**. The same question always produces the same,
@@ -61,7 +61,8 @@ changes an entry (a shipped entry is immutable through the API: `PATCH` and
 - **calculation** (`calc-*`) — actual days, NPT/UPA days, the responsible party,
   the AFE balance, the forecast, out-of-scope cost and LIH treatment;
 - **data entry** (`entry-*`) — what a daily sheet, sub-activity, well progress and
-  AFE estimate need before they save;
+  AFE estimate need before they save, and what the entry checks on a daily sheet
+  point out (`entry-checks`);
 - **navigation and policy** (`nav-*`, `policy-*`) — where each job lives, who may
   do what, deletion rules, unsaved-changes protection, currency and depth rules.
 

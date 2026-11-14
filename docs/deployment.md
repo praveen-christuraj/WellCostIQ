@@ -187,6 +187,9 @@ service from `render.yaml`.
 | `PASSWORD_HISTORY_LIMIT` | **Yes** | `5` |
 | `FORCE_PASSWORD_CHANGE_ON_CREATE` | **Yes** | `true` |
 | `MAX_FAILED_LOGINS` / `LOCKOUT_MINUTES` | **Yes** | `5` / `15` |
+| `ENTRY_CHECKS_ENABLED` | No | Default `true`. Entry checks on the daily cost sheet (see [`entry-checks.md`](entry-checks.md)); `false` hides every finding and stops the profile refresh |
+| `ENTRY_CHECK_HISTORY_SHEETS` | No | Default `30` (5-120). Sheets of the same AFE, nearest in date, a sheet is compared with |
+| `ENTRY_CHECK_PROFILE_WINDOW_DAYS` / `ENTRY_CHECK_PROFILE_MAX_AGE_HOURS` | No | Defaults `730` / `24`. How far back a workspace item profile reads, and how long it is used before it is rebuilt |
 | `APP_NAME` | No | Default `WellCostIQ` |
 | `APP_TAGLINE` | No | Default `Well Cost Estimation & Tracking`; shown as the API description in `/docs` and OpenAPI |
 
