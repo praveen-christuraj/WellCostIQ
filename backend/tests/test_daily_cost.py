@@ -384,7 +384,10 @@ def test_draft_sheet_date_correction_keeps_costs_locks_and_reorders_cumulative_t
         after = moved.json()
         assert after["entry"]["cost_date"] == "2026-10-12"
         assert after["entry"]["id"] == entry_id
-        assert after["entry"]["daily_cost_code"] == before["entry"]["daily_cost_code"]
+        # The code states the operating date, so it follows the correction and
+        # the date it vacated can be costed again.
+        assert after["entry"]["daily_cost_code"] == "DC-WELL-01-20261012-AFE-01"
+        assert after["entry"]["daily_cost_code"] != before["entry"]["daily_cost_code"]
         assert after["entry"]["total_cost"] == before["entry"]["total_cost"]
         assert [line["id"] for line in after["services"]] == [line["id"] for line in before["services"]]
         assert after["entry"]["rate_baseline_locked_at"] == before["entry"]["rate_baseline_locked_at"]
@@ -400,6 +403,19 @@ def test_draft_sheet_date_correction_keeps_costs_locks_and_reorders_cumulative_t
                 AuditLog.summary.contains("Corrected daily cost sheet date"),
             ).one()
             assert "2026-10-10 → 2026-10-12" in audit_row.summary
+            assert "DC-WELL-01-20261010-AFE-01 → DC-WELL-01-20261012-AFE-01" in audit_row.summary
+
+        # The vacated day is free again: the register no longer claims a sheet
+        # for 2026-10-10, so that day can be costed without a code conflict.
+        reclaimed = _post(client, "/api/v1/daily-cost/entries", headers, {
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": "2026-10-10",
+        })
+        assert reclaimed["entry"]["daily_cost_code"] == "DC-WELL-01-20261010-AFE-01"
+        assert reclaimed["entry"]["id"] != entry_id
+        assert client.post("/api/v1/daily-cost/entries", headers=headers, json={
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": "2026-10-10",
+        }).status_code == 409
+        assert client.delete(f"/api/v1/daily-cost/entries/{reclaimed['entry']['id']}", headers=headers).status_code == 200
 
         duplicate = client.patch(f"/api/v1/daily-cost/entries/{entry_id}/date", headers=headers, json={"cost_date": "2026-10-11"})
         assert duplicate.status_code == 409
@@ -425,6 +441,54 @@ def test_draft_sheet_date_correction_keeps_costs_locks_and_reorders_cumulative_t
         submitted = client.patch(f"/api/v1/daily-cost/entries/{entry_id}/date", headers=headers, json={"cost_date": "2026-10-14"})
         assert submitted.status_code == 409
         assert client.get(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers).json()["entry"]["cost_date"] == "2026-10-12"
+        assert client.get(f"/api/v1/daily-cost/entries/{entry_id}", headers=headers).json()["entry"]["daily_cost_code"] == "DC-WELL-01-20261012-AFE-01"
+
+
+def test_moved_sheet_code_falls_back_when_the_new_day_code_is_already_taken():
+    """A code is unique per workspace: a move onto a taken code still saves."""
+    with TestClient(app) as client:
+        headers = login(client)
+        setup = _setup_daily_sheet(client, headers)
+        first_id = setup["entry"]["id"]
+        # A sheet on 2026-10-12 owns DC-WELL-01-20261012-AFE-01.
+        assert client.patch(f"/api/v1/daily-cost/entries/{first_id}/date", headers=headers, json={"cost_date": "2026-10-12"}).status_code == 200
+        second = _post(client, "/api/v1/daily-cost/entries", headers, {
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": "2026-10-14",
+        })
+        # Move the second sheet back onto the first sheet's vacated code by way
+        # of a date that was never used: free the source day, then take 10-12.
+        assert client.patch(f"/api/v1/daily-cost/entries/{first_id}/date", headers=headers, json={"cost_date": "2026-10-15"}).status_code == 200
+        taken = client.patch(f"/api/v1/daily-cost/entries/{second['entry']['id']}/date", headers=headers, json={"cost_date": "2026-10-12"})
+        assert taken.status_code == 200, taken.text
+        assert taken.json()["entry"]["daily_cost_code"] == "DC-WELL-01-20261012-AFE-01"
+
+        # A soft-deleted sheet still owns its day and its code. Both are named in
+        # the refusal, together with the two ways out, instead of a bare conflict.
+        assert client.delete(f"/api/v1/daily-cost/entries/{second['entry']['id']}", headers=headers).status_code == 200
+        third = _post(client, "/api/v1/daily-cost/entries", headers, {
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": "2026-10-20",
+        })
+        moved_onto_deleted = client.patch(
+            f"/api/v1/daily-cost/entries/{third['entry']['id']}/date", headers=headers, json={"cost_date": "2026-10-12"},
+        )
+        assert moved_onto_deleted.status_code == 409
+        detail = moved_onto_deleted.json()["detail"]
+        assert "deleted daily sheet" in detail and "Restore it from Deleted Entries" in detail
+        assert "DC-WELL-01-20261012-AFE-01" in detail
+        reclaimed = client.post("/api/v1/daily-cost/entries", headers=headers, json={
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": "2026-10-12",
+        })
+        assert reclaimed.status_code == 409
+        assert "Restore it from Deleted Entries" in reclaimed.json()["detail"]
+
+        # Restoring the deleted sheet re-reads the day correctly, and moving it
+        # away frees the day for a new sheet.
+        assert client.post(f"/api/v1/daily-cost/entries/{second['entry']['id']}/restore", headers=headers).status_code == 200
+        assert client.patch(f"/api/v1/daily-cost/entries/{second['entry']['id']}/date", headers=headers, json={"cost_date": "2026-10-21"}).status_code == 200
+        fresh = _post(client, "/api/v1/daily-cost/entries", headers, {
+            "well_id": setup["well"]["id"], "afe_id": setup["afe"]["id"], "cost_date": "2026-10-12",
+        })
+        assert fresh["entry"]["daily_cost_code"] == "DC-WELL-01-20261012-AFE-01"
 
 
 def test_daily_cost_is_tenant_scoped_and_rejects_unjustified_upa():

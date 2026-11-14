@@ -5,7 +5,7 @@ import {
   AccountBalanceWalletOutlined, AlignVerticalBottomRounded, ArrowForwardRounded, CalendarMonthOutlined,
   DescriptionOutlined, DownloadDoneRounded, EventBusyOutlined, LayersOutlined,
   RefreshRounded, ReportProblemOutlined, ScheduleOutlined, SpeedOutlined,
-  TerrainOutlined, TrendingUpRounded, WarningAmberRounded,
+  PictureAsPdfOutlined, TerrainOutlined, TrendingUpRounded, WarningAmberRounded,
 } from '@mui/icons-material'
 import {
   Alert, Box, Button, FormControlLabel, LinearProgress, MenuItem, Paper,
@@ -21,6 +21,9 @@ import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
 import { DrillThroughPanel } from '../components/business-dashboard/DrillThroughPanel'
+import { ExportReportDialog } from '../components/ui/ExportReportDialog'
+import { chartData, chartDrillHandler, chartRowId } from '../lib/chartInteraction'
+import type { ReportDocument, ReportFigure, ReportSection } from '../lib/reportPdf'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { api, body } from '../lib/api'
@@ -73,6 +76,7 @@ export default function BusinessDashboard() {
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null)
   const requestVersion = useRef(0)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
 
   const load = useCallback(async (silent = false) => {
     const version = ++requestVersion.current
@@ -142,6 +146,12 @@ export default function BusinessDashboard() {
     line: theme.palette.divider,
   }), [theme])
 
+  // Every plotted point carries the well it was drawn from. The bars are drawn
+  // oldest-widest first (`rows` is the reversed copy), so a click resolved by
+  // position against `chartWells` would open the neighbouring well: with three
+  // wells A, B, C, A opened C. The identity travels with the point instead.
+  const plottedWellId = (row: DashboardWellRow) => chartRowId('well', row.well_id)
+
   const costOption: EChartsOption = useMemo(() => {
     const rows = [...chartWells].reverse()
     const series: EChartsOption['series'] = []
@@ -149,13 +159,13 @@ export default function BusinessDashboard() {
       series.push({
         name: 'AFE amount', type: 'bar', barMaxWidth: 12,
         itemStyle: { color: palette.planned, opacity: .45 },
-        data: rows.map(row => Number(row.afe_amount ?? 0)),
+        data: chartData(rows, plottedWellId, row => Number(row.afe_amount ?? 0), row => row.well_code),
       })
       if (rows.some(row => row.has_sow_adjustment)) {
         series.push({
           name: 'SOW adjusted', type: 'bar', barMaxWidth: 12,
           itemStyle: { color: palette.adjusted },
-          data: rows.map(row => row.sow_adjusted_amount === null ? '-' : Number(row.sow_adjusted_amount)),
+          data: chartData(rows, plottedWellId, row => (row.sow_adjusted_amount === null ? '-' : Number(row.sow_adjusted_amount)), row => row.well_code),
         })
       }
     }
@@ -163,7 +173,7 @@ export default function BusinessDashboard() {
       series.push({
         name: 'Actual cost', type: 'bar', barMaxWidth: 12,
         itemStyle: { color: palette.actual },
-        data: rows.map(row => Number(row.actual_amount ?? 0)),
+        data: chartData(rows, plottedWellId, row => Number(row.actual_amount ?? 0), row => row.well_code),
       })
     }
     return {
@@ -208,22 +218,22 @@ export default function BusinessDashboard() {
         {
           name: 'Productive days', type: 'bar', stack: 'days', barMaxWidth: 16,
           itemStyle: { color: palette.series[2] },
-          data: rows.map(row => Math.max(Number(row.actual_days ?? 0) - Number(row.npt_days ?? 0) - Number(row.upa_days ?? 0), 0)),
+          data: chartData(rows, plottedWellId, row => Math.max(Number(row.actual_days ?? 0) - Number(row.npt_days ?? 0) - Number(row.upa_days ?? 0), 0), row => row.well_code),
         },
         {
           name: 'UPA days', type: 'bar', stack: 'days', barMaxWidth: 16,
           itemStyle: { color: palette.series[1] },
-          data: rows.map(row => Number(row.upa_days ?? 0)),
+          data: chartData(rows, plottedWellId, row => Number(row.upa_days ?? 0), row => row.well_code),
         },
         {
           name: 'NPT days', type: 'bar', stack: 'days', barMaxWidth: 16,
           itemStyle: { color: palette.series[3] },
-          data: rows.map(row => Number(row.npt_days ?? 0)),
+          data: chartData(rows, plottedWellId, row => Number(row.npt_days ?? 0), row => row.well_code),
         },
         ...(caps.plan ? [{
           name: 'Planned days', type: 'scatter' as const, symbol: 'diamond', symbolSize: 11,
           itemStyle: { color: palette.planned },
-          data: rows.map(row => Number(row.planned_days ?? 0)),
+          data: chartData(rows, plottedWellId, row => Number(row.planned_days ?? 0), row => row.well_code),
         }] : []),
       ] : [],
     }
@@ -301,9 +311,14 @@ export default function BusinessDashboard() {
       grid: { left: 8, right: 48, top: 8, bottom: 8, containLabel: true },
       tooltip: {
         trigger: 'axis', axisPointer: { type: 'shadow', snap: true },
+        // Read the well from the clicked point's identity, not from a row number:
+        // the rows are sorted by progress, so a positional read can name the
+        // neighbouring well.
         formatter: (params: unknown) => {
-          const items = params as { dataIndex: number }[]
-          const row = rows[items[0]?.dataIndex ?? 0]
+          const point = (params as { dataIndex?: number; data?: unknown }[])[0]
+          const identity = (point?.data as { chartRowId?: string } | undefined)?.chartRowId ?? ''
+          const row = rows.find(candidate => chartRowId('well', candidate.well_id) === identity)
+            ?? rows[point?.dataIndex ?? 0]
           if (!row) return ''
           return `${row.well_code}<br/>${percent(row.depth_progress_percent)} · ${decimal(row.actual_depth, 0)} of ${decimal(row.planned_depth, 0)} m`
         },
@@ -311,7 +326,7 @@ export default function BusinessDashboard() {
       xAxis: { type: 'value', max: 100, axisLabel: { color: axis.text, fontSize: 10.5, formatter: '{value}%' }, splitLine: { lineStyle: { color: axis.line } } },
       yAxis: {
         type: 'category',
-        data: rows.map(row => row.well_code),
+        data: rows.map(row => ({ value: row.well_code, chartRowId: chartRowId('well', row.well_id) })),
         axisLabel: { color: axis.text, fontSize: 10.5, width: 110, overflow: 'truncate' },
         axisLine: { lineStyle: { color: axis.line } },
       },
@@ -323,15 +338,15 @@ export default function BusinessDashboard() {
           borderRadius: [0, 3, 3, 0],
         },
         label: { show: true, position: 'right', color: axis.text, fontSize: 10.5, formatter: '{c}%' },
-        data: rows.map(row => Number(row.depth_progress_percent ?? 0)),
+        data: chartData(rows, plottedWellId, row => Number(row.depth_progress_percent ?? 0), row => row.well_code),
       }],
     }
   }, [data, palette, axis])
 
-  const drillFromChart = (params: { dataIndex?: number }, rows: { well_id: string }[]) => {
-    const row = rows[params.dataIndex ?? -1]
-    if (row) setDrillWell(row.well_id)
-  }
+  // Resolve the click to the well that was plotted, by identity first, so the
+  // drill-through always opens the well under the pointer.
+  const drillToWell = chartDrillHandler<DashboardWellRow>(chartWells, plottedWellId, row => setDrillWell(row.well_id))
+  const drillToDaysWell = chartDrillHandler<DashboardWellRow>(daysWells, plottedWellId, row => setDrillWell(row.well_id))
 
   // ---- table columns ---------------------------------------------------------
   const wellColumns: ColDef<DashboardWellRow>[] = useMemo(() => {
@@ -639,6 +654,150 @@ export default function BusinessDashboard() {
     },
   ].filter(Boolean) as { key: string; label: string; value: string; hint: string; icon: ReactNode; tone?: 'default' | 'warning' | 'error'; title?: string; badge?: ReactNode }[]
 
+  /**
+   * The page's exportable figures, in the order they appear on screen. The key is
+   * stable and is what the export dialog captures and the document places, so a
+   * figure can never be captioned with the panel above it.
+   */
+  const exportFigures = useMemo(() => [
+    { key: 'afe-actual', label: 'AFE against actual cost' },
+    { key: 'cost-mix', label: 'Actual cost mix' },
+    { key: 'cumulative', label: 'Cumulative actual cost' },
+    { key: 'depth', label: 'Depth progress' },
+    { key: 'planned-days', label: 'Planned days against actual time' },
+  ].filter(() => Boolean(data)), [data])
+
+  /**
+   * Build the export document from *this page's own data*. The figures come from
+   * the live charts (captured by the dialog); the KPI tiles and every table are
+   * the same values the page renders, so the PDF cannot disagree with the screen.
+   */
+  const buildDashboardDocument = useCallback((options: {
+    figures: Map<string, { dataUrl: string; width: number; height: number; title?: string; caption?: string }>
+    includeFigures: boolean
+    includeTables: boolean
+    orientation: 'landscape' | 'portrait'
+  }): ReportDocument => {
+    const figure = (key: string, title: string, caption: string): ReportFigure => {
+      const capture = options.figures.get(key)
+      return {
+        title,
+        caption,
+        dataUrl: options.includeFigures ? capture?.dataUrl ?? '' : '',
+        width: capture?.width ?? 0,
+        height: capture?.height ?? 0,
+      }
+    }
+    const figures = options.includeFigures ? [
+      figure('afe-actual', 'AFE against actual cost', `Effective plan and recorded actual cost in ${currency || 'the selected currency'}, top wells by effective plan.`),
+      figure('cost-mix', 'Actual cost mix', 'Share of recorded actual cost by cost group; hover values are printed in the table below.'),
+      figure('cumulative', 'Cumulative actual cost', 'Daily actual bars with the running cumulative line, by cost date.'),
+      figure('depth', 'Depth progress', 'Deepest configured section carrying cost against planned depth, per well.'),
+      figure('planned-days', 'Planned days against actual time', 'Actual days split into productive, UPA and NPT; the diamond marks planned duration.'),
+    ] : []
+    const sections: ReportSection[] = [
+      {
+        title: 'Financial and operating KPIs',
+        subtitle: 'The same tiles shown at the top of the dashboard, in the selected currency.',
+        kpis: [...financialCards, ...operationCards].map(card => ({ label: card.label, value: card.value, hint: card.hint })),
+      },
+    ]
+    if (options.includeFigures && figures.length) {
+      sections.push({ title: 'Visuals as shown', subtitle: 'Captured from the rendered charts on this page.', figures })
+    }
+    if (options.includeTables && data) {
+      sections.push({
+        title: 'Cost group reconciliation',
+        tables: [{
+          head: ['Cost group', 'AFE planned', `Actual (${currency})`, 'Balance', 'Share'],
+          numeric: [1, 2, 3, 4],
+          body: data.cost_groups.map(row => [row.label, money(row.planned, currency), money(row.actual, currency), money(row.balance, currency), percent(row.share)]),
+        }, {
+          title: 'Time classification',
+          head: ['Classification', 'Days', `Actual (${currency})`, 'Share of cost'],
+          numeric: [1, 2, 3],
+          body: data.classification.map(row => [row.key, decimal(row.days, row.key === 'Planned' ? 0 : 2), money(row.actual, currency), percent(row.share)]),
+        }],
+      })
+      sections.push({
+        title: 'Wells in scope',
+        subtitle: `${data.wells.length} well${data.wells.length === 1 ? '' : 's'} · ${filters.includeDraft ? 'draft and submitted sheets' : 'submitted sheets only'}`,
+        tables: [{
+          head: ['Rig', 'Well', 'Planned days', 'Actual days', `AFE (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Balance', 'NPT days', 'UPA days'],
+          numeric: [2, 3, 4, 5, 6, 7, 8, 9],
+          body: data.wells.map(row => [
+            row.rig_code, `${row.well_code} — ${row.well_name}`, decimal(row.planned_days, 2), decimal(row.actual_days, 3),
+            caps.budget ? money(row.afe_amount, currency) : '—',
+            caps.budget && row.has_sow_adjustment ? money(row.sow_adjusted_amount, currency) : '—',
+            caps.actuals ? money(row.actual_amount, currency) : '—',
+            caps.budget && caps.actuals ? money(row.afe_balance, currency) : '—',
+            decimal(row.npt_days, 3), decimal(row.upa_days, 3),
+          ]),
+        }],
+      })
+      if (caps.budget && data.afes.length) {
+        sections.push({
+          title: 'AFE register',
+          tables: [{
+            head: ['AFE', 'Well', 'Type', 'Status', `AFE amount (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Balance', 'Actual days'],
+            numeric: [4, 5, 6, 7, 8],
+            body: data.afes.map(row => [
+              `${row.afe_code} — ${row.afe_name}`, row.well_code, row.afe_type, AFE_STATUS_LABELS[row.status] ?? row.status,
+              money(row.afe_amount, currency), money(row.sow_adjusted_amount, currency), money(row.actual_amount, currency),
+              money(row.afe_balance, currency), decimal(row.actual_days, 3),
+            ]),
+          }],
+        })
+      }
+      if (data.rigs.length) {
+        sections.push({
+          title: 'Rig register',
+          tables: [{
+            head: ['Rig', 'Wells', 'Planned days', 'Actual days', `Actual (${currency})`, 'Depth progress'],
+            numeric: [1, 2, 3, 4, 5],
+            body: data.rigs.map(row => [
+              `${row.rig_code} — ${row.rig_name}`, count(row.wells), decimal(row.planned_days, 2), decimal(row.actual_days, 3),
+              money(row.actual_amount, currency),
+              row.planned_depth && Number(row.planned_depth) > 0
+                ? percent(String((Number(row.actual_depth ?? 0) / Number(row.planned_depth)) * 100))
+                : '—',
+            ]),
+          }],
+        })
+      }
+      if (data.alerts.length) {
+        sections.push({
+          title: 'Signals needing attention',
+          tables: [{
+            head: ['Signal', 'Detail', 'Severity'],
+            body: data.alerts.map(alert => [alert.title, alert.detail, alert.severity]),
+          }],
+        })
+      }
+    }
+    return {
+      title: 'Operations dashboard',
+      subtitle: 'Rig and well plans, AFE budgets, SOW adjustments, actual cost, NPT/UPA time and depth progress.',
+      scope: [
+        filters.rig ? (data?.filters.rigs.find(rig => rig.id === filters.rig)?.code ?? 'Selected rig') : 'All rigs',
+        filters.well ? (data?.filters.wells.find(well => well.id === filters.well)?.code ?? 'Selected well') : 'All wells',
+        filters.from || filters.to
+          ? `${filters.from ? displayDate(filters.from) : 'start'} to ${filters.to ? displayDate(filters.to) : 'today'}`
+          : 'All cost dates',
+        currency || 'no currency',
+      ].join(' · '),
+      readAt: displayDateTime((refreshedAt ?? new Date()).toISOString()),
+      notices: [
+        `${filters.includeDraft ? 'Draft and submitted' : 'Submitted'} daily sheets are included.`,
+        `Amounts are grouped by the ${currency || 'selected'} currency and never converted silently.`,
+        caps.plan ? 'Planned days are plan-level figures; the date range narrows the cost register only.' : 'Planned days and depth require rig and well read access and are omitted here.',
+      ],
+      sections,
+      fileName: 'operations-dashboard',
+      orientation: options.orientation,
+    }
+  }, [data, filters, currency, caps, financialCards, operationCards, refreshedAt])
+
   return <>
     <PageHeading
       eyebrow="HOME / OPERATIONS DASHBOARD"
@@ -652,6 +811,11 @@ export default function BusinessDashboard() {
         />
         <Button size="small" variant="outlined" startIcon={<RefreshRounded sx={{ fontSize: 17 }}/>} onClick={() => void load()} disabled={loading}>
           {loading ? 'Refreshing…' : 'Refresh'}
+        </Button>
+        <Button size="small" variant="outlined" startIcon={<PictureAsPdfOutlined sx={{ fontSize: 17 }}/>}
+          onClick={() => setExportOpen(true)} disabled={!data || loading}
+          title="Download this dashboard as a PDF: the KPI tiles, the charts exactly as shown and every table">
+          Export PDF
         </Button>
         {caps.actuals && can('daily-cost:read') && <Button size="small" component={RouterLink} to="/daily-cost/analysis" endIcon={<ArrowForwardRounded sx={{ fontSize: 16 }}/>}>Well cost analysis</Button>}
       </Box>}
@@ -806,6 +970,7 @@ export default function BusinessDashboard() {
 
       <Box display="grid" gap={2} sx={{ mt: 2.5, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(0, 1fr)' } }}>
         <ChartPanel
+          figureKey="afe-actual"
           title="AFE against actual cost"
           subtitle="Top wells by effective plan. Select a bar to open that well's drill-through panel."
           meta={<Tag tone={data.kpis.over_budget_wells ? 'error' : 'success'}>{data.kpis.over_budget_wells ? `${data.kpis.over_budget_wells} over plan` : 'Within plan'}</Tag>}
@@ -816,10 +981,11 @@ export default function BusinessDashboard() {
         >
           <InteractiveChart
             option={costOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
-            onEvents={{ click: (params: { dataIndex?: number }) => drillFromChart(params, chartWells) }}
+            onEvents={{ click: drillToWell }}
           />
         </ChartPanel>
         <ChartPanel
+          figureKey="cost-mix"
           title="Actual cost mix"
           subtitle="Where the recorded money went, by cost group."
           meta={<Tag tone="info">Share</Tag>}
@@ -834,6 +1000,7 @@ export default function BusinessDashboard() {
 
       <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(0, 1fr)' } }}>
         <ChartPanel
+          figureKey="cumulative"
           title="Cumulative actual cost"
           subtitle="Daily actual cost with the running cumulative line, by cost date."
           meta={<Tag tone="info">{currency || 'Currency'}</Tag>}
@@ -845,6 +1012,7 @@ export default function BusinessDashboard() {
           <InteractiveChart option={trendOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
         <ChartPanel
+          figureKey="depth"
           title="Depth progress"
           subtitle="Deepest section carrying cost against the planned depth, per well."
           height={268}
@@ -858,6 +1026,7 @@ export default function BusinessDashboard() {
 
       <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(0, 1fr)' } }}>
         <ChartPanel
+          figureKey="planned-days"
           title="Planned days against actual time"
           subtitle="Actual days split into productive, UPA and NPT by allocated service hours ÷ 24."
           meta={<Tag tone="info">Duration</Tag>}
@@ -868,7 +1037,7 @@ export default function BusinessDashboard() {
         >
           <InteractiveChart
             option={daysOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}
-            onEvents={{ click: (params: { dataIndex?: number }) => drillFromChart(params, daysWells) }}
+            onEvents={{ click: drillToDaysWell }}
           />
         </ChartPanel>
         <SectionCard title="Time classification" subtitle="Days and recorded cost under each classification." sx={{ height: '100%' }}>
@@ -982,6 +1151,15 @@ export default function BusinessDashboard() {
       </Box>
     </>}
 
+    <ExportReportDialog
+      open={exportOpen}
+      onClose={() => setExportOpen(false)}
+      figures={exportFigures}
+      buildDocument={buildDashboardDocument}
+      onExport={(format, recordCount) => recordExport(format, recordCount)}
+      fileName="operations-dashboard"
+      title="Export the Operations dashboard"
+    />
     <DrillThroughPanel wellId={drillWell} filters={filters} onClose={() => setDrillWell('')}/>
   </>
 }

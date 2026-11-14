@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import type { ColDef } from 'ag-grid-community'
-import { ArrowBackRounded, Inventory2Outlined, RefreshRounded } from '@mui/icons-material'
+import { ArrowBackRounded, GridOnOutlined, Inventory2Outlined, RefreshRounded } from '@mui/icons-material'
 import { Alert, Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
 import { DataTable } from '../DataTable'
 import { ErrorMessage, PageHeading } from '../Common'
 import { useAuth } from '../../context/AuthContext'
 import {
-  auditExport, EMPTY_FILTERS, fetchMatrix, fetchReference, formatDateText, formatMoney, formatQuantity,
+  auditExport, detailWorkbook, EMPTY_FILTERS, fetchMatrix, fetchReference, formatDateText, formatMoney, formatQuantity,
+  matrixWorkbook,
   type UsageDetailRow, type UsageMatrix as UsageMatrixData, type UsageReference,
   type UsageReportFilters, type UsageReportKey,
 } from '../../lib/usageReports'
+import { matrixSheet, writeWorkbook } from '../../lib/matrixWorkbook'
 import FiltersCard from './UsageReportFilters'
 import MatrixTable from './UsageMatrix'
 
@@ -109,6 +111,8 @@ export default function UsageReportShell({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
+  const [matrixBusy, setMatrixBusy] = useState(false)
+  const [matrixError, setMatrixError] = useState('')
 
   useEffect(() => {
     let active = true
@@ -156,6 +160,26 @@ export default function UsageReportShell({
     await auditExport(reportKey, format, recordCount, filters)
   }, [reportKey, filters])
 
+  /**
+   * Export the matrix itself as a workbook: the same structure the page shows —
+   * two header bands, a row per item, well totals and the grand total — with the
+   * detail lines on a second tab. The audit records one XLSX for the matrix.
+   */
+  const exportMatrixWorkbook = useCallback(async () => {
+    if (!report) return
+    setMatrixBusy(true)
+    setMatrixError('')
+    try {
+      const sheet = matrixSheet(matrixWorkbook(report, filters))
+      await writeWorkbook(`${reportKey}-matrix-${report.currency || 'report'}.xlsx`, [sheet, detailWorkbook(report)])
+      await auditExport(reportKey, 'xlsx', report.rows.length, filters)
+    } catch (caught) {
+      setMatrixError(caught instanceof Error ? caught.message : 'The matrix workbook could not be written')
+    } finally {
+      setMatrixBusy(false)
+    }
+  }, [report, reportKey, filters])
+
   const kpis: ReactNode = report ? (
     <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' }} gap={1.4} mb={1.7}>
       <Stat label={costOnly ? 'Cost lines' : 'Items'} value={String(report.rows.length)} note={`Distinct ${costOnly ? 'records' : 'catalogue items'} in the matrix`} />
@@ -173,10 +197,16 @@ export default function UsageReportShell({
       action={<Box display="flex" gap={1} flexWrap="wrap">
         <Button component={RouterLink} to="/reports" variant="outlined" startIcon={<ArrowBackRounded />}>Reports</Button>
         <Button variant="outlined" startIcon={<RefreshRounded />} onClick={() => setRefreshKey(value => value + 1)} disabled={loading}>Refresh</Button>
+        {canExport && <Button
+          variant="contained" startIcon={<GridOnOutlined />} onClick={() => void exportMatrixWorkbook()}
+          disabled={!report || loading || matrixBusy}
+          title="Download this matrix as an Excel workbook: the header bands, sections, well totals and grand total, plus a detail tab"
+        >{matrixBusy ? 'Writing matrix…' : 'Export matrix to Excel'}</Button>}
       </Box>}
     />
     <FiltersCard reference={reference} filters={filters} onChange={patchFilters} disabled={!reference} />
     <ErrorMessage message={error} />
+    <ErrorMessage message={matrixError} />
     {filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo && (
       <Alert severity="warning" sx={{ mb: 1.5 }}>The start date must not be after the end date.</Alert>
     )}

@@ -16,6 +16,8 @@ import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { ErrorMessage, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
 import { WellProgressPanel } from '../components/daily-cost/WellProgressPanel'
+import { ExportReportDialog } from '../components/ui/ExportReportDialog'
+import type { ReportDocument, ReportFigure, ReportSection } from '../lib/reportPdf'
 import { CostCriteriaPivot } from '../components/daily-cost/CostCriteriaPivot'
 import { WellEntryChecksCard } from '../components/daily-cost/WellEntryChecksCard'
 import { useAuth } from '../context/AuthContext'
@@ -140,6 +142,7 @@ export default function DailyCostAnalysis() {
   const requestVersion = useRef(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [exportOpen, setExportOpen] = useState(false)
 
   useEffect(() => { setSelectedWell(wellId) }, [wellId])
 
@@ -332,6 +335,121 @@ export default function DailyCostAnalysis() {
     message: 'The Well Spud Date & Time or Progress Completed Date & Time entries are not saved yet. Save them before leaving, or discard them deliberately.',
   })
 
+  /**
+   * The well cost analysis document. Every figure comes from `summary`, the
+   * payload this page renders, and the two charts are captured from their live
+   * scene — so the PDF is the page, not a second report.
+   */
+  const buildDocument = (options: {
+    figures: Map<string, { dataUrl: string; width: number; height: number; title?: string; caption?: string }>
+    includeFigures: boolean
+    includeTables: boolean
+    orientation: 'landscape' | 'portrait'
+  }): ReportDocument => {
+    const figure = (key: string, title: string, caption: string): ReportFigure => {
+      const capture = options.figures.get(key)
+      return {
+        title,
+        caption,
+        dataUrl: capture?.dataUrl ?? '',
+        width: capture?.width ?? 0,
+        height: capture?.height ?? 0,
+      }
+    }
+    const sections: ReportSection[] = []
+    if (summary) {
+      sections.push({
+        title: 'AFE position',
+        subtitle: `${summary.well.well_code} — ${summary.well.well_name} · ${summary.afes.length} AFE${summary.afes.length === 1 ? '' : 's'} locked on this well`,
+        kpis: [
+          { label: 'AFE planned', value: dailyMoney(summary.totals.planned, currency), hint: `${summary.totals.used_percent}% used` },
+          ...(hasAdjustment && summary.totals.adjusted_planned != null
+            ? [{ label: 'Adjusted AFE', value: dailyMoney(summary.totals.adjusted_planned, currency), hint: `${summary.totals.adjusted_used_percent ?? '—'}% of the adjusted AFE spent` }]
+            : []),
+          { label: 'Actual to date', value: dailyMoney(summary.totals.actual, currency) },
+          { label: 'Other expenses', value: dailyMoney(summary.totals.other_expenses, currency), hint: 'Deducted from the AFE' },
+          { label: 'Remaining balance', value: dailyMoney(comparisonBalance, currency), hint: Number(comparisonBalance) < 0 ? 'Over the AFE budget' : 'Planned less actual' },
+          { label: 'Average per day', value: dailyMoney(summary.totals.average_per_day, currency), hint: `${summary.totals.recorded_days} recorded of ${summary.totals.elapsed_days} elapsed days` },
+          { label: 'UPA to date', value: dailyMoney(summary.totals.upa, currency) },
+          { label: 'NPT to date', value: dailyMoney(summary.totals.npt, currency) },
+        ],
+      })
+      if (options.includeFigures) {
+        sections.push({
+          title: 'Visuals as shown',
+          figures: [
+            figure('well-daily-afe', 'Daily actuals against the AFE', `Running total with the straight-line AFE plan, in ${currency}.`),
+            figure('well-cost-group-day', 'Cost group by day', 'Services, consumables, tangibles and other expenses stacked per well-day, with NPT overlaid.'),
+          ],
+        })
+      }
+      if (options.includeTables) {
+        sections.push({
+          title: 'AFE position by AFE',
+          tables: [{
+            head: ['AFE', 'Status', 'Sheets', 'Planned', ...(hasAdjustment ? ['Adjusted'] : []), 'Actual', 'Other expenses', 'Balance', 'Days'],
+            numeric: [2, 3, ...(hasAdjustment ? [4] : []), hasAdjustment ? 5 : 4, hasAdjustment ? 6 : 5, hasAdjustment ? 7 : 6, hasAdjustment ? 8 : 7],
+            body: summary.afes.map(afe => [
+              `${afe.afe_code} — ${afe.afe_name}`, afe.afe_status, `${afe.sheets} · ${displayDate(afe.first_day)} → ${displayDate(afe.last_day)}`,
+              dailyMoney(afe.planned_total, afe.currency),
+              ...(hasAdjustment ? [afe.adjusted_planned_total != null ? dailyMoney(afe.adjusted_planned_total, afe.currency) : '—'] : []),
+              dailyMoney(afe.actual, afe.currency), dailyMoney(afe.other_expenses, afe.currency),
+              dailyMoney(afe.balance_including_lih ?? afe.balance, afe.currency), String(afe.days_recorded),
+            ]),
+          }],
+        })
+        if (summary.daily.length) {
+          sections.push({
+            title: 'Daily cost run sheet',
+            subtitle: `${summary.daily.length} well-day${summary.daily.length === 1 ? '' : 's'} in this filter`,
+            tables: [{
+              head: ['Date', 'Depth (m)', 'Services', 'Consumables', 'Tangibles', 'Other', 'Day total', 'UPA', 'NPT', 'Cumulative', 'AFE balance'],
+              numeric: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+              body: summary.daily.map(row => [
+                displayDate(row.cost_date), formatDepthMeters(row.actual_depth, 'm'),
+                dailyMoney(row.services, currency), dailyMoney(row.consumables, currency), dailyMoney(row.tangibles, currency),
+                dailyMoney(row.other_expenses, currency), dailyMoney(row.total, currency), dailyMoney(row.upa, currency),
+                dailyMoney(row.npt, currency), dailyMoney(row.cumulative, currency), dailyMoney(row.budget_balance, currency),
+              ]),
+            }],
+          })
+        }
+        if (summary.budget_lines.length) {
+          sections.push({
+            title: 'AFE budget reconciliation',
+            subtitle: 'Each locked AFE budget line against the actuals recorded under it.',
+            tables: [{
+              head: ['Budget line', 'Name', 'Group', 'Service group', `Planned (${currency})`, 'Actual', 'Balance'],
+              numeric: [4, 5, 6],
+              body: summary.budget_lines.map(row => [
+                String(row.item_code || row.item_name || 'Unbudgeted actual'), row.item_name, row.cost_group, row.service_group || '—',
+                dailyMoney(row.planned, currency), dailyMoney(row.actual_to_date, currency), dailyMoney(row.balance, currency),
+              ]),
+            }],
+          })
+        }
+        if (summary.warnings.length) {
+          sections.push({ title: 'Warnings raised on this well', notes: summary.warnings.map(warning => `${warning.severity.toUpperCase()}: ${warning.message}`) })
+        }
+      }
+    }
+    return {
+      title: 'Well cost analysis',
+      subtitle: 'Every AFE and daily sheet for one well, costed day by day and cut by activity, section, party, rate source and currency.',
+      scope: [summary ? `${summary.well.well_code} — ${summary.well.well_name}` : '',
+        dateFrom || dateTo ? `${dateFrom ? displayDate(dateFrom) : 'start'} to ${dateTo ? displayDate(dateTo) : 'today'}` : 'All cost dates',
+        currency, includeDraft ? 'draft and submitted sheets' : 'submitted sheets only'].filter(Boolean).join(' · '),
+      readAt: new Date().toLocaleString(),
+      notices: [
+        includeDraft ? 'Draft and submitted daily sheets are included.' : 'Submitted daily sheets only.',
+        'Amounts keep the currency the AFE was estimated in; unlike currencies are never summed together.',
+      ],
+      sections,
+      fileName: `well-cost-analysis-${summary?.well.well_code ?? 'well'}`,
+      orientation: options.orientation,
+    }
+  }
+
   return <>
     <PageHeading
       eyebrow="DAILY COST MANAGEMENT / WELL COST ANALYSIS"
@@ -339,6 +457,10 @@ export default function DailyCostAnalysis() {
       subtitle="Every AFE and daily sheet for one well, costed day by day and cut by activity, section, party, rate source and currency."
       action={<Box display="flex" gap={1} flexWrap="wrap">
         {canExport && <Button variant="outlined" startIcon={<PrintOutlined/>} disabled={!selectedWell} onClick={() => setPrintOpen(true)}>Print well costing sheet</Button>}
+        <Button variant="outlined" startIcon={<DownloadOutlined/>} disabled={!summary || loading} onClick={() => setExportOpen(true)}
+          title="Download this analysis as a PDF: the KPI tiles, the charts as shown and every table">
+          Export PDF
+        </Button>
         <Button component={RouterLink} to="/daily-cost" variant="outlined" startIcon={<CalendarMonthOutlined/>}>Daily register</Button>
         <Button variant="outlined" startIcon={<RefreshRounded/>} onClick={() => void load()} disabled={loading || !selectedWell}>{loading ? 'Refreshing…' : 'Refresh'}</Button>
       </Box>}
@@ -401,7 +523,12 @@ export default function DailyCostAnalysis() {
       </Box>
 
       <Box display="grid" gap={1.6} mb={1.8} sx={{ gridTemplateColumns: { xs: '1fr', lg: '1.15fr .85fr' } }}>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, minWidth: 0 }}>
+        <Paper
+          variant="outlined" sx={{ p: 2, borderRadius: 2, minWidth: 0 }}
+          data-chart-figure="1" data-chart-key="well-daily-afe"
+          data-chart-title="Daily actuals against the AFE"
+          data-chart-caption="Running total from the first recorded day, with the straight-line AFE plan for the same period."
+        >
           <Typography fontWeight={800} fontSize={15}>Daily actuals against the AFE</Typography>
           <Typography color="text.secondary" fontSize={11.5} mt={.25}>
             Running total from the first recorded day, with the straight-line AFE plan for the same period.
@@ -410,7 +537,12 @@ export default function DailyCostAnalysis() {
             ? <Box height={250} mt={1}><InteractiveChart option={progressOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No daily sheets match this filter.</Typography>}
         </Paper>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, minWidth: 0 }}>
+        <Paper
+          variant="outlined" sx={{ p: 2, borderRadius: 2, minWidth: 0 }}
+          data-chart-figure="1" data-chart-key="well-cost-group-day"
+          data-chart-title="Cost group by day"
+          data-chart-caption="Services, consumables, tangibles and other expenses stacked per well-day, with NPT overlaid."
+        >
           <Typography fontWeight={800} fontSize={15}>Cost group by day</Typography>
           <Typography color="text.secondary" fontSize={11.5} mt={.25}>Services, consumables, tangibles and other expenses stacked per well-day, with NPT overlaid.</Typography>
           {summary.daily.length
@@ -712,6 +844,18 @@ export default function DailyCostAnalysis() {
         />
       </Box>
     </>}
+    <ExportReportDialog
+      open={exportOpen}
+      onClose={() => setExportOpen(false)}
+      figures={[
+        { key: 'well-daily-afe', label: 'Daily actuals against the AFE' },
+        { key: 'well-cost-group-day', label: 'Cost group by day' },
+      ]}
+      buildDocument={buildDocument}
+      onExport={(format, recordCount) => recordExport(format, recordCount)}
+      fileName={`well-cost-analysis-${summary?.well.well_code ?? 'well'}`}
+      title="Export the well cost analysis"
+    />
     {/* Intercepts navigation, the back button and tab close while progress dates are unsaved. */}
     {leaveGuard}
   </>

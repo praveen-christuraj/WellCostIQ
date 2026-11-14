@@ -5,13 +5,15 @@ import {
   Box, Button, CircularProgress, Divider, Paper, Table, TableBody, TableCell, TableHead, TableRow,
   Typography, useTheme,
 } from '@mui/material'
-import { InsightsOutlined, OpenInNewRounded } from '@mui/icons-material'
+import { InsightsOutlined, OpenInNewRounded, PictureAsPdfOutlined } from '@mui/icons-material'
 import { ErrorMessage, PanelDialog, Tag } from '../Common'
 import { planLabel, planStatusTone, trackingLabel, wellStatusTone } from '../../lib/rigWell'
 import { InteractiveChart } from '../ui/InteractiveChart'
+import { ExportReportDialog } from '../ui/ExportReportDialog'
+import type { ReportFigure, ReportDocument, ReportSection } from '../../lib/reportPdf'
 import { useAuth } from '../../context/AuthContext'
 import { useColorMode } from '../../context/ThemeContext'
-import { api } from '../../lib/api'
+import { api, body } from '../../lib/api'
 import { chartPalette } from '../../designSystem'
 import {
   AFE_STATUS_LABELS, CLASSIFICATION_TONES, dashboardQuery, decimal, displayDate, money, percent,
@@ -54,7 +56,12 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
   const [detail, setDetail] = useState<DashboardWellDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [exportOpen, setExportOpen] = useState(false)
 
+  // The panel is keyed to the well that was clicked. A late response for the
+  // previously opened well is dropped, and the detail is cleared the moment the
+  // selection changes, so the header, the KPI strip and the charts can never
+  // show one well's figures under another well's name.
   useEffect(() => {
     if (!wellId) return
     let active = true
@@ -63,11 +70,18 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
     setDetail(null)
     const query = dashboardQuery(filters)
     api<DashboardWellDetail>(`/dashboard/business/wells/${wellId}${query ? `?${query}` : ''}`)
-      .then(result => { if (active) setDetail(result) })
+      .then(result => {
+        if (!active) return
+        if (result.well.well_id !== wellId) {
+          setError('The drill-through returned a different well. Close the panel and select the well again.')
+          return
+        }
+        setDetail(result)
+      })
       .catch(caught => { if (active) setError(caught instanceof Error ? caught.message : 'The well detail could not be loaded') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-    // The panel reloads when the dashboard filters or currency change.
+    // The panel reloads when the well, dashboard filters or currency change.
   }, [wellId, filters.from, filters.to, filters.currency, filters.includeDraft]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const currency = detail?.well.currency || filters.currency
@@ -133,6 +147,132 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
     }
   }, [classification, theme, palette])
 
+  /**
+   * The drill-through document: the well's own figures. Everything here is drawn
+   * from `detail`, the payload this panel already shows, so the exported page and
+   * the panel cannot disagree. The two charts are captured from their live scene.
+   */
+  const buildDocument = (options: {
+    figures: Map<string, { dataUrl: string; width: number; height: number; title?: string; caption?: string }>
+    includeFigures: boolean
+    includeTables: boolean
+    orientation: 'landscape' | 'portrait'
+  }): ReportDocument => {
+    const figure = (key: string, title: string, caption: string): ReportFigure => {
+      const capture = options.figures.get(key)
+      return {
+        title,
+        caption,
+        dataUrl: capture?.dataUrl ?? '',
+        width: capture?.width ?? 0,
+        height: capture?.height ?? 0,
+      }
+    }
+    const well = detail?.well
+    const sections: ReportSection[] = [{
+      title: 'Well position',
+      subtitle: well ? `${well.rig_code} ${well.rig_name} · ${well.well_location || 'Location not recorded'} · block ${well.block || '—'}` : undefined,
+      kpis: well ? [
+        { label: 'Planned days', value: decimal(well.planned_days, 2), hint: `Drilling ${decimal(well.drilling_planned_days, 2)}${well.completion_planned_days ? ` · Completion ${decimal(well.completion_planned_days, 2)}` : ''}` },
+        { label: 'Actual days', value: decimal(well.actual_days, 3), hint: `${displayDate(well.first_cost_date)} → ${displayDate(well.last_cost_date)}` },
+        { label: 'Cost sheets', value: decimal(well.sheets), hint: `${decimal(well.recorded_days)} recording days · ${decimal(well.draft_sheets)} draft` },
+        { label: 'NPT / UPA days', value: `${decimal(well.npt_days, 3)} / ${decimal(well.upa_days, 3)}` },
+        { label: 'AFE amount', value: money(well.afe_amount, currency), hint: well.afe_count ? `${well.afe_count} AFE` : 'No active AFE' },
+        { label: 'Actual cost', value: money(well.actual_amount, currency), hint: `${percent(well.utilisation_percent)} of the effective AFE` },
+        { label: 'AFE balance', value: money(well.afe_balance, currency), hint: well.over_budget ? 'Over the effective AFE' : 'Remaining against the effective AFE' },
+        { label: 'Depth progress', value: percent(well.depth_progress_percent), hint: `${decimal(well.actual_depth, 0)} of ${decimal(well.planned_depth, 0)} m` },
+      ] : [],
+    }]
+    if (options.includeFigures) {
+      sections.push({
+        title: 'Visuals as shown',
+        figures: [
+          figure('drill-daily', 'Daily actual and cumulative cost', `Every saved sheet in the current range, in ${currency}.`),
+          figure('drill-time', 'Recorded time split', 'Classified operational hours ÷ 24 by classification.'),
+        ],
+      })
+    }
+    if (options.includeTables && detail) {
+      sections.push({
+        title: 'Cost group reconciliation',
+        tables: [{
+          head: ['Cost group', 'AFE planned', `Actual (${currency})`, 'Balance'],
+          numeric: [1, 2, 3],
+          body: detail.cost_groups.map(row => [row.label, money(row.planned, currency), money(row.actual, currency), money(row.balance, currency)]),
+        }],
+      })
+      if (detail.sections.length) {
+        sections.push({
+          title: 'Hole sections and depth',
+          tables: [{
+            head: ['Section', 'Planned depth (m)', 'Actual depth (m)', 'Planned days', 'Cost days', `Actual (${currency})`, 'Reached'],
+            numeric: [1, 2, 3, 4, 5],
+            body: detail.sections.map(row => [
+              `${row.section_code} — ${row.section_name}${row.scope === 'completion' ? ' (completion)' : ''}`,
+              row.from_depth != null ? `${decimal(row.from_depth, 2)} – ${decimal(row.to_depth, 2)}` : '—',
+              row.actual_depth != null ? decimal(row.actual_depth, 2) : '—',
+              decimal(row.planned_days, 2), decimal(row.active_days), money(row.amount, currency), row.reached ? 'Reached' : 'Not reached',
+            ]),
+          }],
+        })
+      }
+      if (detail.activities.length) {
+        sections.push({
+          title: 'Activities recorded',
+          tables: [{
+            head: ['Activity', 'Class', 'Days', `Actual (${currency})`, 'Share'],
+            numeric: [2, 3, 4],
+            body: detail.activities.map(row => [
+              `${row.activity_code || '—'} ${row.activity_name}`.trim(), row.classification,
+              decimal(row.active_days), money(row.amount, currency), percent(row.share),
+            ]),
+          }],
+        })
+      }
+      sections.push({
+        title: 'AFE positions',
+        tables: [{
+          head: ['AFE', 'Type', 'Status', `AFE amount (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Balance', 'Actual days'],
+          numeric: [3, 4, 5, 6, 7],
+          body: detail.afes.map(row => [
+            `${row.afe_code} — ${row.afe_name}`, row.afe_type, AFE_STATUS_LABELS[row.status] ?? row.status,
+            money(row.afe_amount, currency), money(row.sow_adjusted_amount, currency), money(row.actual_amount, currency),
+            money(row.afe_balance, currency), decimal(row.actual_days, 3),
+          ]),
+        }],
+      })
+      if (detail.sheets.length) {
+        sections.push({
+          title: 'Daily cost sheets',
+          tables: [{
+            head: ['Cost date', 'AFE', 'Status', 'Actual depth (m)', `Total (${currency})`, 'NPT', 'UPA'],
+            numeric: [3, 4, 5, 6],
+            body: detail.sheets.map(row => [
+              displayDate(row.cost_date), row.afe_code || '—', SHEET_STATUS_LABELS[row.status] ?? row.status,
+              row.actual_depth != null ? formatDepthMeters(row.actual_depth, 'm') : '—',
+              money(row.total, currency), money(row.npt, currency), money(row.upa, currency),
+            ]),
+          }],
+        })
+      }
+      if (detail.notes.length) sections.push({ title: 'How this drill-through is calculated', notes: detail.notes })
+    }
+    return {
+      title: well ? `${well.well_code} — ${well.well_name}` : 'Well drill-through',
+      subtitle: 'Plan, AFE budget and recorded actuals for one well, cut by activity, section and day.',
+      scope: [well?.rig_code, well?.well_code, filters.currency || currency, filters.from || filters.to
+        ? `${filters.from ? displayDate(filters.from) : 'start'} to ${filters.to ? displayDate(filters.to) : 'today'}` : 'All cost dates'].filter(Boolean).join(' · '),
+      readAt: new Date().toLocaleString(),
+      notices: [
+        filters.includeDraft ? 'Draft and submitted daily sheets are included.' : 'Submitted daily sheets only.',
+        'Actual days are elapsed time, not a count of sheets; sections and activities report active days.',
+      ],
+      sections,
+      fileName: `well-drill-through-${well?.well_code ?? 'well'}`,
+      orientation: options.orientation,
+    }
+  }
+
   return <PanelDialog
     open={!!wellId}
     title={detail ? `${detail.well.well_code} — ${detail.well.well_name}` : 'Well drill-through'}
@@ -143,6 +283,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
     maxWidth="lg"
     footer={<Box display="flex" gap={1} flexWrap="wrap" justifyContent="flex-end" width="100%">
       {can('daily-cost:read') && detail && <Button component={RouterLink} to={`/daily-cost/analysis/${detail.well.well_id}`} variant="contained" startIcon={<InsightsOutlined/>}>Open well cost analysis</Button>}
+      <Button variant="outlined" startIcon={<PictureAsPdfOutlined/>} disabled={!detail} onClick={() => setExportOpen(true)}>Export PDF</Button>
       <Button onClick={onClose} color="inherit">Close</Button>
     </Box>}
   >
@@ -176,14 +317,24 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
       </Paper>
 
       <Box display="grid" gap={2} mt={2} sx={{ gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1.6fr) minmax(0, 1fr)' } }}>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+        <Paper
+          variant="outlined" sx={{ p: 2, borderRadius: 2 }}
+          data-chart-figure="1" data-chart-key="drill-daily"
+          data-chart-title="Daily actual and cumulative cost"
+          data-chart-caption={`Every saved sheet in the current date range, in ${currency || 'the selected currency'}.`}
+        >
           <Typography fontWeight={800} fontSize={13.5}>Daily actual and cumulative cost</Typography>
           <Typography color="text.secondary" fontSize={11.5} mb={1}>Every saved sheet in the current date range, in {currency || 'the selected currency'}.</Typography>
           {detail.daily.length
             ? <Box height={230}><InteractiveChart option={dailyOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No cost sheets in this range.</Typography>}
         </Paper>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+        <Paper
+          variant="outlined" sx={{ p: 2, borderRadius: 2 }}
+          data-chart-figure="1" data-chart-key="drill-time"
+          data-chart-title="Recorded time split"
+          data-chart-caption="Classified operational hours ÷ 24 by classification."
+        >
           <Typography fontWeight={800} fontSize={13.5}>Recorded time split</Typography>
           <Typography color="text.secondary" fontSize={11.5} mb={1}>Distinct cost dates per classification.</Typography>
           {classification.length
@@ -381,5 +532,23 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
         </Box>
       </Box>
     </>}
+
+    <ExportReportDialog
+      open={exportOpen}
+      onClose={() => setExportOpen(false)}
+      figures={[
+        { key: 'drill-daily', label: 'Daily actual and cumulative cost' },
+        { key: 'drill-time', label: 'Recorded time split' },
+      ]}
+      buildDocument={buildDocument}
+      onExport={async (format, recordCount) => {
+        await api('/dashboard/business/export-audit', {
+          method: 'POST',
+          body: body({ format, record_count: recordCount }),
+        })
+      }}
+      fileName={`well-drill-through-${detail?.well.well_code ?? 'well'}`}
+      title="Export this drill-through"
+    />
   </PanelDialog>
 }

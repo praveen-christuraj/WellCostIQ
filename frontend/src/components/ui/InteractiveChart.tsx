@@ -78,7 +78,68 @@ function preciseTooltip(option: EChartsReactProps['option']) {
 
 type Box = { width: number; height: number }
 
-export function InteractiveChart({ option, opts, style, ...props }: EChartsReactProps) {
+/**
+ * ECharts reports a click on the *series item*, not the record the caller
+ * plotted. This host normalises every click into the shape the application uses
+ * to open a record: the identity carried by the clicked data item
+ * (`chartRowId`, see `lib/chartInteraction.ts`), the category `name`, the
+ * plotted `dataIndex` **within the series that was clicked**, and the series
+ * index.
+ *
+ * The old binding reported `dataIndex` relative to whichever series was hit.
+ * For a clustered chart that is the row within that series, which is why a
+ * handler that indexed an unrelated array opened a neighbouring well. Callers
+ * should resolve clicks with `resolveChartClick`, which matches the identity and
+ * only falls back to the reported position inside the plotted array.
+ */
+export type ChartClickEvent = {
+  dataIndex: number | null
+  seriesIndex: number | null
+  /** Category label (or the item's `name`) of the clicked point. */
+  name: string
+  /** Record identity carried by the plotted data item, when the caller set one. */
+  chartRowId: string
+  /** The raw ECharts payload, for chart kinds that need another field. */
+  raw: unknown
+}
+
+type ChartClickHandler = (event: ChartClickEvent) => void
+
+function normaliseClick(raw: unknown): ChartClickEvent {
+  const payload = (raw ?? {}) as {
+    dataIndex?: number
+    seriesIndex?: number
+    name?: string
+    data?: { name?: string; chartRowId?: string }
+  }
+  return {
+    dataIndex: typeof payload.dataIndex === 'number' ? payload.dataIndex : null,
+    seriesIndex: typeof payload.seriesIndex === 'number' ? payload.seriesIndex : null,
+    name: payload.data?.name ?? payload.name ?? '',
+    chartRowId: typeof payload.data?.chartRowId === 'string' ? payload.data.chartRowId : '',
+    raw,
+  }
+}
+
+export function InteractiveChart({ option, opts, style, onEvents, ...props }: EChartsReactProps) {
+  // Re-binding on every render is deliberate. `echarts-for-react` compares
+  // `onEvents` by value: an inline object literal always compares unequal, so it
+  // unbinds and rebinds each render, while a memoised object would keep a
+  // closure over the previous render's rows and open a stale record. A stable
+  // identity here means the handler always sees the current rows.
+  const events = useMemo(() => onEvents, [onEvents])
+  const bind = useMemo(() => {
+    if (!events) return undefined
+    const bound: Record<string, (params: unknown) => void> = {}
+    for (const [name, handler] of Object.entries(events)) {
+      if (typeof handler !== 'function') continue
+      bound[name] = name === 'click'
+        ? (params: unknown) => (handler as ChartClickHandler)(normaliseClick(params))
+        : (params: unknown) => (handler as (value: unknown) => void)(params)
+    }
+    return bound
+  }, [events])
+
   const hostRef = useRef<HTMLDivElement | null>(null)
   const [box, setBox] = useState<Box | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -141,6 +202,7 @@ export function InteractiveChart({ option, opts, style, ...props }: EChartsReact
         echarts={echarts}
         option={preciseOption}
         opts={{ ...opts, renderer: 'svg' }}
+        onEvents={bind}
         style={{ width: '100%', height: '100%', ...style }}
         data-chart-renderer="svg"
       />

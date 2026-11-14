@@ -1,4 +1,4 @@
-.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check
+.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -118,6 +118,25 @@ usage-reports-check:
 		--bundle --platform=node --format=esm --jsx=automatic \
 		--outfile=node_modules/.cache/usage-reports-check.mjs --loader:.jsx=jsx --log-level=error \
 		--external:jsdom && node node_modules/.cache/usage-reports-check.mjs
+
+# Chart drill-through identity: a plotted point opens the record it was drawn
+# from even when the plot is reversed or sorted, and never the neighbouring well.
+chart-drill-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/chart-drill-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/chart-drill-check.mjs --loader:.jsx=jsx --external:jsdom && \
+		node node_modules/.cache/chart-drill-check.mjs
+
+# Export as shown: the dashboard PDF (figures + the visuals themselves), the
+# matrix Excel (merged header bands, stacked well/section columns, totals) and
+# the workbook the reader can re-import.
+export-report-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/export-report-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/export-report-check.mjs --loader:.jsx=jsx --external:jsdom && \
+		node node_modules/.cache/export-report-check.mjs
 
 # Reusable templates: the library page, the picker preview/confirm and the
 # code-scoped well plan preview (the structures that must survive Master Data changes).

@@ -345,3 +345,115 @@ export const SCOPE_OPTIONS: { value: ScopeFilter; label: string }[] = [
   { value: 'drilling', label: 'Drilling' },
   { value: 'completion', label: 'Completion' },
 ]
+
+// ---- Matrix → workbook -----------------------------------------------------
+
+/**
+ * Map a loaded matrix report onto the workbook's structure.
+ *
+ * The screen draws the item header as a stack of code, name, manufacturer and
+ * detail; the workbook needs those as their own columns, so the item label is
+ * assembled as `code · name` and its detail kept apart. Nothing is recomputed:
+ * every figure is the one the API returned, so the workbook and the page cannot
+ * disagree.
+ */
+export function matrixWorkbook(report: UsageMatrix, filters: UsageReportFilters): import('./matrixWorkbook').MatrixWorkbook {
+  const definition = REPORT_DEFINITIONS.find(entry => entry.key === report.report)
+  const costOnly = report.mode === 'cost'
+  const itemLabel = (row: UsageItemRow) => [row.item_code, row.item_name].filter(Boolean).join(' · ')
+  const detailParts = (row: UsageItemRow) => [row.manufacturer, row.subcategory, row.detail, row.uom && !costOnly ? row.uom : '']
+    .filter(Boolean).join(' · ')
+  const filterParts = [
+    filters.blockId ? `Block filter applied` : '',
+    filters.rigId ? 'Rig filter applied' : '',
+    filters.wellIds.length ? `${filters.wellIds.length} well(s) selected` : '',
+    filters.scope ? `${filters.scope} scope` : 'All scopes',
+    filters.lifecycle ? `${filters.lifecycle} wells` : 'All well statuses',
+  ].filter(Boolean)
+  return {
+    reportKey: report.report,
+    title: definition?.title ?? report.report,
+    subtitle: definition?.subtitle,
+    currency: report.currency,
+    periodLabel: `${formatDateText(report.date_from)} to ${report.date_to ? formatDateText(report.date_to) : 'latest entry'}`,
+    filtersLabel: `${filterParts.join(' · ')} · ${report.include_draft ? 'drafts included' : 'submitted only'} · ${report.entry_count} cost sheet(s)`,
+    withQuantity: !costOnly,
+    quantityLabel: costOnly ? undefined : 'Qty',
+    wells: report.wells.map(well => ({
+      wellId: well.well_id,
+      label: `${well.well_code} — ${well.well_name}`,
+      note: [well.block_code, well.rig_code].filter(Boolean).join(' · '),
+      sections: well.sections.map(section => ({
+        key: section.section_key,
+        label: section.section_code || 'WL',
+        note: section.section_name,
+      })),
+    })),
+    items: report.rows.map(row => ({
+      itemId: row.item_id,
+      label: itemLabel(row),
+      detail: detailParts(row),
+      band: report.report === 'tangibles' ? (row.category || 'Uncategorised') : undefined,
+      cells: Object.fromEntries(row.cells.map(cell => [
+        cell.well_id,
+        Object.fromEntries(cell.sections.map(section => [section.section_key, { quantity: section.quantity, amount: section.amount }])),
+      ])),
+      quantityTotal: row.quantity_total,
+      amountTotal: row.amount_total,
+    })),
+    wellTotals: Object.fromEntries(report.well_totals.map(total => [total.well_id, { quantity: total.quantity, amount: total.amount }])),
+    grandQuantity: report.grand_quantity,
+    grandAmount: report.grand_amount,
+    notes: [
+      costOnly
+        ? `Costs are in ${report.currency}; every figure is the amount recorded on the daily cost sheets.`
+        : `Quantities use each item's own unit of measure; costs are in ${report.currency}.`,
+      `${report.detail.length} detail row(s) are included on the Detail sheet.`,
+      `Basis: ${report.date_from ?? 'inception'} to ${report.date_to ?? 'latest entry'}, ${report.include_draft ? 'draft and submitted sheets' : 'submitted sheets only'}.`,
+    ],
+  }
+}
+
+/** The detail tab of the same workbook: one row per recorded usage line. */
+export function detailWorkbook(report: UsageMatrix): import('./matrixWorkbook').WorkbookSheet {
+  const costOnly = report.mode === 'cost'
+  const columns: { key: string; label: string; numeric?: boolean }[] = [
+    { key: 'item_code', label: 'Item code' },
+    { key: 'item_name', label: 'Item' },
+    { key: 'category', label: 'Category' },
+    { key: 'subcategory', label: 'Subcategory' },
+    { key: 'manufacturer', label: 'Manufacturer' },
+    { key: 'detail', label: 'Detail' },
+    { key: 'well_code', label: 'Well' },
+    { key: 'well_name', label: 'Well name' },
+    { key: 'block_code', label: 'Block' },
+    { key: 'rig_code', label: 'Rig' },
+    { key: 'scope', label: 'Scope' },
+    { key: 'section_code', label: 'Section' },
+    { key: 'section_name', label: 'Section name' },
+    ...(costOnly ? [] : [{ key: 'quantity', label: 'Quantity', numeric: true }, { key: 'uom', label: 'UOM' }]),
+    { key: 'amount', label: `Cost (${report.currency})`, numeric: true },
+  ]
+  return {
+    name: 'Detail',
+    rows: [
+      columns.map(column => ({
+        value: column.label, type: String, fontWeight: 'bold' as const, backgroundColor: '#15515B', textColor: '#FFFFFF',
+        align: (column.numeric ? 'right' : 'left') as 'right' | 'left', borderStyle: 'thin' as const,
+      })),
+      ...report.detail.map(row => columns.map(column => {
+        const value = (row as unknown as Record<string, unknown>)[column.key]
+        if (column.numeric) {
+          return {
+            value: value === null || value === undefined || value === '' ? null : Number(value),
+            type: Number, format: column.key === 'quantity' ? '#,##0.####' : '#,##0.00;-#,##0.00',
+            align: 'right' as const, borderStyle: 'thin' as const, borderColor: '#D6DEE2',
+          }
+        }
+        return { value: String(value ?? ''), type: String, align: 'left' as const, borderStyle: 'thin' as const, borderColor: '#D6DEE2' }
+      })),
+    ],
+    columns: columns.map(column => ({ width: column.numeric ? 16 : Math.min(46, Math.max(14, column.label.length + 6)) })),
+    sticky: 1,
+  }
+}
