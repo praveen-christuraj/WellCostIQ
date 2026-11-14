@@ -83,6 +83,10 @@ CAPABILITIES = {resource: actions for resource, actions in {
     # The in-application guide: read answers from memory and the workspace's own
     # figures; manage lets a workspace record its own memory entries.
     "assistant": ("read", "manage"),
+    # Cost Intelligence: automated analysis of the cost record. Read opens the
+    # module (figures still follow afe/daily-cost/rig-well read); export is the
+    # audited report.
+    "cost-intelligence": ("read", "export"),
     "costing-sets": ("read", "create", "update", "delete", "import", "export"),
     # Reusable templates (AFE estimate, well plan, daily sheet). Read is enough to
     # pick and apply one; changing the library needs its own rights.

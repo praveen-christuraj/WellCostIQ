@@ -96,7 +96,7 @@ export default function SecurityCenter() {
   const [selected, setSelected] = useState<string[]>([])
 
   // Dialogs
-  const [decision, setDecision] = useState<{ row: PasswordResetRequest; action: 'approve' | 'reject' } | null>(null)
+  const [decision, setDecision] = useState<{ row: PasswordResetRequest; action: 'approve' | 'reject' | 'reissue' } | null>(null)
   const [accountAction, setAccountAction] = useState<{ account: SecurityAccount; action: AccountAction } | null>(null)
   const [bulkAction, setBulkAction] = useState<SecurityBulkAction | null>(null)
   const [notes, setNotes] = useState('')
@@ -104,6 +104,7 @@ export default function SecurityCenter() {
   const [dialogError, setDialogError] = useState('')
   const [issued, setIssued] = useState<{ code: string; expires: string; email: string; request: string } | null>(null)
   const [notice, setNotice] = useState('')
+  const [copyState, setCopyState] = useState<'' | 'copied' | 'failed'>('')
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null)
 
   // A reviewer may hold only security:password-reset (the reset queue), and an
@@ -115,7 +116,10 @@ export default function SecurityCenter() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [summary, resetRows, accountRows] = await Promise.all([
+      // Each register is loaded on its own terms: a failing account list must
+      // not hide the reset queue (or the other way round), because the queue is
+      // where a waiting user's request is decided.
+      const [summaryResult, resetResult, accountResult] = await Promise.allSettled([
         api<SecurityOverview>('/security/overview', { action: 'Load the security summary' }),
         canSeeQueue
           ? api<PasswordResetRequest[]>('/security/password-reset-requests', { action: 'Load password reset requests' })
@@ -124,8 +128,15 @@ export default function SecurityCenter() {
           ? api<SecurityAccount[]>('/security/users', { action: 'Load workspace accounts' })
           : Promise.resolve([] as SecurityAccount[]),
       ])
-      setOverview(summary); setRequests(resetRows); setAccounts(accountRows)
-      setSelected(ids => ids.filter(id => accountRows.some(account => account.id === id)))
+      const failures = [summaryResult, resetResult, accountResult]
+        .filter((item): item is PromiseRejectedResult => item.status === 'rejected')
+        .map(item => (item.reason as Error).message)
+      if (summaryResult.status === 'fulfilled') setOverview(summaryResult.value)
+      if (resetResult.status === 'fulfilled') setRequests(resetResult.value)
+      const accountRows = accountResult.status === 'fulfilled' ? accountResult.value : null
+      if (accountRows) setAccounts(accountRows)
+      if (failures.length) setError(Array.from(new Set(failures)).join(' '))
+      if (accountRows) setSelected(ids => ids.filter(id => accountRows.some(account => account.id === id)))
       // Land on the first tab this viewer can actually use: an unlock-only role
       // sees the accounts, a queue-only reviewer sees the requests.
       setTab(current => {
@@ -139,18 +150,36 @@ export default function SecurityCenter() {
   }, [canReadRegisters, canSeeQueue])
   useEffect(() => { void load() }, [load])
 
+  // The clipboard is refused on plain-HTTP origins and when the browser denies
+  // the permission. Say so, and leave the code selected for a manual copy.
+  const copyCode = async () => {
+    if (!issued) return
+    try {
+      await navigator.clipboard.writeText(issued.code)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+      const field = document.getElementById('wcp-reset-code') as HTMLInputElement | null
+      field?.focus(); field?.select()
+    }
+  }
+
   const resetDialogs = () => { setDecision(null); setAccountAction(null); setBulkAction(null); setNotes(''); setDialogError('') }
 
   const runDecision = async () => {
     if (!decision) return
     setBusy(true); setDialogError('')
     try {
-      if (decision.action === 'approve') {
-        const result = await api<ResetCode>(`/security/password-reset-requests/${decision.row.id}/approve`, {
-          method: 'POST', body: body({ notes }), action: 'Approve the reset request',
+      if (decision.action === 'approve' || decision.action === 'reissue') {
+        const result = await api<ResetCode>(`/security/password-reset-requests/${decision.row.id}/${decision.action}`, {
+          method: 'POST', body: body({ notes }),
+          action: decision.action === 'approve' ? 'Approve the reset request' : 'Issue a replacement reset code',
         })
         setIssued({ code: result.reset_code, expires: result.expires_at, email: decision.row.user_email, request: decision.row.request_number })
-        setNotice(`Reset request ${decision.row.request_number} approved.`)
+        setCopyState('')
+        setNotice(decision.action === 'approve'
+          ? `Reset request ${decision.row.request_number} approved.`
+          : `A replacement code was issued for ${decision.row.request_number}; the earlier code no longer works.`)
       } else {
         await api(`/security/password-reset-requests/${decision.row.id}/reject`, {
           method: 'POST', body: body({ notes }), action: 'Reject the reset request',
@@ -170,6 +199,7 @@ export default function SecurityCenter() {
           method: 'POST', body: body({ notes }), action: 'Issue a reset code',
         })
         setIssued({ code: result.reset_code, expires: result.expires_at, email: accountAction.account.email, request: result.request.request_number })
+        setCopyState('')
         setNotice(`One-time reset code issued for ${accountAction.account.email}.`)
       } else if (accountAction.action === 'unlock') {
         await api(`/security/users/${accountAction.account.id}/unlock`, { method: 'POST', action: 'Unlock the account' })
@@ -362,7 +392,9 @@ export default function SecurityCenter() {
                     {row.status === 'pending' && canReset ? <Box display="flex" justifyContent="flex-end" gap={.5}>
                       <Button size="small" color="error" onClick={() => { setDecision({ row, action: 'reject' }); setNotes(''); setDialogError('') }}>Reject</Button>
                       <Button size="small" variant="contained" onClick={() => { setDecision({ row, action: 'approve' }); setNotes(''); setDialogError('') }}>Approve</Button>
-                    </Box> : <Typography color="text.secondary" fontSize={11.5}>{row.status === 'pending' ? 'Needs security:password-reset' : '—'}</Typography>}
+                    </Box> : (row.status === 'approved' || (row.status === 'expired' && row.reviewed_at)) && canReset
+                      ? <Tooltip title="Retire the earlier code and issue a new one"><Button size="small" onClick={() => { setDecision({ row, action: 'reissue' }); setNotes(''); setDialogError('') }}>Issue new code</Button></Tooltip>
+                      : <Typography color="text.secondary" fontSize={11.5}>{row.status === 'pending' ? 'Needs security:password-reset' : '—'}</Typography>}
                   </TableCell>
                 </TableRow>)}
               </TableBody>
@@ -523,12 +555,14 @@ export default function SecurityCenter() {
     </Paper>
 
     {/* Approve / reject a reset request */}
-    <FormDialog open={!!decision} title={decision?.action === 'approve' ? 'Approve password reset' : 'Reject password reset'}
+    <FormDialog open={!!decision} title={decision?.action === 'approve' ? 'Approve password reset' : decision?.action === 'reissue' ? 'Issue a replacement reset code' : 'Reject password reset'}
       subtitle={decision?.action === 'approve'
         ? 'A single-use code is generated now and shown once. Share it with the account holder through an approved secure channel.'
-        : 'The account holder keeps their current password. They can request help again later.'}
+        : decision?.action === 'reissue'
+          ? 'The earlier code stops working immediately. A new single-use code is generated and shown once.'
+          : 'The account holder keeps their current password. They can request help again later.'}
       onClose={resetDialogs} onSubmit={() => void runDecision()} busy={busy}
-      submitLabel={decision?.action === 'approve' ? 'Approve and issue code' : 'Reject request'}
+      submitLabel={decision?.action === 'approve' ? 'Approve and issue code' : decision?.action === 'reissue' ? 'Issue new code' : 'Reject request'}
       danger={decision?.action === 'reject'} maxWidth="sm">
       <Box display="grid" gap={2} pt={.5}>
         <Typography fontSize={12.5}>Request <strong>{decision?.row.request_number}</strong> for <strong>{decision?.row.user_email}</strong>.</Typography>
@@ -572,12 +606,15 @@ export default function SecurityCenter() {
       subtitle={`Only shown now. Share it with ${issued?.email ?? 'the account holder'} through an approved secure channel.`}
       onClose={() => setIssued(null)}
       footer={<>
-        <Button startIcon={<ContentCopyRounded/>} onClick={() => issued && void navigator.clipboard.writeText(issued.code)}>Copy code</Button>
+        <Button startIcon={<ContentCopyRounded/>} onClick={() => void copyCode()}>{copyState === 'copied' ? 'Copied' : 'Copy code'}</Button>
         <Button variant="contained" onClick={() => setIssued(null)}>Done</Button>
       </>}>
       <Box display="grid" gap={2}>
-        <TextField fullWidth value={issued?.code ?? ''} label="Single-use reset code" InputProps={{ readOnly: true }}
+        <TextField id="wcp-reset-code" fullWidth value={issued?.code ?? ''} label="Single-use reset code" InputProps={{ readOnly: true }}
+          onFocus={event => event.target.select()}
           helperText={issued ? `${issued.request} · expires ${new Date(issued.expires).toLocaleString()}` : ''}/>
+        {copyState === 'failed' && <Alert severity="info">This browser did not allow copying. The code is selected — copy it with Ctrl+C (or ⌘C).</Alert>}
+        <Alert severity="info">If the code is lost or expires, open the request under Reset requests and choose “Issue new code”.</Alert>
         <Alert severity="warning">The account holder signs in, chooses “Forgot password?”, then “I already have an approved reset code”. Redeeming it signs out every existing session.</Alert>
       </Box>
     </PanelDialog>

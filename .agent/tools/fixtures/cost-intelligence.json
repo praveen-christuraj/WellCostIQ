@@ -1,0 +1,2929 @@
+{
+ "overview": {
+  "generated_at": "2026-11-14T15:23:12.482371Z",
+  "as_of": "2026-11-14",
+  "date_from": null,
+  "date_to": null,
+  "currency": "USD",
+  "capabilities": {
+   "budget": true,
+   "actuals": true,
+   "plan": true,
+   "export": true
+  },
+  "kpis": {
+   "wells": 5,
+   "analysed_wells": 4,
+   "afe_amount": 5829200.0,
+   "actual_amount": 4462840.0,
+   "forecast_amount": 6561700.86,
+   "forecast_variance": 732500.86,
+   "forecast_variance_percent": 12.6,
+   "amount_at_risk": 778295.72,
+   "critical": 3,
+   "warning": 7,
+   "info": 8,
+   "wells_at_risk": 2,
+   "score": 60,
+   "band": "watch"
+  },
+  "headline": [
+   "5 well(s) carry an AFE of USD 5,829,200; USD 4,462,840 (77%) has been recorded.",
+   "At current spending rates the wells are forecast to close near USD 6,561,701, USD 732,501 over the combined AFE.",
+   "3 critical and 7 warning finding(s) need attention, mainly on WELL-B, WELL-D, WELL-C.",
+   "Cost above AFE, recorded or forecast, totals USD 778,296."
+  ],
+  "wells": [
+   {
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "well_name": "Bonga East 2",
+    "rig_code": "RIG-01",
+    "status": "active",
+    "currency": "USD",
+    "afe_amount": 1270800.0,
+    "actual_amount": 1250584.0,
+    "utilisation_percent": 98.4,
+    "planned_days": 36.0,
+    "actual_days": 30.0,
+    "npt_amount": 17332.0,
+    "npt_share_percent": 1.4,
+    "recorded_days": 30,
+    "first_cost_date": "2026-10-15",
+    "last_cost_date": "2026-11-13",
+    "score": 34,
+    "band": "at-risk",
+    "critical": 2,
+    "warning": 1,
+    "info": 2,
+    "summary": "WELL-B has recorded USD 1,250,584 against an AFE of USD 1,270,800 (98%). At the current rate it is forecast to finish near USD 1,578,566, 24% over the AFE. Main points: forecast to finish 24% over the afe; daily cost has been creeping up since 2026-10-26; services is over its afe allowance.",
+    "forecast": {
+     "available": true,
+     "reason": "",
+     "recent_daily": 54663.71,
+     "planned_daily": 35300.0,
+     "remaining_days": 6.0,
+     "estimate": 1578566.29,
+     "low": 1568722.49,
+     "high": 1588410.08,
+     "variance": 307766.29,
+     "variance_percent": 24.2,
+     "exhaustion_date": "2026-11-13",
+     "days_to_exhaustion": 0.4,
+     "past_plan": false
+    },
+    "analysed": true
+   },
+   {
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "well_name": "Dibi West 4",
+    "rig_code": "RIG-02",
+    "status": "active",
+    "currency": "USD",
+    "afe_amount": 877200.0,
+    "actual_amount": 1185601.0,
+    "utilisation_percent": 135.2,
+    "planned_days": 24.0,
+    "actual_days": 26.0,
+    "npt_amount": 133438.0,
+    "npt_share_percent": 11.3,
+    "recorded_days": 26,
+    "first_cost_date": "2026-10-19",
+    "last_cost_date": "2026-11-13",
+    "score": 39,
+    "band": "at-risk",
+    "critical": 1,
+    "warning": 3,
+    "info": 2,
+    "summary": "WELL-D has recorded USD 1,185,601 against an AFE of USD 877,200 (135%). It is past its planned duration and is spending about USD 46,051 a day. Main points: actual cost is 35% over the afe; services is over its afe allowance; non-productive time is 11% of the cost.",
+    "forecast": {
+     "available": true,
+     "reason": "",
+     "recent_daily": 46051.29,
+     "planned_daily": 36550.0,
+     "remaining_days": 0.0,
+     "estimate": 1185601.0,
+     "low": 1185601.0,
+     "high": 1185601.0,
+     "variance": 308401.0,
+     "variance_percent": 35.2,
+     "exhaustion_date": "2026-11-13",
+     "days_to_exhaustion": 0.0,
+     "past_plan": true
+    },
+    "analysed": true
+   },
+   {
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "well_name": "Chota Deep 3",
+    "rig_code": "RIG-02",
+    "status": "active",
+    "currency": "USD",
+    "afe_amount": 1205200.0,
+    "actual_amount": 1021327.0,
+    "utilisation_percent": 84.7,
+    "planned_days": 34.0,
+    "actual_days": 24.0,
+    "npt_amount": 11549.0,
+    "npt_share_percent": 1.1,
+    "recorded_days": 24,
+    "first_cost_date": "2026-10-19",
+    "last_cost_date": "2026-11-13",
+    "score": 64,
+    "band": "watch",
+    "critical": 0,
+    "warning": 3,
+    "info": 2,
+    "summary": "WELL-C has recorded USD 1,021,327 against an AFE of USD 1,205,200 (85%). At the current rate it is forecast to finish near USD 1,367,328, 13% over the AFE. Main points: unusually high daily cost on 2026-11-07; forecast to finish 13% over the afe; 2 cost date(s) have no daily sheet.",
+    "forecast": {
+     "available": true,
+     "reason": "",
+     "recent_daily": 34600.14,
+     "planned_daily": 35447.06,
+     "remaining_days": 10.0,
+     "estimate": 1367328.43,
+     "low": 1364648.57,
+     "high": 1370008.28,
+     "variance": 162128.43,
+     "variance_percent": 13.5,
+     "exhaustion_date": "2026-11-18",
+     "days_to_exhaustion": 5.3,
+     "past_plan": false
+    },
+    "analysed": true
+   },
+   {
+    "well_id": "w-a",
+    "well_code": "WELL-A",
+    "well_name": "Agbami North 1",
+    "rig_code": "RIG-01",
+    "status": "active",
+    "currency": "USD",
+    "afe_amount": 1402000.0,
+    "actual_amount": 1005328.0,
+    "utilisation_percent": 71.7,
+    "planned_days": 40.0,
+    "actual_days": 30.0,
+    "npt_amount": 16793.0,
+    "npt_share_percent": 1.7,
+    "recorded_days": 30,
+    "first_cost_date": "2026-10-15",
+    "last_cost_date": "2026-11-13",
+    "score": 94,
+    "band": "good",
+    "critical": 0,
+    "warning": 0,
+    "info": 2,
+    "summary": "WELL-A has recorded USD 1,005,328 against an AFE of USD 1,402,000 (72%). At the current rate it is forecast to finish near USD 1,356,205, 3% under the AFE. No cost or schedule concern was found; there are record-keeping notes only.",
+    "forecast": {
+     "available": true,
+     "reason": "",
+     "recent_daily": 35087.71,
+     "planned_daily": 35050.0,
+     "remaining_days": 10.0,
+     "estimate": 1356205.14,
+     "low": 1353747.61,
+     "high": 1358662.68,
+     "variance": -45794.86,
+     "variance_percent": -3.3,
+     "exhaustion_date": "2026-11-24",
+     "days_to_exhaustion": 11.3,
+     "past_plan": false
+    },
+    "analysed": true
+   },
+   {
+    "well_id": "w-e",
+    "well_code": "WELL-E",
+    "well_name": "Egina South 5",
+    "rig_code": "RIG-02",
+    "status": "upcoming",
+    "currency": "USD",
+    "afe_amount": 1074000.0,
+    "actual_amount": 0.0,
+    "utilisation_percent": 0.0,
+    "planned_days": 30.0,
+    "actual_days": null,
+    "npt_amount": 0.0,
+    "npt_share_percent": null,
+    "recorded_days": 0,
+    "first_cost_date": null,
+    "last_cost_date": null,
+    "score": 100,
+    "band": "good",
+    "critical": 0,
+    "warning": 0,
+    "info": 0,
+    "summary": "WELL-E has no recorded cost yet. No concern was found.",
+    "forecast": {
+     "available": false,
+     "reason": "At least three recorded cost days are needed for a forecast.",
+     "recent_daily": null,
+     "planned_daily": null,
+     "remaining_days": null,
+     "estimate": null,
+     "low": null,
+     "high": null,
+     "variance": null,
+     "variance_percent": null,
+     "exhaustion_date": null,
+     "days_to_exhaustion": null,
+     "past_plan": false
+    },
+    "analysed": true
+   }
+  ],
+  "findings": [
+   {
+    "id": "7fb76101c16cb346",
+    "code": "afe-exceeded",
+    "severity": "critical",
+    "category": "budget",
+    "title": "Actual cost is 35% over the AFE",
+    "detail": "USD 1,185,601 has been recorded against an AFE of USD 877,200: USD 308,401 over.",
+    "basis": "Recorded actual cost compared with the effective AFE amount (SOW adjustments included).",
+    "suggestion": "Raise a supplementary AFE or an approved SOW adjustment for the overrun before further cost is committed, and record the cause against the well.",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "cost_date": null,
+    "amount": 308401.0,
+    "evidence": [
+     {
+      "label": "AFE",
+      "value": "USD 877,200"
+     },
+     {
+      "label": "Actual",
+      "value": "USD 1,185,601"
+     },
+     {
+      "label": "Over",
+      "value": "USD 308,401"
+     }
+    ],
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register"
+   },
+   {
+    "id": "11236920af88341b",
+    "code": "forecast-overrun",
+    "severity": "critical",
+    "category": "budget",
+    "title": "Forecast to finish 24% over the AFE",
+    "detail": "At the recent USD 54,664 per day for the remaining 6 planned days, the well would close near USD 1,578,566 against an AFE of USD 1,270,800; the AFE would be used up around 2026-11-13.",
+    "basis": "Estimate at completion = recorded cost + mean of the last 7 recorded days (spikes excluded) x remaining planned days. Range USD 1,568,722 to USD 1,588,410.",
+    "suggestion": "Review the remaining programme with operations now: confirm the days to go, and prepare a supplementary AFE or SOW adjustment if the forecast holds.",
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "cost_date": null,
+    "amount": 307766.29,
+    "evidence": [
+     {
+      "label": "Estimate at completion",
+      "value": "USD 1,578,566"
+     },
+     {
+      "label": "AFE",
+      "value": "USD 1,270,800"
+     },
+     {
+      "label": "Forecast overrun",
+      "value": "USD 307,766"
+     }
+    ],
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register"
+   },
+   {
+    "id": "2fd720cec5471e29",
+    "code": "drift-up",
+    "severity": "critical",
+    "category": "trend",
+    "title": "Daily cost has been creeping up since 2026-10-26",
+    "detail": "The daily level rose from about USD 33,674 to USD 47,521 (+41%). Over 19 days that is about USD 263,108 more than the opening rate would have cost.",
+    "basis": "Two-sided CUSUM (slack 0.5, limit 4) against the median of the first 10 days; alarm raised on 2026-10-31 and still standing.",
+    "suggestion": "Compare the service lines of a recent sheet with one from the opening period: look for added services, a rate revision, or standby and rental items that were meant to be released.",
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "cost_date": "2026-10-26",
+    "amount": 263107.5,
+    "evidence": [
+     {
+      "label": "Opening level",
+      "value": "USD 33,674 / day"
+     },
+     {
+      "label": "Level since change",
+      "value": "USD 47,521 / day"
+     },
+     {
+      "label": "Change",
+      "value": "+41.1%"
+     }
+    ],
+    "action_path": "/daily-cost/analysis/w-b",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "cf82e014d25244c5",
+    "code": "group-overrun",
+    "severity": "warning",
+    "category": "budget",
+    "title": "Services is over its AFE allowance",
+    "detail": "USD 1,185,601 recorded against USD 787,200 planned for Services.",
+    "basis": "Recorded cost of the cost group compared with its AFE estimate (more than 5% over).",
+    "suggestion": "Check which services lines exceed the estimate and whether another group is carrying a matching saving.",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "cost_date": null,
+    "amount": 398401.0,
+    "evidence": [
+     {
+      "label": "Planned",
+      "value": "USD 787,200"
+     },
+     {
+      "label": "Actual",
+      "value": "USD 1,185,601"
+     }
+    ],
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register"
+   },
+   {
+    "id": "c57b9887da3b5a68",
+    "code": "cost-spike",
+    "severity": "warning",
+    "category": "anomaly",
+    "title": "Unusually high daily cost on 2026-11-07",
+    "detail": "USD 247,800 was recorded against a typical USD 34,653 for the surrounding days (7.2x).",
+    "basis": "Modified z-score +99.0 against the median of up to 7 days either side (flagged beyond 3.5, at least 25% from that median, and no neighbouring day within 15% of it).",
+    "suggestion": "Open the sheet and confirm the large lines: a lump-sum, mobilisation or tangible delivery is legitimate; a quantity keyed with an extra digit or a cost booked on the wrong date is not.",
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "cost_date": "2026-11-07",
+    "amount": 213147.0,
+    "evidence": [
+     {
+      "label": "Recorded",
+      "value": "USD 247,800"
+     },
+     {
+      "label": "Typical day",
+      "value": "USD 34,653"
+     },
+     {
+      "label": "Difference",
+      "value": "USD 213,147"
+     }
+    ],
+    "action_path": "/daily-cost/analysis/w-c",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "e3d435f4936b198b",
+    "code": "forecast-overrun",
+    "severity": "warning",
+    "category": "budget",
+    "title": "Forecast to finish 13% over the AFE",
+    "detail": "At the recent USD 34,600 per day for the remaining 10 planned days, the well would close near USD 1,367,328 against an AFE of USD 1,205,200; the AFE would be used up around 2026-11-18.",
+    "basis": "Estimate at completion = recorded cost + mean of the last 7 recorded days (spikes excluded) x remaining planned days. Range USD 1,364,649 to USD 1,370,008.",
+    "suggestion": "Review the remaining programme with operations now: confirm the days to go, and prepare a supplementary AFE or SOW adjustment if the forecast holds.",
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "cost_date": null,
+    "amount": 162128.43,
+    "evidence": [
+     {
+      "label": "Estimate at completion",
+      "value": "USD 1,367,328"
+     },
+     {
+      "label": "AFE",
+      "value": "USD 1,205,200"
+     },
+     {
+      "label": "Forecast overrun",
+      "value": "USD 162,128"
+     }
+    ],
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register"
+   },
+   {
+    "id": "83998d80b32879e3",
+    "code": "npt-share",
+    "severity": "warning",
+    "category": "npt",
+    "title": "Non-productive time is 11% of the cost",
+    "detail": "USD 133,438 of USD 1,185,601 was recorded against non-productive time.",
+    "basis": "NPT cost as a share of recorded cost; warning from 10%, critical from 20%.",
+    "suggestion": "Review the NPT events by activity and service company; where a contractor is accountable, check the contract for a reduced or zero rate and raise the back-charge.",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "cost_date": null,
+    "amount": 133438.0,
+    "evidence": [
+     {
+      "label": "NPT cost",
+      "value": "USD 133,438"
+     },
+     {
+      "label": "Share of cost",
+      "value": "11.3%"
+     }
+    ],
+    "action_path": "/daily-cost/analysis/w-d",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "32e08365b637ddbf",
+    "code": "schedule-overrun",
+    "severity": "warning",
+    "category": "schedule",
+    "title": "2 day(s) beyond the planned duration",
+    "detail": "26 days recorded against 24 planned; each further day costs about USD 46,051.",
+    "basis": "Recorded actual days compared with the configured planned days (plan adjustments included).",
+    "suggestion": "Record a well plan SOW adjustment for the extra days so the plan, the AFE and the forecast agree.",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "cost_date": null,
+    "amount": 92102.57,
+    "evidence": [
+     {
+      "label": "Planned days",
+      "value": "24"
+     },
+     {
+      "label": "Actual days",
+      "value": "26"
+     }
+    ],
+    "action_path": "/rig-well/wells",
+    "action_label": "Open the well register"
+   },
+   {
+    "id": "dfdabef0f1b7fb44",
+    "code": "group-overrun",
+    "severity": "warning",
+    "category": "budget",
+    "title": "Services is over its AFE allowance",
+    "detail": "USD 1,250,584 recorded against USD 1,180,800 planned for Services.",
+    "basis": "Recorded cost of the cost group compared with its AFE estimate (more than 5% over).",
+    "suggestion": "Check which services lines exceed the estimate and whether another group is carrying a matching saving.",
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "cost_date": null,
+    "amount": 69784.0,
+    "evidence": [
+     {
+      "label": "Planned",
+      "value": "USD 1,180,800"
+     },
+     {
+      "label": "Actual",
+      "value": "USD 1,250,584"
+     }
+    ],
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register"
+   },
+   {
+    "id": "77f166262664a30a",
+    "code": "missing-sheets",
+    "severity": "warning",
+    "category": "data-quality",
+    "title": "2 cost date(s) have no daily sheet",
+    "detail": "No cost is recorded for 2026-10-31 to 2026-11-01. At a typical USD 34,684 per day that is about USD 69,369 not yet in the record.",
+    "basis": "Every calendar date between the first and last recorded cost date is expected to have a sheet.",
+    "suggestion": "Enter the missing sheets, or record a zero-cost sheet with a remark if the rig was released for those days.",
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "cost_date": "2026-10-31",
+    "amount": 69369.0,
+    "evidence": [
+     {
+      "label": "Missing dates",
+      "value": "2"
+     },
+     {
+      "label": "Typical day",
+      "value": "USD 34,684"
+     }
+    ],
+    "action_path": "/daily-cost/analysis/w-c",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "0081eb8f373f6de5",
+    "code": "entry-warnings",
+    "severity": "info",
+    "category": "data-quality",
+    "title": "30 sheet(s) carry entry-check warnings",
+    "detail": "The entry checks raised a warning on these sheets when they were saved and it was kept as entered.",
+    "basis": "Count of daily sheets whose saved entry checks include a warning.",
+    "suggestion": "Open the sheets from Daily Cost Analysis and either correct the line or confirm it with a remark.",
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "cost_date": null,
+    "amount": null,
+    "evidence": [],
+    "action_path": "/daily-cost/analysis/w-b",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "ef9d9d98846c4033",
+    "code": "all-draft",
+    "severity": "info",
+    "category": "data-quality",
+    "title": "None of the daily sheets has been submitted",
+    "detail": "All 30 sheets are still in draft, so the figures can change without a reopen trail.",
+    "basis": "Every recorded daily sheet has draft status.",
+    "suggestion": "Submit the sheets that have been checked so the record is locked and later changes are traceable.",
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "cost_date": null,
+    "amount": null,
+    "evidence": [],
+    "action_path": "/daily-cost/analysis/w-b",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "7caec1361026cdf5",
+    "code": "entry-warnings",
+    "severity": "info",
+    "category": "data-quality",
+    "title": "26 sheet(s) carry entry-check warnings",
+    "detail": "The entry checks raised a warning on these sheets when they were saved and it was kept as entered.",
+    "basis": "Count of daily sheets whose saved entry checks include a warning.",
+    "suggestion": "Open the sheets from Daily Cost Analysis and either correct the line or confirm it with a remark.",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "cost_date": null,
+    "amount": null,
+    "evidence": [],
+    "action_path": "/daily-cost/analysis/w-d",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "76c562ada587219d",
+    "code": "all-draft",
+    "severity": "info",
+    "category": "data-quality",
+    "title": "None of the daily sheets has been submitted",
+    "detail": "All 26 sheets are still in draft, so the figures can change without a reopen trail.",
+    "basis": "Every recorded daily sheet has draft status.",
+    "suggestion": "Submit the sheets that have been checked so the record is locked and later changes are traceable.",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "cost_date": null,
+    "amount": null,
+    "evidence": [],
+    "action_path": "/daily-cost/analysis/w-d",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "d7723806234e32b9",
+    "code": "entry-warnings",
+    "severity": "info",
+    "category": "data-quality",
+    "title": "24 sheet(s) carry entry-check warnings",
+    "detail": "The entry checks raised a warning on these sheets when they were saved and it was kept as entered.",
+    "basis": "Count of daily sheets whose saved entry checks include a warning.",
+    "suggestion": "Open the sheets from Daily Cost Analysis and either correct the line or confirm it with a remark.",
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "cost_date": null,
+    "amount": null,
+    "evidence": [],
+    "action_path": "/daily-cost/analysis/w-c",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "13a70e893e46eace",
+    "code": "all-draft",
+    "severity": "info",
+    "category": "data-quality",
+    "title": "None of the daily sheets has been submitted",
+    "detail": "All 24 sheets are still in draft, so the figures can change without a reopen trail.",
+    "basis": "Every recorded daily sheet has draft status.",
+    "suggestion": "Submit the sheets that have been checked so the record is locked and later changes are traceable.",
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "cost_date": null,
+    "amount": null,
+    "evidence": [],
+    "action_path": "/daily-cost/analysis/w-c",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "43a774379974c519",
+    "code": "entry-warnings",
+    "severity": "info",
+    "category": "data-quality",
+    "title": "30 sheet(s) carry entry-check warnings",
+    "detail": "The entry checks raised a warning on these sheets when they were saved and it was kept as entered.",
+    "basis": "Count of daily sheets whose saved entry checks include a warning.",
+    "suggestion": "Open the sheets from Daily Cost Analysis and either correct the line or confirm it with a remark.",
+    "well_id": "w-a",
+    "well_code": "WELL-A",
+    "cost_date": null,
+    "amount": null,
+    "evidence": [],
+    "action_path": "/daily-cost/analysis/w-a",
+    "action_label": "Open Daily Cost Analysis"
+   },
+   {
+    "id": "e1b8bfdc72bf059f",
+    "code": "all-draft",
+    "severity": "info",
+    "category": "data-quality",
+    "title": "None of the daily sheets has been submitted",
+    "detail": "All 30 sheets are still in draft, so the figures can change without a reopen trail.",
+    "basis": "Every recorded daily sheet has draft status.",
+    "suggestion": "Submit the sheets that have been checked so the record is locked and later changes are traceable.",
+    "well_id": "w-a",
+    "well_code": "WELL-A",
+    "cost_date": null,
+    "amount": null,
+    "evidence": [],
+    "action_path": "/daily-cost/analysis/w-a",
+    "action_label": "Open Daily Cost Analysis"
+   }
+  ],
+  "suggestions": [
+   {
+    "rank": 1,
+    "severity": "critical",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "title": "Actual cost is 35% over the AFE",
+    "suggestion": "Raise a supplementary AFE or an approved SOW adjustment for the overrun before further cost is committed, and record the cause against the well.",
+    "amount": 308401.0,
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register",
+    "finding_id": "7fb76101c16cb346"
+   },
+   {
+    "rank": 2,
+    "severity": "critical",
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "title": "Forecast to finish 24% over the AFE",
+    "suggestion": "Review the remaining programme with operations now: confirm the days to go, and prepare a supplementary AFE or SOW adjustment if the forecast holds.",
+    "amount": 307766.29,
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register",
+    "finding_id": "11236920af88341b"
+   },
+   {
+    "rank": 3,
+    "severity": "critical",
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "title": "Daily cost has been creeping up since 2026-10-26",
+    "suggestion": "Compare the service lines of a recent sheet with one from the opening period: look for added services, a rate revision, or standby and rental items that were meant to be released.",
+    "amount": 263107.5,
+    "action_path": "/daily-cost/analysis/w-b",
+    "action_label": "Open Daily Cost Analysis",
+    "finding_id": "2fd720cec5471e29"
+   },
+   {
+    "rank": 4,
+    "severity": "warning",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "title": "Services is over its AFE allowance",
+    "suggestion": "Check which services lines exceed the estimate and whether another group is carrying a matching saving.",
+    "amount": 398401.0,
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register",
+    "finding_id": "cf82e014d25244c5"
+   },
+   {
+    "rank": 5,
+    "severity": "warning",
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "title": "Unusually high daily cost on 2026-11-07",
+    "suggestion": "Open the sheet and confirm the large lines: a lump-sum, mobilisation or tangible delivery is legitimate; a quantity keyed with an extra digit or a cost booked on the wrong date is not.",
+    "amount": 213147.0,
+    "action_path": "/daily-cost/analysis/w-c",
+    "action_label": "Open Daily Cost Analysis",
+    "finding_id": "c57b9887da3b5a68"
+   },
+   {
+    "rank": 6,
+    "severity": "warning",
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "title": "Forecast to finish 13% over the AFE",
+    "suggestion": "Review the remaining programme with operations now: confirm the days to go, and prepare a supplementary AFE or SOW adjustment if the forecast holds.",
+    "amount": 162128.43,
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register",
+    "finding_id": "e3d435f4936b198b"
+   },
+   {
+    "rank": 7,
+    "severity": "warning",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "title": "Non-productive time is 11% of the cost",
+    "suggestion": "Review the NPT events by activity and service company; where a contractor is accountable, check the contract for a reduced or zero rate and raise the back-charge.",
+    "amount": 133438.0,
+    "action_path": "/daily-cost/analysis/w-d",
+    "action_label": "Open Daily Cost Analysis",
+    "finding_id": "83998d80b32879e3"
+   },
+   {
+    "rank": 8,
+    "severity": "warning",
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "title": "2 day(s) beyond the planned duration",
+    "suggestion": "Record a well plan SOW adjustment for the extra days so the plan, the AFE and the forecast agree.",
+    "amount": 92102.57,
+    "action_path": "/rig-well/wells",
+    "action_label": "Open the well register",
+    "finding_id": "32e08365b637ddbf"
+   },
+   {
+    "rank": 9,
+    "severity": "warning",
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "title": "Services is over its AFE allowance",
+    "suggestion": "Check which services lines exceed the estimate and whether another group is carrying a matching saving.",
+    "amount": 69784.0,
+    "action_path": "/afe/register",
+    "action_label": "Open the AFE register",
+    "finding_id": "dfdabef0f1b7fb44"
+   },
+   {
+    "rank": 10,
+    "severity": "warning",
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "title": "2 cost date(s) have no daily sheet",
+    "suggestion": "Enter the missing sheets, or record a zero-cost sheet with a remark if the rig was released for those days.",
+    "amount": 69369.0,
+    "action_path": "/daily-cost/analysis/w-c",
+    "action_label": "Open Daily Cost Analysis",
+    "finding_id": "77f166262664a30a"
+   }
+  ],
+  "by_category": [
+   {
+    "key": "budget",
+    "label": "Budget and forecast",
+    "critical": 2,
+    "warning": 3,
+    "info": 0
+   },
+   {
+    "key": "trend",
+    "label": "Cost trend",
+    "critical": 1,
+    "warning": 0,
+    "info": 0
+   },
+   {
+    "key": "anomaly",
+    "label": "Unusual days",
+    "critical": 0,
+    "warning": 1,
+    "info": 0
+   },
+   {
+    "key": "schedule",
+    "label": "Schedule",
+    "critical": 0,
+    "warning": 1,
+    "info": 0
+   },
+   {
+    "key": "npt",
+    "label": "Non-productive time",
+    "critical": 0,
+    "warning": 1,
+    "info": 0
+   },
+   {
+    "key": "data-quality",
+    "label": "Record quality",
+    "critical": 0,
+    "warning": 1,
+    "info": 8
+   }
+  ],
+  "notes": [],
+  "methods": [
+   "Unusual days: each day's cost is compared with the median of up to 7 days either side using a modified z-score (median and MAD). A day is flagged beyond 3.5, at least 25% from that median, and only when no neighbouring day comes within 15% of it, so a step to a new level or a recurring peak is not reported.",
+   "Cost trend: Page's two-sided CUSUM on daily cost, standardised against the median of the well's opening period (slack 0.5, limit 4). It detects a sustained change of level that no single day would reveal.",
+   "Forecast: recorded cost plus the mean of the last 7 recorded days (unusual days excluded) for each remaining planned day. The range reflects the recent day-to-day spread (80% band).",
+   "Record quality: every date between the first and last cost date should have a sheet; identical totals on three or more consecutive days, zero-cost sheets, draft sheets and kept entry-check warnings are listed.",
+   "Health score: 100 less 25 per critical finding, 10 per warning and 3 per note, never below 0. The workspace score is the AFE-weighted average of its wells.",
+   "All findings are advice. Nothing is changed or blocked, and every finding states the rule and the figures used."
+  ]
+ },
+ "details": {
+  "w-b": {
+   "well": {
+    "well_id": "w-b",
+    "well_code": "WELL-B",
+    "well_name": "Bonga East 2",
+    "rig_code": "RIG-01",
+    "status": "active",
+    "currency": "USD",
+    "afe_amount": 1270800.0,
+    "actual_amount": 1250584.0,
+    "utilisation_percent": 98.4,
+    "planned_days": 36.0,
+    "actual_days": 30.0,
+    "npt_amount": 17332.0,
+    "npt_share_percent": 1.4,
+    "recorded_days": 30,
+    "first_cost_date": "2026-10-15",
+    "last_cost_date": "2026-11-13",
+    "score": 34,
+    "band": "at-risk",
+    "critical": 2,
+    "warning": 1,
+    "info": 2,
+    "summary": "WELL-B has recorded USD 1,250,584 against an AFE of USD 1,270,800 (98%). At the current rate it is forecast to finish near USD 1,578,566, 24% over the AFE. Main points: forecast to finish 24% over the afe; daily cost has been creeping up since 2026-10-26; services is over its afe allowance.",
+    "forecast": {
+     "available": true,
+     "reason": "",
+     "recent_daily": 54663.71,
+     "planned_daily": 35300.0,
+     "remaining_days": 6.0,
+     "estimate": 1578566.29,
+     "low": 1568722.49,
+     "high": 1588410.08,
+     "variance": 307766.29,
+     "variance_percent": 24.2,
+     "exhaustion_date": "2026-11-13",
+     "days_to_exhaustion": 0.4,
+     "past_plan": false
+    },
+    "analysed": true
+   },
+   "findings": [
+    {
+     "id": "11236920af88341b",
+     "code": "forecast-overrun",
+     "severity": "critical",
+     "category": "budget",
+     "title": "Forecast to finish 24% over the AFE",
+     "detail": "At the recent USD 54,664 per day for the remaining 6 planned days, the well would close near USD 1,578,566 against an AFE of USD 1,270,800; the AFE would be used up around 2026-11-13.",
+     "basis": "Estimate at completion = recorded cost + mean of the last 7 recorded days (spikes excluded) x remaining planned days. Range USD 1,568,722 to USD 1,588,410.",
+     "suggestion": "Review the remaining programme with operations now: confirm the days to go, and prepare a supplementary AFE or SOW adjustment if the forecast holds.",
+     "well_id": "w-b",
+     "well_code": "WELL-B",
+     "cost_date": null,
+     "amount": 307766.29,
+     "evidence": [
+      {
+       "label": "Estimate at completion",
+       "value": "USD 1,578,566"
+      },
+      {
+       "label": "AFE",
+       "value": "USD 1,270,800"
+      },
+      {
+       "label": "Forecast overrun",
+       "value": "USD 307,766"
+      }
+     ],
+     "action_path": "/afe/register",
+     "action_label": "Open the AFE register"
+    },
+    {
+     "id": "2fd720cec5471e29",
+     "code": "drift-up",
+     "severity": "critical",
+     "category": "trend",
+     "title": "Daily cost has been creeping up since 2026-10-26",
+     "detail": "The daily level rose from about USD 33,674 to USD 47,521 (+41%). Over 19 days that is about USD 263,108 more than the opening rate would have cost.",
+     "basis": "Two-sided CUSUM (slack 0.5, limit 4) against the median of the first 10 days; alarm raised on 2026-10-31 and still standing.",
+     "suggestion": "Compare the service lines of a recent sheet with one from the opening period: look for added services, a rate revision, or standby and rental items that were meant to be released.",
+     "well_id": "w-b",
+     "well_code": "WELL-B",
+     "cost_date": "2026-10-26",
+     "amount": 263107.5,
+     "evidence": [
+      {
+       "label": "Opening level",
+       "value": "USD 33,674 / day"
+      },
+      {
+       "label": "Level since change",
+       "value": "USD 47,521 / day"
+      },
+      {
+       "label": "Change",
+       "value": "+41.1%"
+      }
+     ],
+     "action_path": "/daily-cost/analysis/w-b",
+     "action_label": "Open Daily Cost Analysis"
+    },
+    {
+     "id": "dfdabef0f1b7fb44",
+     "code": "group-overrun",
+     "severity": "warning",
+     "category": "budget",
+     "title": "Services is over its AFE allowance",
+     "detail": "USD 1,250,584 recorded against USD 1,180,800 planned for Services.",
+     "basis": "Recorded cost of the cost group compared with its AFE estimate (more than 5% over).",
+     "suggestion": "Check which services lines exceed the estimate and whether another group is carrying a matching saving.",
+     "well_id": "w-b",
+     "well_code": "WELL-B",
+     "cost_date": null,
+     "amount": 69784.0,
+     "evidence": [
+      {
+       "label": "Planned",
+       "value": "USD 1,180,800"
+      },
+      {
+       "label": "Actual",
+       "value": "USD 1,250,584"
+      }
+     ],
+     "action_path": "/afe/register",
+     "action_label": "Open the AFE register"
+    },
+    {
+     "id": "0081eb8f373f6de5",
+     "code": "entry-warnings",
+     "severity": "info",
+     "category": "data-quality",
+     "title": "30 sheet(s) carry entry-check warnings",
+     "detail": "The entry checks raised a warning on these sheets when they were saved and it was kept as entered.",
+     "basis": "Count of daily sheets whose saved entry checks include a warning.",
+     "suggestion": "Open the sheets from Daily Cost Analysis and either correct the line or confirm it with a remark.",
+     "well_id": "w-b",
+     "well_code": "WELL-B",
+     "cost_date": null,
+     "amount": null,
+     "evidence": [],
+     "action_path": "/daily-cost/analysis/w-b",
+     "action_label": "Open Daily Cost Analysis"
+    },
+    {
+     "id": "ef9d9d98846c4033",
+     "code": "all-draft",
+     "severity": "info",
+     "category": "data-quality",
+     "title": "None of the daily sheets has been submitted",
+     "detail": "All 30 sheets are still in draft, so the figures can change without a reopen trail.",
+     "basis": "Every recorded daily sheet has draft status.",
+     "suggestion": "Submit the sheets that have been checked so the record is locked and later changes are traceable.",
+     "well_id": "w-b",
+     "well_code": "WELL-B",
+     "cost_date": null,
+     "amount": null,
+     "evidence": [],
+     "action_path": "/daily-cost/analysis/w-b",
+     "action_label": "Open Daily Cost Analysis"
+    }
+   ],
+   "days": [
+    {
+     "cost_date": "2026-10-15",
+     "actual": 25993.0,
+     "cumulative": 25993.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 35300.0,
+     "cusum_up": 0.0,
+     "cusum_down": 1.091,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-16",
+     "actual": 24926.0,
+     "cumulative": 50919.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 70600.0,
+     "cusum_up": 0.0,
+     "cusum_down": 2.403,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-17",
+     "actual": 25981.0,
+     "cumulative": 76900.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 105900.0,
+     "cusum_up": 0.0,
+     "cusum_down": 3.496,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-18",
+     "actual": 25999.0,
+     "cumulative": 102899.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 141200.0,
+     "cusum_up": 0.0,
+     "cusum_down": 4.585,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-19",
+     "actual": 34212.0,
+     "cumulative": 137111.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 176500.0,
+     "cusum_up": 0.0,
+     "cusum_down": 3.974,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-20",
+     "actual": 38702.0,
+     "cumulative": 175813.0,
+     "npt": 5201.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 211800.0,
+     "cusum_up": 0.542,
+     "cusum_down": 2.432,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-21",
+     "actual": 33852.0,
+     "cumulative": 209665.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 247100.0,
+     "cusum_up": 0.078,
+     "cusum_down": 1.895,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-22",
+     "actual": 33495.0,
+     "cumulative": 243160.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 282400.0,
+     "cusum_up": 0.0,
+     "cusum_down": 1.432,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-23",
+     "actual": 34540.0,
+     "cumulative": 277700.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 317700.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.753,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-24",
+     "actual": 35158.0,
+     "cumulative": 312858.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 353000.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-25",
+     "actual": 34822.0,
+     "cumulative": 347680.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 388300.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-26",
+     "actual": 36293.0,
+     "cumulative": 383973.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 423600.0,
+     "cusum_up": 0.043,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-27",
+     "actual": 37708.0,
+     "cumulative": 421681.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 458900.0,
+     "cusum_up": 0.378,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-28",
+     "actual": 38295.0,
+     "cumulative": 459976.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 494200.0,
+     "cusum_up": 0.835,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-29",
+     "actual": 40257.0,
+     "cumulative": 500233.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 529500.0,
+     "cusum_up": 1.699,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-30",
+     "actual": 40541.0,
+     "cumulative": 540774.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 564800.0,
+     "cusum_up": 2.621,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-31",
+     "actual": 48888.0,
+     "cumulative": 589662.0,
+     "npt": 6269.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 600100.0,
+     "cusum_up": 5.273,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-01",
+     "actual": 43231.0,
+     "cumulative": 632893.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 635400.0,
+     "cusum_up": 6.752,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-02",
+     "actual": 44897.0,
+     "cumulative": 677790.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 670700.0,
+     "cusum_up": 8.577,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-03",
+     "actual": 46571.0,
+     "cumulative": 724361.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 706000.0,
+     "cusum_up": 10.748,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-04",
+     "actual": 47446.0,
+     "cumulative": 771807.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 741300.0,
+     "cusum_up": 13.101,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-05",
+     "actual": 47570.0,
+     "cumulative": 819377.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 776600.0,
+     "cusum_up": 15.479,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-06",
+     "actual": 48561.0,
+     "cumulative": 867938.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 811900.0,
+     "cusum_up": 18.063,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-07",
+     "actual": 50691.0,
+     "cumulative": 918629.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 847200.0,
+     "cusum_up": 21.087,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-08",
+     "actual": 51819.0,
+     "cumulative": 970448.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 882500.0,
+     "cusum_up": 24.346,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-09",
+     "actual": 53108.0,
+     "cumulative": 1023556.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 917800.0,
+     "cusum_up": 27.871,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-10",
+     "actual": 53334.0,
+     "cumulative": 1076890.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 953100.0,
+     "cusum_up": 31.443,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-11",
+     "actual": 60724.0,
+     "cumulative": 1137614.0,
+     "npt": 5862.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 988400.0,
+     "cusum_up": 36.546,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-12",
+     "actual": 55449.0,
+     "cumulative": 1193063.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 1023700.0,
+     "cusum_up": 40.556,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-13",
+     "actual": 57521.0,
+     "cumulative": 1250584.0,
+     "npt": 0.0,
+     "baseline": 33673.5,
+     "planned_cumulative": 1059000.0,
+     "cusum_up": 44.995,
+     "cusum_down": 0.0,
+     "spike": false
+    }
+   ],
+   "projection": [
+    {
+     "cost_date": "2026-11-13",
+     "estimate": 1250584.0,
+     "low": 1250584.0,
+     "high": 1250584.0
+    },
+    {
+     "cost_date": "2026-11-14",
+     "estimate": 1305247.71,
+     "low": 1301229.0,
+     "high": 1309266.43
+    },
+    {
+     "cost_date": "2026-11-15",
+     "estimate": 1359911.43,
+     "low": 1354228.11,
+     "high": 1365594.75
+    },
+    {
+     "cost_date": "2026-11-16",
+     "estimate": 1414575.14,
+     "low": 1407614.53,
+     "high": 1421535.76
+    },
+    {
+     "cost_date": "2026-11-17",
+     "estimate": 1469238.86,
+     "low": 1461201.43,
+     "high": 1477276.28
+    },
+    {
+     "cost_date": "2026-11-18",
+     "estimate": 1523902.57,
+     "low": 1514916.46,
+     "high": 1532888.68
+    },
+    {
+     "cost_date": "2026-11-19",
+     "estimate": 1578566.29,
+     "low": 1568722.49,
+     "high": 1588410.08
+    }
+   ],
+   "missing_dates": [],
+   "cusum_limit": 4.0,
+   "drift_baseline": 33673.5,
+   "drift_start": "2026-10-26",
+   "drift_direction": "up",
+   "notes": [
+    "Actual days are elapsed time, not a count of sheets: from the Well Spud Date & Time to the Progress Completed Date & Time (or the end of the last included cost date), reported at three decimals. Sections and activities report active days \u2014 the cost dates on which they were charged.",
+    "NPT and UPA days are deduplicated operational service hours divided by 24; affected cost dates are not used as duration.",
+    "All depths are standardized to metres (feet / 3.281), and each section's actual depth uses the last depth value entered in the daily cost register.",
+    "Every daily cost sheet in the current range is listed with a link to the sheet itself."
+   ]
+  },
+  "w-d": {
+   "well": {
+    "well_id": "w-d",
+    "well_code": "WELL-D",
+    "well_name": "Dibi West 4",
+    "rig_code": "RIG-02",
+    "status": "active",
+    "currency": "USD",
+    "afe_amount": 877200.0,
+    "actual_amount": 1185601.0,
+    "utilisation_percent": 135.2,
+    "planned_days": 24.0,
+    "actual_days": 26.0,
+    "npt_amount": 133438.0,
+    "npt_share_percent": 11.3,
+    "recorded_days": 26,
+    "first_cost_date": "2026-10-19",
+    "last_cost_date": "2026-11-13",
+    "score": 39,
+    "band": "at-risk",
+    "critical": 1,
+    "warning": 3,
+    "info": 2,
+    "summary": "WELL-D has recorded USD 1,185,601 against an AFE of USD 877,200 (135%). It is past its planned duration and is spending about USD 46,051 a day. Main points: actual cost is 35% over the afe; services is over its afe allowance; non-productive time is 11% of the cost.",
+    "forecast": {
+     "available": true,
+     "reason": "",
+     "recent_daily": 46051.29,
+     "planned_daily": 36550.0,
+     "remaining_days": 0.0,
+     "estimate": 1185601.0,
+     "low": 1185601.0,
+     "high": 1185601.0,
+     "variance": 308401.0,
+     "variance_percent": 35.2,
+     "exhaustion_date": "2026-11-13",
+     "days_to_exhaustion": 0.0,
+     "past_plan": true
+    },
+    "analysed": true
+   },
+   "findings": [
+    {
+     "id": "7fb76101c16cb346",
+     "code": "afe-exceeded",
+     "severity": "critical",
+     "category": "budget",
+     "title": "Actual cost is 35% over the AFE",
+     "detail": "USD 1,185,601 has been recorded against an AFE of USD 877,200: USD 308,401 over.",
+     "basis": "Recorded actual cost compared with the effective AFE amount (SOW adjustments included).",
+     "suggestion": "Raise a supplementary AFE or an approved SOW adjustment for the overrun before further cost is committed, and record the cause against the well.",
+     "well_id": "w-d",
+     "well_code": "WELL-D",
+     "cost_date": null,
+     "amount": 308401.0,
+     "evidence": [
+      {
+       "label": "AFE",
+       "value": "USD 877,200"
+      },
+      {
+       "label": "Actual",
+       "value": "USD 1,185,601"
+      },
+      {
+       "label": "Over",
+       "value": "USD 308,401"
+      }
+     ],
+     "action_path": "/afe/register",
+     "action_label": "Open the AFE register"
+    },
+    {
+     "id": "cf82e014d25244c5",
+     "code": "group-overrun",
+     "severity": "warning",
+     "category": "budget",
+     "title": "Services is over its AFE allowance",
+     "detail": "USD 1,185,601 recorded against USD 787,200 planned for Services.",
+     "basis": "Recorded cost of the cost group compared with its AFE estimate (more than 5% over).",
+     "suggestion": "Check which services lines exceed the estimate and whether another group is carrying a matching saving.",
+     "well_id": "w-d",
+     "well_code": "WELL-D",
+     "cost_date": null,
+     "amount": 398401.0,
+     "evidence": [
+      {
+       "label": "Planned",
+       "value": "USD 787,200"
+      },
+      {
+       "label": "Actual",
+       "value": "USD 1,185,601"
+      }
+     ],
+     "action_path": "/afe/register",
+     "action_label": "Open the AFE register"
+    },
+    {
+     "id": "83998d80b32879e3",
+     "code": "npt-share",
+     "severity": "warning",
+     "category": "npt",
+     "title": "Non-productive time is 11% of the cost",
+     "detail": "USD 133,438 of USD 1,185,601 was recorded against non-productive time.",
+     "basis": "NPT cost as a share of recorded cost; warning from 10%, critical from 20%.",
+     "suggestion": "Review the NPT events by activity and service company; where a contractor is accountable, check the contract for a reduced or zero rate and raise the back-charge.",
+     "well_id": "w-d",
+     "well_code": "WELL-D",
+     "cost_date": null,
+     "amount": 133438.0,
+     "evidence": [
+      {
+       "label": "NPT cost",
+       "value": "USD 133,438"
+      },
+      {
+       "label": "Share of cost",
+       "value": "11.3%"
+      }
+     ],
+     "action_path": "/daily-cost/analysis/w-d",
+     "action_label": "Open Daily Cost Analysis"
+    },
+    {
+     "id": "32e08365b637ddbf",
+     "code": "schedule-overrun",
+     "severity": "warning",
+     "category": "schedule",
+     "title": "2 day(s) beyond the planned duration",
+     "detail": "26 days recorded against 24 planned; each further day costs about USD 46,051.",
+     "basis": "Recorded actual days compared with the configured planned days (plan adjustments included).",
+     "suggestion": "Record a well plan SOW adjustment for the extra days so the plan, the AFE and the forecast agree.",
+     "well_id": "w-d",
+     "well_code": "WELL-D",
+     "cost_date": null,
+     "amount": 92102.57,
+     "evidence": [
+      {
+       "label": "Planned days",
+       "value": "24"
+      },
+      {
+       "label": "Actual days",
+       "value": "26"
+      }
+     ],
+     "action_path": "/rig-well/wells",
+     "action_label": "Open the well register"
+    },
+    {
+     "id": "7caec1361026cdf5",
+     "code": "entry-warnings",
+     "severity": "info",
+     "category": "data-quality",
+     "title": "26 sheet(s) carry entry-check warnings",
+     "detail": "The entry checks raised a warning on these sheets when they were saved and it was kept as entered.",
+     "basis": "Count of daily sheets whose saved entry checks include a warning.",
+     "suggestion": "Open the sheets from Daily Cost Analysis and either correct the line or confirm it with a remark.",
+     "well_id": "w-d",
+     "well_code": "WELL-D",
+     "cost_date": null,
+     "amount": null,
+     "evidence": [],
+     "action_path": "/daily-cost/analysis/w-d",
+     "action_label": "Open Daily Cost Analysis"
+    },
+    {
+     "id": "76c562ada587219d",
+     "code": "all-draft",
+     "severity": "info",
+     "category": "data-quality",
+     "title": "None of the daily sheets has been submitted",
+     "detail": "All 26 sheets are still in draft, so the figures can change without a reopen trail.",
+     "basis": "Every recorded daily sheet has draft status.",
+     "suggestion": "Submit the sheets that have been checked so the record is locked and later changes are traceable.",
+     "well_id": "w-d",
+     "well_code": "WELL-D",
+     "cost_date": null,
+     "amount": null,
+     "evidence": [],
+     "action_path": "/daily-cost/analysis/w-d",
+     "action_label": "Open Daily Cost Analysis"
+    }
+   ],
+   "days": [
+    {
+     "cost_date": "2026-10-19",
+     "actual": 48252.0,
+     "cumulative": 48252.0,
+     "npt": 14776.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 36550.0,
+     "cusum_up": 0.193,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-20",
+     "actual": 32914.0,
+     "cumulative": 81166.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 73100.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.58,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-21",
+     "actual": 33375.0,
+     "cumulative": 114541.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 109650.0,
+     "cusum_up": 0.0,
+     "cusum_down": 1.107,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-22",
+     "actual": 47926.0,
+     "cumulative": 162467.0,
+     "npt": 14613.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 146200.0,
+     "cusum_up": 0.156,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-23",
+     "actual": 42692.0,
+     "cumulative": 205159.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 182750.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-24",
+     "actual": 41603.0,
+     "cumulative": 246762.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 219300.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-25",
+     "actual": 57486.0,
+     "cumulative": 304248.0,
+     "npt": 15093.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 255850.0,
+     "cusum_up": 1.261,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-26",
+     "actual": 41819.0,
+     "cumulative": 346067.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 292400.0,
+     "cusum_up": 0.711,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-27",
+     "actual": 41489.0,
+     "cumulative": 387556.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 328950.0,
+     "cusum_up": 0.122,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-28",
+     "actual": 56994.0,
+     "cumulative": 444550.0,
+     "npt": 14847.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 365500.0,
+     "cusum_up": 1.326,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-29",
+     "actual": 41049.0,
+     "cumulative": 485599.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 402050.0,
+     "cusum_up": 0.687,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-30",
+     "actual": 41141.0,
+     "cumulative": 526740.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 438600.0,
+     "cusum_up": 0.058,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-31",
+     "actual": 56596.0,
+     "cumulative": 583336.0,
+     "npt": 14648.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 475150.0,
+     "cusum_up": 1.216,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-01",
+     "actual": 41756.0,
+     "cumulative": 625092.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 511700.0,
+     "cusum_up": 0.658,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-02",
+     "actual": 41237.0,
+     "cumulative": 666329.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 548250.0,
+     "cusum_up": 0.04,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-03",
+     "actual": 57600.0,
+     "cumulative": 723929.0,
+     "npt": 15150.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 584800.0,
+     "cusum_up": 1.314,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-04",
+     "actual": 41600.0,
+     "cumulative": 765529.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 621350.0,
+     "cusum_up": 0.739,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-05",
+     "actual": 41211.0,
+     "cumulative": 806740.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 657900.0,
+     "cusum_up": 0.118,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-06",
+     "actual": 56502.0,
+     "cumulative": 863242.0,
+     "npt": 14601.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 694450.0,
+     "cusum_up": 1.265,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-07",
+     "actual": 41763.0,
+     "cumulative": 905005.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 731000.0,
+     "cusum_up": 0.708,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-08",
+     "actual": 40980.0,
+     "cumulative": 945985.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 767550.0,
+     "cusum_up": 0.061,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-09",
+     "actual": 57236.0,
+     "cumulative": 1003221.0,
+     "npt": 14968.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 804100.0,
+     "cusum_up": 1.293,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-10",
+     "actual": 41058.0,
+     "cumulative": 1044279.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 840650.0,
+     "cusum_up": 0.654,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-11",
+     "actual": 42465.0,
+     "cumulative": 1086744.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 877200.0,
+     "cusum_up": 0.179,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-12",
+     "actual": 56784.0,
+     "cumulative": 1143528.0,
+     "npt": 14742.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 877200.0,
+     "cusum_up": 1.358,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-13",
+     "actual": 42073.0,
+     "cumulative": 1185601.0,
+     "npt": 0.0,
+     "baseline": 42255.5,
+     "planned_cumulative": 877200.0,
+     "cusum_up": 0.837,
+     "cusum_down": 0.0,
+     "spike": false
+    }
+   ],
+   "projection": [],
+   "missing_dates": [],
+   "cusum_limit": 4.0,
+   "drift_baseline": 42255.5,
+   "drift_start": null,
+   "drift_direction": "",
+   "notes": [
+    "Actual days are elapsed time, not a count of sheets: from the Well Spud Date & Time to the Progress Completed Date & Time (or the end of the last included cost date), reported at three decimals. Sections and activities report active days \u2014 the cost dates on which they were charged.",
+    "NPT and UPA days are deduplicated operational service hours divided by 24; affected cost dates are not used as duration.",
+    "All depths are standardized to metres (feet / 3.281), and each section's actual depth uses the last depth value entered in the daily cost register.",
+    "Every daily cost sheet in the current range is listed with a link to the sheet itself."
+   ]
+  },
+  "w-c": {
+   "well": {
+    "well_id": "w-c",
+    "well_code": "WELL-C",
+    "well_name": "Chota Deep 3",
+    "rig_code": "RIG-02",
+    "status": "active",
+    "currency": "USD",
+    "afe_amount": 1205200.0,
+    "actual_amount": 1021327.0,
+    "utilisation_percent": 84.7,
+    "planned_days": 34.0,
+    "actual_days": 24.0,
+    "npt_amount": 11549.0,
+    "npt_share_percent": 1.1,
+    "recorded_days": 24,
+    "first_cost_date": "2026-10-19",
+    "last_cost_date": "2026-11-13",
+    "score": 64,
+    "band": "watch",
+    "critical": 0,
+    "warning": 3,
+    "info": 2,
+    "summary": "WELL-C has recorded USD 1,021,327 against an AFE of USD 1,205,200 (85%). At the current rate it is forecast to finish near USD 1,367,328, 13% over the AFE. Main points: unusually high daily cost on 2026-11-07; forecast to finish 13% over the afe; 2 cost date(s) have no daily sheet.",
+    "forecast": {
+     "available": true,
+     "reason": "",
+     "recent_daily": 34600.14,
+     "planned_daily": 35447.06,
+     "remaining_days": 10.0,
+     "estimate": 1367328.43,
+     "low": 1364648.57,
+     "high": 1370008.28,
+     "variance": 162128.43,
+     "variance_percent": 13.5,
+     "exhaustion_date": "2026-11-18",
+     "days_to_exhaustion": 5.3,
+     "past_plan": false
+    },
+    "analysed": true
+   },
+   "findings": [
+    {
+     "id": "c57b9887da3b5a68",
+     "code": "cost-spike",
+     "severity": "warning",
+     "category": "anomaly",
+     "title": "Unusually high daily cost on 2026-11-07",
+     "detail": "USD 247,800 was recorded against a typical USD 34,653 for the surrounding days (7.2x).",
+     "basis": "Modified z-score +99.0 against the median of up to 7 days either side (flagged beyond 3.5, at least 25% from that median, and no neighbouring day within 15% of it).",
+     "suggestion": "Open the sheet and confirm the large lines: a lump-sum, mobilisation or tangible delivery is legitimate; a quantity keyed with an extra digit or a cost booked on the wrong date is not.",
+     "well_id": "w-c",
+     "well_code": "WELL-C",
+     "cost_date": "2026-11-07",
+     "amount": 213147.0,
+     "evidence": [
+      {
+       "label": "Recorded",
+       "value": "USD 247,800"
+      },
+      {
+       "label": "Typical day",
+       "value": "USD 34,653"
+      },
+      {
+       "label": "Difference",
+       "value": "USD 213,147"
+      }
+     ],
+     "action_path": "/daily-cost/analysis/w-c",
+     "action_label": "Open Daily Cost Analysis"
+    },
+    {
+     "id": "e3d435f4936b198b",
+     "code": "forecast-overrun",
+     "severity": "warning",
+     "category": "budget",
+     "title": "Forecast to finish 13% over the AFE",
+     "detail": "At the recent USD 34,600 per day for the remaining 10 planned days, the well would close near USD 1,367,328 against an AFE of USD 1,205,200; the AFE would be used up around 2026-11-18.",
+     "basis": "Estimate at completion = recorded cost + mean of the last 7 recorded days (spikes excluded) x remaining planned days. Range USD 1,364,649 to USD 1,370,008.",
+     "suggestion": "Review the remaining programme with operations now: confirm the days to go, and prepare a supplementary AFE or SOW adjustment if the forecast holds.",
+     "well_id": "w-c",
+     "well_code": "WELL-C",
+     "cost_date": null,
+     "amount": 162128.43,
+     "evidence": [
+      {
+       "label": "Estimate at completion",
+       "value": "USD 1,367,328"
+      },
+      {
+       "label": "AFE",
+       "value": "USD 1,205,200"
+      },
+      {
+       "label": "Forecast overrun",
+       "value": "USD 162,128"
+      }
+     ],
+     "action_path": "/afe/register",
+     "action_label": "Open the AFE register"
+    },
+    {
+     "id": "77f166262664a30a",
+     "code": "missing-sheets",
+     "severity": "warning",
+     "category": "data-quality",
+     "title": "2 cost date(s) have no daily sheet",
+     "detail": "No cost is recorded for 2026-10-31 to 2026-11-01. At a typical USD 34,684 per day that is about USD 69,369 not yet in the record.",
+     "basis": "Every calendar date between the first and last recorded cost date is expected to have a sheet.",
+     "suggestion": "Enter the missing sheets, or record a zero-cost sheet with a remark if the rig was released for those days.",
+     "well_id": "w-c",
+     "well_code": "WELL-C",
+     "cost_date": "2026-10-31",
+     "amount": 69369.0,
+     "evidence": [
+      {
+       "label": "Missing dates",
+       "value": "2"
+      },
+      {
+       "label": "Typical day",
+       "value": "USD 34,684"
+      }
+     ],
+     "action_path": "/daily-cost/analysis/w-c",
+     "action_label": "Open Daily Cost Analysis"
+    },
+    {
+     "id": "d7723806234e32b9",
+     "code": "entry-warnings",
+     "severity": "info",
+     "category": "data-quality",
+     "title": "24 sheet(s) carry entry-check warnings",
+     "detail": "The entry checks raised a warning on these sheets when they were saved and it was kept as entered.",
+     "basis": "Count of daily sheets whose saved entry checks include a warning.",
+     "suggestion": "Open the sheets from Daily Cost Analysis and either correct the line or confirm it with a remark.",
+     "well_id": "w-c",
+     "well_code": "WELL-C",
+     "cost_date": null,
+     "amount": null,
+     "evidence": [],
+     "action_path": "/daily-cost/analysis/w-c",
+     "action_label": "Open Daily Cost Analysis"
+    },
+    {
+     "id": "13a70e893e46eace",
+     "code": "all-draft",
+     "severity": "info",
+     "category": "data-quality",
+     "title": "None of the daily sheets has been submitted",
+     "detail": "All 24 sheets are still in draft, so the figures can change without a reopen trail.",
+     "basis": "Every recorded daily sheet has draft status.",
+     "suggestion": "Submit the sheets that have been checked so the record is locked and later changes are traceable.",
+     "well_id": "w-c",
+     "well_code": "WELL-C",
+     "cost_date": null,
+     "amount": null,
+     "evidence": [],
+     "action_path": "/daily-cost/analysis/w-c",
+     "action_label": "Open Daily Cost Analysis"
+    }
+   ],
+   "days": [
+    {
+     "cost_date": "2026-10-19",
+     "actual": 26558.0,
+     "cumulative": 26558.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 35447.06,
+     "cusum_up": 0.0,
+     "cusum_down": 0.123,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-20",
+     "actual": 25228.0,
+     "cumulative": 51786.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 70894.12,
+     "cusum_up": 0.0,
+     "cusum_down": 0.448,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-21",
+     "actual": 26255.0,
+     "cumulative": 78041.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 106341.18,
+     "cusum_up": 0.0,
+     "cusum_down": 0.617,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-22",
+     "actual": 25222.0,
+     "cumulative": 103263.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 141788.24,
+     "cusum_up": 0.0,
+     "cusum_down": 0.944,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-23",
+     "actual": 34967.0,
+     "cumulative": 138230.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 177235.29,
+     "cusum_up": 0.161,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-24",
+     "actual": 39642.0,
+     "cumulative": 177872.0,
+     "npt": 5521.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 212682.35,
+     "cusum_up": 1.035,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-25",
+     "actual": 34716.0,
+     "cumulative": 212588.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 248129.41,
+     "cusum_up": 1.158,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-26",
+     "actual": 35093.0,
+     "cumulative": 247681.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 283576.47,
+     "cusum_up": 1.338,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-27",
+     "actual": 34788.0,
+     "cumulative": 282469.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 319023.53,
+     "cusum_up": 1.472,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-28",
+     "actual": 34575.0,
+     "cumulative": 317044.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 354470.59,
+     "cusum_up": 1.573,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-29",
+     "actual": 35291.0,
+     "cumulative": 352335.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 389917.65,
+     "cusum_up": 1.783,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-30",
+     "actual": 34343.0,
+     "cumulative": 386678.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 425364.71,
+     "cusum_up": 1.849,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-02",
+     "actual": 34653.0,
+     "cumulative": 421331.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 460811.76,
+     "cusum_up": 1.962,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-03",
+     "actual": 34899.0,
+     "cumulative": 456230.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 496258.82,
+     "cusum_up": 2.112,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-04",
+     "actual": 40656.0,
+     "cumulative": 496886.0,
+     "npt": 6028.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 531705.88,
+     "cusum_up": 3.142,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-05",
+     "actual": 34440.0,
+     "cumulative": 531326.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 567152.94,
+     "cusum_up": 3.222,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-06",
+     "actual": 34313.0,
+     "cumulative": 565639.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 602600.0,
+     "cusum_up": 3.283,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-07",
+     "actual": 247800.0,
+     "cumulative": 813439.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 638047.06,
+     "cusum_up": 3.283,
+     "cusum_down": 0.0,
+     "spike": true
+    },
+    {
+     "cost_date": "2026-11-08",
+     "actual": 35326.0,
+     "cumulative": 848765.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 673494.12,
+     "cusum_up": 3.499,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-09",
+     "actual": 34068.0,
+     "cumulative": 882833.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 708941.18,
+     "cusum_up": 3.522,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-10",
+     "actual": 35131.0,
+     "cumulative": 917964.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 744388.24,
+     "cusum_up": 3.708,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-11",
+     "actual": 35297.0,
+     "cumulative": 953261.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 779835.29,
+     "cusum_up": 3.92,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-12",
+     "actual": 34199.0,
+     "cumulative": 987460.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 815282.35,
+     "cusum_up": 3.963,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-13",
+     "actual": 33867.0,
+     "cumulative": 1021327.0,
+     "npt": 0.0,
+     "baseline": 30637.0,
+     "planned_cumulative": 850729.41,
+     "cusum_up": 3.956,
+     "cusum_down": 0.0,
+     "spike": false
+    }
+   ],
+   "projection": [
+    {
+     "cost_date": "2026-11-13",
+     "estimate": 1021327.0,
+     "low": 1021327.0,
+     "high": 1021327.0
+    },
+    {
+     "cost_date": "2026-11-14",
+     "estimate": 1055927.14,
+     "low": 1055079.7,
+     "high": 1056774.59
+    },
+    {
+     "cost_date": "2026-11-15",
+     "estimate": 1090527.29,
+     "low": 1089328.82,
+     "high": 1091725.75
+    },
+    {
+     "cost_date": "2026-11-16",
+     "estimate": 1125127.43,
+     "low": 1123659.61,
+     "high": 1126595.25
+    },
+    {
+     "cost_date": "2026-11-17",
+     "estimate": 1159727.57,
+     "low": 1158032.68,
+     "high": 1161422.46
+    },
+    {
+     "cost_date": "2026-11-18",
+     "estimate": 1194327.71,
+     "low": 1192432.77,
+     "high": 1196222.66
+    },
+    {
+     "cost_date": "2026-11-19",
+     "estimate": 1228927.86,
+     "low": 1226852.05,
+     "high": 1231003.66
+    },
+    {
+     "cost_date": "2026-11-20",
+     "estimate": 1263528.0,
+     "low": 1261285.87,
+     "high": 1265770.13
+    },
+    {
+     "cost_date": "2026-11-21",
+     "estimate": 1298128.14,
+     "low": 1295731.21,
+     "high": 1300525.08
+    },
+    {
+     "cost_date": "2026-11-22",
+     "estimate": 1332728.29,
+     "low": 1330185.95,
+     "high": 1335270.62
+    },
+    {
+     "cost_date": "2026-11-23",
+     "estimate": 1367328.43,
+     "low": 1364648.57,
+     "high": 1370008.28
+    }
+   ],
+   "missing_dates": [
+    "2026-10-31",
+    "2026-11-01"
+   ],
+   "cusum_limit": 4.0,
+   "drift_baseline": 30637.0,
+   "drift_start": null,
+   "drift_direction": "",
+   "notes": [
+    "Actual days are elapsed time, not a count of sheets: from the Well Spud Date & Time to the Progress Completed Date & Time (or the end of the last included cost date), reported at three decimals. Sections and activities report active days \u2014 the cost dates on which they were charged.",
+    "NPT and UPA days are deduplicated operational service hours divided by 24; affected cost dates are not used as duration.",
+    "All depths are standardized to metres (feet / 3.281), and each section's actual depth uses the last depth value entered in the daily cost register.",
+    "Every daily cost sheet in the current range is listed with a link to the sheet itself."
+   ]
+  },
+  "w-a": {
+   "well": {
+    "well_id": "w-a",
+    "well_code": "WELL-A",
+    "well_name": "Agbami North 1",
+    "rig_code": "RIG-01",
+    "status": "active",
+    "currency": "USD",
+    "afe_amount": 1402000.0,
+    "actual_amount": 1005328.0,
+    "utilisation_percent": 71.7,
+    "planned_days": 40.0,
+    "actual_days": 30.0,
+    "npt_amount": 16793.0,
+    "npt_share_percent": 1.7,
+    "recorded_days": 30,
+    "first_cost_date": "2026-10-15",
+    "last_cost_date": "2026-11-13",
+    "score": 94,
+    "band": "good",
+    "critical": 0,
+    "warning": 0,
+    "info": 2,
+    "summary": "WELL-A has recorded USD 1,005,328 against an AFE of USD 1,402,000 (72%). At the current rate it is forecast to finish near USD 1,356,205, 3% under the AFE. No cost or schedule concern was found; there are record-keeping notes only.",
+    "forecast": {
+     "available": true,
+     "reason": "",
+     "recent_daily": 35087.71,
+     "planned_daily": 35050.0,
+     "remaining_days": 10.0,
+     "estimate": 1356205.14,
+     "low": 1353747.61,
+     "high": 1358662.68,
+     "variance": -45794.86,
+     "variance_percent": -3.3,
+     "exhaustion_date": "2026-11-24",
+     "days_to_exhaustion": 11.3,
+     "past_plan": false
+    },
+    "analysed": true
+   },
+   "findings": [
+    {
+     "id": "43a774379974c519",
+     "code": "entry-warnings",
+     "severity": "info",
+     "category": "data-quality",
+     "title": "30 sheet(s) carry entry-check warnings",
+     "detail": "The entry checks raised a warning on these sheets when they were saved and it was kept as entered.",
+     "basis": "Count of daily sheets whose saved entry checks include a warning.",
+     "suggestion": "Open the sheets from Daily Cost Analysis and either correct the line or confirm it with a remark.",
+     "well_id": "w-a",
+     "well_code": "WELL-A",
+     "cost_date": null,
+     "amount": null,
+     "evidence": [],
+     "action_path": "/daily-cost/analysis/w-a",
+     "action_label": "Open Daily Cost Analysis"
+    },
+    {
+     "id": "e1b8bfdc72bf059f",
+     "code": "all-draft",
+     "severity": "info",
+     "category": "data-quality",
+     "title": "None of the daily sheets has been submitted",
+     "detail": "All 30 sheets are still in draft, so the figures can change without a reopen trail.",
+     "basis": "Every recorded daily sheet has draft status.",
+     "suggestion": "Submit the sheets that have been checked so the record is locked and later changes are traceable.",
+     "well_id": "w-a",
+     "well_code": "WELL-A",
+     "cost_date": null,
+     "amount": null,
+     "evidence": [],
+     "action_path": "/daily-cost/analysis/w-a",
+     "action_label": "Open Daily Cost Analysis"
+    }
+   ],
+   "days": [
+    {
+     "cost_date": "2026-10-15",
+     "actual": 25463.0,
+     "cumulative": 25463.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 35050.0,
+     "cusum_up": 0.0,
+     "cusum_down": 1.106,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-16",
+     "actual": 25108.0,
+     "cumulative": 50571.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 70100.0,
+     "cusum_up": 0.0,
+     "cusum_down": 2.283,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-17",
+     "actual": 25608.0,
+     "cumulative": 76179.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 105150.0,
+     "cusum_up": 0.0,
+     "cusum_down": 3.361,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-18",
+     "actual": 26133.0,
+     "cumulative": 102312.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 140200.0,
+     "cusum_up": 0.0,
+     "cusum_down": 4.334,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-19",
+     "actual": 33498.0,
+     "cumulative": 135810.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 175250.0,
+     "cusum_up": 0.0,
+     "cusum_down": 3.843,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-20",
+     "actual": 38796.0,
+     "cumulative": 174606.0,
+     "npt": 5248.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 210300.0,
+     "cusum_up": 0.544,
+     "cusum_down": 2.3,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-21",
+     "actual": 35081.0,
+     "cumulative": 209687.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 245350.0,
+     "cusum_up": 0.349,
+     "cusum_down": 1.494,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-22",
+     "actual": 34497.0,
+     "cumulative": 244184.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 280400.0,
+     "cusum_up": 0.038,
+     "cusum_down": 0.805,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-23",
+     "actual": 33592.0,
+     "cumulative": 277776.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 315450.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.296,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-24",
+     "actual": 34148.0,
+     "cumulative": 311924.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 350500.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-25",
+     "actual": 34593.0,
+     "cumulative": 346517.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 385550.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-26",
+     "actual": 33518.0,
+     "cumulative": 380035.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 420600.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-27",
+     "actual": 34439.0,
+     "cumulative": 414474.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 455650.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-28",
+     "actual": 33839.0,
+     "cumulative": 448313.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 490700.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-29",
+     "actual": 33476.0,
+     "cumulative": 481789.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 525750.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-30",
+     "actual": 33576.0,
+     "cumulative": 515365.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 560800.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-10-31",
+     "actual": 40276.0,
+     "cumulative": 555641.0,
+     "npt": 5988.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 595850.0,
+     "cusum_up": 0.838,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-01",
+     "actual": 34256.0,
+     "cumulative": 589897.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 630900.0,
+     "cusum_up": 0.479,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-02",
+     "actual": 33543.0,
+     "cumulative": 623440.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 665950.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-03",
+     "actual": 33892.0,
+     "cumulative": 657332.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 701000.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-04",
+     "actual": 33585.0,
+     "cumulative": 690917.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 736050.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-05",
+     "actual": 34528.0,
+     "cumulative": 725445.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 771100.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-06",
+     "actual": 34269.0,
+     "cumulative": 759714.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 806150.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-07",
+     "actual": 33521.0,
+     "cumulative": 793235.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 841200.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-08",
+     "actual": 35093.0,
+     "cumulative": 828328.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 876250.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-09",
+     "actual": 34558.0,
+     "cumulative": 862886.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 911300.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-10",
+     "actual": 33653.0,
+     "cumulative": 896539.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 946350.0,
+     "cusum_up": 0.0,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-11",
+     "actual": 39414.0,
+     "cumulative": 935953.0,
+     "npt": 5557.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 981400.0,
+     "cusum_up": 0.667,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-12",
+     "actual": 34691.0,
+     "cumulative": 970644.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 1016450.0,
+     "cusum_up": 0.394,
+     "cusum_down": 0.0,
+     "spike": false
+    },
+    {
+     "cost_date": "2026-11-13",
+     "actual": 34684.0,
+     "cumulative": 1005328.0,
+     "npt": 0.0,
+     "baseline": 33545.0,
+     "planned_cumulative": 1051500.0,
+     "cusum_up": 0.121,
+     "cusum_down": 0.0,
+     "spike": false
+    }
+   ],
+   "projection": [
+    {
+     "cost_date": "2026-11-13",
+     "estimate": 1005328.0,
+     "low": 1005328.0,
+     "high": 1005328.0
+    },
+    {
+     "cost_date": "2026-11-14",
+     "estimate": 1040415.71,
+     "low": 1039638.57,
+     "high": 1041192.86
+    },
+    {
+     "cost_date": "2026-11-15",
+     "estimate": 1075503.43,
+     "low": 1074404.39,
+     "high": 1076602.47
+    },
+    {
+     "cost_date": "2026-11-16",
+     "estimate": 1110591.14,
+     "low": 1109245.1,
+     "high": 1111937.19
+    },
+    {
+     "cost_date": "2026-11-17",
+     "estimate": 1145678.86,
+     "low": 1144124.58,
+     "high": 1147233.14
+    },
+    {
+     "cost_date": "2026-11-18",
+     "estimate": 1180766.57,
+     "low": 1179028.83,
+     "high": 1182504.31
+    },
+    {
+     "cost_date": "2026-11-19",
+     "estimate": 1215854.29,
+     "low": 1213950.69,
+     "high": 1217757.88
+    },
+    {
+     "cost_date": "2026-11-20",
+     "estimate": 1250942.0,
+     "low": 1248885.88,
+     "high": 1252998.12
+    },
+    {
+     "cost_date": "2026-11-21",
+     "estimate": 1286029.71,
+     "low": 1283831.63,
+     "high": 1288227.8
+    },
+    {
+     "cost_date": "2026-11-22",
+     "estimate": 1321117.43,
+     "low": 1318786.01,
+     "high": 1323448.85
+    },
+    {
+     "cost_date": "2026-11-23",
+     "estimate": 1356205.14,
+     "low": 1353747.61,
+     "high": 1358662.68
+    }
+   ],
+   "missing_dates": [],
+   "cusum_limit": 4.0,
+   "drift_baseline": 33545.0,
+   "drift_start": null,
+   "drift_direction": "",
+   "notes": [
+    "Actual days are elapsed time, not a count of sheets: from the Well Spud Date & Time to the Progress Completed Date & Time (or the end of the last included cost date), reported at three decimals. Sections and activities report active days \u2014 the cost dates on which they were charged.",
+    "NPT and UPA days are deduplicated operational service hours divided by 24; affected cost dates are not used as duration.",
+    "All depths are standardized to metres (feet / 3.281), and each section's actual depth uses the last depth value entered in the daily cost register.",
+    "Every daily cost sheet in the current range is listed with a link to the sheet itself."
+   ]
+  },
+  "w-e": {
+   "well": {
+    "well_id": "w-e",
+    "well_code": "WELL-E",
+    "well_name": "Egina South 5",
+    "rig_code": "RIG-02",
+    "status": "upcoming",
+    "currency": "USD",
+    "afe_amount": 1074000.0,
+    "actual_amount": 0.0,
+    "utilisation_percent": 0.0,
+    "planned_days": 30.0,
+    "actual_days": null,
+    "npt_amount": 0.0,
+    "npt_share_percent": null,
+    "recorded_days": 0,
+    "first_cost_date": null,
+    "last_cost_date": null,
+    "score": 100,
+    "band": "good",
+    "critical": 0,
+    "warning": 0,
+    "info": 0,
+    "summary": "WELL-E has no recorded cost yet. No concern was found.",
+    "forecast": {
+     "available": false,
+     "reason": "At least three recorded cost days are needed for a forecast.",
+     "recent_daily": null,
+     "planned_daily": null,
+     "remaining_days": null,
+     "estimate": null,
+     "low": null,
+     "high": null,
+     "variance": null,
+     "variance_percent": null,
+     "exhaustion_date": null,
+     "days_to_exhaustion": null,
+     "past_plan": false
+    },
+    "analysed": true
+   },
+   "findings": [],
+   "days": [],
+   "projection": [],
+   "missing_dates": [],
+   "cusum_limit": 4.0,
+   "drift_baseline": null,
+   "drift_start": null,
+   "drift_direction": "",
+   "notes": [
+    "Actual days are elapsed time, not a count of sheets: from the Well Spud Date & Time to the Progress Completed Date & Time (or the end of the last included cost date), reported at three decimals. Sections and activities report active days \u2014 the cost dates on which they were charged.",
+    "NPT and UPA days are deduplicated operational service hours divided by 24; affected cost dates are not used as duration.",
+    "All depths are standardized to metres (feet / 3.281), and each section's actual depth uses the last depth value entered in the daily cost register.",
+    "Every daily cost sheet in the current range is listed with a link to the sheet itself.",
+    "At least three recorded cost days are needed for a forecast."
+   ]
+  }
+ }
+}

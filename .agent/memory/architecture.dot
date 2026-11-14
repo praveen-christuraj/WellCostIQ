@@ -3,6 +3,7 @@ digraph WellCostIQ {
   rankdir=LR;
   graph [fontname="Helvetica", bgcolor="transparent"];
   node [shape=box, style="rounded,filled", fillcolor="#e7f5f1", color="#2a8c80", fontname="Helvetica", fontsize=10];
+  ".agent/tools/demo-data.py";
   ".agent/tools/entry-checks-simulation.py";
   ".agent/tools/graphify.py";
   "backend/app/__init__.py";
@@ -15,6 +16,7 @@ digraph WellCostIQ {
   "backend/app/api/business_dashboard.py";
   "backend/app/api/catalogue_items.py";
   "backend/app/api/catalogue_options.py";
+  "backend/app/api/cost_intelligence.py";
   "backend/app/api/costing_sets.py";
   "backend/app/api/daily_cost.py";
   "backend/app/api/database_browser.py";
@@ -48,6 +50,7 @@ digraph WellCostIQ {
   "backend/app/core/units.py";
   "backend/app/domain/__init__.py";
   "backend/app/domain/afe_costing.py";
+  "backend/app/domain/cost_intelligence.py";
   "backend/app/domain/entry_rules.py";
   "backend/app/domain/entry_statistics.py";
   "backend/app/domain/invoice_processing.py";
@@ -83,6 +86,7 @@ digraph WellCostIQ {
   "backend/app/schemas/backup.py";
   "backend/app/schemas/business_dashboard.py";
   "backend/app/schemas/catalogue.py";
+  "backend/app/schemas/cost_intelligence.py";
   "backend/app/schemas/costing_set.py";
   "backend/app/schemas/daily_cost.py";
   "backend/app/schemas/database_browser.py";
@@ -112,6 +116,7 @@ digraph WellCostIQ {
   "backend/app/services/catalogue.py";
   "backend/app/services/catalogue_specs.py";
   "backend/app/services/console.py";
+  "backend/app/services/cost_intelligence.py";
   "backend/app/services/daily_cost.py";
   "backend/app/services/database_browser.py";
   "backend/app/services/dependencies.py";
@@ -228,6 +233,7 @@ digraph WellCostIQ {
   "frontend/src/lib/catalogue.ts";
   "frontend/src/lib/chartExport.ts";
   "frontend/src/lib/chartInteraction.ts";
+  "frontend/src/lib/costIntelligence.ts";
   "frontend/src/lib/costingSets.ts";
   "frontend/src/lib/dailyAllocations.ts";
   "frontend/src/lib/dailyCost.ts";
@@ -270,6 +276,7 @@ digraph WellCostIQ {
   "frontend/src/pages/CatalogueLists.tsx";
   "frontend/src/pages/Consumables.tsx";
   "frontend/src/pages/ConsumptionLossesReport.tsx";
+  "frontend/src/pages/CostIntelligence.tsx";
   "frontend/src/pages/CostingSets.tsx";
   "frontend/src/pages/CustomReportViewer.tsx";
   "frontend/src/pages/CustomReports.tsx";
@@ -363,6 +370,9 @@ digraph WellCostIQ {
   "backend/app/api/catalogue_options.py" -> "backend/app/schemas/master_data.py";
   "backend/app/api/catalogue_options.py" -> "backend/app/services/__init__.py";
   "backend/app/api/catalogue_options.py" -> "backend/app/services/catalogue.py";
+  "backend/app/api/cost_intelligence.py" -> "backend/app/api/deps.py";
+  "backend/app/api/cost_intelligence.py" -> "backend/app/schemas/cost_intelligence.py";
+  "backend/app/api/cost_intelligence.py" -> "backend/app/services/__init__.py";
   "backend/app/api/costing_sets.py" -> "backend/app/api/deps.py";
   "backend/app/api/costing_sets.py" -> "backend/app/models/__init__.py";
   "backend/app/api/costing_sets.py" -> "backend/app/schemas/costing_set.py";
@@ -607,6 +617,10 @@ digraph WellCostIQ {
   "backend/app/services/catalogue_specs.py" -> "backend/app/models/catalogue.py";
   "backend/app/services/catalogue_specs.py" -> "backend/app/schemas/catalogue.py";
   "backend/app/services/catalogue_specs.py" -> "backend/app/services/catalogue.py";
+  "backend/app/services/cost_intelligence.py" -> "backend/app/domain/__init__.py";
+  "backend/app/services/cost_intelligence.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/cost_intelligence.py" -> "backend/app/schemas/cost_intelligence.py";
+  "backend/app/services/cost_intelligence.py" -> "backend/app/services/__init__.py";
   "backend/app/services/daily_cost.py" -> "backend/app/core/precision.py";
   "backend/app/services/daily_cost.py" -> "backend/app/core/units.py";
   "backend/app/services/daily_cost.py" -> "backend/app/domain/service_groups.py";
@@ -715,6 +729,7 @@ digraph WellCostIQ {
   "frontend/src/App.tsx" -> "frontend/src/pages/CatalogueLists.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/Consumables.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/ConsumptionLossesReport.tsx";
+  "frontend/src/App.tsx" -> "frontend/src/pages/CostIntelligence.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/CostingSets.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/CustomReportViewer.tsx";
   "frontend/src/App.tsx" -> "frontend/src/pages/CustomReports.tsx";
@@ -1174,6 +1189,22 @@ digraph WellCostIQ {
   "frontend/src/pages/ConsumptionLossesReport.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/pages/ConsumptionLossesReport.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/ConsumptionLossesReport.tsx" -> "frontend/src/lib/mudCost.ts";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/components/ui/ChartPanel.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/components/ui/DatasetState.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/components/ui/ExportReportDialog.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/components/ui/InteractiveChart.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/components/ui/StatCard.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/context/AuthContext.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/context/ThemeContext.tsx";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/designSystem.ts";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/lib/api.ts";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/lib/chartInteraction.ts";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/lib/costIntelligence.ts";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/lib/matrixWorkbook.ts";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/lib/reportPdf.ts";
+  "frontend/src/pages/CostIntelligence.tsx" -> "frontend/src/lib/rigWell.ts";
   "frontend/src/pages/CostingSets.tsx" -> "frontend/src/components/AdvancedItemSelector.tsx";
   "frontend/src/pages/CostingSets.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/CostingSets.tsx" -> "frontend/src/components/DataTable.tsx";

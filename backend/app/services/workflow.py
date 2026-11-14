@@ -96,6 +96,7 @@ def create_task(
     entity_id: str = "",
     entity_label: str = "",
     action_path: str = "",
+    notify_path: str = "/other-management/tasks",
 ) -> WorkflowTask:
     existing = db.scalar(select(WorkflowTask).where(
         WorkflowTask.organization_id == organization_id,
@@ -128,7 +129,7 @@ def create_task(
     notify(
         db, organization_id=organization_id, recipients=[row for row in recipients if row], actor=actor,
         title=f"New task: {title}", message=description or title, severity="warning" if priority in ("high", "critical") else "info",
-        notification_type="task", action_path="/other-management/tasks", entity_type="workflow_task", entity_id=task.id,
+        notification_type="task", action_path=notify_path, entity_type="workflow_task", entity_id=task.id,
     )
     return task
 

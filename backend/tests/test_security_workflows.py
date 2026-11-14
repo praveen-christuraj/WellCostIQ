@@ -351,9 +351,13 @@ def test_reset_reviewer_reaches_the_queue_without_the_account_register():
             ))
             db.commit()
         reviewer = login_as(client, "reviewer@example.com", "Reviewer-pass-123!")
+        # An ordinary account asks for help. (A request for an *owner* account is
+        # visible to the reviewer but only an owner may decide it — see
+        # test_a_delegated_reviewer_cannot_approve_a_reset_for_an_owner.)
+        make_member(client, owner)
 
         assert client.post("/api/v1/auth/forgot-password", json={
-            "organization": "north", "email": "owner@example.com", "reason": "Locked out"}).status_code == 202
+            "organization": "north", "email": "member@example.com", "reason": "Locked out"}).status_code == 202
 
         summary = client.get("/api/v1/security/overview", headers=reviewer)
         assert summary.status_code == 200, summary.text
@@ -373,3 +377,95 @@ def test_reset_reviewer_reaches_the_queue_without_the_account_register():
         assert client.post(
             f"/api/v1/security/users/{queue.json()[0]['user_id']}/lock", headers=reviewer, json={"notes": ""},
         ).status_code == 403
+
+
+def _forgot(client: TestClient, organization: str = "north", email: str = "member@example.com"):
+    response = client.post("/api/v1/auth/forgot-password", json={"organization": organization, "email": email, "reason": "Locked out"})
+    assert response.status_code == 202, response.text
+
+
+def test_recovery_forms_tolerate_how_people_type_and_paste():
+    with TestClient(app) as client:
+        owner = login(client)
+        make_member(client, owner)
+        # Workspace typed by its name, e-mail in capitals with a stray blank.
+        _forgot(client, organization=" North Energy ", email=" Member@Example.com ")
+        queue = client.get("/api/v1/security/password-reset-requests", headers=owner).json()
+        assert [row["user_email"] for row in queue] == ["member@example.com"]
+
+        approved = client.post(f"/api/v1/security/password-reset-requests/{queue[0]['id']}/approve", headers=owner, json={"notes": ""})
+        code = approved.json()["reset_code"]
+        # Pasted with a line break in the middle and a trailing blank.
+        pasted = f" {code[:20]}\n{code[20:]} "
+        done = client.post("/api/v1/auth/reset-password", json={
+            "organization": "NORTH ", "email": "member@example.com ", "reset_code": pasted,
+            "new_password": "Pasted-code-pass-2026!", "confirm_password": "Pasted-code-pass-2026!",
+        })
+        assert done.status_code == 204, done.text
+        assert login_as(client, "member@example.com", "Pasted-code-pass-2026!")
+
+
+def test_a_pending_reset_always_has_open_work_for_reviewers():
+    with TestClient(app) as client:
+        owner = login(client)
+        make_member(client, owner)
+        _forgot(client)
+        tasks = client.get("/api/v1/tasks?status=active&type=password_reset", headers=owner).json()["items"]
+        assert len(tasks) == 1 and tasks[0]["action_path"] == "/security"
+        # The reviewer's notice opens the Security Centre, which they can always reach.
+        with SessionLocal() as db:
+            notice = db.scalar(select(UserNotification).where(UserNotification.notification_type == "task"))
+            assert notice.action_path == "/security"
+
+        # Somebody cancels the task while the request is still undecided.
+        cancelled = client.patch(f"/api/v1/tasks/{tasks[0]['id']}", headers=owner, json={"status": "cancelled", "notes": "closed by mistake"})
+        assert cancelled.status_code == 200, cancelled.text
+        _forgot(client)
+        queue = client.get("/api/v1/security/password-reset-requests?status=pending", headers=owner).json()
+        assert len(queue) == 1, "asking twice must not open a second request"
+        tasks = client.get("/api/v1/tasks?status=active&type=password_reset", headers=owner).json()["items"]
+        assert len(tasks) == 1, "the pending request must be back in the Task Manager"
+        # Asking a third time changes nothing.
+        _forgot(client)
+        assert client.get("/api/v1/tasks?status=active&type=password_reset", headers=owner).json()["total"] == 1
+
+
+def test_a_lost_code_is_replaced_and_only_the_newest_code_works():
+    with TestClient(app) as client:
+        owner = login(client)
+        make_member(client, owner)
+        _forgot(client)
+        row = client.get("/api/v1/security/password-reset-requests", headers=owner).json()[0]
+        assert client.post(f"/api/v1/security/password-reset-requests/{row['id']}/reissue", headers=owner, json={"notes": ""}).status_code == 409
+        first = client.post(f"/api/v1/security/password-reset-requests/{row['id']}/approve", headers=owner, json={"notes": "verified"}).json()["reset_code"]
+        second = client.post(f"/api/v1/security/password-reset-requests/{row['id']}/reissue", headers=owner, json={"notes": ""})
+        assert second.status_code == 200, second.text
+        payload = {"organization": "north", "email": "member@example.com",
+                   "new_password": "Newest-code-pass-2026!", "confirm_password": "Newest-code-pass-2026!"}
+        assert client.post("/api/v1/auth/reset-password", json={**payload, "reset_code": first}).status_code == 400
+        # A code issued from the Accounts tab retires the one issued from the queue.
+        member_id = next(item["id"] for item in client.get("/api/v1/security/users", headers=owner).json() if item["email"] == "member@example.com")
+        third = client.post(f"/api/v1/security/users/{member_id}/reset-code", headers=owner, json={"notes": "replaced"}).json()["reset_code"]
+        assert client.post("/api/v1/auth/reset-password", json={**payload, "reset_code": second.json()["reset_code"]}).status_code == 400
+        assert client.post("/api/v1/auth/reset-password", json={**payload, "reset_code": third}).status_code == 204
+        # Used once, never again; and a completed request cannot be re-issued.
+        assert client.post("/api/v1/auth/reset-password", json={**payload, "reset_code": third, "new_password": "Another-pass-2027!", "confirm_password": "Another-pass-2027!"}).status_code == 400
+        completed = next(item for item in client.get("/api/v1/security/password-reset-requests?status=completed", headers=owner).json())
+        assert client.post(f"/api/v1/security/password-reset-requests/{completed['id']}/reissue", headers=owner, json={"notes": ""}).status_code == 409
+
+
+def test_a_delegated_reviewer_cannot_approve_a_reset_for_an_owner():
+    with TestClient(app) as client:
+        owner = login(client)
+        member = make_member(client, owner)
+        grant_permissions(client, owner, member, ("security:password-reset", "tasks:read"), "Reset reviewer")
+        reviewer = login_as(client, "member@example.com", "Member-pass-123!")
+        _forgot(client, email="owner@example.com")
+        row = client.get("/api/v1/security/password-reset-requests", headers=reviewer).json()[0]
+        # The reviewer sees the work in the Task Manager too...
+        assert client.get("/api/v1/tasks?status=active", headers=reviewer).json()["total"] == 1
+        # ...but taking over the owner account is not theirs to do.
+        for action in ("approve", "reject"):
+            refused = client.post(f"/api/v1/security/password-reset-requests/{row['id']}/{action}", headers=reviewer, json={"notes": ""})
+            assert refused.status_code == 403, refused.text
+        assert client.post(f"/api/v1/security/password-reset-requests/{row['id']}/approve", headers=owner, json={"notes": ""}).status_code == 200

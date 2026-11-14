@@ -1,4 +1,4 @@
-.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check
+.PHONY: test build graph up seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check cost-intelligence-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -127,6 +127,15 @@ chart-drill-check:
 		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
 		--outfile=node_modules/.cache/chart-drill-check.mjs --loader:.jsx=jsx --external:jsdom && \
 		node node_modules/.cache/chart-drill-check.mjs
+
+# Cost Intelligence: the analysis finds what the shaped demo wells contain, and
+# the page selects the well whose bar was pressed.
+cost-intelligence-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/cost-intelligence-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/cost-intelligence-check.mjs --loader:.jsx=jsx --external:jsdom && \
+		node node_modules/.cache/cost-intelligence-check.mjs
 
 # Export as shown: the dashboard PDF (figures + the visuals themselves), the
 # matrix Excel (merged header bands, stacked well/section columns, totals) and

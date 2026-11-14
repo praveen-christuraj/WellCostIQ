@@ -233,7 +233,7 @@ collectSources('src')
 const directEChartsUsers = sourceFiles.filter(path => path !== 'src/components/ui/InteractiveChart.tsx' && readFileSync(path, 'utf8').includes('echarts-for-react'))
 const chartHostSource = readFileSync('src/components/ui/InteractiveChart.tsx', 'utf8')
 const chartUsageCount = sourceFiles.reduce((count, path) => count + (readFileSync(path, 'utf8').match(/<InteractiveChart\b/g)?.length ?? 0), 0)
-check('all interactive charts use the shared precision host', directEChartsUsers.length === 0 && chartUsageCount === 16, `${chartUsageCount} charts; direct renderers: ${directEChartsUsers.join(',') || 'none'}`)
+check('all interactive charts use the shared precision host', directEChartsUsers.length === 0 && chartUsageCount === 21, `${chartUsageCount} charts; direct renderers: ${directEChartsUsers.join(',') || 'none'}`)
 check('chart host corrects zoomed pointer mapping with SVG', chartHostSource.includes("renderer: 'svg'") && chartHostSource.includes('transitionDuration: 0'))
 for (const mode of ['light', 'dark']) {
   const colours = chartPalette(mode).series

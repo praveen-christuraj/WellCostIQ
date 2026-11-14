@@ -42,6 +42,10 @@ If you receive any of these notices and did not expect it, contact your workspac
 5. The administrator gives the code to the verified user through the organisation’s approved secure channel—not an open group, ticket comment or unverified caller.
 6. The user opens **I already have an approved reset code** on the sign-in page, supplies the code and a new password. Codes expire after 30 minutes by default and cannot be reused.
 
+7. If the code is lost or expires before it is used, the administrator opens the same request under **Reset requests** and chooses **Issue new code**. The earlier code stops working at once; only one code per account is ever live.
+
+The request appears in two places: the **Security Centre** queue (needs *Review password reset requests*) and the **Task Manager** (also needs *View tasks*). The notification opens the Security Centre. A request for an **owner** account can only be approved, rejected or re-issued by an owner. The workspace ID, e-mail and code may be pasted with surrounding blanks or a line break.
+
 Never approve your own unexpected request without verifying why it was raised. Repeated or suspicious requests should be escalated to IT/security.
 
 ### Notifications and tasks

@@ -41,14 +41,19 @@ export default function Login() {
   const requestReset = async () => {
     setRecoveryBusy(true); setRecoveryError('')
     try {
-      const result = await api<{ message: string }>('/auth/forgot-password', { method: 'POST', body: body({ organization, email, reason }) })
+      const result = await api<{ message: string }>('/auth/forgot-password', { method: 'POST', body: body({ organization: organization.trim(), email: email.trim(), reason: reason.trim() }) })
       setRecoveryMessage(result.message); setRecovery(null); setReason('')
     } catch (err) { setRecoveryError((err as Error).message) } finally { setRecoveryBusy(false) }
   }
   const completeReset = async () => {
+    // A pasted code often carries a trailing blank or a line break; the code
+    // itself never contains whitespace, so it is removed before sending.
+    const code = resetCode.replace(/\s+/g, '')
+    if (code.length < 20) { setRecoveryError('That reset code is incomplete. Paste the whole code your administrator gave you.'); return }
+    if (newPassword !== confirmPassword) { setRecoveryError('The new password and its confirmation do not match.'); return }
     setRecoveryBusy(true); setRecoveryError('')
     try {
-      await api('/auth/reset-password', { method: 'POST', body: body({ organization, email, reset_code: resetCode, new_password: newPassword, confirm_password: confirmPassword }) })
+      await api('/auth/reset-password', { method: 'POST', body: body({ organization: organization.trim(), email: email.trim(), reset_code: code, new_password: newPassword, confirm_password: confirmPassword }) })
       setRecoveryMessage('Password updated. Sign in with your new password.'); setRecovery(null); setResetCode(''); setNewPassword(''); setConfirmPassword('')
     } catch (err) { setRecoveryError((err as Error).message) } finally { setRecoveryBusy(false) }
   }
@@ -133,11 +138,12 @@ export default function Login() {
     <FormDialog open={recovery === 'reset'} title="Use an approved reset code" maxWidth="sm"
       subtitle="Enter the single-use code supplied by your workspace administrator, then choose a new password."
       onClose={() => setRecovery(null)} onSubmit={() => void completeReset()} busy={recoveryBusy} submitLabel="Reset password"
-      submitDisabled={!resetCode || !newPassword || !confirmPassword}>
+      submitDisabled={!organization.trim() || !email.trim() || !resetCode.trim() || !newPassword || !confirmPassword}>
       <Box display="grid" gap={2} pt={.5}>
         <TextField label="Workspace ID" required value={organization} onChange={e => setOrganization(e.target.value)}/>
         <TextField label="Work email" required type="email" value={email} onChange={e => setEmail(e.target.value)}/>
-        <TextField label="Reset code" required value={resetCode} onChange={e => setResetCode(e.target.value)}/>
+        <TextField label="Reset code" required value={resetCode} onChange={e => setResetCode(e.target.value)} autoComplete="off"
+          helperText="Paste the whole code. It works once and for a limited time; ask your administrator for a new one if it has expired."/>
         <TextField label="New password" required type="password" autoComplete="new-password"
           helperText="12–128 characters; use at least three of uppercase, lowercase, number and symbol. The last five passwords cannot be reused."
           value={newPassword} onChange={e => setNewPassword(e.target.value)}/>
