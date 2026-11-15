@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  AddRounded, DeleteForeverOutlined, DeleteOutlineRounded, EventNoteOutlined,
-  FactCheckOutlined, FilterAltOffOutlined, FilterListRounded, HistoryOutlined, InfoOutlined, InsightsOutlined,
-  PlaceOutlined, PlaylistAddCheckRounded, RestoreRounded, RefreshRounded, PrintOutlined, WaterDropOutlined,
+  AccountTreeOutlined, AddRounded, ArrowBackRounded, ChevronRightRounded, DeleteForeverOutlined,
+  DeleteOutlineRounded, EventNoteOutlined, ExpandMoreRounded, FactCheckOutlined, FilterAltOffOutlined,
+  FilterListRounded, HistoryOutlined, InfoOutlined, InsightsOutlined, PlaceOutlined,
+  PlaylistAddCheckRounded, PrintOutlined, RefreshRounded, RestoreRounded, TableRowsOutlined,
+  WaterDropOutlined,
 } from '@mui/icons-material'
 import {
-  Alert, Box, Button, CircularProgress, MenuItem, Paper, Tab, Tabs, TextField, Typography,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, IconButton, MenuItem, Paper, Tab, Tabs,
+  TextField, ToggleButton, ToggleButtonGroup, Typography,
 } from '@mui/material'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
@@ -51,6 +54,32 @@ const TABS: { key: CostTab; label: string; hint: string }[] = [
 const RIG_INACTIVITY_DAYS = 5
 
 type PendingAction = { kind: 'delete' | 'restore' | 'purge'; rows: DailyCostEntry[] }
+type ScopeKey = 'drilling' | 'completion'
+type OpenGroup = { rigId: string; rigCode: string; rigName: string; wellId: string; wellCode: string; wellName: string; scope: ScopeKey }
+type ScopeGroupBucket = {
+  scope: ScopeKey
+  label: string
+  rows: DailyCostEntry[]
+  latest: DailyCostEntry
+  draftCount: number
+  submittedCount: number
+}
+type WellGroupBucket = {
+  wellId: string
+  wellCode: string
+  wellName: string
+  scopes: ScopeGroupBucket[]
+  sheetCount: number
+  latestDate: string
+}
+type RigGroupBucket = {
+  rigId: string
+  rigCode: string
+  rigName: string
+  wells: WellGroupBucket[]
+  sheetCount: number
+  latestDate: string
+}
 
 /**
  * The registers that capture the detail behind a daily sheet. Each shortcut opens
@@ -116,6 +145,10 @@ export default function DailyCostManagement() {
   const [dateTo, setDateTo] = useState('')
   // One row per rig: the latest saved sheet, plus the rigs that went quiet.
   const [latestRigs, setLatestRigs] = useState<DailyCostRigLatestReport | null>(null)
+  // Grouping by Rig -> Well -> Scope lets users navigate cleanly without a flat wall of sheets.
+  const [viewMode, setViewMode] = useState<'grouped' | 'flat'>('grouped')
+  const [openGroup, setOpenGroup] = useState<OpenGroup | null>(null)
+  const [collapsedRigs, setCollapsedRigs] = useState<Record<string, boolean>>({})
 
   const filterQuery = entryQuery({
     well_id: filterWell, afe_id: filterAfe, status: filterStatus, from: dateFrom, to: dateTo,
@@ -206,6 +239,105 @@ export default function DailyCostManagement() {
     if (active === 'history') return perRigView ? rows.filter(row => !latest(row)) : []
     return rows.filter(row => rowTab(row) === active)
   }, [rows, active, deletedView, perRigView, latestRowIds])
+
+  useEffect(() => {
+    // Switching tabs or entering Deleted Entries resets the active drill-down group.
+    setOpenGroup(null)
+    setSelected([])
+  }, [active, deletedView])
+
+  const groupedTree = useMemo<RigGroupBucket[]>(() => {
+    const rigMap = new Map<string, {
+      rigId: string; rigCode: string; rigName: string
+      wellMap: Map<string, {
+        wellId: string; wellCode: string; wellName: string
+        scopeMap: Map<ScopeKey, DailyCostEntry[]>
+      }>
+    }>()
+    for (const row of tabRows) {
+      const rigKey = row.rig_id || row.rig_code || 'unassigned'
+      let rigBucket = rigMap.get(rigKey)
+      if (!rigBucket) {
+        rigBucket = { rigId: row.rig_id, rigCode: row.rig_code || '—', rigName: row.rig_name || '', wellMap: new Map() }
+        rigMap.set(rigKey, rigBucket)
+      }
+      let wellBucket = rigBucket.wellMap.get(row.well_id)
+      if (!wellBucket) {
+        wellBucket = { wellId: row.well_id, wellCode: row.well_code, wellName: row.well_name, scopeMap: new Map() }
+        rigBucket.wellMap.set(row.well_id, wellBucket)
+      }
+      const sc: ScopeKey = rowScope(row)
+      const list = wellBucket.scopeMap.get(sc) ?? []
+      list.push(row)
+      wellBucket.scopeMap.set(sc, list)
+    }
+    const rigs: RigGroupBucket[] = []
+    for (const rigBucket of rigMap.values()) {
+      const wellBuckets: WellGroupBucket[] = []
+      for (const wellBucket of rigBucket.wellMap.values()) {
+        const scopes: ScopeGroupBucket[] = (['drilling', 'completion'] as const)
+          .filter(sc => wellBucket.scopeMap.has(sc))
+          .map(sc => {
+            const list = [...(wellBucket.scopeMap.get(sc) ?? [])].sort((a, b) => b.cost_date.localeCompare(a.cost_date))
+            return {
+              scope: sc,
+              label: sc === 'completion' ? 'Completion' : 'Drilling',
+              rows: list,
+              latest: list[0],
+              draftCount: list.filter(item => item.status === 'draft').length,
+              submittedCount: list.filter(item => item.status === 'submitted').length,
+            }
+          })
+        const sheetCount = scopes.reduce((sum, s) => sum + s.rows.length, 0)
+        const latestDate = scopes.map(s => s.latest.cost_date).sort().at(-1) ?? ''
+        wellBuckets.push({
+          wellId: wellBucket.wellId, wellCode: wellBucket.wellCode, wellName: wellBucket.wellName,
+          scopes, sheetCount, latestDate,
+        })
+      }
+      wellBuckets.sort((a, b) => a.wellCode.localeCompare(b.wellCode, undefined, { numeric: true }))
+      const sheetCount = wellBuckets.reduce((sum, w) => sum + w.sheetCount, 0)
+      const latestDate = wellBuckets.map(w => w.latestDate).sort().at(-1) ?? ''
+      rigs.push({
+        rigId: rigBucket.rigId, rigCode: rigBucket.rigCode, rigName: rigBucket.rigName,
+        wells: wellBuckets, sheetCount, latestDate,
+      })
+    }
+    rigs.sort((a, b) => a.rigCode.localeCompare(b.rigCode, undefined, { numeric: true }))
+    return rigs
+  }, [tabRows, wellsById, afesById])
+
+  const activeGroupRows = useMemo(() => {
+    if (!openGroup) return tabRows
+    return tabRows.filter(
+      row => row.rig_id === openGroup.rigId && row.well_id === openGroup.wellId && rowScope(row) === openGroup.scope,
+    )
+  }, [openGroup, tabRows, wellsById, afesById])
+
+  const enterScopeGroup = (rig: RigGroupBucket, well: WellGroupBucket, scope: ScopeGroupBucket) => {
+    setOpenGroup({
+      rigId: rig.rigId, rigCode: rig.rigCode, rigName: rig.rigName,
+      wellId: well.wellId, wellCode: well.wellCode, wellName: well.wellName,
+      scope: scope.scope,
+    })
+    setSelected([])
+    if (well.wellId) setScopeWellId(well.wellId)
+    if (rig.rigId) setScopeRigId(rig.rigId)
+  }
+
+  const openCreateForScope = (targetWellId?: string, targetScope?: ScopeKey) => {
+    setCreateError('')
+    setRemarks('')
+    setUsdExchangeRate('')
+    setCostDate(localToday())
+    const chosenWell = wells.find(well => well.id === (targetWellId || scopeWellId)) ?? wells[0]
+    const chosenAfe = reference?.afes.find(item =>
+      item.well_id === chosenWell?.id && (!targetScope || (item.configuration_scope ?? 'drilling') === targetScope),
+    ) ?? reference?.afes.find(item => item.well_id === chosenWell?.id)
+    setWellId(chosenWell?.id ?? '')
+    setAfeId(chosenAfe?.id ?? '')
+    setCreateOpen(true)
+  }
 
   /** How many sheets each tab holds, shown beside its label. */
   const tabCounts = useMemo<Record<CostTab, number>>(() => {
@@ -576,7 +708,26 @@ export default function DailyCostManagement() {
           <Typography fontSize={11} color="text.secondary">
             Filters run on the server for this register only; searches and column filters inside the table narrow the rows already loaded.
           </Typography>
-          <Box ml="auto" display="flex" alignItems="center" gap={1}>
+          <Box ml="auto" display="flex" alignItems="center" gap={1} flexWrap="wrap">
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={viewMode}
+              onChange={(_e, next) => {
+                if (!next) return
+                setViewMode(next)
+                setOpenGroup(null)
+                setSelected([])
+              }}
+              aria-label="Register view layout"
+            >
+              <ToggleButton value="grouped" sx={{ px: 1.1, py: .35, fontSize: 11, textTransform: 'none' }}>
+                <AccountTreeOutlined sx={{ fontSize: 15, mr: .5 }}/>Grouped (Rig → Well → Scope)
+              </ToggleButton>
+              <ToggleButton value="flat" sx={{ px: 1.1, py: .35, fontSize: 11, textTransform: 'none' }}>
+                <TableRowsOutlined sx={{ fontSize: 15, mr: .5 }}/>All sheets
+              </ToggleButton>
+            </ToggleButtonGroup>
             <Typography fontSize={11} color="text.secondary" className="tnum">{tabRows.length} sheet{tabRows.length === 1 ? '' : 's'}</Typography>
             <Button size="small" color="inherit" startIcon={<FilterAltOffOutlined sx={{ fontSize: 16 }}/>} onClick={() => {
               setFilterWell(''); setFilterAfe(''); setFilterStatus(''); setDateFrom(''); setDateTo('')
@@ -610,6 +761,143 @@ export default function DailyCostManagement() {
       </Paper>}
 
       {loading && !rows.length ? <Box py={6} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={26} /></Box> : <>
+        {!deletedView && viewMode === 'grouped' && !openGroup ? (
+          <Box data-testid="daily-cost-grouped-directory" display="grid" gap={1.5}>
+            {!groupedTree.length ? (
+              <Paper variant="outlined" sx={{ p: 4, borderRadius: 2.5, textAlign: 'center' }}>
+                <Typography fontSize={14} fontWeight={700} mb={.5}>No daily cost sheets in this view</Typography>
+                <Typography fontSize={12.5} color="text.secondary">
+                  {filtersActive ? 'Adjust or clear the register filters above to view saved sheets.' : 'Start from a saved AFE estimate on a configured well.'}
+                </Typography>
+              </Paper>
+            ) : groupedTree.map(rig => {
+              const collapsed = Boolean(collapsedRigs[rig.rigId || rig.rigCode])
+              return (
+                <Paper key={rig.rigId || rig.rigCode} variant="outlined" sx={{ borderRadius: 2.5, overflow: 'hidden' }}>
+                  <Box
+                    sx={{
+                      px: 2, py: 1.15, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap',
+                      bgcolor: 'background.default', borderBottom: collapsed ? 0 : '1px solid', borderColor: 'divider',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setCollapsedRigs(prev => ({ ...prev, [rig.rigId || rig.rigCode]: !prev[rig.rigId || rig.rigCode] }))}
+                  >
+                    <IconButton size="small" aria-label={collapsed ? `Expand ${rig.rigCode}` : `Collapse ${rig.rigCode}`} sx={{ p: .25 }}>
+                      {collapsed ? <ChevronRightRounded sx={{ fontSize: 18 }}/> : <ExpandMoreRounded sx={{ fontSize: 18 }}/>}
+                    </IconButton>
+                    <Typography fontSize={13.5} fontWeight={750}>
+                      {rig.rigCode}{rig.rigName ? ` · ${rig.rigName}` : ''}
+                    </Typography>
+                    <Chip size="small" label={`${rig.wells.length} well${rig.wells.length === 1 ? '' : 's'}`} variant="outlined" sx={{ height: 22, fontSize: 11 }}/>
+                    <Chip size="small" label={`${rig.sheetCount} sheet${rig.sheetCount === 1 ? '' : 's'}`} variant="outlined" sx={{ height: 22, fontSize: 11 }}/>
+                    <Typography fontSize={11.5} color="text.secondary" ml="auto" className="tnum">
+                      Latest: {displayDate(rig.latestDate)}
+                    </Typography>
+                  </Box>
+                  <Collapse in={!collapsed}>
+                    <Box sx={{ p: 1.5, display: 'grid', gap: 1.25 }}>
+                      {rig.wells.map(well => (
+                        <Paper key={well.wellId} variant="outlined" sx={{ p: 1.35, borderRadius: 2, bgcolor: 'background.paper' }}>
+                          <Box display="flex" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap" mb={1}>
+                            <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+                              <Typography fontSize={13} fontWeight={700}>{well.wellCode} · {well.wellName}</Typography>
+                              <Typography fontSize={11.5} color="text.secondary" className="tnum">
+                                {well.scopes.length} scope{well.scopes.length === 1 ? '' : 's'} · {well.sheetCount} sheet{well.sheetCount === 1 ? '' : 's'}
+                              </Typography>
+                            </Box>
+                            {can('daily-cost:read') && (
+                              <Button size="small" component={RouterLink} to={`/daily-cost/analysis/${well.wellId}`} sx={{ fontSize: 11.5 }}>
+                                Well analysis
+                              </Button>
+                            )}
+                          </Box>
+                          <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
+                            {well.scopes.map(scope => (
+                              <Paper
+                                key={`${well.wellId}-${scope.scope}`}
+                                variant="outlined"
+                                onClick={() => enterScopeGroup(rig, well, scope)}
+                                sx={{
+                                  p: 1.25, borderRadius: 2, cursor: 'pointer',
+                                  display: 'flex', flexDirection: 'column', gap: .7,
+                                  transition: 'border-color 140ms ease, background-color 140ms ease',
+                                  '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' },
+                                }}
+                              >
+                                <Box display="flex" alignItems="center" justifyContent="space-between" gap={1}>
+                                  <Box display="flex" alignItems="center" gap={.8}>
+                                    <Tag tone={scope.scope === 'completion' ? 'warning' : 'info'}>{scope.label}</Tag>
+                                    <Typography fontSize={12} fontWeight={700} className="tnum">
+                                      {scope.rows.length} sheet{scope.rows.length === 1 ? '' : 's'}
+                                    </Typography>
+                                  </Box>
+                                  <Typography fontSize={11.5} color="primary.main" fontWeight={700} display="inline-flex" alignItems="center">
+                                    Open group <ChevronRightRounded sx={{ fontSize: 16 }}/>
+                                  </Typography>
+                                </Box>
+                                <Box display="flex" alignItems="baseline" justifyContent="space-between" gap={1} flexWrap="wrap">
+                                  <Typography fontSize={11.5} color="text.secondary" className="tnum">
+                                    Latest: <strong>{displayDate(scope.latest.cost_date)}</strong> · {scope.submittedCount} submitted{scope.draftCount ? `, ${scope.draftCount} draft` : ''}
+                                  </Typography>
+                                  <Typography fontSize={12} fontWeight={750} className="tnum">
+                                    Cum: {dailyMoney(String(scope.latest.cumulative_cost ?? scope.latest.total_cost), scope.latest.standard_currency)}
+                                  </Typography>
+                                </Box>
+                                <Box display="flex" alignItems="center" justifyContent="space-between" gap={1} pt={.25} borderTop="1px solid" borderColor="divider">
+                                  <Typography fontSize={11} color="text.secondary" noWrap>
+                                    {scope.latest.afe_code} · {scope.latest.daily_cost_code}
+                                  </Typography>
+                                  <Button
+                                    size="small"
+                                    component={RouterLink}
+                                    to={`/daily-cost/entries/${scope.latest.id}`}
+                                    onClick={event => {
+                                      event.stopPropagation()
+                                      rememberRowScope(scope.latest)
+                                    }}
+                                    sx={{ minWidth: 'auto', px: .8, py: .15, fontSize: 11 }}
+                                  >
+                                    Open latest
+                                  </Button>
+                                </Box>
+                              </Paper>
+                            ))}
+                          </Box>
+                        </Paper>
+                      ))}
+                    </Box>
+                  </Collapse>
+                </Paper>
+              )
+            })}
+          </Box>
+        ) : <>
+        {!deletedView && openGroup && (
+          <Paper variant="outlined" data-testid="daily-cost-group-breadcrumb" sx={{ px: 2, py: 1.15, borderRadius: 2, mb: 1.5, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', bgcolor: 'background.default' }}>
+            <Button size="small" variant="outlined" startIcon={<ArrowBackRounded sx={{ fontSize: 16 }}/>} onClick={() => { setOpenGroup(null); setSelected([]) }}>
+              All Rig → Well → Scope groups
+            </Button>
+            <Typography fontSize={12.5} fontWeight={750}>
+              {openGroup.rigCode}{openGroup.rigName ? ` · ${openGroup.rigName}` : ''}
+            </Typography>
+            <ChevronRightRounded sx={{ fontSize: 16, color: 'text.secondary' }}/>
+            <Typography fontSize={12.5} fontWeight={750}>
+              {openGroup.wellCode} · {openGroup.wellName}
+            </Typography>
+            <ChevronRightRounded sx={{ fontSize: 16, color: 'text.secondary' }}/>
+            <Tag tone={openGroup.scope === 'completion' ? 'warning' : 'info'}>
+              {openGroup.scope === 'completion' ? 'Completion' : 'Drilling'}
+            </Tag>
+            <Typography fontSize={11.5} color="text.secondary" className="tnum" ml="auto">
+              {activeGroupRows.length} sheet{activeGroupRows.length === 1 ? '' : 's'}
+            </Typography>
+            {can('daily-cost:create') && (
+              <Button size="small" variant="contained" startIcon={<AddRounded sx={{ fontSize: 16 }}/>} onClick={() => openCreateForScope(openGroup.wellId, openGroup.scope)}>
+                New {openGroup.scope === 'completion' ? 'completion' : 'drilling'} sheet
+              </Button>
+            )}
+          </Paper>
+        )}
         {selected.length > 0 && <Paper variant="outlined" sx={{ p: 1.4, borderRadius: 2, mb: 1.5, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Typography fontSize={12} fontWeight={700} mr="auto">{selected.length} sheet{selected.length === 1 ? '' : 's'} selected</Typography>
           {!deletedView && can('daily-cost:export') && <Button
@@ -626,12 +914,12 @@ export default function DailyCostManagement() {
         </Paper>}
         <DataTable
           fillHeight
-          fillReserve={!loading && tabRows.length === 0 ? 40 : 0}
-          rows={tabRows}
+          fillReserve={!loading && activeGroupRows.length === 0 ? 40 : 0}
+          rows={activeGroupRows}
           columns={columns}
           rowKey="id"
           searchPlaceholder={deletedView ? 'Search deleted sheets by date, well, AFE or code…' : 'Search sheets by date, well, AFE, amount or status…'}
-          exportName={deletedView ? 'daily-cost-deleted' : `daily-cost-${active}`}
+          exportName={deletedView ? 'daily-cost-deleted' : openGroup ? `daily-cost-${openGroup.wellCode}-${openGroup.scope}` : `daily-cost-${active}`}
           canExport={can('daily-cost:export')}
           onExport={can('daily-cost:export') ? exportAudit : undefined}
           selectable={deletedView
@@ -639,9 +927,9 @@ export default function DailyCostManagement() {
             : can('daily-cost:delete') || can('daily-cost:export')}
           onSelectionChange={setSelected}
         />
-        {!loading && tabRows.length === 0 && <Typography color="text.secondary" fontSize={12} mt={1.2}>
+        {!loading && activeGroupRows.length === 0 && <Typography color="text.secondary" fontSize={12} mt={1.2}>
           {deletedView ? 'There are no deleted daily sheets.' : 'No daily sheets yet. Start from a saved AFE estimate on a configured well.'}
-        </Typography>}
+        </Typography>}</>}
       </>}
     </Box>
 

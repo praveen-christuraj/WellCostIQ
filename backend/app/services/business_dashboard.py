@@ -247,6 +247,7 @@ def _line_subquery(
     date_to: date | None,
     include_draft: bool,
     currency: str = "",
+    afe_ids: Sequence[str] | None = None,
 ) -> Any:
     """One row per daily cost line, with the entry's well, AFE, date and currency.
 
@@ -285,6 +286,8 @@ def _line_subquery(
                 DailyCostEntry.is_deleted.is_(False),
             )
         )
+        if afe_ids is not None:
+            statement = statement.where(DailyCostEntry.afe_id.in_(list(afe_ids)))
         if not include_draft:
             statement = statement.where(DailyCostEntry.status == "submitted")
         if date_from is not None:
@@ -307,6 +310,7 @@ def _allocated_classification_days(
     include_draft: bool,
     currency: str = "",
     afe_id: str = "",
+    afe_ids: Sequence[str] | None = None,
 ) -> tuple[dict[tuple[str, str], Decimal], dict[tuple[str, str], Decimal]]:
     """Return deduplicated NPT/UPA service hours as fractional days.
 
@@ -316,6 +320,8 @@ def _allocated_classification_days(
     divide the rolled-up hours by 24. Billing-day quantities and one-time
     charges are costs, not authoritative elapsed-time records.
     """
+    if afe_ids is not None and not afe_ids:
+        return {}, {}
     conditions = _entry_conditions(
         organization_id,
         well_ids,
@@ -323,6 +329,7 @@ def _allocated_classification_days(
         date_to=date_to,
         include_draft=include_draft,
         afe_id=afe_id,
+        afe_ids=afe_ids,
     )
     conditions.extend((
         DailyCostServiceLine.organization_id == organization_id,
@@ -398,6 +405,7 @@ def _entry_conditions(
     date_to: date | None,
     include_draft: bool,
     afe_id: str = "",
+    afe_ids: Sequence[str] | None = None,
 ) -> list[Any]:
     conditions: list[Any] = [
         DailyCostEntry.organization_id == organization_id,
@@ -406,6 +414,8 @@ def _entry_conditions(
     ]
     if afe_id:
         conditions.append(DailyCostEntry.afe_id == afe_id)
+    if afe_ids is not None:
+        conditions.append(DailyCostEntry.afe_id.in_(list(afe_ids)))
     if date_from is not None:
         conditions.append(DailyCostEntry.cost_date >= date_from)
     if date_to is not None:
@@ -424,9 +434,10 @@ def _entry_totals(
     date_to: date | None,
     include_draft: bool,
     afe_id: str = "",
+    afe_ids: Sequence[str] | None = None,
 ) -> list[Any]:
     """Daily sheet totals grouped by well, AFE and standard currency."""
-    if not well_ids:
+    if not well_ids or (afe_ids is not None and not afe_ids):
         return []
     return list(
         db.execute(
@@ -457,7 +468,8 @@ def _entry_totals(
             )
             .where(*_entry_conditions(
                 organization_id, well_ids,
-                date_from=date_from, date_to=date_to, include_draft=include_draft, afe_id=afe_id,
+                date_from=date_from, date_to=date_to, include_draft=include_draft,
+                afe_id=afe_id, afe_ids=afe_ids,
             ))
             .group_by(DailyCostEntry.well_id, DailyCostEntry.afe_id, DailyCostEntry.standard_currency)
         ).all()
@@ -473,8 +485,9 @@ def _daily_sheets(
     date_to: date | None,
     include_draft: bool,
     afe_id: str = "",
+    afe_ids: Sequence[str] | None = None,
 ) -> dict[date, int]:
-    if not well_ids:
+    if not well_ids or (afe_ids is not None and not afe_ids):
         return {}
     return {
         row[0]: int(row[1])
@@ -482,7 +495,8 @@ def _daily_sheets(
             select(DailyCostEntry.cost_date, func.count(DailyCostEntry.id))
             .where(*_entry_conditions(
                 organization_id, well_ids,
-                date_from=date_from, date_to=date_to, include_draft=include_draft, afe_id=afe_id,
+                date_from=date_from, date_to=date_to, include_draft=include_draft,
+                afe_id=afe_id, afe_ids=afe_ids,
             ))
             .group_by(DailyCostEntry.cost_date)
         ).all()
@@ -516,9 +530,13 @@ def dashboard(
     well_status: str = "",
     currency: str = "",
     include_draft: bool = True,
+    scope: str = "",
 ) -> BusinessDashboardOut:
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="The start date must not be after the end date")
+    normalized_scope = scope.strip().lower()
+    if normalized_scope and normalized_scope not in ("drilling", "completion"):
+        raise HTTPException(status_code=422, detail="Scope must be 'drilling' or 'completion'")
     if not access_allowed(user):
         raise HTTPException(status_code=403, detail="Permission denied")
 
@@ -576,13 +594,27 @@ def dashboard(
     sow_map: dict[str, Any] = {}
     afe_read_error = False
     conversion_pending_afes = 0
+    scoped_afe_ids: list[str] | None = None
+    if normalized_scope and well_ids:
+        scoped_afe_ids = list(
+            db.scalars(
+                select(Afe.id).where(
+                    Afe.organization_id == organization_id,
+                    Afe.well_id.in_(well_ids),
+                    Afe.is_deleted.is_(False),
+                    Afe.configuration_scope == normalized_scope,
+                )
+            ).all()
+        )
     if caps.budget:
-        scope = set(well_ids)
-        afes = [afe for afe in all_afes if afe.well_id in scope]
+        well_set = set(well_ids)
+        afes = [afe for afe in all_afes if afe.well_id in well_set]
         if afe_id:
             afes = [afe for afe in afes if afe.id == afe_id]
         if afe_type:
             afes = [afe for afe in afes if afe.afe_type == afe_type]
+        if normalized_scope:
+            afes = [afe for afe in afes if afe.configuration_scope == normalized_scope]
         if afes:
             try:
                 # The pricing helper is shared with the AFE register and overview so the
@@ -653,7 +685,8 @@ def dashboard(
     if caps.actuals and well_ids:
         for row in _entry_totals(
             db, organization_id, well_ids,
-            date_from=date_from, date_to=date_to, include_draft=include_draft, afe_id=afe_id,
+            date_from=date_from, date_to=date_to, include_draft=include_draft,
+            afe_id=afe_id, afe_ids=scoped_afe_ids,
         ):
             code = str(row[2] or "")
             use_usd_cols = selected == "USD"
@@ -699,7 +732,8 @@ def dashboard(
             afe_bucket["npt"] += npt_amt
         sheets_by_day = _daily_sheets(
             db, organization_id, well_ids,
-            date_from=date_from, date_to=date_to, include_draft=include_draft, afe_id=afe_id,
+            date_from=date_from, date_to=date_to, include_draft=include_draft,
+            afe_id=afe_id, afe_ids=scoped_afe_ids,
         )
 
     # ---- line facts: classification duration, sections, depth, daily trend ----
@@ -709,10 +743,11 @@ def dashboard(
     daily_facts: dict[date, dict[str, Decimal]] = {}
     group_actual: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     classification_amounts: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-    if caps.actuals and well_ids:
+    if caps.actuals and well_ids and (scoped_afe_ids is None or scoped_afe_ids):
         lines = _line_subquery(
             db, organization_id, well_ids,
-            date_from=date_from, date_to=date_to, include_draft=include_draft, currency=selected,
+            date_from=date_from, date_to=date_to, include_draft=include_draft,
+            currency=selected, afe_ids=scoped_afe_ids,
         )
         for well_key, classification, affected_dates, amount in db.execute(
             select(
@@ -738,6 +773,7 @@ def dashboard(
             include_draft=include_draft,
             currency=selected,
             afe_id=afe_id,
+            afe_ids=scoped_afe_ids,
         )
         well_classification.update(allocated_well_days)
         afe_classification.update(allocated_afe_days)
@@ -759,21 +795,32 @@ def dashboard(
                 "active_days": int(active_days or 0),
                 "amount": Decimal(amount or 0),
             }
-        for cost_day, amount, npt, upa in db.execute(
+        for cost_day, amount, npt, upa, tangibles_amt, services_amt, consumables_amt, other_amt in db.execute(
             select(
                 lines.c.cost_date,
                 func.sum(lines.c.standard_amount),
                 func.sum(case((lines.c.classification == "NPT", lines.c.standard_amount), else_=Decimal("0"))),
                 func.sum(case((lines.c.classification == "UPA", lines.c.standard_amount), else_=Decimal("0"))),
+                func.sum(case((lines.c.cost_group == "Tangibles", lines.c.standard_amount), else_=Decimal("0"))),
+                func.sum(case((lines.c.cost_group == "Services", lines.c.standard_amount), else_=Decimal("0"))),
+                func.sum(case((lines.c.cost_group == "Consumables", lines.c.standard_amount), else_=Decimal("0"))),
+                func.sum(case((lines.c.cost_group == "Other Expenses", lines.c.standard_amount), else_=Decimal("0"))),
             )
             .select_from(lines)
             .group_by(lines.c.cost_date)
             .order_by(lines.c.cost_date)
         ).all():
+            actual_val = Decimal(amount or 0)
+            tangibles_val = Decimal(tangibles_amt or 0)
             daily_facts[cost_day] = {
-                "actual": Decimal(amount or 0),
+                "actual": actual_val,
                 "npt": Decimal(npt or 0),
                 "upa": Decimal(upa or 0),
+                "tangibles": tangibles_val,
+                "operational": max(Decimal("0"), actual_val - tangibles_val),
+                "services": Decimal(services_amt or 0),
+                "consumables": Decimal(consumables_amt or 0),
+                "other_expenses": Decimal(other_amt or 0),
             }
         for group, amount in db.execute(
             select(lines.c.cost_group, func.sum(lines.c.standard_amount))
@@ -919,6 +966,13 @@ def dashboard(
             _percent(actual_depth, planned_depth)
             if planned_depth and planned_depth > 0 and actual_depth is not None else None
         )
+        scoped_planned_days = (
+            plan["drilling_days"]
+            if normalized_scope == "drilling"
+            else plan["completion_days"]
+            if normalized_scope == "completion"
+            else plan["drilling_days"] + plan["completion_days"]
+        )
         well_rows.append(DashboardWellRow(
             well_id=well.id,
             well_code=well.well_code,
@@ -934,7 +988,7 @@ def dashboard(
             rig_name=well.rig.rig_name if well.rig else "",
             drilling_planned_days=_money(plan["drilling_days"]) if caps.plan else None,
             completion_planned_days=_money(plan["completion_days"]) if caps.plan and plan["completion_section_count"] else None,
-            planned_days=_money(plan["drilling_days"] + plan["completion_days"]) if caps.plan else None,
+            planned_days=_money(scoped_planned_days) if caps.plan else None,
             drilling_plan_adjusted=plan["drilling_adjusted"],
             completion_plan_adjusted=plan["completion_adjusted"],
             section_count=plan["section_count"] if caps.plan else None,
@@ -1094,6 +1148,7 @@ def dashboard(
             planned=planned,
             actual=actual,
             balance=_money(planned - actual) if planned is not None and actual is not None else None,
+            utilisation_percent=_percent(actual, planned) if planned and actual is not None else None,
             share=_percent(group_actual.get(group, Decimal("0")), total_group_actual)
             if caps.actuals and total_group_actual else None,
         ))
@@ -1126,6 +1181,11 @@ def dashboard(
                 cumulative=_money(cumulative) or Decimal("0.00"),
                 npt=_money(bucket["npt"]) or Decimal("0.00"),
                 upa=_money(bucket["upa"]) or Decimal("0.00"),
+                tangibles=_money(bucket["tangibles"]) or Decimal("0.00"),
+                operational=_money(bucket["operational"]) or Decimal("0.00"),
+                services=_money(bucket["services"]) or Decimal("0.00"),
+                consumables=_money(bucket["consumables"]) or Decimal("0.00"),
+                other_expenses=_money(bucket["other_expenses"]) or Decimal("0.00"),
                 sheets=sheets_by_day.get(cost_day, 0),
             ))
 
@@ -1302,12 +1362,14 @@ def well_detail(
     date_to: date | None = None,
     currency: str = "",
     include_draft: bool = True,
+    scope: str = "",
 ) -> DashboardWellDetail:
     """One well's plan, budget and actuals, cut by activity, section and day."""
+    normalized_scope = scope.strip().lower()
     payload = dashboard(
         db, organization_id, user,
         date_from=date_from, date_to=date_to, well_id=well_id,
-        currency=currency, include_draft=include_draft,
+        currency=currency, include_draft=include_draft, scope=normalized_scope,
     )
     row = next((item for item in payload.wells if item.well_id == well_id), None)
     if row is None:
@@ -1325,6 +1387,19 @@ def well_detail(
     if well is None:
         raise HTTPException(status_code=404, detail="Well not found in this workspace")
 
+    scoped_afe_ids: list[str] | None = None
+    if normalized_scope in ("drilling", "completion"):
+        scoped_afe_ids = list(
+            db.scalars(
+                select(Afe.id).where(
+                    Afe.organization_id == organization_id,
+                    Afe.well_id == well_id,
+                    Afe.is_deleted.is_(False),
+                    Afe.configuration_scope == normalized_scope,
+                )
+            ).all()
+        )
+
     notes: list[str] = [
         "Actual days are elapsed time, not a count of sheets: from the Well Spud Date & Time to the "
         "Progress Completed Date & Time (or the end of the last included cost date), reported at three "
@@ -1334,11 +1409,11 @@ def well_detail(
 
     activities: list[DashboardActivityRow] = []
     sections: list[DashboardSectionRow] = []
-    if caps.actuals:
+    if caps.actuals and (scoped_afe_ids is None or scoped_afe_ids):
         lines = _line_subquery(
             db, organization_id, [well_id],
             date_from=date_from, date_to=date_to, include_draft=include_draft,
-            currency=payload.currency,
+            currency=payload.currency, afe_ids=scoped_afe_ids,
         )
         activity_rows = db.execute(
             select(
@@ -1397,9 +1472,12 @@ def well_detail(
             ),
             default=Decimal("0"),
         )
-        for scope in ("drilling", "completion"):
-            scope_unit = well.scope_value(scope, "depth_unit")
-            for section in well.sections_for_scope(scope):
+        detail_scopes = (
+            (normalized_scope,) if normalized_scope in ("drilling", "completion") else ("drilling", "completion")
+        )
+        for sec_scope in detail_scopes:
+            scope_unit = well.scope_value(sec_scope, "depth_unit")
+            for section in well.sections_for_scope(sec_scope):
                 values = used.get(section.hole_section_id)
                 amount = Decimal(values[4] or 0) if values else Decimal("0")
                 active_days = int(values[3] or 0) if values else 0
@@ -1416,7 +1494,7 @@ def well_detail(
                     hole_section_id=section.hole_section_id,
                     section_code=section.hole_section.section_code if section.hole_section else "",
                     section_name=section.hole_section.section_name if section.hole_section else "",
-                    scope=scope,
+                    scope=sec_scope,
                     from_depth=_money(from_m),
                     to_depth=_money(to_m),
                     actual_depth=sec_actual,
@@ -1460,13 +1538,15 @@ def well_detail(
         notes.append("Actual cost figures are hidden because daily cost read access is not granted.")
 
     day_sheets: list[DashboardDaySheet] = []
-    if caps.actuals:
+    if caps.actuals and (scoped_afe_ids is None or scoped_afe_ids):
         use_usd_sheet = payload.currency == "USD"
         entry_conditions = [
             DailyCostEntry.organization_id == organization_id,
             DailyCostEntry.well_id == well_id,
             DailyCostEntry.is_deleted.is_(False),
         ]
+        if scoped_afe_ids is not None:
+            entry_conditions.append(DailyCostEntry.afe_id.in_(scoped_afe_ids))
         if not use_usd_sheet:
             entry_conditions.append(DailyCostEntry.standard_currency == payload.currency)
         entry_query = (

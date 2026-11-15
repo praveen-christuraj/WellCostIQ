@@ -16,7 +16,7 @@ import { useColorMode } from '../../context/ThemeContext'
 import { api, body } from '../../lib/api'
 import { chartPalette } from '../../designSystem'
 import {
-  AFE_STATUS_LABELS, CLASSIFICATION_TONES, dashboardQuery, decimal, displayDate, money, percent,
+  AFE_STATUS_LABELS, CLASSIFICATION_TONES, actualVsAfePercent, dashboardQuery, decimal, displayDate, money, percent,
   type DashboardFilters, type DashboardDaySheet, type DashboardWellDetail, type Money,
 } from '../../lib/businessDashboard'
 import { formatDepthMeters } from '../../lib/units'
@@ -91,6 +91,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
 
   const dailyOption: EChartsOption = useMemo(() => {
     const rows = detail?.daily ?? []
+    const hasTangibles = rows.some(row => Number(row.tangibles ?? 0) > 0)
     return {
       animation: false,
       grid: { left: 12, right: 16, top: 30, bottom: 26, containLabel: true },
@@ -111,10 +112,23 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
         splitLine: { lineStyle: { color: theme.palette.divider } },
       },
       series: [
-        {
-          name: 'Daily actual', type: 'bar', barMaxWidth: 14,
-          itemStyle: { color: palette.series[0], opacity: .65 }, data: rows.map(row => Number(row.actual)),
-        },
+        ...(hasTangibles ? [
+          {
+            name: 'Daily operational', type: 'bar' as const, stack: 'daily', barMaxWidth: 14,
+            itemStyle: { color: palette.series[0], opacity: .72 },
+            data: rows.map(row => Number(row.operational ?? Math.max(0, Number(row.actual) - Number(row.tangibles ?? 0)))),
+          },
+          {
+            name: 'Tangibles (lump-sum)', type: 'bar' as const, stack: 'daily', barMaxWidth: 14,
+            itemStyle: { color: palette.series[4] ?? '#B7791F', opacity: .88 },
+            data: rows.map(row => Number(row.tangibles ?? 0)),
+          },
+        ] : [
+          {
+            name: 'Daily actual', type: 'bar' as const, barMaxWidth: 14,
+            itemStyle: { color: palette.series[0], opacity: .65 }, data: rows.map(row => Number(row.actual)),
+          },
+        ]),
         {
           name: 'Cumulative actual', type: 'line', smooth: true, symbol: 'none',
           itemStyle: { color: palette.actual }, lineStyle: { width: 2.2, color: palette.actual },
@@ -179,6 +193,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
         { label: 'NPT / UPA days', value: `${decimal(well.npt_days, 3)} / ${decimal(well.upa_days, 3)}` },
         { label: 'AFE amount', value: money(well.afe_amount, currency), hint: well.afe_count ? `${well.afe_count} AFE` : 'No active AFE' },
         { label: 'Actual cost', value: money(well.actual_amount, currency), hint: `${percent(well.utilisation_percent)} of the effective AFE` },
+        { label: 'Actual / AFE %', value: percent(well.utilisation_percent), hint: `${money(well.actual_amount, currency)} vs ${money(well.effective_afe_amount ?? well.afe_amount, currency)}` },
         { label: 'AFE balance', value: money(well.afe_balance, currency), hint: well.over_budget ? 'Over the effective AFE' : 'Remaining against the effective AFE' },
         { label: 'Depth progress', value: percent(well.depth_progress_percent), hint: `${decimal(well.actual_depth, 0)} of ${decimal(well.planned_depth, 0)} m` },
       ] : [],
@@ -196,9 +211,13 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
       sections.push({
         title: 'Cost group reconciliation',
         tables: [{
-          head: ['Cost group', 'AFE planned', `Actual (${currency})`, 'Balance'],
-          numeric: [1, 2, 3],
-          body: detail.cost_groups.map(row => [row.label, money(row.planned, currency), money(row.actual, currency), money(row.balance, currency)]),
+          head: ['Cost group', 'AFE planned', `Actual (${currency})`, 'Actual / AFE %', 'Balance'],
+          numeric: [1, 2, 3, 4],
+          body: detail.cost_groups.map(row => [
+            row.label, money(row.planned, currency), money(row.actual, currency),
+            row.utilisation_percent != null ? percent(row.utilisation_percent) : actualVsAfePercent(row.actual, row.planned),
+            money(row.balance, currency),
+          ]),
         }],
       })
       if (detail.sections.length) {
@@ -232,11 +251,12 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
       sections.push({
         title: 'AFE positions',
         tables: [{
-          head: ['AFE', 'Type', 'Status', `AFE amount (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Balance', 'Actual days'],
-          numeric: [3, 4, 5, 6, 7],
+          head: ['AFE', 'Type', 'Status', `AFE amount (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Actual / AFE %', 'Balance', 'Actual days'],
+          numeric: [3, 4, 5, 6, 7, 8],
           body: detail.afes.map(row => [
             `${row.afe_code} — ${row.afe_name}`, row.afe_type, AFE_STATUS_LABELS[row.status] ?? row.status,
             money(row.afe_amount, currency), money(row.sow_adjusted_amount, currency), money(row.actual_amount, currency),
+            actualVsAfePercent(row.actual_amount, row.effective_afe_amount ?? row.afe_amount),
             money(row.afe_balance, currency), decimal(row.actual_days, 3),
           ]),
         }],
@@ -306,6 +326,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
           <Stat label="AFE amount" value={money(detail.well.afe_amount, currency)} hint={detail.well.afe_count ? `${detail.well.afe_count} AFE${detail.well.afe_count === 1 ? '' : 's'}` : 'No active AFE'}/>
           <Stat label="SOW adjusted" value={money(detail.well.sow_adjusted_amount, currency)} hint={`Effective ${money(detail.well.effective_afe_amount, currency)}`}/>
           <Stat label="Actual cost" value={money(detail.well.actual_amount, currency)} hint={`${percent(detail.well.utilisation_percent)} of the effective AFE`}/>
+          <Stat label="Actual / AFE %" value={percent(detail.well.utilisation_percent)} hint="(Actual cost ÷ AFE) × 100"/>
           <Stat label="AFE balance" value={money(detail.well.afe_balance, currency)} hint={detail.well.over_budget ? 'Over the effective AFE' : 'Remaining against the effective AFE'}/>
           <Stat label="Services" value={money(detail.well.services_amount, currency)} hint="Recorded actual"/>
           <Stat label="Consumables" value={money(detail.well.consumables_amount, currency)} hint="Recorded actual"/>
@@ -355,6 +376,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
                 <TableCell align="right">AFE amount</TableCell>
                 <TableCell align="right">SOW adjusted</TableCell>
                 <TableCell align="right">Actual</TableCell>
+                <TableCell align="right">Actual / AFE %</TableCell>
                 <TableCell align="right">Balance</TableCell>
                 <TableCell align="right">Days</TableCell>
               </TableRow>
@@ -379,6 +401,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
                 <TableCell align="right">{money(row.afe_amount, row.currency)}</TableCell>
                 <TableCell align="right">{money(row.sow_adjusted_amount, row.currency)}</TableCell>
                 <TableCell align="right">{money(row.actual_amount, row.currency)}</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700 }}>{actualVsAfePercent(row.actual_amount, row.effective_afe_amount ?? row.afe_amount)}</TableCell>
                 <TableCell align="right"><BalanceValue value={row.afe_balance} currency={row.currency}/></TableCell>
                 <TableCell align="right">{decimal(row.actual_days, 3)} <Typography component="span" fontSize={10.5} color="text.secondary">({decimal(row.npt_days, 3)} NPT · {decimal(row.upa_days, 3)} UPA)</Typography></TableCell>
               </TableRow>)}

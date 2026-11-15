@@ -481,6 +481,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const coverCostRows = coverCostGroups.flatMap(group => group.rows)
   const tangiblePosition = groupPosition('Tangibles')
   const tangibleDay = groupSplit('Tangibles')
+  const unbudgetedTangibles = costRows.tangibles.filter(row => !row.is_planned && asNumber(row.actual_to_date) !== 0)
   const totalPlanned = asNumber(summary?.totals.planned ?? latestComparison.planned_total)
   const totalActual = asNumber(summary?.totals.comparison_actual ?? latestComparison.actual_to_date)
   const otherExpenses = asNumber(summary?.totals.other_expenses ?? latestComparison.other_expenses_to_date)
@@ -651,7 +652,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
           const dayCost = daySplit(row)
           const activityCost = classificationSplit(row)
           return <tr className="dcr-cost-item-row" key={row.budget_key}>
-          <td>{costName(row.item_name)}</td>
+          <td>{costName(row.item_name)}{!row.is_planned && <span className="dcr-unbudgeted-note"> (unbudgeted)</span>}</td>
           <td className="num">{printMoney(row.planned, currency)}</td>
           <td className="num">{printMoney(dayCost.prior, currency)}</td>
           <td className="num">{printMoney(dayCost.today, currency)}</td>
@@ -718,7 +719,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
           <span>Actual <strong>{printMoney(tangiblePosition.actual, currency)}</strong></span>
           <span>Balance <strong>{printMoney(tangiblePosition.planned - tangiblePosition.actual, currency)}</strong></span>
           <span>Used <strong>{percent(tangiblePosition.actual, tangiblePosition.planned)}</strong></span>
-        </div></section>
+        </div>{unbudgetedTangibles.length > 0 && <p className="dcr-tangibles-unbudgeted">Unbudgeted: {unbudgetedTangibles.map(row => `${costName(row.item_name)} (${printMoney(row.actual_to_date, currency)})`).join(' · ')}</p>}</section>
       </div>
       <div className="dcr-mud-stack">
         <section className="dcr-panel dcr-mud-analysis"><h2>Mud cost analysis · section / mud type</h2><table><thead><tr><th>Measure</th>{mudSections.map(row => <th key={row.section_id}>{sectionNameOnly(row.section_label)}<span>{row.mud_type ?? 'Not configured'}</span></th>)}</tr></thead><tbody>
@@ -759,7 +760,7 @@ function CumulativeSchedule({ title, rows, currency }: { title: string; rows: Da
   return <section className="dcr-cumulative-section">
     <h2>{title}</h2>
     <table><thead><tr><th>Cost item</th><th>AFE</th><th>Cumulative actual</th><th>Balance</th><th>Used</th></tr></thead>
-      <tbody>{rows.map(row => <tr key={row.budget_key}><td>{costName(row.item_name)}</td><td className="num">{printMoney(row.planned, currency)}</td><td className="num">{printMoney(row.actual_to_date, currency)}</td><td className="num">{printMoney(row.balance, currency)}</td><td className="num">{percent(asNumber(row.actual_to_date), asNumber(row.planned))}</td></tr>)}
+      <tbody>{rows.map(row => <tr key={row.budget_key}><td>{costName(row.item_name)}{!row.is_planned && <span className="dcr-unbudgeted-note"> (unbudgeted)</span>}</td><td className="num">{printMoney(row.planned, currency)}</td><td className="num">{printMoney(row.actual_to_date, currency)}</td><td className="num">{printMoney(row.balance, currency)}</td><td className="num">{percent(asNumber(row.actual_to_date), asNumber(row.planned))}</td></tr>)}
       {!rows.length && <tr><td colSpan={5} className="dcr-none">No cumulative cost recorded.</td></tr>}</tbody>
     </table>
   </section>

@@ -223,6 +223,11 @@ class DashboardDailyPoint(BaseModel):
     cumulative: Decimal
     npt: Decimal = Decimal("0")
     upa: Decimal = Decimal("0")
+    tangibles: Decimal = Decimal("0")
+    operational: Decimal = Decimal("0")
+    services: Decimal = Decimal("0")
+    consumables: Decimal = Decimal("0")
+    other_expenses: Decimal = Decimal("0")
     sheets: int = 0
 
 
@@ -236,6 +241,7 @@ class DashboardSlice(BaseModel):
     planned: Decimal | None = None
     actual: Decimal | None = None
     balance: Decimal | None = None
+    utilisation_percent: Decimal | None = None
     share: Decimal | None = None
 
 

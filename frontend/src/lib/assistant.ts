@@ -30,6 +30,14 @@ export type AssistantFact = {
 
 export type AssistantSource = { label: string; route: string }
 
+export type AssistantTable = {
+  title: string
+  columns: string[]
+  rows: string[][]
+  numeric?: number[]
+  footer?: string
+}
+
 export type AssistantAnswer = {
   answer: string
   intent: string
@@ -37,6 +45,7 @@ export type AssistantAnswer = {
   category: AssistantMemoryCategory
   memory_key: string
   facts: AssistantFact[]
+  tables?: AssistantTable[]
   steps: string[]
   sources: AssistantSource[]
   follow_ups: string[]

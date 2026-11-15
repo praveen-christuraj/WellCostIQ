@@ -29,7 +29,7 @@ import { useColorMode } from '../context/ThemeContext'
 import { api, body } from '../lib/api'
 import { chartPalette } from '../designSystem'
 import {
-  AFE_STATUS_LABELS, currentYearFilters, EMPTY_FILTERS, compactMoney, count, dashboardQuery, days, daysBasis, decimal,
+  AFE_STATUS_LABELS, actualVsAfePercent, currentYearFilters, EMPTY_FILTERS, compactMoney, count, dashboardQuery, days, daysBasis, decimal,
   displayDate, displayDateTime, money, percent, presetRange,
   type BusinessDashboard as BusinessDashboardData, type DashboardAfeRow, type DashboardFilters,
   type DashboardRigRow, type DashboardWellRow, type Money,
@@ -248,6 +248,7 @@ export default function BusinessDashboard() {
 
   const trendOption: EChartsOption = useMemo(() => {
     const rows = data?.daily ?? []
+    const hasTangibles = rows.some(row => Number(row.tangibles ?? 0) > 0)
     return {
       animation: false,
       grid: { left: 12, right: 16, top: 30, bottom: 26, containLabel: true },
@@ -261,11 +262,24 @@ export default function BusinessDashboard() {
       },
       yAxis: { type: 'value', axisLabel: { color: axis.text, fontSize: 10.5 }, splitLine: { lineStyle: { color: axis.line } } },
       series: [
-        {
-          name: 'Daily actual', type: 'bar', barMaxWidth: 14,
-          itemStyle: { color: palette.series[0], opacity: .65 },
-          data: rows.map(row => Number(row.actual)),
-        },
+        ...(hasTangibles ? [
+          {
+            name: 'Daily operational', type: 'bar' as const, stack: 'daily', barMaxWidth: 14,
+            itemStyle: { color: palette.series[0], opacity: .72 },
+            data: rows.map(row => Number(row.operational ?? Math.max(0, Number(row.actual) - Number(row.tangibles ?? 0)))),
+          },
+          {
+            name: 'Tangibles (lump-sum)', type: 'bar' as const, stack: 'daily', barMaxWidth: 14,
+            itemStyle: { color: palette.series[4] ?? '#B7791F', opacity: .88 },
+            data: rows.map(row => Number(row.tangibles ?? 0)),
+          },
+        ] : [
+          {
+            name: 'Daily actual', type: 'bar' as const, barMaxWidth: 14,
+            itemStyle: { color: palette.series[0], opacity: .65 },
+            data: rows.map(row => Number(row.actual)),
+          },
+        ]),
         {
           name: 'Cumulative actual', type: 'line', smooth: true, symbol: 'none',
           itemStyle: { color: palette.actual }, lineStyle: { width: 2.2, color: palette.actual },
@@ -442,6 +456,17 @@ export default function BusinessDashboard() {
     }
     if (caps.budget && caps.actuals) {
       columns.push({
+        headerName: 'ACTUAL / AFE %', field: 'utilisation_percent', minWidth: 130, flex: 0.65,
+        headerTooltip: 'Actual cost as a percentage of effective AFE amount: (Actual / AFE) × 100.',
+        valueFormatter: params => percent(params.value as string | null),
+        cellRenderer: (params: ICellRendererParams<DashboardWellRow>) => params.data && <Typography
+          fontSize={12.5} fontWeight={700} className="tnum"
+          color={Number(params.data.utilisation_percent ?? 0) > 100 ? 'error.main' : 'text.primary'}
+        >
+          {percent(params.data.utilisation_percent)}
+        </Typography>,
+      })
+      columns.push({
         headerName: 'AFE BALANCE', field: 'afe_balance', minWidth: 145, flex: 0.8,
         cellRenderer: (params: ICellRendererParams<DashboardWellRow>) => params.data && <Box>
           <BalanceCell value={params.data.afe_balance} currency={currency}/>
@@ -490,6 +515,15 @@ export default function BusinessDashboard() {
       {
         headerName: 'ACTUAL', field: 'actual_amount', minWidth: 135, flex: 0.8,
         cellRenderer: (params: ICellRendererParams<DashboardAfeRow>) => params.data && <Typography fontSize={12}>{money(params.data.actual_amount, params.data.currency)}</Typography>,
+      },
+      {
+        headerName: 'ACTUAL / AFE %', field: 'id' as keyof DashboardAfeRow, minWidth: 125, flex: 0.65,
+        valueGetter: params => actualVsAfePercent(params.data?.actual_amount, params.data?.effective_afe_amount ?? params.data?.afe_amount),
+        cellRenderer: (params: ICellRendererParams<DashboardAfeRow>) => {
+          const text = actualVsAfePercent(params.data?.actual_amount, params.data?.effective_afe_amount ?? params.data?.afe_amount)
+          const over = params.data && Number(params.data.actual_amount ?? 0) > Number(params.data.effective_afe_amount ?? params.data.afe_amount ?? 0)
+          return <Typography fontSize={12} fontWeight={700} className="tnum" color={over ? 'error.main' : 'text.primary'}>{text}</Typography>
+        },
       },
       {
         headerName: 'BALANCE', field: 'afe_balance', minWidth: 135, flex: 0.8,
@@ -547,6 +581,15 @@ export default function BusinessDashboard() {
     if (caps.budget) columns.push({ headerName: 'AFE AMOUNT', field: 'afe_amount', minWidth: 145, flex: 0.8, valueFormatter: params => money(String(params.value ?? ''), currency) })
     if (caps.actuals) columns.push({ headerName: 'ACTUAL AMOUNT', field: 'actual_amount', minWidth: 145, flex: 0.8, valueFormatter: params => money(String(params.value ?? ''), currency) })
     if (caps.budget && caps.actuals) columns.push({
+      headerName: 'ACTUAL / AFE %', field: 'rig_id', minWidth: 125, flex: 0.65,
+      valueGetter: params => actualVsAfePercent(params.data?.actual_amount, params.data?.effective_afe_amount ?? params.data?.afe_amount),
+      cellRenderer: (params: ICellRendererParams<DashboardRigRow>) => {
+        const text = actualVsAfePercent(params.data?.actual_amount, params.data?.effective_afe_amount ?? params.data?.afe_amount)
+        const over = params.data && Number(params.data.actual_amount ?? 0) > Number(params.data.effective_afe_amount ?? params.data.afe_amount ?? 0)
+        return <Typography fontSize={12} fontWeight={700} className="tnum" color={over ? 'error.main' : 'text.primary'}>{text}</Typography>
+      },
+    })
+    if (caps.budget && caps.actuals) columns.push({
       headerName: 'AFE BALANCE', field: 'afe_balance', minWidth: 145, flex: 0.8,
       cellRenderer: (params: ICellRendererParams<DashboardRigRow>) => params.data && <BalanceCell value={params.data.afe_balance} currency={currency}/>,
     })
@@ -602,6 +645,15 @@ export default function BusinessDashboard() {
       hint: `${count(data!.kpis.wells_with_actuals)} wells tracked · ${compactMoney(data!.kpis.other_expenses_amount, currency)} other`,
       icon: <AccountBalanceWalletOutlined fontSize="small"/>,
       title: 'Recorded daily cost in the selected currency, including other expenses.',
+    },
+    caps.budget && caps.actuals && {
+      key: 'actual-vs-afe',
+      label: 'Actual / AFE %',
+      value: percent(data!.kpis.utilisation_percent),
+      hint: `${compactMoney(data!.kpis.actual_amount, currency)} of ${compactMoney(data!.kpis.effective_afe_amount, currency)}`,
+      icon: <TrendingUpRounded fontSize="small"/>,
+      tone: (Number(data!.kpis.utilisation_percent ?? 0) > 100 ? 'error' : 'positive') as 'error' | 'positive',
+      title: 'Recorded actual cost divided by the effective AFE amount × 100.',
     },
     caps.budget && caps.actuals && {
       key: 'balance',
@@ -721,9 +773,13 @@ export default function BusinessDashboard() {
       sections.push({
         title: 'Cost group reconciliation',
         tables: [{
-          head: ['Cost group', 'AFE planned', `Actual (${currency})`, 'Balance', 'Share'],
-          numeric: [1, 2, 3, 4],
-          body: data.cost_groups.map(row => [row.label, money(row.planned, currency), money(row.actual, currency), money(row.balance, currency), percent(row.share)]),
+          head: ['Cost group', 'AFE planned', `Actual (${currency})`, 'Actual / AFE %', 'Balance', 'Share'],
+          numeric: [1, 2, 3, 4, 5],
+          body: data.cost_groups.map(row => [
+            row.label, money(row.planned, currency), money(row.actual, currency),
+            row.utilisation_percent != null ? percent(row.utilisation_percent) : actualVsAfePercent(row.actual, row.planned),
+            money(row.balance, currency), percent(row.share),
+          ]),
         }, {
           title: 'Time classification',
           head: ['Classification', 'Days', `Actual (${currency})`, 'Share of cost'],
@@ -735,15 +791,16 @@ export default function BusinessDashboard() {
         title: 'Wells in scope',
         subtitle: `${data.wells.length} well${data.wells.length === 1 ? '' : 's'} · ${filters.includeDraft ? 'draft and submitted sheets' : 'submitted sheets only'}`,
         tables: [{
-          head: ['Rig', 'Well', 'Planned days', 'Actual days', `AFE (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Balance', 'NPT days', 'UPA days'],
-          numeric: [2, 3, 4, 5, 6, 7, 8, 9],
+          head: ['Rig', 'Well', 'Planned days', 'Actual days', `AFE (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Actual / AFE %', 'Balance', 'NPT / UPA days'],
+          numeric: [2, 3, 4, 5, 6, 7, 8],
           body: data.wells.map(row => [
             row.rig_code, `${row.well_code} — ${row.well_name}`, decimal(row.planned_days, 2), decimal(row.actual_days, 3),
             caps.budget ? money(row.afe_amount, currency) : '—',
             caps.budget && row.has_sow_adjustment ? money(row.sow_adjusted_amount, currency) : '—',
             caps.actuals ? money(row.actual_amount, currency) : '—',
+            caps.budget && caps.actuals ? percent(row.utilisation_percent) : '—',
             caps.budget && caps.actuals ? money(row.afe_balance, currency) : '—',
-            decimal(row.npt_days, 3), decimal(row.upa_days, 3),
+            `${decimal(row.npt_days, 2)} / ${decimal(row.upa_days, 2)}`,
           ]),
         }],
       })
@@ -751,11 +808,12 @@ export default function BusinessDashboard() {
         sections.push({
           title: 'AFE register',
           tables: [{
-            head: ['AFE', 'Well', 'Type', 'Status', `AFE amount (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Balance', 'Actual days'],
-            numeric: [4, 5, 6, 7, 8],
+            head: ['AFE', 'Well', 'Type', 'Status', `AFE amount (${currency})`, 'SOW adjusted', `Actual (${currency})`, 'Actual / AFE %', 'Balance', 'Actual days'],
+            numeric: [4, 5, 6, 7, 8, 9],
             body: data.afes.map(row => [
               `${row.afe_code} — ${row.afe_name}`, row.well_code, row.afe_type, AFE_STATUS_LABELS[row.status] ?? row.status,
               money(row.afe_amount, currency), money(row.sow_adjusted_amount, currency), money(row.actual_amount, currency),
+              actualVsAfePercent(row.actual_amount, row.effective_afe_amount ?? row.afe_amount),
               money(row.afe_balance, currency), decimal(row.actual_days, 3),
             ]),
           }],

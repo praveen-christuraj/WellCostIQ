@@ -28,6 +28,15 @@ class AssistantSource(BaseModel):
     route: str
 
 
+class AssistantTable(BaseModel):
+    """Compact structured table of live workspace records returned by a lookup."""
+
+    title: str
+    columns: list[str]
+    rows: list[list[str]]
+    note: str = ""
+
+
 class AssistantAnswer(BaseModel):
     """One answer: a sentence or two, the facts behind it, and where to go next."""
 
@@ -37,6 +46,7 @@ class AssistantAnswer(BaseModel):
     category: MemoryCategory = "faq"
     memory_key: str = ""
     facts: list[AssistantFact] = Field(default_factory=list)
+    tables: list[AssistantTable] = Field(default_factory=list)
     steps: list[str] = Field(default_factory=list)
     sources: list[AssistantSource] = Field(default_factory=list)
     follow_ups: list[str] = Field(default_factory=list)

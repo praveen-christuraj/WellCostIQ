@@ -287,7 +287,7 @@ export default function WellCostComparisonReport() {
     },
     { headerName: 'ACTUAL USD (STD)', field: 'actual_usd', minWidth: 175, headerTooltip: 'Standardized USD actual cost across all wells' },
     { headerName: 'AFE BALANCE', field: 'afe_balance', minWidth: 190, headerTooltip: 'Adjusted AFE amount less the LIH cost and the actual cost' },
-    { headerName: '% COSTS INCURRED', field: 'costs_incurred', minWidth: 155, headerTooltip: 'Actual cost plus LIH as a share of the adjusted AFE amount' },
+    { headerName: 'ACTUAL / AFE %', field: 'costs_incurred', minWidth: 155, headerTooltip: 'Actual cost plus LIH as a percentage of the adjusted AFE amount: (Actual / AFE) × 100' },
     { headerName: 'PLANNED DEPTH (m)', field: 'planned_depth_m', minWidth: 160 },
     { headerName: 'ACTUAL DEPTH (m)', field: 'actual_depth_m', minWidth: 155 },
     { headerName: 'PLANNED DAYS', field: 'planned_days', minWidth: 135, headerTooltip: 'Original planned days', valueFormatter: params => Number(params.value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 }) },

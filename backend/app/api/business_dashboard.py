@@ -69,12 +69,14 @@ def well_detail(
     date_to: date | None = Query(default=None, alias="to"),
     currency: str = Query(default="", max_length=10),
     include_draft: bool = Query(default=True),
+    scope: str = Query(default="", max_length=20),
 ) -> DashboardWellDetail:
     """Drill-through: one well's AFEs, daily trend, activities and sections."""
     _dashboard_user(user)
     return service.well_detail(
         db, user.organization_id, user, well_id,
         date_from=date_from, date_to=date_to, currency=currency, include_draft=include_draft,
+        scope=scope,
     )
 
 

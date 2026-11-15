@@ -1445,7 +1445,7 @@ export default function DailyCostSheet() {
       </Paper>
     )}
 
-    <Box display="grid" gap={1.2} mb={1.6} sx={{ gridTemplateColumns: { xs: '1fr 1fr', md: day.comparison.has_adjustment ? 'repeat(11, 1fr)' : 'repeat(9, 1fr)' } }}>
+    <Box display="grid" gap={1.2} mb={1.6} sx={{ gridTemplateColumns: { xs: '1fr 1fr', md: day.comparison.has_adjustment ? 'repeat(12, 1fr)' : 'repeat(10, 1fr)' } }}>
       <StatCard label="AFE planned" value={dailyMoney(day.comparison.planned_total, standard)} hint="Locked standard-currency budget"/>
       {day.comparison.has_adjustment && day.comparison.adjusted_planned_total != null && <>
         <StatCard label="Adjusted AFE" value={dailyMoney(day.comparison.adjusted_planned_total, standard)} hint="Latest approved SOW revision"/>
@@ -1462,6 +1462,20 @@ export default function DailyCostSheet() {
         hint={hasPreviewForEdits ? `Includes the unsaved preview · ${displayDate(entry.cost_date)}` : `Saved day total · ${displayDate(entry.cost_date)}`}
       />
       <StatCard label="Cumulative cost to date" value={dailyMoney(actualToDate, standard)} hint={hasPreviewForEdits ? 'Includes the current unsaved preview' : 'All four cost groups through this day'}/>
+      <StatCard
+        label="Actual / AFE %"
+        value={(() => {
+          const base = Number(day.comparison.has_adjustment && day.comparison.adjusted_planned_total != null
+            ? day.comparison.adjusted_planned_total : day.comparison.planned_total)
+          return base > 0 ? `${(((actualToDate + lihToDate) / base) * 100).toFixed(1)}%` : '—'
+        })()}
+        hint="(Actual ÷ AFE) × 100"
+        tone={(() => {
+          const base = Number(day.comparison.has_adjustment && day.comparison.adjusted_planned_total != null
+            ? day.comparison.adjusted_planned_total : day.comparison.planned_total)
+          return base > 0 && (actualToDate + lihToDate) > base ? 'bad' : 'good'
+        })()}
+      />
       <StatCard
         label="Actual depth"
         value={formatDepthMeters(hasPreviewForEdits ? preview?.actual_depth : entry.actual_depth, 'm')}

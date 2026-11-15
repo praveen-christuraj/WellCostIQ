@@ -170,25 +170,43 @@ export default function CostIntelligence() {
   }
 
   const days = useMemo(() => detail?.days ?? [], [detail])
-  const dailyOption: EChartsOption = useMemo(() => ({
-    animation: false,
-    grid: { left: 8, right: 20, top: 30, bottom: 8, containLabel: true },
-    legend: { top: 0, textStyle: { color: axis.text }, itemWidth: 12, itemHeight: 8 },
-    tooltip: { trigger: 'axis', valueFormatter: value => amount(Number(value ?? 0), currency) },
-    xAxis: { type: 'category', data: days.map(row => row.cost_date), axisLabel: { color: axis.text }, axisLine: { lineStyle: { color: axis.line } } },
-    yAxis: { type: 'value', axisLabel: { color: axis.text, formatter: (value: number) => amount(value) }, splitLine: { lineStyle: { color: axis.line } } },
-    series: [
-      {
-        name: 'Daily cost', type: 'bar', barMaxWidth: 14,
-        data: days.map(row => ({ value: row.actual, itemStyle: { color: row.spike ? tone.error.main : palette.actual } })),
-      },
-      { name: 'Non-productive time', type: 'bar', barMaxWidth: 14, barGap: '-100%', itemStyle: { color: tone.warning.main }, data: days.map(row => row.npt) },
-      ...(detail?.drift_baseline ? [{
-        name: 'Opening baseline', type: 'line' as const, symbol: 'none', lineStyle: { color: palette.planned, type: 'dashed' as const, width: 1.5 },
-        itemStyle: { color: palette.planned }, data: days.map(row => row.baseline),
-      }] : []),
-    ],
-  }), [days, detail, palette, axis, tone, currency])
+  const dailyOption: EChartsOption = useMemo(() => {
+    const hasTangibles = days.some(row => Number(row.tangibles ?? 0) > 0)
+    return {
+      animation: false,
+      grid: { left: 8, right: 20, top: 30, bottom: 8, containLabel: true },
+      legend: { top: 0, textStyle: { color: axis.text }, itemWidth: 12, itemHeight: 8 },
+      tooltip: { trigger: 'axis', valueFormatter: value => amount(Number(value ?? 0), currency) },
+      xAxis: { type: 'category', data: days.map(row => row.cost_date), axisLabel: { color: axis.text }, axisLine: { lineStyle: { color: axis.line } } },
+      yAxis: { type: 'value', axisLabel: { color: axis.text, formatter: (value: number) => amount(value) }, splitLine: { lineStyle: { color: axis.line } } },
+      series: [
+        ...(hasTangibles ? [
+          {
+            name: 'Daily operational', type: 'bar' as const, stack: 'daily', barMaxWidth: 14,
+            data: days.map(row => ({
+              value: row.operational ?? Math.max(0, row.actual - (row.tangibles ?? 0)),
+              itemStyle: { color: row.spike ? tone.error.main : palette.actual },
+            })),
+          },
+          {
+            name: 'Tangibles (lump-sum)', type: 'bar' as const, stack: 'daily', barMaxWidth: 14,
+            itemStyle: { color: palette.series[4] },
+            data: days.map(row => row.tangibles ?? 0),
+          },
+        ] : [
+          {
+            name: 'Daily cost', type: 'bar' as const, barMaxWidth: 14,
+            data: days.map(row => ({ value: row.actual, itemStyle: { color: row.spike ? tone.error.main : palette.actual } })),
+          },
+        ]),
+        { name: 'Non-productive time', type: 'bar', barMaxWidth: 14, barGap: '-100%', itemStyle: { color: tone.warning.main }, data: days.map(row => row.npt) },
+        ...(detail?.drift_baseline ? [{
+          name: 'Opening baseline', type: 'line' as const, symbol: 'none', lineStyle: { color: palette.planned, type: 'dashed' as const, width: 1.5 },
+          itemStyle: { color: palette.planned }, data: days.map(row => row.baseline),
+        }] : []),
+      ],
+    }
+  }, [days, detail, palette, axis, tone, currency])
 
   const cumulativeOption: EChartsOption = useMemo(() => {
     const projection = detail?.projection ?? []
@@ -250,6 +268,7 @@ export default function CostIntelligence() {
   const wellRecord = (row: IntelligenceWell) => ({
     well: row.well_code, name: row.well_name, rig: row.rig_code, status: trackingLabel(row.status), health: row.score,
     band: BAND_LABEL[row.band], afe: row.afe_amount ?? '', actual: row.actual_amount ?? '',
+    actual_vs_afe_percent: row.utilisation_percent ?? '',
     forecast: row.forecast.available ? row.forecast.estimate ?? '' : '', variance_percent: row.forecast.variance_percent ?? '',
     critical: row.critical, warning: row.warning, notes: row.info, summary: row.summary,
   })
@@ -257,6 +276,7 @@ export default function CostIntelligence() {
     { key: 'well', label: 'Well' }, { key: 'name', label: 'Name' }, { key: 'rig', label: 'Rig' }, { key: 'status', label: 'Status' },
     { key: 'health', label: 'Health score', numeric: true }, { key: 'band', label: 'Band' },
     { key: 'afe', label: `AFE (${currency})`, numeric: true }, { key: 'actual', label: `Recorded (${currency})`, numeric: true },
+    { key: 'actual_vs_afe_percent', label: 'Actual / AFE %', numeric: true },
     { key: 'forecast', label: `Forecast (${currency})`, numeric: true }, { key: 'variance_percent', label: 'Forecast vs AFE %', numeric: true },
     { key: 'critical', label: 'Critical', numeric: true }, { key: 'warning', label: 'Warnings', numeric: true },
     { key: 'notes', label: 'Notes', numeric: true }, { key: 'summary', label: 'Summary' },
@@ -302,6 +322,7 @@ export default function CostIntelligence() {
     const captured = (key: string) => options.includeFigures && options.figures.has(key)
     const out: ReportSection[] = []
     if (data && kpis && has('summary')) {
+      const utilPct = kpis.utilisation_percent ?? (kpis.afe_amount && kpis.actual_amount != null ? (kpis.actual_amount / kpis.afe_amount) * 100 : null)
       out.push({
         title: 'Summary',
         notes: data.headline,
@@ -309,6 +330,7 @@ export default function CostIntelligence() {
           { label: 'Health score', value: `${kpis.score} / 100`, hint: BAND_LABEL[kpis.band] },
           { label: 'Combined AFE', value: amount(kpis.afe_amount, currency) },
           { label: 'Recorded cost', value: amount(kpis.actual_amount, currency) },
+          { label: 'Actual / AFE %', value: utilPct != null ? `${utilPct.toFixed(1)}%` : '—', hint: '(Actual ÷ AFE) × 100' },
           { label: 'Forecast at completion', value: amount(kpis.forecast_amount, currency), hint: signedPercent(kpis.forecast_variance_percent) },
           { label: 'Cost above AFE', value: amount(kpis.amount_at_risk, currency), hint: 'Recorded or forecast' },
           { label: 'Findings', value: `${kpis.critical} critical, ${kpis.warning} warning`, hint: `${kpis.info} note(s)` },
@@ -333,10 +355,11 @@ export default function CostIntelligence() {
       out.push({
         title: 'Well health and forecast',
         tables: [{
-          head: ['Well', 'Status', 'Health', `AFE (${currency})`, 'Recorded', 'Forecast', 'vs AFE', 'Critical', 'Warnings'],
-          numeric: [2, 3, 4, 5, 6, 7, 8],
+          head: ['Well', 'Status', 'Health', `AFE (${currency})`, 'Recorded', 'Actual / AFE %', 'Forecast', 'vs AFE', 'Critical', 'Warnings'],
+          numeric: [2, 3, 4, 5, 6, 7, 8, 9],
           body: wells.map(row => [row.well_code, trackingLabel(row.status), `${row.score} (${BAND_LABEL[row.band]})`, amount(row.afe_amount),
-            amount(row.actual_amount), row.forecast.available ? amount(row.forecast.estimate) : '—', signedPercent(row.forecast.variance_percent), row.critical, row.warning]),
+            amount(row.actual_amount), row.utilisation_percent != null ? `${row.utilisation_percent.toFixed(1)}%` : '—',
+            row.forecast.available ? amount(row.forecast.estimate) : '—', signedPercent(row.forecast.variance_percent), row.critical, row.warning]),
         }],
         notes: wells.filter(row => row.critical || row.warning).map(row => row.summary),
       })
@@ -352,18 +375,42 @@ export default function CostIntelligence() {
       })
     }
     if (detail && has('well')) {
+      const wellTables: ReportSection['tables'] = []
+      if (options.includeTables && detail.breakdown?.cost_groups.length) {
+        wellTables.push({
+          title: 'Cost group variance',
+          head: ['Cost group', `AFE (${currency})`, 'Actual', 'Actual / AFE %', 'Share'],
+          numeric: [1, 2, 3, 4],
+          body: detail.breakdown.cost_groups.map(grp => [
+            grp.label, amount(grp.planned), amount(grp.actual),
+            grp.utilisation_percent != null ? `${grp.utilisation_percent.toFixed(1)}%` : '—',
+            grp.share_percent != null ? `${grp.share_percent.toFixed(1)}%` : '—',
+          ]),
+        })
+      }
+      if (options.includeTables) {
+        wellTables.push({
+          title: 'Findings & suggested actions',
+          head: ['Severity', 'Finding', 'Suggested action'], wide: [2],
+          body: detail.findings.map(row => [SEVERITY_LABEL[row.severity], row.title, row.suggestion]),
+        })
+      }
       out.push({
         title: `Well analysis: ${detail.well.well_code}`,
         subtitle: detail.well.summary,
+        kpis: detail.breakdown ? [
+          { label: 'Actual / AFE %', value: detail.well.utilisation_percent != null ? `${detail.well.utilisation_percent.toFixed(1)}%` : '—' },
+          { label: 'Operational spend', value: amount(detail.breakdown.unit_economics.operational_actual, currency) },
+          { label: 'Tangibles spend', value: amount(detail.breakdown.unit_economics.tangible_actual, currency) },
+          { label: 'Operational daily avg', value: amount(detail.breakdown.unit_economics.operational_daily_avg, currency) },
+          { label: 'CPI', value: detail.breakdown.unit_economics.burn_efficiency_index != null ? detail.breakdown.unit_economics.burn_efficiency_index.toFixed(2) : '—' },
+        ] : undefined,
         figures: [
-          ...(captured('ci-well-daily') ? [figure('ci-well-daily', 'Daily cost', 'Daily cost with flagged days and the opening baseline.')] : []),
+          ...(captured('ci-well-daily') ? [figure('ci-well-daily', 'Daily operational cost & tangibles', 'Daily operational spend separated from lump-sum tangibles, with flagged days and the opening baseline.')] : []),
           ...(captured('ci-well-cumulative') ? [figure('ci-well-cumulative', 'Cumulative cost and forecast', 'Recorded cumulative cost, the forecast path with its range, and the AFE.')] : []),
-          ...(captured('ci-well-trend') ? [figure('ci-well-trend', 'Trend statistic', 'CUSUM of daily cost against the opening baseline; a line above the limit is a sustained change.')] : []),
+          ...(captured('ci-well-trend') ? [figure('ci-well-trend', 'Trend statistic', 'CUSUM of operational daily cost against the opening baseline; lump-sum tangibles are excluded.')] : []),
         ],
-        tables: options.includeTables ? [{
-          head: ['Severity', 'Finding', 'Suggested action'], wide: [2],
-          body: detail.findings.map(row => [SEVERITY_LABEL[row.severity], row.title, row.suggestion]),
-        }] : [],
+        tables: wellTables,
         notes: detail.notes,
       })
     }
@@ -457,9 +504,17 @@ export default function CostIntelligence() {
         </Box>
       </SectionCard>
 
-      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(5, minmax(0, 1fr))' }, mb: 2 }}>
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))', lg: 'repeat(6, minmax(0, 1fr))' }, mb: 2 }}>
         <StatCard label="Health score" value={`${kpis.score} / 100`} tone={kpis.band === 'good' ? 'positive' : kpis.band === 'watch' ? 'warning' : 'error'}
           hint="AFE-weighted average of the wells; 100 less 25 per critical, 10 per warning, 3 per note"/>
+        <StatCard
+          label="Actual / AFE %"
+          value={(() => {
+            const pct = kpis.utilisation_percent ?? (kpis.afe_amount && kpis.actual_amount != null ? (kpis.actual_amount / kpis.afe_amount) * 100 : null)
+            return pct != null ? `${pct.toFixed(1)}%` : '—'
+          })()}
+          tone={((kpis.utilisation_percent ?? 0) > 100) ? 'error' : 'positive'}
+          hint={`${amount(kpis.actual_amount, currency)} of ${amount(kpis.afe_amount, currency)}`}/>
         <StatCard label="Forecast at completion" value={amount(kpis.forecast_amount, currency)}
           tone={(kpis.forecast_variance ?? 0) > 0 ? 'error' : 'default'}
           hint={kpis.forecast_variance === null ? 'Needs AFE and daily cost access' : `${signedPercent(kpis.forecast_variance_percent)} against a combined AFE of ${amount(kpis.afe_amount, currency)}`}/>
@@ -510,6 +565,7 @@ export default function CostIntelligence() {
           <TableHead><TableRow>
             <TableCell>Well</TableCell><TableCell>Status</TableCell><TableCell>Health</TableCell>
             <TableCell align="right">AFE ({currency})</TableCell><TableCell align="right">Recorded</TableCell>
+            <TableCell align="right">Actual / AFE %</TableCell>
             <TableCell align="right">Forecast</TableCell><TableCell align="right">vs AFE</TableCell>
             <TableCell align="right">Findings</TableCell><TableCell>Reading</TableCell>
           </TableRow></TableHead>
@@ -519,6 +575,9 @@ export default function CostIntelligence() {
             <TableCell><Tag tone={BAND_TONE[row.band]}>{row.score} · {BAND_LABEL[row.band]}</Tag></TableCell>
             <TableCell align="right">{amount(row.afe_amount)}</TableCell>
             <TableCell align="right">{amount(row.actual_amount)}</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, color: (row.utilisation_percent ?? 0) > 100 ? 'error.main' : 'text.primary' }}>
+              {row.utilisation_percent != null ? `${row.utilisation_percent.toFixed(1)}%` : '—'}
+            </TableCell>
             <TableCell align="right">{row.forecast.available ? amount(row.forecast.estimate) : '—'}</TableCell>
             <TableCell align="right" sx={{ color: (row.forecast.variance_percent ?? 0) > 0 ? 'error.main' : 'text.primary' }}>{signedPercent(row.forecast.variance_percent)}</TableCell>
             <TableCell align="right">{row.critical + row.warning}{row.info ? ` + ${row.info}` : ''}</TableCell>
@@ -558,12 +617,92 @@ export default function CostIntelligence() {
               <ChartPanel figureKey="ci-well-trend" title="Trend statistic" height={220} empty={!trendAvailable}
                 emptyMessage="The trend check needs at least 12 recorded days."
                 caption={detail.drift_start
-                  ? `Sustained change of level estimated from ${detail.drift_start}. A line above the dashed limit means the daily cost has moved away from its opening baseline and stayed there.`
-                  : 'Both lines stay under the dashed limit: the daily cost has held its opening level.'}>
+                  ? `Sustained change of operational daily level estimated from ${detail.drift_start}. Lump-sum tangibles are excluded so end-of-scope bookings do not distort trend monitoring.`
+                  : 'Both lines stay under the dashed limit: the daily operational cost has held its opening level.'}>
                 <InteractiveChart option={trendOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
               </ChartPanel>
             </Box>
           </Box>
+          {detail.breakdown && <Box mt={2.5} display="grid" gap={2}>
+            <Box display="grid" gap={1.3} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(5, minmax(0, 1fr))' } }}>
+              <StatCard
+                label="Operational vs Tangibles"
+                value={amount(detail.breakdown.unit_economics.operational_actual, currency)}
+                hint={`Tangibles: ${amount(detail.breakdown.unit_economics.tangible_actual, currency)}${detail.breakdown.unit_economics.tangible_utilisation_percent != null ? ` (${detail.breakdown.unit_economics.tangible_utilisation_percent.toFixed(1)}% of tangible AFE)` : ''}`}
+              />
+              <StatCard
+                label="Operational daily avg"
+                value={amount(detail.breakdown.unit_economics.operational_daily_avg, currency)}
+                hint={detail.breakdown.unit_economics.planned_operational_daily != null
+                  ? `Planned daily: ${amount(detail.breakdown.unit_economics.planned_operational_daily, currency)}`
+                  : 'Recurring operational burn / day'}
+              />
+              <StatCard
+                label="Cost Performance (CPI)"
+                value={detail.breakdown.unit_economics.burn_efficiency_index != null
+                  ? detail.breakdown.unit_economics.burn_efficiency_index.toFixed(2)
+                  : '—'}
+                tone={detail.breakdown.unit_economics.burn_efficiency_index == null ? 'default'
+                  : detail.breakdown.unit_economics.burn_efficiency_index >= 1 ? 'positive' : 'warning'}
+                hint=">1.00 under operational plan · <1.00 over-burning"
+              />
+              <StatCard
+                label="Cost per metre"
+                value={detail.breakdown.unit_economics.cost_per_meter != null
+                  ? amount(detail.breakdown.unit_economics.cost_per_meter, currency)
+                  : '—'}
+                hint={detail.breakdown.unit_economics.depth_progress_percent != null
+                  ? `${detail.breakdown.unit_economics.actual_depth ?? 0} m (${detail.breakdown.unit_economics.depth_progress_percent.toFixed(1)}% of target)`
+                  : 'Requires recorded hole depth'}
+              />
+              <StatCard
+                label="NPT / UPA share"
+                value={`${detail.well.npt_share_percent != null ? `${detail.well.npt_share_percent.toFixed(1)}%` : '0.0%'} / ${detail.breakdown.unit_economics.upa_share_percent != null ? `${detail.breakdown.unit_economics.upa_share_percent.toFixed(1)}%` : '0.0%'}`}
+                tone={((detail.well.npt_share_percent ?? 0) >= 10 || (detail.breakdown.unit_economics.upa_share_percent ?? 0) >= 10) ? 'warning' : 'default'}
+                hint={detail.breakdown.unit_economics.top_cost_driver || 'Non-productive & unplanned cost shares'}
+              />
+            </Box>
+            {detail.breakdown.cost_groups.length > 0 && <Box display="grid" gap={2} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' } }}>
+              <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                <Table size="small">
+                  <TableHead><TableRow>
+                    <TableCell>Cost group</TableCell>
+                    <TableCell align="right">AFE ({currency})</TableCell>
+                    <TableCell align="right">Actual</TableCell>
+                    <TableCell align="right">Actual / AFE %</TableCell>
+                    <TableCell align="right">Share</TableCell>
+                  </TableRow></TableHead>
+                  <TableBody>{detail.breakdown.cost_groups.map(grp => <TableRow key={grp.label} hover>
+                    <TableCell sx={{ fontWeight: 700 }}>{grp.label}</TableCell>
+                    <TableCell align="right">{amount(grp.planned)}</TableCell>
+                    <TableCell align="right">{amount(grp.actual)}</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 700, color: (grp.utilisation_percent ?? 0) > 105 ? 'error.main' : 'text.primary' }}>
+                      {grp.utilisation_percent != null ? `${grp.utilisation_percent.toFixed(1)}%` : '—'}
+                    </TableCell>
+                    <TableCell align="right">{grp.share_percent != null ? `${grp.share_percent.toFixed(1)}%` : '—'}</TableCell>
+                  </TableRow>)}</TableBody>
+                </Table>
+              </TableContainer>
+              {detail.breakdown.activities.length > 0 && <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                <Table size="small">
+                  <TableHead><TableRow>
+                    <TableCell>Top cost-driving activities</TableCell>
+                    <TableCell>Class</TableCell>
+                    <TableCell align="right">Days</TableCell>
+                    <TableCell align="right">Actual ({currency})</TableCell>
+                    <TableCell align="right">Share</TableCell>
+                  </TableRow></TableHead>
+                  <TableBody>{detail.breakdown.activities.slice(0, 6).map((act, idx) => <TableRow key={`${act.activity_code}-${idx}`} hover>
+                    <TableCell>{act.activity_name || act.activity_code}</TableCell>
+                    <TableCell><Tag tone={act.classification === 'NPT' ? 'error' : act.classification === 'UPA' ? 'warning' : 'neutral'}>{act.classification}</Tag></TableCell>
+                    <TableCell align="right">{act.active_days}</TableCell>
+                    <TableCell align="right">{amount(act.amount)}</TableCell>
+                    <TableCell align="right">{act.share_percent != null ? `${act.share_percent.toFixed(1)}%` : '—'}</TableCell>
+                  </TableRow>)}</TableBody>
+                </Table>
+              </TableContainer>}
+            </Box>}
+          </Box>}
         </>}
       </SectionCard>
 

@@ -55,6 +55,15 @@ class DayCost:
     actual: float
     npt: float = 0.0
     upa: float = 0.0
+    tangibles: float = 0.0
+    services: float = 0.0
+    consumables: float = 0.0
+    other_expenses: float = 0.0
+
+    @property
+    def operational(self) -> float:
+        """Recurring daily operational spend excluding lump-sum tangible bookings."""
+        return max(0.0, self.actual - self.tangibles)
 
 
 @dataclass(frozen=True)
@@ -62,6 +71,27 @@ class GroupCost:
     label: str
     planned: float | None
     actual: float
+
+
+@dataclass(frozen=True)
+class SectionCost:
+    section_code: str
+    section_name: str
+    scope: str = "drilling"
+    planned_days: float | None = None
+    active_days: int = 0
+    amount: float = 0.0
+    share_percent: float | None = None
+
+
+@dataclass(frozen=True)
+class ActivityCost:
+    activity_code: str
+    activity_name: str
+    classification: str = "Planned"
+    active_days: int = 0
+    amount: float = 0.0
+    share_percent: float | None = None
 
 
 @dataclass(frozen=True)
@@ -80,11 +110,19 @@ class WellInput:
     planned_days: float | None = None
     actual_days: float | None = None
     npt_amount: float | None = None
+    upa_amount: float | None = None
+    npt_days: float | None = None
+    upa_days: float | None = None
+    planned_depth: float | None = None
+    actual_depth: float | None = None
+    depth_progress_percent: float | None = None
     draft_sheets: int = 0
     sheet_count: int = 0
     warning_sheets: int = 0
     days: tuple[DayCost, ...] = ()
     groups: tuple[GroupCost, ...] = ()
+    sections: tuple[SectionCost, ...] = ()
+    activities: tuple[ActivityCost, ...] = ()
 
 
 @dataclass
@@ -110,6 +148,7 @@ class Forecast:
     recent_daily: float = 0.0
     planned_daily: float | None = None
     remaining_days: float | None = None
+    remaining_tangibles: float = 0.0
     estimate: float | None = None
     low: float | None = None
     high: float | None = None
@@ -282,20 +321,55 @@ def _span(first: date, last: date) -> str:
     return first.isoformat() if first == last else f"{first.isoformat()} to {last.isoformat()}"
 
 
+def _tangible_budget_and_actual(well: WellInput) -> tuple[float | None, float]:
+    """Return (tangible AFE allowance if known, recorded tangible actual)."""
+    tangible_group = next((g for g in well.groups if g.label.lower() == "tangibles"), None)
+    tangible_afe = (
+        tangible_group.planned
+        if tangible_group is not None and tangible_group.planned is not None and tangible_group.planned > 0
+        else None
+    )
+    tangible_from_days = sum(day.tangibles for day in well.days)
+    tangible_actual = tangible_from_days if tangible_from_days > 0 else (
+        tangible_group.actual if tangible_group is not None else 0.0
+    )
+    return tangible_afe, tangible_actual
+
+
 def forecast(well: WellInput, values: list[float], skip: set[int]) -> Forecast:
+    """Estimate at completion separating daily operational burn from lump-sum tangibles.
+
+    Tangibles (casing, tubing, wellhead, completion hardware) are typically
+    booked near the end of a scope rather than daily. Daily run-rate is
+    measured strictly on recurring operational costs (``values``) so a
+    tangible-entry day never inflates the projected daily burn. Any unbooked
+    portion of the tangible AFE allowance is added once rather than multiplied
+    by remaining days.
+    """
     result = Forecast()
     usable = [value for index, value in enumerate(values) if index not in skip]
     if len(usable) < 3:
-        result.reason = "At least three recorded cost days are needed for a forecast."
+        result.reason = "At least three recorded operational cost days are needed for a forecast."
         return result
     recent = usable[-RECENT_DAYS:]
     burn = sum(recent) / len(recent)
     result.recent_daily = burn
-    spent = well.actual_amount if well.actual_amount is not None else sum(values)
-    if well.afe_amount and well.planned_days:
-        result.planned_daily = well.afe_amount / well.planned_days
+    spent = well.actual_amount if well.actual_amount is not None else sum(day.actual for day in well.days)
+    tangible_afe, tangible_actual = _tangible_budget_and_actual(well)
+    operational_afe = (
+        well.afe_amount - tangible_afe
+        if well.afe_amount and tangible_afe and well.afe_amount > tangible_afe
+        else well.afe_amount
+    )
+    if operational_afe and well.planned_days:
+        result.planned_daily = operational_afe / well.planned_days
     if well.afe_amount and burn > 0:
-        left = well.afe_amount - spent
+        unbooked_tangibles = (
+            max(0.0, tangible_afe - tangible_actual)
+            if tangible_afe and well.status not in ("completed", "closed")
+            else 0.0
+        )
+        left = well.afe_amount - spent - unbooked_tangibles
         result.days_to_exhaustion = max(left, 0.0) / burn
         if well.days:
             result.exhaustion_date = well.days[-1].cost_date + timedelta(days=int(result.days_to_exhaustion))
@@ -308,7 +382,13 @@ def forecast(well: WellInput, values: list[float], skip: set[int]) -> Forecast:
     result.past_plan = remaining <= 0 and well.status not in ("completed", "closed")
     remaining = max(remaining, 0.0)
     result.remaining_days = remaining
-    result.estimate = spent + burn * remaining
+    remaining_tangibles = (
+        max(0.0, tangible_afe - tangible_actual)
+        if tangible_afe and remaining > 0 and well.status not in ("completed", "closed")
+        else 0.0
+    )
+    result.remaining_tangibles = remaining_tangibles
+    result.estimate = spent + burn * remaining + remaining_tangibles
     _, spread = robust_centre(recent)
     band = 1.2816 * spread * sqrt(remaining) if remaining > 0 else 0.0
     result.low, result.high = max(spent, result.estimate - band), result.estimate + band
@@ -323,6 +403,14 @@ def analyse_well(well: WellInput, as_of: date | None = None) -> WellAnalysis:
     days = tuple(sorted(well.days, key=lambda item: item.cost_date))
     well = WellInput(**{**well.__dict__, "days": days})
     values = [day.actual for day in days]
+    # Tangibles are booked in lump sums (often at end-of-scope / casing runs),
+    # not as daily recurring burn. Anomaly, drift and daily run-rate checks run
+    # on operational daily cost (services + consumables + other expenses).
+    operational_values = [day.operational for day in days]
+    tangible_only_index = {
+        index for index, day in enumerate(days) if day.tangibles > 0 and day.operational <= 0
+    }
+    tangible_afe, tangible_actual = _tangible_budget_and_actual(well)
     cur = well.currency
     findings: list[Finding] = []
 
@@ -335,46 +423,59 @@ def analyse_well(well: WellInput, as_of: date | None = None) -> WellAnalysis:
             amount=amount, evidence=evidence or [],
         ))
 
-    # --- Anomalies: single-day spikes -------------------------------------
-    spikes = find_spikes(values)
+    # --- Anomalies: single-day operational spikes (tangibles excluded) -----
+    # Strip tangible-only closeout sheets from spike scoring so booking
+    # tangibles on a standalone closeout sheet never fires a false cost-dip.
+    op_indices = [index for index in range(len(days)) if index not in tangible_only_index]
+    op_series = [operational_values[index] for index in op_indices]
+    raw_spikes = find_spikes(op_series)
+    spikes = [(op_indices[pos], z, centre) for pos, z, centre in raw_spikes]
     spike_index = {index for index, _, _ in spikes}
+    analysis_skip = spike_index | tangible_only_index
     for index, z, centre in spikes:
         day = days[index]
-        higher = day.actual > centre
+        op_value = day.operational
+        higher = op_value > centre
         add(
             "cost-spike" if higher else "cost-dip", "warning" if higher else "info", "anomaly",
             f"{'Unusually high' if higher else 'Unusually low'} daily cost on {day.cost_date.isoformat()}",
-            f"{money(day.actual, cur)} was recorded against a typical {money(centre, cur)} for the surrounding days "
-            f"({day.actual / centre:.1f}x).",
-            f"Modified z-score {z:+.1f} against the median of up to {SPIKE_WINDOW} days either side (flagged beyond "
-            f"{SPIKE_Z}, at least {SPIKE_MIN_RELATIVE:.0%} from that median, and no neighbouring day within "
-            f"{SPIKE_ISOLATION:.0%} of it).",
-            ("Open the sheet and confirm the large lines: a lump-sum, mobilisation or tangible delivery is legitimate; "
-             "a quantity keyed with an extra digit or a cost booked on the wrong date is not."
+            f"{money(op_value, cur)} operational spend was recorded against a typical {money(centre, cur)} for the "
+            f"surrounding days ({op_value / centre:.1f}x)"
+            + (f" (excluding {money(day.tangibles, cur)} in booked tangibles)." if day.tangibles > 0 else "."),
+            f"Modified z-score {z:+.1f} on daily operational cost (excluding lump-sum tangibles) against the median "
+            f"of up to {SPIKE_WINDOW} days either side (flagged beyond {SPIKE_Z}, at least {SPIKE_MIN_RELATIVE:.0%} "
+            f"from that median, and no neighbouring day within {SPIKE_ISOLATION:.0%} of it).",
+            ("Open the sheet and confirm the large operational lines: a lump-sum service or mobilisation is "
+             "legitimate; a quantity keyed with an extra digit or a cost booked on the wrong date is not."
              if higher else
              "Open the sheet and confirm no service line or day-rate item was left out."),
-            cost_date=day.cost_date, amount=day.actual - centre,
-            evidence=[("Recorded", money(day.actual, cur)), ("Typical day", money(centre, cur)),
-                      ("Difference", money(day.actual - centre, cur))],
+            cost_date=day.cost_date, amount=op_value - centre,
+            evidence=[
+                ("Operational spend", money(op_value, cur)),
+                ("Typical day", money(centre, cur)),
+                ("Difference", money(op_value - centre, cur)),
+                *([] if day.tangibles <= 0 else [("Tangibles (excluded)", money(day.tangibles, cur))]),
+            ],
         )
 
-    # --- Trend: creeping drift ---------------------------------------------
-    drift = cusum(values, spike_index)
+    # --- Trend: creeping operational drift (tangibles excluded) ------------
+    drift = cusum(operational_values, analysis_skip)
     if drift.alarm_index is not None and drift.start_index is not None:
         start = days[min(drift.start_index, len(days) - 1)].cost_date
         alarm = days[drift.alarm_index].cost_date
         rising = drift.direction.startswith("up")
         recovered = drift.direction.endswith("recovered")
-        extra_days = len(days) - drift.start_index
+        extra_days = sum(1 for i in range(drift.start_index, len(days)) if i not in tangible_only_index)
         extra = (drift.recent_mean - drift.baseline) * extra_days
         if recovered:
             add(
                 "drift-recovered", "info", "trend",
-                f"Daily cost ran {'above' if rising else 'below'} its baseline from {start.isoformat()}, then settled",
-                f"The daily cost level moved away from the opening {money(drift.baseline, cur)} per day and has since "
-                f"returned inside the control limit.",
-                f"Two-sided CUSUM (slack {CUSUM_SLACK}, limit {CUSUM_LIMIT:g}) against the median of the first "
-                f"{drift.baseline_days} days; alarm on {alarm.isoformat()}, no longer in alarm on the last recorded day.",
+                f"Daily operational cost ran {'above' if rising else 'below'} its baseline from {start.isoformat()}, then settled",
+                f"The daily operational cost level moved away from the opening {money(drift.baseline, cur)} per day "
+                f"and has since returned inside the control limit.",
+                f"Two-sided CUSUM (slack {CUSUM_SLACK}, limit {CUSUM_LIMIT:g}) on daily operational cost (excluding "
+                f"tangibles) against the median of the first {drift.baseline_days} days; alarm on {alarm.isoformat()}, "
+                "no longer in alarm on the last recorded day.",
                 "No action is needed; note the cause in the well file if it was a planned change of operation.",
                 cost_date=start,
             )
@@ -382,11 +483,12 @@ def analyse_well(well: WellInput, as_of: date | None = None) -> WellAnalysis:
             add(
                 "drift-up", "critical" if drift.change_percent >= 25 else "warning", "trend",
                 f"Daily cost has been creeping up since {start.isoformat()}",
-                f"The daily level rose from about {money(drift.baseline, cur)} to {money(drift.recent_mean, cur)} "
+                f"The daily operational level rose from about {money(drift.baseline, cur)} to {money(drift.recent_mean, cur)} "
                 f"({drift.change_percent:+.0f}%). Over {extra_days} days that is about {money(extra, cur)} more than "
                 f"the opening rate would have cost.",
-                f"Two-sided CUSUM (slack {CUSUM_SLACK}, limit {CUSUM_LIMIT:g}) against the median of the first "
-                f"{drift.baseline_days} days; alarm raised on {alarm.isoformat()} and still standing.",
+                f"Two-sided CUSUM (slack {CUSUM_SLACK}, limit {CUSUM_LIMIT:g}) on daily operational cost (excluding "
+                f"tangibles) against the median of the first {drift.baseline_days} days; alarm raised on "
+                f"{alarm.isoformat()} and still standing.",
                 "Compare the service lines of a recent sheet with one from the opening period: look for added "
                 "services, a rate revision, or standby and rental items that were meant to be released.",
                 cost_date=start, amount=extra,
@@ -398,18 +500,25 @@ def analyse_well(well: WellInput, as_of: date | None = None) -> WellAnalysis:
             add(
                 "drift-down", "info", "trend",
                 f"Daily cost has been running lower since {start.isoformat()}",
-                f"The daily level fell from about {money(drift.baseline, cur)} to {money(drift.recent_mean, cur)} "
+                f"The daily operational level fell from about {money(drift.baseline, cur)} to {money(drift.recent_mean, cur)} "
                 f"({drift.change_percent:+.0f}%).",
-                f"Two-sided CUSUM (slack {CUSUM_SLACK}, limit {CUSUM_LIMIT:g}) against the median of the first "
-                f"{drift.baseline_days} days; alarm raised on {alarm.isoformat()}.",
+                f"Two-sided CUSUM (slack {CUSUM_SLACK}, limit {CUSUM_LIMIT:g}) on daily operational cost (excluding "
+                f"tangibles) against the median of the first {drift.baseline_days} days; alarm raised on "
+                f"{alarm.isoformat()}.",
                 "Confirm the saving is real (a released service or lower rate) and not costs that are still to be "
                 "entered; accruals missing from the sheets understate the well.",
                 cost_date=start, amount=extra,
             )
 
     # --- Budget: position and forecast --------------------------------------
-    outlook = forecast(well, values, spike_index)
+    outlook = forecast(well, operational_values, analysis_skip)
     spent = well.actual_amount
+    operational_spent = max(0.0, (spent or 0.0) - tangible_actual) if spent is not None else None
+    operational_afe = (
+        well.afe_amount - tangible_afe
+        if well.afe_amount and tangible_afe and well.afe_amount > tangible_afe
+        else well.afe_amount
+    )
     if well.afe_amount and spent is not None:
         used = spent / well.afe_amount * 100
         if spent > well.afe_amount:
@@ -417,42 +526,94 @@ def analyse_well(well: WellInput, as_of: date | None = None) -> WellAnalysis:
             add(
                 "afe-exceeded", "critical", "budget",
                 f"Actual cost is {used - 100:.0f}% over the AFE",
-                f"{money(spent, cur)} has been recorded against an AFE of {money(well.afe_amount, cur)}: "
+                f"{money(spent, cur)} ({used:.1f}% of AFE) has been recorded against an AFE of {money(well.afe_amount, cur)}: "
                 f"{money(over, cur)} over.",
                 "Recorded actual cost compared with the effective AFE amount (SOW adjustments included).",
                 "Raise a supplementary AFE or an approved SOW adjustment for the overrun before further cost is "
                 "committed, and record the cause against the well.",
                 amount=over,
-                evidence=[("AFE", money(well.afe_amount, cur)), ("Actual", money(spent, cur)), ("Over", money(over, cur))],
+                evidence=[
+                    ("AFE", money(well.afe_amount, cur)),
+                    ("Actual", money(spent, cur)),
+                    ("Actual / AFE", f"{used:.1f}%"),
+                    ("Over", money(over, cur)),
+                ],
             )
         elif outlook.available and outlook.variance_percent is not None and outlook.variance_percent >= OVERRUN_WARNING_PERCENT:
             critical = outlook.variance_percent >= OVERRUN_CRITICAL_PERCENT
+            tangible_clause = (
+                f" plus {money(outlook.remaining_tangibles, cur)} remaining tangible AFE"
+                if outlook.remaining_tangibles > 0 else ""
+            )
             add(
                 "forecast-overrun", "critical" if critical else "warning", "budget",
                 f"Forecast to finish {outlook.variance_percent:.0f}% over the AFE",
-                f"At the recent {money(outlook.recent_daily, cur)} per day for the remaining "
-                f"{outlook.remaining_days:.0f} planned days, the well would close near {money(outlook.estimate or 0, cur)} "
-                f"against an AFE of {money(well.afe_amount, cur)}"
+                f"At the recent operational rate of {money(outlook.recent_daily, cur)} per day for the remaining "
+                f"{outlook.remaining_days:.0f} planned days{tangible_clause}, the well would close near "
+                f"{money(outlook.estimate or 0, cur)} against an AFE of {money(well.afe_amount, cur)}"
                 + (f"; the AFE would be used up around {outlook.exhaustion_date.isoformat()}." if outlook.exhaustion_date else "."),
-                f"Estimate at completion = recorded cost + mean of the last {RECENT_DAYS} recorded days (spikes excluded) "
-                f"x remaining planned days. Range {money(outlook.low or 0, cur)} to {money(outlook.high or 0, cur)}.",
+                f"Estimate at completion = recorded cost + mean of the last {RECENT_DAYS} operational days (spikes "
+                f"and lump-sum tangibles excluded) x remaining planned days + unbooked tangible AFE. "
+                f"Range {money(outlook.low or 0, cur)} to {money(outlook.high or 0, cur)}.",
                 "Review the remaining programme with operations now: confirm the days to go, and prepare a "
                 "supplementary AFE or SOW adjustment if the forecast holds.",
                 amount=outlook.variance,
-                evidence=[("Estimate at completion", money(outlook.estimate or 0, cur)),
-                          ("AFE", money(well.afe_amount, cur)), ("Forecast overrun", money(outlook.variance or 0, cur))],
+                evidence=[
+                    ("Estimate at completion", money(outlook.estimate or 0, cur)),
+                    ("AFE", money(well.afe_amount, cur)),
+                    ("Actual / AFE", f"{used:.1f}%"),
+                    ("Forecast overrun", money(outlook.variance or 0, cur)),
+                ],
             )
         elif well.planned_days and well.actual_days is not None and well.actual_days > 0:
             elapsed = well.actual_days / well.planned_days * 100
-            if used - elapsed >= 15 and elapsed < 100:
+            # Evaluate burn-ahead on operational spend vs operational AFE when
+            # tangible AFE is known so early/end-of-scope tangible booking does
+            # not falsely indicate operational burn running ahead of schedule.
+            burn_used = (
+                (operational_spent / operational_afe * 100)
+                if (operational_spent is not None and operational_afe and operational_afe > 0)
+                else used
+            )
+            if burn_used - elapsed >= 15 and elapsed < 100:
                 add(
                     "burn-ahead", "warning", "budget",
-                    "Cost is running ahead of time",
-                    f"{used:.0f}% of the AFE is spent with {elapsed:.0f}% of the planned days used.",
-                    "Share of AFE spent minus share of planned days elapsed is 15 points or more.",
-                    "Check whether front-loaded items (mobilisation, tangibles) explain the lead; if not, the daily "
-                    "rate is above the AFE basis.",
-                    evidence=[("AFE used", f"{used:.1f}%"), ("Planned days used", f"{elapsed:.1f}%")],
+                    "Operational cost is running ahead of time",
+                    f"{burn_used:.0f}% of the {'operational ' if tangible_afe else ''}AFE is spent with {elapsed:.0f}% of the planned days used.",
+                    "Share of operational AFE spent (excluding lump-sum tangibles) minus share of planned days elapsed is 15 points or more.",
+                    "Check whether front-loaded mobilisation explains the lead; if not, the daily operational rate is above the AFE basis.",
+                    evidence=[
+                        ("Actual / AFE", f"{used:.1f}%"),
+                        ("Operational burn", f"{burn_used:.1f}%"),
+                        ("Planned days used", f"{elapsed:.1f}%"),
+                    ],
+                )
+        # Depth vs operational spend check (domain common sense): catching
+        # wells burning through operational budget while hole progress lags.
+        if (
+            well.depth_progress_percent is not None
+            and well.depth_progress_percent > 0
+            and well.depth_progress_percent < 75
+            and operational_spent is not None
+            and operational_afe
+            and operational_afe > 0
+        ):
+            op_used = operational_spent / operational_afe * 100
+            if op_used >= 60 and (op_used - well.depth_progress_percent) >= 25 and spent <= well.afe_amount:
+                add(
+                    "depth-cost-mismatch", "warning", "budget",
+                    "Operational spend is outpacing depth progress",
+                    f"{op_used:.0f}% of the operational AFE has been spent while hole depth is at "
+                    f"{well.depth_progress_percent:.0f}% of target.",
+                    "Operational AFE utilisation (excluding tangibles) exceeds physical depth progress by at least "
+                    "25 percentage points before 75% of planned depth is reached.",
+                    "Inspect slow ROP intervals, sidetrack/remedial work or standby time in the active hole section "
+                    "before the remaining footage exhausts the AFE.",
+                    evidence=[
+                        ("Operational AFE used", f"{op_used:.1f}%"),
+                        ("Depth progress", f"{well.depth_progress_percent:.1f}%"),
+                        ("Actual / AFE", f"{used:.1f}%"),
+                    ],
                 )
 
     # --- Schedule ------------------------------------------------------------
@@ -471,7 +632,7 @@ def analyse_well(well: WellInput, as_of: date | None = None) -> WellAnalysis:
             evidence=[("Planned days", f"{well.planned_days:.0f}"), ("Actual days", f"{well.actual_days:.0f}")],
         )
 
-    # --- Non-productive time -------------------------------------------------
+    # --- Non-productive time & Unplanned activity ----------------------------
     if well.npt_amount and spent:
         share = well.npt_amount / spent * 100
         if share >= NPT_WARNING_SHARE:
@@ -486,37 +647,65 @@ def analyse_well(well: WellInput, as_of: date | None = None) -> WellAnalysis:
                 amount=well.npt_amount,
                 evidence=[("NPT cost", money(well.npt_amount, cur)), ("Share of cost", f"{share:.1f}%")],
             )
+    if well.upa_amount and spent:
+        upa_share = well.upa_amount / spent * 100
+        if upa_share >= NPT_WARNING_SHARE:
+            add(
+                "upa-share", "critical" if upa_share >= NPT_CRITICAL_SHARE else "warning", "npt",
+                f"Unplanned activity (UPA) is {upa_share:.0f}% of the cost",
+                f"{money(well.upa_amount, cur)} of {money(spent, cur)} was charged to unplanned activities.",
+                f"UPA cost as a share of recorded cost; warning from {NPT_WARNING_SHARE:.0f}%, critical from "
+                f"{NPT_CRITICAL_SHARE:.0f}%.",
+                "Verify whether recurring unplanned operations reflect a scope change that requires an SOW adjustment.",
+                amount=well.upa_amount,
+                evidence=[("UPA cost", money(well.upa_amount, cur)), ("Share of cost", f"{upa_share:.1f}%")],
+            )
 
     # --- Cost groups ---------------------------------------------------------
     for group in well.groups:
         if group.planned and group.actual > group.planned * 1.05:
             over = group.actual - group.planned
+            group_pct = group.actual / group.planned * 100
+            major_group = bool(well.afe_amount and (group.planned / well.afe_amount) >= 0.15)
+            severity = "critical" if (group_pct >= 125 and major_group) else "warning"
+            is_tangibles = group.label.lower() == "tangibles"
             add(
-                "group-overrun", "warning", "budget",
-                f"{group.label} is over its AFE allowance",
-                f"{money(group.actual, cur)} recorded against {money(group.planned, cur)} planned for {group.label}.",
-                "Recorded cost of the cost group compared with its AFE estimate (more than 5% over).",
-                f"Check which {group.label.lower()} lines exceed the estimate and whether another group is carrying "
-                "a matching saving.",
+                "group-overrun", severity, "budget",
+                f"{group.label} is over its AFE allowance ({group_pct:.0f}%)",
+                f"{money(group.actual, cur)} recorded against {money(group.planned, cur)} planned for {group.label} "
+                f"({group_pct:.1f}% of AFE allowance)."
+                + (" Evaluated on total tangible spend vs tangible AFE, independent of booking date." if is_tangibles else ""),
+                "Recorded cost of the cost group compared with its AFE estimate (warning >105%, critical >=125% on major cost groups).",
+                (
+                    "Confirm whether substituted or additional casing/tubing strings explain the tangible overrun "
+                    "and align the AFE via an SOW adjustment."
+                    if is_tangibles else
+                    f"Check which {group.label.lower()} lines exceed the estimate and whether another group is carrying a matching saving."
+                ),
                 amount=over,
-                evidence=[("Planned", money(group.planned, cur)), ("Actual", money(group.actual, cur))],
+                evidence=[
+                    ("Planned", money(group.planned, cur)),
+                    ("Actual", money(group.actual, cur)),
+                    ("Actual / AFE", f"{group_pct:.1f}%"),
+                    ("Over", money(over, cur)),
+                ],
             )
 
     # --- Record quality ------------------------------------------------------
     gaps = missing_dates(days)
     if gaps:
         runs = _date_runs(gaps)
-        typical = robust_centre(values)[0]
+        typical = robust_centre([v for i, v in enumerate(operational_values) if i not in tangible_only_index])[0]
         add(
             "missing-sheets", "warning", "data-quality",
             f"{len(gaps)} cost date(s) have no daily sheet",
             "No cost is recorded for " + ", ".join(_span(first, last) for first, last in runs[:6])
             + (f" and {len(runs) - 6} more period(s)" if len(runs) > 6 else "")
-            + f". At a typical {money(typical, cur)} per day that is about {money(typical * len(gaps), cur)} not yet in the record.",
+            + f". At a typical operational {money(typical, cur)} per day that is about {money(typical * len(gaps), cur)} not yet in the record.",
             "Every calendar date between the first and last recorded cost date is expected to have a sheet.",
             "Enter the missing sheets, or record a zero-cost sheet with a remark if the rig was released for those days.",
             cost_date=runs[0][0], amount=typical * len(gaps),
-            evidence=[("Missing dates", str(len(gaps))), ("Typical day", money(typical, cur))],
+            evidence=[("Missing dates", str(len(gaps))), ("Typical operational day", money(typical, cur))],
         )
     if as_of and days and well.status == "active":
         behind = (as_of - days[-1].cost_date).days
@@ -530,16 +719,16 @@ def analyse_well(well: WellInput, as_of: date | None = None) -> WellAnalysis:
                 cost_date=days[-1].cost_date,
             )
     run_start = 0
-    for index in range(1, len(values) + 1):
-        if index == len(values) or values[index] != values[run_start]:
+    for index in range(1, len(operational_values) + 1):
+        if index == len(operational_values) or operational_values[index] != operational_values[run_start]:
             length = index - run_start
-            if length >= REPEAT_RUN and values[run_start] > 0:
+            if length >= REPEAT_RUN and operational_values[run_start] > 0:
                 add(
                     "repeated-total", "info", "data-quality",
-                    f"{length} consecutive days carry the identical total",
-                    f"{money(values[run_start], cur)} is recorded for every day from "
+                    f"{length} consecutive days carry the identical operational total",
+                    f"{money(operational_values[run_start], cur)} is recorded for every day from "
                     f"{_span(days[run_start].cost_date, days[index - 1].cost_date)}.",
-                    f"{REPEAT_RUN} or more consecutive cost dates with exactly the same daily total.",
+                    f"{REPEAT_RUN} or more consecutive cost dates with exactly the same daily operational total.",
                     "If the sheets were copied forward, confirm the consumables and variable services were updated "
                     "for each day.",
                     cost_date=days[run_start].cost_date,
