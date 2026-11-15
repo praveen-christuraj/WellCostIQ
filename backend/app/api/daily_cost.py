@@ -73,10 +73,12 @@ def well_cost_summary(
     date_from: date | None = Query(default=None, alias="from"),
     date_to: date | None = Query(default=None, alias="to"),
     include_draft: bool = Query(default=True),
+    scope: str | None = Query(default=None),
 ) -> DailyCostWellSummary:
     """Whole-well cost detail: daily run sheet, AFE positions and every cost factor."""
     return service.well_cost_summary(
-        db, user.organization_id, well_id, date_from=date_from, date_to=date_to, include_draft=include_draft,
+        db, user.organization_id, well_id, date_from=date_from, date_to=date_to,
+        include_draft=include_draft, scope=scope,
     )
 
 
@@ -153,10 +155,12 @@ def well_cost_report(
     date_from: date | None = Query(default=None, alias="from"),
     date_to: date | None = Query(default=None, alias="to"),
     include_draft: bool = Query(default=True),
+    scope: str | None = Query(default=None),
 ) -> list[DailyCostDayOut]:
     """Complete saved sheets for one well; no cross-well or cross-currency totals."""
     return service.well_cost_report(
-        db, user.organization_id, well_id, date_from=date_from, date_to=date_to, include_draft=include_draft,
+        db, user.organization_id, well_id, date_from=date_from, date_to=date_to,
+        include_draft=include_draft, scope=scope,
     )
 
 

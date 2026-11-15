@@ -177,6 +177,11 @@ export type DashboardDailyPoint = {
   cumulative: string
   npt: string
   upa: string
+  tangibles?: string
+  operational?: string
+  services?: string
+  consumables?: string
+  other_expenses?: string
   sheets: number
 }
 
@@ -189,6 +194,7 @@ export type DashboardSlice = {
   actual: Money
   balance: Money
   share: Money
+  utilisation_percent?: Money
 }
 
 export type DashboardSectionRow = {
@@ -342,6 +348,14 @@ export function decimal(value: Money | number | undefined, digits = 0): string {
 export function percent(value: Money | number | undefined): string {
   if (value === null || value === undefined || value === '') return '—'
   return `${Number(value).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+}
+
+export function actualVsAfePercent(actual: Money | number | undefined, afe: Money | number | undefined): string {
+  if (actual === null || actual === undefined || actual === '' || afe === null || afe === undefined || afe === '') return '—'
+  const act = Number(actual)
+  const plan = Number(afe)
+  if (!Number.isFinite(act) || !Number.isFinite(plan) || plan <= 0) return '—'
+  return `${((act / plan) * 100).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
 }
 
 /** Exact elapsed days: three decimals, e.g. 13.417, never a rounded sheet count. */

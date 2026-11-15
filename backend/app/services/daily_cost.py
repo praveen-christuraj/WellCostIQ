@@ -4082,6 +4082,7 @@ def _line_union(
     date_from: date | None,
     date_to: date | None,
     include_draft: bool,
+    scope: str | None = None,
 ) -> Any:
     """One row per daily cost line, whatever its group, with every captured factor.
 
@@ -4124,6 +4125,10 @@ def _line_union(
             DailyCostEntry.well_id == well_id,
             DailyCostEntry.is_deleted.is_(False),
         )
+        if scope in ("drilling", "completion"):
+            statement = statement.join(Afe, DailyCostEntry.afe_id == Afe.id).where(
+                Afe.configuration_scope == scope
+            )
         if not include_draft:
             statement = statement.where(DailyCostEntry.status == "submitted")
         if date_from is not None:
@@ -4403,10 +4408,13 @@ def _party_factor_rows(
 def well_cost_report(
     db: Session, organization_id: str, well_id: str, *,
     date_from: date | None = None, date_to: date | None = None, include_draft: bool = True,
+    scope: str | None = None,
 ) -> list[DailyCostDayOut]:
     """Return every persisted section, including empty sheets, in date order."""
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="The start date must not be after the end date")
+    if scope is not None and scope not in ("drilling", "completion"):
+        raise HTTPException(status_code=422, detail="Scope must be 'drilling' or 'completion'")
     well = db.scalar(select(Well).where(
         Well.id == well_id, Well.organization_id == organization_id, Well.is_deleted.is_(False),
     ))
@@ -4416,6 +4424,8 @@ def well_cost_report(
         DailyCostEntry.organization_id == organization_id, DailyCostEntry.well_id == well_id,
         DailyCostEntry.is_deleted.is_(False), DailyCostEntry.cost_date <= (date_to or date.today()),
     )
+    if scope in ("drilling", "completion"):
+        query = query.join(Afe, DailyCostEntry.afe_id == Afe.id).where(Afe.configuration_scope == scope)
     if date_from:
         query = query.where(DailyCostEntry.cost_date >= date_from)
     if not include_draft:
@@ -5003,10 +5013,14 @@ def well_cost_summary(
     date_from: date | None = None,
     date_to: date | None = None,
     include_draft: bool = True,
+    scope: str | None = None,
 ) -> DailyCostWellSummary:
     """Cost the whole well: daily run sheet, AFE positions and every captured factor."""
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="The start date must not be after the end date")
+    selected_scope = scope if scope in ("drilling", "completion") else None
+    if scope is not None and selected_scope is None:
+        raise HTTPException(status_code=422, detail="Scope must be 'drilling' or 'completion'")
     well = db.scalars(
         select(Well).options(joinedload(Well.rig))
         .where(Well.id == well_id, Well.organization_id == organization_id, Well.is_deleted.is_(False))
@@ -5014,7 +5028,7 @@ def well_cost_summary(
     if well is None:
         raise HTTPException(status_code=404, detail="Well not found in this workspace")
 
-    entries = list(db.scalars(
+    entry_stmt = (
         select(DailyCostEntry)
         .options(joinedload(DailyCostEntry.afe), joinedload(DailyCostEntry.baseline))
         .where(
@@ -5023,7 +5037,12 @@ def well_cost_summary(
             DailyCostEntry.is_deleted.is_(False),
         )
         .order_by(DailyCostEntry.cost_date, DailyCostEntry.id)
-    ).unique().all())
+    )
+    if selected_scope is not None:
+        entry_stmt = entry_stmt.join(Afe, DailyCostEntry.afe_id == Afe.id).where(
+            Afe.configuration_scope == selected_scope
+        )
+    entries = list(db.scalars(entry_stmt).unique().all())
     windowed = [
         row for row in entries
         if (date_from is None or row.cost_date >= date_from) and (date_to is None or row.cost_date <= date_to)
@@ -5069,7 +5088,9 @@ def well_cost_summary(
         if adjustment is not None and str(adjustment.standard_currency) == option.standard_currency:
             adjusted_by_afe[option.id] = _money(Decimal(adjustment.adjusted_total))
 
-    lines = _line_union(organization_id, well_id, date_from=date_from, date_to=date_to, include_draft=include_draft)
+    lines = _line_union(
+        organization_id, well_id, date_from=date_from, date_to=date_to, include_draft=include_draft, scope=selected_scope
+    )
     totals_by_group = {
         str(row[0] or ""): Decimal(row[1] or 0)
         for row in db.execute(
@@ -5186,6 +5207,8 @@ def well_cost_summary(
     )
     if date_from is not None:
         mud_statement = mud_statement.where(DailyCostEntry.cost_date >= date_from)
+    if selected_scope is not None:
+        mud_statement = mud_statement.join(Afe, DailyCostEntry.afe_id == Afe.id).where(Afe.configuration_scope == selected_scope)
     if not include_draft:
         mud_statement = mud_statement.where(DailyCostEntry.status == "submitted")
     actual_mud_chemicals = _money(Decimal(db.scalar(mud_statement) or 0))
@@ -5537,15 +5560,17 @@ def well_cost_summary(
             key = f"{budget_line.budget_kind}:{budget_line.item_key}"
             planned_by_key[key] = planned_by_key.get(key, Decimal("0")) + Decimal(budget_line.planned_amount)
             meta.setdefault(key, budget_line)
+    unplanned_codes: dict[tuple[str, str], str] = {}
     unplanned_names: dict[tuple[str, str], str] = {}
     unplanned_groups: dict[tuple[str, str], str] = {}
     for row in db.execute(
         select(
             lines.c.cost_group, lines.c.budget_key,
             # PostgreSQL rejects ungrouped projections (SQLite silently picks an
-            # arbitrary row), so the representative activity and party labels are
+            # arbitrary row), so the representative item, activity and party labels are
             # aggregated. min() keeps the same one-label-per-budget-key shape and
             # makes the chosen label deterministic on every dialect.
+            func.min(lines.c.item_code), func.min(lines.c.item_name),
             func.min(lines.c.activity_name), func.min(lines.c.party_name),
             func.min(lines.c.service_group),
         )
@@ -5553,8 +5578,18 @@ def well_cost_summary(
         .where(lines.c.budget_key.like("unplanned:%"))
         .group_by(lines.c.cost_group, lines.c.budget_key)
     ).all():
-        unplanned_names[(str(row[0]), str(row[1]))] = f"Unbudgeted {row[0].lower()} — {row[2] or row[3] or UNASSIGNED}"
-        unplanned_groups[(str(row[0]), str(row[1]))] = str(row[4] or "")
+        group_key = (str(row[0]), str(row[1]))
+        item_code = str(row[2] or "").strip()
+        item_name = str(row[3] or "").strip()
+        unplanned_codes[group_key] = item_code
+        # Preserve the actual used item's name (especially for unbudgeted tangibles,
+        # services, and consumables) instead of obscuring it behind a generic label.
+        unplanned_names[group_key] = (
+            item_name
+            or item_code
+            or f"Unbudgeted {row[0].lower()} — {row[4] or row[5] or UNASSIGNED}"
+        )
+        unplanned_groups[group_key] = str(row[6] or "")
     unplanned_live_groups = _live_unplanned_service_groups(
         db, organization_id, (key for _, key in unplanned_groups)
     )
@@ -5568,7 +5603,7 @@ def well_cost_summary(
         else:
             group = group_by_key.get(key, "Services")
             kind = key.split(":", 1)[0] if key else "unplanned"
-            code = "" if key.startswith("unplanned:") else key.split(":", 1)[-1][:50]
+            code = unplanned_codes.get((str(group), key), "" if key.startswith("unplanned:") else key.split(":", 1)[-1][:50])
             name = unplanned_names.get((str(group), key), f"Unbudgeted {str(group).lower()}")
             service_group = unplanned_live_groups.get(key) or unplanned_groups.get((str(group), key), "")
         planned_value = planned_by_key.get(key)
@@ -5666,12 +5701,15 @@ def well_cost_summary(
     progress_cache: dict = {}
     progress_as_of: dict[str, date] = {}
     for entry in windowed:
-        scope = afe_scope.get(entry.afe_id, "drilling")
-        if scope not in progress_as_of or entry.cost_date > progress_as_of[scope]:
-            progress_as_of[scope] = entry.cost_date
+        entry_scope = afe_scope.get(entry.afe_id, "drilling")
+        if entry_scope not in progress_as_of or entry.cost_date > progress_as_of[entry_scope]:
+            progress_as_of[entry_scope] = entry.cost_date
+    active_progress_scopes = (
+        (selected_scope,) if selected_scope in ("drilling", "completion") else PROGRESS_SCOPES
+    )
     progress_rows = [
-        _well_progress_row(db, organization_id, well, scope, as_of=progress_as_of.get(scope), cache=progress_cache)
-        for scope in PROGRESS_SCOPES
+        _well_progress_row(db, organization_id, well, progress_scope, as_of=progress_as_of.get(progress_scope), cache=progress_cache)
+        for progress_scope in active_progress_scopes
     ]
     spudded_rows = [row for row in progress_rows if row.actual_days is not None]
     spud_actual_days = sum((row.actual_days for row in spudded_rows), Decimal("0.000"))

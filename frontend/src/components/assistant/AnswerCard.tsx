@@ -1,6 +1,7 @@
 import { Link as RouterLink } from 'react-router-dom'
 import {
-  Alert, Box, Chip, Divider, Link, List, ListItem, ListItemText, Paper, Typography,
+  Alert, Box, Chip, Divider, Link, List, ListItem, ListItemText, Paper,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography,
 } from '@mui/material'
 import { ArrowForwardRounded, CheckCircleOutlined, MenuBookOutlined, LockOutlined, RouteRounded } from '@mui/icons-material'
 import { Tag } from '../Common'
@@ -27,6 +28,7 @@ export function AnswerCard({ answer, onAsk }: {
       </Tag>
       {answer.memory_key && <Chip size="small" variant="outlined" label={answer.memory_key} sx={{ height: 22, fontSize: 10.5, fontFamily: 'monospace' }}/>}
       {answer.intent === 'data_health' && <Tag tone="info">Data health</Tag>}
+      {(answer.intent === 'price_lookup' || answer.intent === 'cost_search' || answer.intent === 'cost_position') && <Tag tone="info">Live data</Tag>}
       {answer.category === 'calculation' && <Tag tone="info">Calculation</Tag>}
     </Box>
 
@@ -51,6 +53,48 @@ export function AnswerCard({ answer, onAsk }: {
             : <Box key={`${fact.label}-${index}`}>{content}</Box>
         })}
       </Box>
+    </Box>}
+
+    {(answer.tables?.length ?? 0) > 0 && <Box sx={{ mt: 2, display: 'grid', gap: 1.5 }}>
+      {answer.tables!.map((tbl, tIdx) => {
+        const numericSet = new Set(tbl.numeric ?? [])
+        return <Box key={`${tbl.title}-${tIdx}`}>
+          {tbl.title && <Typography className="eyebrow" sx={{ mb: .7 }}>{tbl.title}</Typography>}
+          <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.6 }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  {tbl.columns.map((col, cIdx) => (
+                    <TableCell
+                      key={`${col}-${cIdx}`}
+                      align={numericSet.has(cIdx) ? 'right' : 'left'}
+                      sx={{ fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', py: .85 }}
+                    >
+                      {col}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {tbl.rows.map((row, rIdx) => (
+                  <TableRow key={rIdx} hover>
+                    {row.map((cell, cIdx) => (
+                      <TableCell
+                        key={cIdx}
+                        align={numericSet.has(cIdx) ? 'right' : 'left'}
+                        sx={{ fontSize: 12.2, fontVariantNumeric: numericSet.has(cIdx) ? 'tabular-nums' : undefined }}
+                      >
+                        {cell}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          {tbl.footer && <Typography fontSize={11.2} color="text.secondary" sx={{ mt: .55 }}>{tbl.footer}</Typography>}
+        </Box>
+      })}
     </Box>}
 
     {answer.steps.length > 0 && <Box sx={{ mt: 2 }}>

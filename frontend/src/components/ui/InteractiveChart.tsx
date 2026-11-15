@@ -5,6 +5,7 @@ import * as echarts from 'echarts/core'
 import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts'
 import { AxisPointerComponent, GraphicComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { SVGRenderer } from 'echarts/renderers'
+import { registerChartOption } from '../../lib/chartExport'
 
 echarts.use([
   BarChart, LineChart, PieChart, ScatterChart,
@@ -253,6 +254,15 @@ export function InteractiveChart({ option, opts, style, onEvents, onChartReady, 
   const [zoom, setZoom] = useState(1)
 
   const preciseOption = useMemo(() => preciseTooltip(option), [option])
+
+  // Register the live option on the host element so PDF export can re-render a
+  // crisp, paper-white scene with formatted data labels immune to CSS zoom/dark mode.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    registerChartOption(host, option)
+    return () => registerChartOption(host, null)
+  }, [option])
 
   // Measure the on-screen box before paint so the chart never initialises at
   // the zoomed size and then has to be corrected visibly.

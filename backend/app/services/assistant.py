@@ -27,14 +27,27 @@ from collections import Counter
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import (
     Afe,
+    CementAdditive,
+    DailyCostConsumableLine,
     DailyCostEntry,
+    DailyCostOtherExpenseLine,
+    DailyCostServiceLine,
+    DailyCostTangibleLine,
+    DrillBit,
+    FuelType,
+    LihCostEntry,
+    LihCostLine,
+    MudChemical,
+    NdtInspection,
     Service,
+    Tangible,
     User,
+    Vendor,
     Well,
     WellSubActivity,
 )
@@ -47,6 +60,7 @@ from app.schemas.assistant import (
     AssistantMemoryUpdate,
     AssistantOverview,
     AssistantSource,
+    AssistantTable,
 )
 
 MONEY = Decimal("0.01")
@@ -679,13 +693,26 @@ INTENT_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "missing", "incomplete", "what should i enter", "what to enter", "ready", "check my data",
         "data quality", "what is left", "to do", "todo", "hygiene", "clean up",
     )),
+    ("price_lookup", (
+        "price of", "rate of", "unit price", "unit rate", "unit cost", "how much is", "how much does",
+        "tariff", "po rate", "price list", "tangible price", "tangibles price", "consumable price",
+        "consumables price", "chemical price", "bit price", "fuel price", "diesel price",
+        "additive price", "catalogue price", "catalog price", "prices of", "rates of",
+        "cost of tangible", "cost of consumable", "list tangibles", "list consumables",
+        "show tangibles", "show consumables",
+    )),
+    ("cost_search", (
+        "search cost", "find cost", "lookup cost", "look up cost", "costs related to",
+        "cost related to", "costs for", "spend on", "spent on", "all costs for", "search for",
+        "find item", "lih cost", "ndt cost", "ndt inspection",
+    )),
     ("actual_days", ("actual day", "how many day", "duration", "spud", "13.4", "elapsed")),
     ("forecast", ("forecast", "projection", "projected", "overrun", "run rate", "burn")),
     ("out_of_scope", ("out of scope", "unbudgeted", "not in the afe", "other expense", "lih")),
     ("npt_upa", ("npt", "upa", "non productive", "unplanned", "downtime")),
     ("cost_position", (
-        "afe balance", "balance", "spent", "spend", "cost", "budget", "variance", "utilisation",
-        "utilization", "over budget",
+        "afe balance", "balance", "spent", "spend", "cost detail", "cost breakdown",
+        "cost summary", "cost", "budget", "variance", "utilisation", "utilization", "over budget",
     )),
     ("status", ("how many wells", "active wells", "well status", "portfolio", "overview", "summary")),
 )
@@ -1129,10 +1156,75 @@ def _answer_cost_position(
             value=f"{currency} {_money(summary.out_of_scope.amount)}",
             hint=f"{summary.out_of_scope.line_count} unbudgeted line(s) plus other expenses",
         ))
+    tables: list[AssistantTable] = []
+    # Build cost-group breakdown table (Services / Tangibles / Consumables / Other Expenses)
+    group_totals: dict[str, list[Decimal]] = {}
+    for line in getattr(summary, "budget_lines", []) or []:
+        grp = line.cost_group or "Other"
+        bucket = group_totals.setdefault(grp, [Decimal("0"), Decimal("0")])
+        bucket[0] += Decimal(str(line.planned or 0))
+        bucket[1] += Decimal(str(line.actual or 0))
+    if group_totals:
+        group_rows: list[list[str]] = []
+        for grp, (planned_val, actual_val) in sorted(group_totals.items(), key=lambda kv: -kv[1][1]):
+            pct = (
+                f"{(actual_val / planned_val * Decimal('100')).quantize(MONEY, rounding=ROUND_HALF_UP):,.1f}%"
+                if planned_val > 0 else "—"
+            )
+            group_rows.append([
+                grp,
+                f"{currency} {_money(planned_val)}" if _can(permissions, "afe:read") else "—",
+                f"{currency} {_money(actual_val)}",
+                pct if _can(permissions, "afe:read") else "—",
+                f"{currency} {_money(planned_val - actual_val)}" if _can(permissions, "afe:read") else "—",
+            ])
+        tables.append(AssistantTable(
+            title=f"Cost breakdown · {well.well_code}",
+            columns=["Cost Group", "AFE Planned", "Actual", "Actual / AFE %", "Balance"],
+            rows=group_rows,
+        ))
+    # Show top line items (filtered by requested group if the user named one)
+    q_low = question.casefold()
+    requested_group: str | None = None
+    for needle, grp_name in (
+        ("tangible", "Tangibles"),
+        ("service", "Services"),
+        ("consumable", "Consumables"),
+        ("other expense", "Other Expenses"),
+    ):
+        if needle in q_low:
+            requested_group = grp_name
+            break
+    candidate_lines = [
+        line for line in (getattr(summary, "budget_lines", []) or [])
+        if Decimal(str(line.actual or 0)) > 0
+        and (requested_group is None or (line.cost_group or "").lower() == requested_group.lower())
+    ]
+    candidate_lines.sort(key=lambda item: -Decimal(str(item.actual or 0)))
+    if candidate_lines:
+        item_rows = [
+            [
+                line.cost_group or "—",
+                line.item_name or line.item_code or "—",
+                f"{currency} {_money(line.planned)}" if (_can(permissions, "afe:read") and line.is_planned) else "Unbudgeted",
+                f"{currency} {_money(line.actual)}",
+            ]
+            for line in candidate_lines[:10]
+        ]
+        tables.append(AssistantTable(
+            title=(
+                f"{requested_group} lines on {well.well_code}"
+                if requested_group else f"Top cost items on {well.well_code}"
+            ),
+            columns=["Group", "Item", "AFE Planned", "Actual"],
+            rows=item_rows,
+            note=f"Showing top {len(item_rows)} of {len(candidate_lines)} active cost line(s).",
+        ))
+    afe_pct = f"{_money(totals.used_percent)}%" if totals.planned and Decimal(totals.planned) > 0 else "—"
     return AssistantAnswer(
         answer=(
             f"{_well_label(well)}: {currency} {_money(totals.actual)} spent of "
-            f"{currency} {_money(totals.planned)} on the {currency} AFE, leaving "
+            f"{currency} {_money(totals.planned)} ({afe_pct} of AFE) on the {currency} AFE, leaving "
             f"{currency} {_money(totals.balance)}. {totals.recorded_days} cost date(s) are recorded and "
             f"the exact actual days are {_days(totals.actual_days or totals.spud_actual_days)}. "
             f"NPT is {currency} {_money(totals.npt)} and UPA {currency} {_money(totals.upa)}."
@@ -1141,11 +1233,12 @@ def _answer_cost_position(
         confidence="high",
         category="calculation",
         facts=facts,
+        tables=tables,
         sources=[AssistantSource(label=f"Well cost analysis · {well.well_code}", route=f"/daily-cost/analysis/{well.id}")],
         follow_ups=[
             f"What is out of scope on {well.well_code}?",
             f"Forecast for {well.well_code}",
-            "How is the AFE balance calculated?",
+            f"Show tangibles on {well.well_code}",
         ],
     )
 
@@ -1337,6 +1430,554 @@ def _memory_or_raise(db: Session, organization_id: str, key: str) -> AssistantMe
     return row
 
 
+_LOOKUP_NOISE = frozenset("""
+price prices rate rates unit cost costs how much does is are what the a an of
+for on in to by from with about show list find search lookup look get give tell
+me all any my our this that these those related spend spent item items detail
+details breakdown summary register report current latest catalogue catalog quote
+tariff po well wells
+""".split())
+
+
+def _extract_search_terms(question: str, *, keep_category_words: bool = False) -> list[str]:
+    """Extract substantive search tokens (codes, sizes, names, keywords)."""
+    category_words = frozenset({
+        "tangible", "tangibles", "consumable", "consumables", "chemical", "chemicals",
+        "additive", "additives", "fuel", "fuels", "bit", "bits", "drill", "service",
+        "services", "vendor", "vendors", "lih", "ndt", "inspection", "inspections",
+    })
+    raw_tokens = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9._/\-]*", question)
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_tokens:
+        low = raw.casefold().strip(".,?!:;\"'()")
+        if not low or low in STOPWORDS or low in _LOOKUP_NOISE:
+            continue
+        if not keep_category_words and low in category_words:
+            continue
+        if len(low) < 2 and not any(ch.isdigit() for ch in low):
+            continue
+        if low not in seen:
+            seen.add(low)
+            terms.append(low)
+    return terms
+
+
+def _matches_any(columns: list[Any], terms: list[str]):
+    """SQLAlchemy OR-predicate matching any search term against any text column."""
+    clauses = [col.ilike(f"%{term}%") for term in terms for col in columns]
+    return or_(*clauses) if clauses else None
+
+
+def _rate_display(unit_rate: Any, final_cost: Any, currency: str, uom: str) -> str:
+    effective = final_cost if final_cost is not None and Decimal(str(final_cost)) > 0 else unit_rate
+    prefix = f"{currency} " if currency else ""
+    suffix = f" / {uom}" if uom else ""
+    return f"{prefix}{_money(effective)}{suffix}"
+
+
+def _answer_price_lookup(
+    db: Session, organization_id: str, question: str, permissions: set[str],
+) -> AssistantAnswer:
+    """Return live master-data prices (tangibles, consumables, services) and recent booked rates."""
+    can_master = _can(permissions, "master-data:read")
+    can_daily = _can(permissions, "daily-cost:read")
+    if not can_master and not can_daily:
+        return _permission_answer("master-data:read")
+
+    q_low = question.casefold()
+    terms = _extract_search_terms(question, keep_category_words=False)
+    want_tangibles = any(w in q_low for w in ("tangible", "casing", "tubing", "wellhead", "liner", "hanger", "packer", "christmas tree"))
+    want_bits = any(w in q_low for w in ("drill bit", "bit ", "bits", "pdc", "tricone"))
+    want_mud = any(w in q_low for w in ("mud", "chemical", "barite", "bentonite", "polymer", "brine", "kcl", "consumable"))
+    want_cement = any(w in q_low for w in ("cement", "additive", "retarder", "accelerator", "spacer", "consumable"))
+    want_fuel = any(w in q_low for w in ("fuel", "diesel", "ago", "hsd", "gasoil", "consumable"))
+    want_services = any(w in q_low for w in ("service", "vendor", "contractor", "rig rate", "day rate", "standby"))
+    search_all_categories = not any((want_tangibles, want_bits, want_mud, want_cement, want_fuel, want_services))
+    if search_all_categories:
+        want_tangibles = want_bits = want_mud = want_cement = want_fuel = want_services = True
+
+    catalogue_rows: list[list[str]] = []
+    service_rows: list[list[str]] = []
+    booked_rows: list[list[str]] = []
+
+    if can_master:
+        if want_tangibles:
+            stmt = select(Tangible).where(
+                Tangible.organization_id == organization_id, Tangible.is_deleted.is_(False),
+            )
+            pred = _matches_any(
+                [Tangible.tangible_code, Tangible.tangible_name, Tangible.scope, Tangible.po_number, Tangible.remarks],
+                terms,
+            )
+            if pred is not None:
+                stmt = stmt.where(pred)
+            for item in db.scalars(stmt.order_by(Tangible.tangible_name).limit(12)).all():
+                uplift = f"{Decimal(item.cost_uplift):,.1f}%" if item.cost_uplift is not None else "—"
+                catalogue_rows.append([
+                    "Tangible",
+                    f"{item.tangible_code} · {item.tangible_name}",
+                    f"{item.currency} {_money(item.unit_rate)}" if item.currency else _money(item.unit_rate),
+                    uplift,
+                    _rate_display(item.unit_rate, item.final_cost, item.currency, item.uom),
+                    item.effective_date.isoformat() if item.effective_date else "—",
+                ])
+
+        if want_bits:
+            stmt = select(DrillBit).where(
+                DrillBit.organization_id == organization_id, DrillBit.is_deleted.is_(False),
+            )
+            pred = _matches_any(
+                [DrillBit.bit_code, DrillBit.bit_name, DrillBit.model_no, DrillBit.size, DrillBit.iadc_code, DrillBit.remarks],
+                terms,
+            )
+            if pred is not None:
+                stmt = stmt.where(pred)
+            for item in db.scalars(stmt.order_by(DrillBit.bit_name).limit(10)).all():
+                uplift = f"{Decimal(item.cost_uplift):,.1f}%" if item.cost_uplift is not None else "—"
+                catalogue_rows.append([
+                    "Drill Bit",
+                    f"{item.bit_code} · {item.bit_name} ({item.size})",
+                    f"{item.currency} {_money(item.unit_rate)}" if item.currency else _money(item.unit_rate),
+                    uplift,
+                    _rate_display(item.unit_rate, item.final_cost, item.currency, ""),
+                    item.effective_date.isoformat() if item.effective_date else "—",
+                ])
+
+        if want_mud:
+            stmt = select(MudChemical).where(
+                MudChemical.organization_id == organization_id, MudChemical.is_deleted.is_(False),
+            )
+            pred = _matches_any(
+                [MudChemical.chemical_code, MudChemical.chemical_name, MudChemical.part_number, MudChemical.remarks],
+                terms,
+            )
+            if pred is not None:
+                stmt = stmt.where(pred)
+            for item in db.scalars(stmt.order_by(MudChemical.chemical_name).limit(10)).all():
+                catalogue_rows.append([
+                    "Mud Chemical",
+                    f"{item.chemical_code} · {item.chemical_name}",
+                    f"{item.currency} {_money(item.unit_rate)}" if item.currency else _money(item.unit_rate),
+                    "—",
+                    _rate_display(item.unit_rate, item.final_cost, item.currency, item.uom),
+                    item.effective_date.isoformat() if item.effective_date else "—",
+                ])
+
+        if want_cement:
+            stmt = select(CementAdditive).where(
+                CementAdditive.organization_id == organization_id, CementAdditive.is_deleted.is_(False),
+            )
+            pred = _matches_any(
+                [CementAdditive.additive_code, CementAdditive.additive_name, CementAdditive.part_number, CementAdditive.remarks],
+                terms,
+            )
+            if pred is not None:
+                stmt = stmt.where(pred)
+            for item in db.scalars(stmt.order_by(CementAdditive.additive_name).limit(10)).all():
+                catalogue_rows.append([
+                    "Cement Additive",
+                    f"{item.additive_code} · {item.additive_name}",
+                    f"{item.currency} {_money(item.unit_rate)}" if item.currency else _money(item.unit_rate),
+                    "—",
+                    _rate_display(item.unit_rate, item.final_cost, item.currency, item.uom),
+                    item.effective_date.isoformat() if item.effective_date else "—",
+                ])
+
+        if want_fuel:
+            stmt = select(FuelType).where(
+                FuelType.organization_id == organization_id, FuelType.is_deleted.is_(False),
+            )
+            pred = _matches_any([FuelType.fuel_code, FuelType.fuel_name, FuelType.remarks], terms)
+            if pred is not None:
+                stmt = stmt.where(pred)
+            for item in db.scalars(stmt.order_by(FuelType.fuel_name).limit(10)).all():
+                catalogue_rows.append([
+                    "Fuel",
+                    f"{item.fuel_code} · {item.fuel_name}",
+                    f"{item.currency} {_money(item.unit_rate)}" if item.currency else _money(item.unit_rate),
+                    "—",
+                    _rate_display(item.unit_rate, item.final_cost, item.currency, item.uom),
+                    item.effective_date.isoformat() if item.effective_date else "—",
+                ])
+
+        if want_services and terms:
+            stmt = select(Service).outerjoin(Vendor, Service.vendor_id == Vendor.id).where(
+                Service.organization_id == organization_id, Service.is_deleted.is_(False),
+            )
+            pred = _matches_any(
+                [Service.service_code, Service.service_name, Service.service_group, Vendor.vendor_name],
+                terms,
+            )
+            if pred is not None:
+                stmt = stmt.where(pred)
+            for svc in db.scalars(stmt.order_by(Service.service_name).limit(10)).all():
+                vendor_label = svc.vendor.vendor_name if svc.vendor else svc.provider_type
+                service_rows.append([
+                    f"{svc.service_code} · {svc.service_name}",
+                    svc.service_group,
+                    vendor_label,
+                    svc.service_category,
+                ])
+
+    if can_daily and terms:
+        for label, model, code_col, name_col in (
+            ("Service", DailyCostServiceLine, DailyCostServiceLine.service_code_snapshot, DailyCostServiceLine.service_name_snapshot),
+            ("Tangible", DailyCostTangibleLine, DailyCostTangibleLine.tangible_code_snapshot, DailyCostTangibleLine.tangible_name_snapshot),
+            ("Consumable", DailyCostConsumableLine, DailyCostConsumableLine.item_code_snapshot, DailyCostConsumableLine.item_name_snapshot),
+        ):
+            pred = _matches_any([code_col, name_col, model.remarks], terms)
+            if pred is None:
+                continue
+            rows = db.execute(
+                select(
+                    DailyCostEntry.well_code_snapshot,
+                    name_col,
+                    func.max(func.coalesce(model.override_rate, model.captured_rate)),
+                    func.sum(model.standard_amount),
+                    func.count(model.id),
+                    func.max(DailyCostEntry.standard_currency),
+                )
+                .join(DailyCostEntry, DailyCostEntry.id == model.entry_id)
+                .where(
+                    model.organization_id == organization_id,
+                    DailyCostEntry.is_deleted.is_(False),
+                    pred,
+                )
+                .group_by(DailyCostEntry.well_code_snapshot, name_col)
+                .order_by(func.sum(model.standard_amount).desc())
+                .limit(6)
+            ).all()
+            for well_code, item_name, max_rate, total_amt, cnt, curr in rows:
+                booked_rows.append([
+                    label,
+                    well_code,
+                    item_name,
+                    f"{curr} {_money(max_rate)}",
+                    f"{curr} {_money(total_amt)} ({cnt} line{'s' if cnt != 1 else ''})",
+                ])
+
+    tables: list[AssistantTable] = []
+    if catalogue_rows:
+        tables.append(AssistantTable(
+            title="Catalogue rates (Master Data)",
+            columns=["Category", "Item", "PO / Unit Rate", "Uplift", "Effective Rate", "Effective Date"],
+            rows=catalogue_rows[:20],
+            note=(
+                f"Showing {min(len(catalogue_rows), 20)} matching item(s) from the workspace catalogue."
+                if len(catalogue_rows) > 20 else ""
+            ),
+        ))
+    if service_rows:
+        tables.append(AssistantTable(
+            title="Matching services",
+            columns=["Service", "Service Group", "Provider / Vendor", "Category"],
+            rows=service_rows[:12],
+        ))
+    if booked_rows:
+        tables.append(AssistantTable(
+            title="Recorded daily cost rates & spend",
+            columns=["Group", "Well", "Item", "Recorded Rate", "Total Recorded"],
+            rows=booked_rows[:15],
+        ))
+
+    total_hits = len(catalogue_rows) + len(service_rows) + len(booked_rows)
+    if total_hits == 0:
+        query_desc = ", ".join(terms) if terms else "that category"
+        return AssistantAnswer(
+            answer=(
+                f"No priced catalogue item, service or recorded cost line matched \"{query_desc}\" "
+                "in this workspace. Check the item code or name in Master Data, or try a shorter keyword."
+            ),
+            intent="price_lookup",
+            confidence="medium",
+            category="navigation",
+            sources=[AssistantSource(label="Master Data catalogue", route="/master-data")],
+            follow_ups=["List tangibles", "List consumables", "What is missing in my workspace?"],
+        )
+
+    facts: list[AssistantFact] = []
+    if catalogue_rows:
+        first = catalogue_rows[0]
+        facts.append(AssistantFact(
+            label=f"Top catalogue match ({first[0]})",
+            value=f"{first[1]} — {first[4]}",
+            hint=f"Effective {first[5]}" if first[5] != "—" else "Master Data rate",
+            route="/master-data",
+        ))
+    facts.append(AssistantFact(
+        label="Matched records",
+        value=f"{len(catalogue_rows)} catalogue · {len(service_rows)} service · {len(booked_rows)} recorded usage",
+    ))
+    sources = []
+    if can_master:
+        sources.append(AssistantSource(label="Master Data catalogue", route="/master-data"))
+    if can_daily:
+        sources.append(AssistantSource(label="Daily Cost register", route="/daily-cost"))
+    summary_label = f" for \"{' '.join(terms)}\"" if terms else ""
+    return AssistantAnswer(
+        answer=(
+            f"Found {len(catalogue_rows)} catalogue rate(s), {len(service_rows)} service definition(s), and "
+            f"{len(booked_rows)} recorded daily-cost usage match(es){summary_label} in this workspace."
+        ),
+        intent="price_lookup",
+        confidence="high",
+        category="navigation",
+        facts=facts,
+        tables=tables,
+        sources=sources,
+        follow_ups=["List tangibles", "List consumables", "What is missing in my workspace?"],
+    )
+
+
+def _answer_cost_search(
+    db: Session, organization_id: str, question: str, permissions: set[str], *, explicit: bool = True,
+) -> AssistantAnswer | None:
+    """Search across daily cost lines, LIH, NDT, catalogue, services/vendors and AFEs by keyword."""
+    can_daily = _can(permissions, "daily-cost:read")
+    can_master = _can(permissions, "master-data:read")
+    can_afe = _can(permissions, "afe:read")
+    can_wells = _can(permissions, "rig-well:read")
+    if explicit and not any((can_daily, can_master, can_afe, can_wells)):
+        return _permission_answer("daily-cost:read")
+
+    terms = _extract_search_terms(question, keep_category_words=True)
+    if not terms:
+        if not explicit:
+            return None
+        return AssistantAnswer(
+            answer=(
+                "Include a keyword to search across your workspace costs — for example "
+                "\"search costs for casing\", \"costs related to barite\", or \"LIH costs\"."
+            ),
+            intent="cost_search",
+            confidence="medium",
+            category="navigation",
+            follow_ups=["Price of tangibles", "What is missing in my workspace?"],
+        )
+
+    daily_rows: list[list[str]] = []
+    daily_total = Decimal("0")
+    daily_curr = ""
+    lih_rows: list[list[str]] = []
+    ndt_rows: list[list[str]] = []
+    catalogue_rows: list[list[str]] = []
+    afe_rows: list[list[str]] = []
+    matched_well = _find_well(db, organization_id, question) if can_wells else None
+
+    if can_daily:
+        for grp, model, code_col, name_col in (
+            ("Services", DailyCostServiceLine, DailyCostServiceLine.service_code_snapshot, DailyCostServiceLine.service_name_snapshot),
+            ("Tangibles", DailyCostTangibleLine, DailyCostTangibleLine.tangible_code_snapshot, DailyCostTangibleLine.tangible_name_snapshot),
+            ("Consumables", DailyCostConsumableLine, DailyCostConsumableLine.item_code_snapshot, DailyCostConsumableLine.item_name_snapshot),
+            ("Other Expenses", DailyCostOtherExpenseLine, DailyCostOtherExpenseLine.expense_type_label, DailyCostOtherExpenseLine.expense_description),
+        ):
+            pred = _matches_any([code_col, name_col, model.remarks, DailyCostEntry.well_code_snapshot, DailyCostEntry.well_name_snapshot], terms)
+            if pred is None:
+                continue
+            stmt = (
+                select(
+                    DailyCostEntry.well_code_snapshot,
+                    name_col,
+                    func.sum(model.standard_amount),
+                    func.count(model.id),
+                    func.max(DailyCostEntry.cost_date),
+                    func.max(DailyCostEntry.standard_currency),
+                )
+                .join(DailyCostEntry, DailyCostEntry.id == model.entry_id)
+                .where(
+                    model.organization_id == organization_id,
+                    DailyCostEntry.is_deleted.is_(False),
+                    pred,
+                )
+            )
+            if matched_well is not None:
+                stmt = stmt.where(DailyCostEntry.well_id == matched_well.id)
+            rows = db.execute(
+                stmt.group_by(DailyCostEntry.well_code_snapshot, name_col)
+                .order_by(func.sum(model.standard_amount).desc())
+                .limit(8)
+            ).all()
+            for well_code, item_name, amt, cnt, last_dt, curr in rows:
+                amt_dec = Decimal(str(amt or 0))
+                daily_total += amt_dec
+                if curr and not daily_curr:
+                    daily_curr = curr
+                daily_rows.append([
+                    well_code,
+                    grp,
+                    item_name or "—",
+                    str(cnt),
+                    last_dt.isoformat() if last_dt else "—",
+                    f"{curr} {_money(amt_dec)}",
+                ])
+
+        lih_pred = _matches_any(
+            [LihCostLine.item_description, LihCostLine.serial_number, LihCostLine.remarks,
+             LihCostEntry.well_code_snapshot, LihCostEntry.remarks],
+            terms,
+        )
+        lih_query = (
+            select(LihCostEntry.well_code_snapshot, LihCostEntry.cost_date, LihCostLine.item_description,
+                   LihCostLine.no_of_units, LihCostLine.total_cost, LihCostEntry.currency)
+            .join(LihCostEntry, LihCostEntry.id == LihCostLine.entry_id)
+            .where(LihCostEntry.organization_id == organization_id, LihCostEntry.is_deleted.is_(False))
+        )
+        if "lih" not in terms and lih_pred is not None:
+            lih_query = lih_query.where(lih_pred)
+        if matched_well is not None:
+            lih_query = lih_query.where(LihCostEntry.well_id == matched_well.id)
+        for well_code, dt, desc, units, cost, curr in db.execute(lih_query.order_by(LihCostEntry.cost_date.desc()).limit(10)).all():
+            lih_rows.append([well_code, dt.isoformat(), desc, f"{Decimal(units):,.2f}", f"{curr} {_money(cost)}"])
+
+        ndt_pred = _matches_any(
+            [NdtInspection.description, NdtInspection.remarks, NdtInspection.well_code_snapshot],
+            terms,
+        )
+        ndt_query = select(NdtInspection).where(
+            NdtInspection.organization_id == organization_id, NdtInspection.is_deleted.is_(False),
+        )
+        if "ndt" not in terms and "inspection" not in terms and ndt_pred is not None:
+            ndt_query = ndt_query.where(ndt_pred)
+        if matched_well is not None:
+            ndt_query = ndt_query.where(NdtInspection.well_id == matched_well.id)
+        for ndt in db.scalars(ndt_query.order_by(NdtInspection.created_at.desc()).limit(10)).all():
+            ndt_rows.append([
+                ndt.well_code_snapshot,
+                ndt.scope.title(),
+                ndt.description,
+                f"{Decimal(ndt.quantity_received):,.0f}",
+                f"{Decimal(ndt.quantity_consumed):,.0f}",
+                f"{Decimal(ndt.quantity_backloaded_good):,.0f} / {Decimal(ndt.quantity_backloaded_bad):,.0f}",
+            ])
+
+    if can_master:
+        for label, model, code_col, name_col, uom_col in (
+            ("Tangible", Tangible, Tangible.tangible_code, Tangible.tangible_name, Tangible.uom),
+            ("Mud Chemical", MudChemical, MudChemical.chemical_code, MudChemical.chemical_name, MudChemical.uom),
+            ("Cement Additive", CementAdditive, CementAdditive.additive_code, CementAdditive.additive_name, CementAdditive.uom),
+            ("Fuel", FuelType, FuelType.fuel_code, FuelType.fuel_name, FuelType.uom),
+        ):
+            pred = _matches_any([code_col, name_col, model.remarks], terms)
+            if pred is None:
+                continue
+            for item in db.scalars(
+                select(model).where(model.organization_id == organization_id, model.is_deleted.is_(False), pred).limit(6)
+            ).all():
+                catalogue_rows.append([
+                    label,
+                    f"{getattr(item, code_col.key)} · {getattr(item, name_col.key)}",
+                    _rate_display(item.unit_rate, item.final_cost, item.currency, getattr(item, uom_col.key)),
+                    item.effective_date.isoformat() if item.effective_date else "—",
+                ])
+
+    if can_afe:
+        afe_pred = _matches_any([Afe.afe_code, Afe.afe_name, Afe.remarks], terms)
+        if afe_pred is not None:
+            for afe in db.scalars(
+                select(Afe).where(Afe.organization_id == organization_id, Afe.is_deleted.is_(False), afe_pred).limit(8)
+            ).all():
+                afe_rows.append([
+                    f"{afe.afe_code} · {afe.afe_name}",
+                    (afe.scope or "").title() or "—",
+                    afe.status.title(),
+                    f"{afe.standard_currency} {_money(afe.total_amount)}",
+                ])
+
+    total_hits = len(daily_rows) + len(lih_rows) + len(ndt_rows) + len(catalogue_rows) + len(afe_rows)
+    if total_hits == 0:
+        if not explicit:
+            return None
+        return AssistantAnswer(
+            answer=(
+                f"No recorded costs, LIH entries, NDT inspections, catalogue items or AFEs matched "
+                f"\"{' '.join(terms)}\" in the modules you may read."
+            ),
+            intent="cost_search",
+            confidence="medium",
+            category="navigation",
+            sources=[AssistantSource(label="Daily Cost register", route="/daily-cost")],
+            follow_ups=["What is missing in my workspace?", "List tangibles"],
+        )
+
+    tables: list[AssistantTable] = []
+    if daily_rows:
+        tables.append(AssistantTable(
+            title="Matching daily cost lines",
+            columns=["Well", "Group", "Item", "Lines", "Last Date", "Total Recorded"],
+            rows=daily_rows[:18],
+        ))
+    if catalogue_rows:
+        tables.append(AssistantTable(
+            title="Matching catalogue prices",
+            columns=["Category", "Item", "Effective Rate", "Effective Date"],
+            rows=catalogue_rows[:15],
+        ))
+    if lih_rows:
+        tables.append(AssistantTable(
+            title="Lost In Hole (LIH) register matches",
+            columns=["Well", "Date", "Item Description", "Units", "Total Cost"],
+            rows=lih_rows[:10],
+        ))
+    if ndt_rows:
+        tables.append(AssistantTable(
+            title="NDT Inspection register matches",
+            columns=["Well", "Scope", "Description", "Received", "Consumed", "Backloaded (G/B)"],
+            rows=ndt_rows[:10],
+        ))
+    if afe_rows:
+        tables.append(AssistantTable(
+            title="Matching AFEs",
+            columns=["AFE", "Scope", "Status", "Total Amount"],
+            rows=afe_rows[:8],
+        ))
+
+    facts: list[AssistantFact] = []
+    if daily_rows:
+        facts.append(AssistantFact(
+            label="Matched daily cost spend",
+            value=f"{daily_curr} {_money(daily_total)}".strip(),
+            hint=f"Across {len(daily_rows)} matched item group(s)",
+            route="/daily-cost",
+        ))
+    if catalogue_rows:
+        facts.append(AssistantFact(
+            label="Catalogue rate matches",
+            value=str(len(catalogue_rows)),
+            route="/master-data",
+        ))
+    if lih_rows:
+        facts.append(AssistantFact(label="LIH matches", value=str(len(lih_rows)), route="/daily-cost/lih-register"))
+    if ndt_rows:
+        facts.append(AssistantFact(label="NDT matches", value=str(len(ndt_rows)), route="/daily-cost/ndt-inspections"))
+
+    sources: list[AssistantSource] = []
+    if daily_rows:
+        sources.append(AssistantSource(label="Daily Cost register", route="/daily-cost"))
+    if catalogue_rows:
+        sources.append(AssistantSource(label="Master Data catalogue", route="/master-data"))
+    if lih_rows:
+        sources.append(AssistantSource(label="LIH Cost Register", route="/daily-cost/lih-register"))
+    if ndt_rows:
+        sources.append(AssistantSource(label="NDT Inspection Register", route="/daily-cost/ndt-inspections"))
+    if afe_rows:
+        sources.append(AssistantSource(label="AFE Register", route="/afe"))
+
+    return AssistantAnswer(
+        answer=(
+            f"Found {total_hits} workspace record(s) matching \"{' '.join(terms)}\""
+            + (f" — recorded daily cost total {daily_curr} {_money(daily_total)}." if daily_rows else ".")
+        ),
+        intent="cost_search",
+        confidence="high",
+        category="navigation",
+        facts=facts,
+        tables=tables,
+        sources=sources,
+        follow_ups=["What is missing in my workspace?", "List tangibles", "List consumables"],
+    )
+
+
 def _knowledge_answer(
     db: Session,
     organization_id: str,
@@ -1354,6 +1995,13 @@ def _knowledge_answer(
     )
     best_score, best = scored[0] if scored else (0.0, None)
     if best is None or best_score < 2.0:
+        # Before giving up, check if the question refers directly to a well,
+        # catalogue item, service, LIH/NDT record or cost keyword in this workspace.
+        if _can(permissions, "daily-cost:read") and _find_well(db, organization_id, question) is not None:
+            return _answer_cost_position(db, organization_id, question, permissions)
+        live_hit = _answer_cost_search(db, organization_id, question, permissions, explicit=False)
+        if live_hit is not None:
+            return live_hit
         options = "\n".join(
             f"• {row.title}" for row in rows
             if _can(permissions, row.permission) and row.is_active
@@ -1362,13 +2010,13 @@ def _knowledge_answer(
             answer=(
                 "I could not match that to the application memory I am allowed to use. I answer about "
                 "this application's workflows, calculations, data entry and navigation — for example "
-                "\"how are actual days calculated?\", \"what is missing in my workspace?\" or "
-                "\"AFE balance on WELL-01\".\n\nTopics in memory:\n" + options[:1800]
+                "\"how are actual days calculated?\", \"what is missing in my workspace?\", "
+                "\"AFE balance on WELL-01\", or \"price of tangibles\".\n\nTopics in memory:\n" + options[:1800]
             ),
             intent="knowledge",
             confidence="low",
             category="faq",
-            follow_ups=["What is missing in my workspace?", "How are actual days calculated?"],
+            follow_ups=["What is missing in my workspace?", "How are actual days calculated?", "List tangibles"],
         )
     answer = _answer_from_memory(best, reason="matched")
     if best.permission and not _can(permissions, best.permission):
@@ -1408,6 +2056,12 @@ def ask(
     try:
         if intent == "data_health":
             answer = _answer_data_health(db, organization_id, permissions)
+        elif intent == "price_lookup":
+            answer = _answer_price_lookup(db, organization_id, text, permissions)
+        elif intent == "cost_search":
+            answer = _answer_cost_search(db, organization_id, text, permissions, explicit=True) or _knowledge_answer(
+                db, organization_id, text, route, permissions
+            )
         elif intent == "status" and _can(permissions, "rig-well:read"):
             answer = _answer_status(db, organization_id)
         elif intent == "actual_days" and _can(permissions, "daily-cost:read"):
@@ -1481,6 +2135,8 @@ def overview(db: Session, organization_id: str, user: User) -> AssistantOverview
             "What should I enter on a daily cost sheet?",
             "How are actual days calculated?",
             "What is missing in my workspace?",
+            "List tangibles",
+            "List consumables",
             "How is cost attributed to a responsible party?",
             "Where is the well cost analysis?",
             "What counts as out of scope?",

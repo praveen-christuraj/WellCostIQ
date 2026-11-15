@@ -5,6 +5,7 @@ import { api, body } from '../../lib/api'
 import {
   costReportTitle, displayDate, localToday, reportSections,
   type DailyCostDay, type DailyCostReference, type DailyCostWellOption, type DailyCostWellSummary,
+  type WellScopeKey,
 } from '../../lib/dailyCost'
 import type { MudCostMaterialBalance, MudCostReconciliation } from '../../lib/mudCost'
 import type { LihCostReport } from '../../lib/lihCost'
@@ -15,6 +16,7 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
   open: boolean; onClose: () => void; wells: DailyCostWellOption[]; initialWellId?: string
 }) {
   const [wellId, setWellId] = useState('')
+  const [scopeFilter, setScopeFilter] = useState<'' | WellScopeKey>('')
   const [mode, setMode] = useState('inception')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState(localToday())
@@ -25,6 +27,7 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
   useEffect(() => {
     if (open) {
       setWellId(initialWellId)
+      setScopeFilter('')
       setError('')
       setDateTo(localToday())
     }
@@ -38,6 +41,7 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
       const to = mode === 'inception' ? localToday() : dateTo
       const params = new URLSearchParams({ to, include_draft: String(includeDraft) })
       if (mode === 'range') params.set('from', dateFrom)
+      if (scopeFilter) params.set('scope', scopeFilter)
       const well = wells.find(item => item.id === wellId)
       const mudParams = new URLSearchParams({
         rig_id: well?.rig_id ?? '', well_id: wellId, to, include_draft: String(includeDraft),
@@ -47,6 +51,8 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
       if (mode === 'range') mudBalanceParams.set('from', dateFrom)
       const lihParams = new URLSearchParams({ well_id: wellId, to })
       if (mode === 'range') lihParams.set('from', dateFrom)
+      const ndtParams = new URLSearchParams({ well_id: wellId })
+      if (scopeFilter) ndtParams.set('scope', scopeFilter)
       const [days, summary, mudReconciliation, mudBalance, lihReport, allNdtInspections, reference] = await Promise.all([
         api<DailyCostDay[]>(`/daily-cost/wells/${wellId}/cost-report?${params}`),
         // A mixed-standard-currency well cannot expose one combined summary;
@@ -61,7 +67,7 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
         // The LIH Cost Register is separate from daily sheets, so it is fetched
         // by well and period rather than derived from the printed days.
         api<LihCostReport>(`/lih-cost/wells/${wellId}/report?${lihParams}`, { silent: true }).catch(() => null),
-        api<NdtEntry[]>(`/ndt-inspections/entries?${new URLSearchParams({ well_id: wellId })}`, { silent: true }).catch(() => []),
+        api<NdtEntry[]>(`/ndt-inspections/entries?${ndtParams}`, { silent: true }).catch(() => []),
         api<DailyCostReference>('/daily-cost/reference', { silent: true }).catch(() => null),
       ])
       if (!days.length) { setError('No saved daily sheets match this well and period.'); return }
@@ -69,14 +75,12 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
         module: 'well-cost-sheet', format: 'pdf', record_count: days.length, well_id: wellId,
         date_from: mode === 'range' ? dateFrom : null, date_to: to, include_draft: includeDraft,
       }) })
-      // The title names the well scope(s) this report actually costs: each
-      // printed sheet carries its AFE's scope, so the period — not the whole
-      // well — decides between Drilling, Completions or both. The well summary's
-      // AFE scopes are the fallback when a day has no progress payload.
       const dayScopes = days.map(day => day.progress?.scope).filter(Boolean)
-      const scopes = dayScopes.length
-        ? dayScopes
-        : (summary?.well.afes.map(afe => afe.configuration_scope) ?? [])
+      const scopes = scopeFilter
+        ? [scopeFilter]
+        : (dayScopes.length
+          ? dayScopes
+          : (summary?.well.afes.map(afe => afe.configuration_scope) ?? []))
       const scopeSet = new Set(scopes)
       const ndtInspections = scopeSet.size
         ? allNdtInspections.filter(row => scopeSet.has(row.scope))
@@ -96,6 +100,11 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
         <TextField select required label="Well" value={wellId} onChange={event => setWellId(event.target.value)}>
           <MenuItem value="">Select one well</MenuItem>
           {wells.map(well => <MenuItem key={well.id} value={well.id}>{well.well_code} · {well.well_name}</MenuItem>)}
+        </TextField>
+        <TextField select label="Operation scope" value={scopeFilter} onChange={event => setScopeFilter(event.target.value as '' | WellScopeKey)}>
+          <MenuItem value="">All scopes (Drilling &amp; Completion)</MenuItem>
+          <MenuItem value="drilling">Drilling only</MenuItem>
+          <MenuItem value="completion">Completion only</MenuItem>
         </TextField>
         <TextField select label="Report period" value={mode} onChange={event => setMode(event.target.value)}>
           <MenuItem value="inception">Inception to today</MenuItem><MenuItem value="range">Required date range</MenuItem>

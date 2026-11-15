@@ -3,7 +3,7 @@ import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom'
 import type { EChartsOption } from 'echarts'
 import {
   AccountBalanceWalletOutlined, AnalyticsOutlined, ArrowForwardRounded, CalculateOutlined, CalendarMonthOutlined, DownloadOutlined,
-  PrintOutlined, RefreshRounded, ReportProblemOutlined, SavingsOutlined, TimelineOutlined, TrendingUpRounded,
+  PictureAsPdfOutlined, PrintOutlined, RefreshRounded, ReportProblemOutlined, SavingsOutlined, TimelineOutlined, TrendingUpRounded,
   WarningAmberRounded,
 } from '@mui/icons-material'
 import {
@@ -15,6 +15,7 @@ import { DataTable } from '../components/DataTable'
 import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { ErrorMessage, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
+import { WellBundlePdfDialog } from '../components/reports/WellBundlePdfDialog'
 import { WellProgressPanel } from '../components/daily-cost/WellProgressPanel'
 import { ExportReportDialog } from '../components/ui/ExportReportDialog'
 import type { ReportDocument, ReportFigure, ReportSection } from '../lib/reportPdf'
@@ -138,6 +139,7 @@ export default function DailyCostAnalysis() {
   const [dateTo, setDateTo] = useState('')
   const [includeDraft, setIncludeDraft] = useState(true)
   const [printOpen, setPrintOpen] = useState(false)
+  const [bundleOpen, setBundleOpen] = useState(false)
   const [tab, setTab] = useState(0)
   const requestVersion = useRef(0)
   const [loading, setLoading] = useState(true)
@@ -194,6 +196,7 @@ export default function DailyCostAnalysis() {
     const adjustedLine = summary.totals.adjusted_planned != null
       ? summary.daily.map((_row, index) => Number(summary.totals.adjusted_planned) * ((index + 1) / Math.max(1, summary.daily.length)))
       : null
+    const hasTangibles = summary.daily.some(row => Number(row.tangibles ?? 0) > 0)
     return {
       animation: false,
       grid: { left: 14, right: 18, top: 26, bottom: 32, containLabel: true },
@@ -212,10 +215,23 @@ export default function DailyCostAnalysis() {
           areaStyle: { color: `${palette.actual}20` },
           data: summary.daily.map(row => Number(row.cumulative)),
         },
-        {
-          name: 'Daily actual', type: 'bar', barMaxWidth: 16,
-          itemStyle: { color: palette.series[0], opacity: .65 }, data: summary.daily.map(row => Number(row.total)),
-        },
+        ...(hasTangibles ? [
+          {
+            name: 'Daily operational', type: 'bar' as const, stack: 'daily', barMaxWidth: 16,
+            itemStyle: { color: palette.series[0], opacity: .72 },
+            data: summary.daily.map(row => Math.max(0, Number(row.total) - Number(row.tangibles ?? 0))),
+          },
+          {
+            name: 'Tangibles (lump-sum)', type: 'bar' as const, stack: 'daily', barMaxWidth: 16,
+            itemStyle: { color: palette.series[4] ?? '#B7791F', opacity: .88 },
+            data: summary.daily.map(row => Number(row.tangibles ?? 0)),
+          },
+        ] : [
+          {
+            name: 'Daily actual', type: 'bar' as const, barMaxWidth: 16,
+            itemStyle: { color: palette.series[0], opacity: .65 }, data: summary.daily.map(row => Number(row.total)),
+          },
+        ]),
         {
           name: 'AFE straight-line plan', type: 'line', symbol: 'none',
           lineStyle: { width: 1.6, type: 'dashed', color: palette.planned },
@@ -267,7 +283,7 @@ export default function DailyCostAnalysis() {
   // to the actual cost and deducted explicitly from the AFE amount.
   const lih = summary?.lih_cost ?? null
   const hasLih = Boolean(lih?.available && Number(lih.total) !== 0)
-  const comparisonCardCount = 7 + (hasAdjustment ? 1 : 0) + (hasMudReconciliation ? 1 : 0) + (hasLih ? 1 : 0)
+  const comparisonCardCount = 8 + (hasAdjustment ? 1 : 0) + (hasMudReconciliation ? 1 : 0) + (hasLih ? 1 : 0)
 
   const dailyColumns: ColDef<DailyCostDailyRow>[] = [
     { headerName: 'DATE', field: 'cost_date', minWidth: 140, width: 150, valueFormatter: params => displayDate(String(params.value ?? '')) },
@@ -367,6 +383,7 @@ export default function DailyCostAnalysis() {
             ? [{ label: 'Adjusted AFE', value: dailyMoney(summary.totals.adjusted_planned, currency), hint: `${summary.totals.adjusted_used_percent ?? '—'}% of the adjusted AFE spent` }]
             : []),
           { label: 'Actual to date', value: dailyMoney(summary.totals.actual, currency) },
+          { label: 'Actual / AFE %', value: `${Number(comparisonUsedPercent).toFixed(1)}%`, hint: '(Actual cost ÷ AFE) × 100' },
           { label: 'Other expenses', value: dailyMoney(summary.totals.other_expenses, currency), hint: 'Deducted from the AFE' },
           { label: 'Remaining balance', value: dailyMoney(comparisonBalance, currency), hint: Number(comparisonBalance) < 0 ? 'Over the AFE budget' : 'Planned less actual' },
           { label: 'Average per day', value: dailyMoney(summary.totals.average_per_day, currency), hint: `${summary.totals.recorded_days} recorded of ${summary.totals.elapsed_days} elapsed days` },
@@ -419,12 +436,19 @@ export default function DailyCostAnalysis() {
             title: 'AFE budget reconciliation',
             subtitle: 'Each locked AFE budget line against the actuals recorded under it.',
             tables: [{
-              head: ['Budget line', 'Name', 'Group', 'Service group', `Planned (${currency})`, 'Actual', 'Balance'],
-              numeric: [4, 5, 6],
-              body: summary.budget_lines.map(row => [
-                String(row.item_code || row.item_name || 'Unbudgeted actual'), row.item_name, row.cost_group, row.service_group || '—',
-                dailyMoney(row.planned, currency), dailyMoney(row.actual_to_date, currency), dailyMoney(row.balance, currency),
-              ]),
+              head: ['Budget line', 'Name', 'Group', 'Service group', `Planned (${currency})`, 'Actual', 'Actual / AFE %', 'Balance'],
+              numeric: [4, 5, 6, 7],
+              body: summary.budget_lines.map(row => {
+                const plan = Number(row.planned ?? 0)
+                const act = Number(row.actual_to_date ?? 0)
+                const pct = plan > 0 ? `${((act / plan) * 100).toFixed(1)}%` : '—'
+                return [
+                  String(row.item_code || row.item_name || 'Unbudgeted actual'),
+                  row.is_planned ? row.item_name : `${row.item_name} (unbudgeted)`,
+                  row.cost_group, row.service_group || '—',
+                  dailyMoney(row.planned, currency), dailyMoney(row.actual_to_date, currency), pct, dailyMoney(row.balance, currency),
+                ]
+              }),
             }],
           })
         }
@@ -457,6 +481,10 @@ export default function DailyCostAnalysis() {
       subtitle="Every AFE and daily sheet for one well, costed day by day and cut by activity, section, party, rate source and currency."
       action={<Box display="flex" gap={1} flexWrap="wrap">
         {canExport && <Button variant="outlined" startIcon={<PrintOutlined/>} disabled={!selectedWell} onClick={() => setPrintOpen(true)}>Print well costing sheet</Button>}
+        {canExport && <Button variant="outlined" startIcon={<PictureAsPdfOutlined/>} disabled={!selectedWell} onClick={() => setBundleOpen(true)}
+          title="Export one continuous PDF dossier combining AFE, Daily Cost, Drill-In, Cost Analysis, LIH, NDT and Mud Cost Analysis for this well and scope">
+          Well PDF bundle
+        </Button>}
         <Button variant="outlined" startIcon={<DownloadOutlined/>} disabled={!summary || loading} onClick={() => setExportOpen(true)}
           title="Download this analysis as a PDF: the KPI tiles, the charts as shown and every table">
           Export PDF
@@ -466,6 +494,15 @@ export default function DailyCostAnalysis() {
       </Box>}
     />
     <WellCostPrintDialog open={printOpen} onClose={() => setPrintOpen(false)} wells={wells} initialWellId={selectedWell}/>
+    <WellBundlePdfDialog
+      open={bundleOpen}
+      onClose={() => setBundleOpen(false)}
+      wells={wells}
+      initialWellId={selectedWell}
+      initialDateFrom={dateFrom}
+      initialDateTo={dateTo}
+      initialIncludeDraft={includeDraft}
+    />
     <ErrorMessage message={loadError}/>
 
     <Paper variant="outlined" sx={{ p: 1.8, borderRadius: 2, mb: 1.8 }}>
@@ -513,6 +550,7 @@ export default function DailyCostAnalysis() {
         <StatCard label="AFE planned" value={dailyMoney(summary.totals.planned, currency)} hint={`${summary.afes.length} AFE locked on this well`} icon={<AccountBalanceWalletOutlined fontSize="small"/>}/>
         {hasAdjustment && summary.totals.adjusted_planned != null && <StatCard label="Adjusted AFE" value={dailyMoney(summary.totals.adjusted_planned, currency)} hint={`${summary.totals.adjusted_used_percent ?? '—'}% of the adjusted AFE spent`} icon={<AccountBalanceWalletOutlined fontSize="small"/>}/>}
         <StatCard label="Actual to date" value={dailyMoney(summary.totals.actual, currency)} hint={`${summary.totals.used_percent}% of the locked AFE`} icon={<TrendingUpRounded fontSize="small"/>}/>
+        <StatCard label="Actual / AFE %" value={`${Number(comparisonUsedPercent).toFixed(1)}%`} hint="(Actual cost ÷ AFE) × 100" tone={Number(comparisonUsedPercent) > 100 ? 'warning' : 'good'} icon={<CalculateOutlined fontSize="small"/>}/>
         {hasMudReconciliation && <StatCard label="Comparison total" value={dailyMoney(comparisonActual, currency)} hint={`${comparisonUsedPercent}% of the locked AFE after mud reconciliation`} icon={<CalculateOutlined fontSize="small"/>}/>}
         {lih && hasLih && <StatCard label="LIH cost (register)" value={dailyMoney(lih.total, lih.currency)} hint={`${lih.entry_count} register day${lih.entry_count === 1 ? '' : 's'} · deducted from the AFE, added to actual`} tone="warning" icon={<ReportProblemOutlined fontSize="small"/>}/>}
         <StatCard label="Other expenses" value={dailyMoney(summary.totals.other_expenses, currency)} hint="LIH and similar charges deducted from the AFE" tone={Number(summary.totals.other_expenses) > 0 ? 'warning' : 'default'} icon={<ReportProblemOutlined fontSize="small"/>}/>

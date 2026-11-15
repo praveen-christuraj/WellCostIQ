@@ -16,33 +16,66 @@ export type IntelligenceFinding = {
 }
 export type IntelligenceForecast = {
   available: boolean; reason: string; recent_daily: number | null; planned_daily: number | null
-  remaining_days: number | null; estimate: number | null; low: number | null; high: number | null
+  remaining_days: number | null; remaining_tangibles?: number
+  estimate: number | null; low: number | null; high: number | null
   variance: number | null; variance_percent: number | null; exhaustion_date: string | null
   days_to_exhaustion: number | null; past_plan: boolean
 }
 export type IntelligenceWell = {
   well_id: string; well_code: string; well_name: string; rig_code: string; status: string; currency: string
   afe_amount: number | null; actual_amount: number | null; utilisation_percent: number | null
+  operational_amount?: number | null; tangible_amount?: number | null
   planned_days: number | null; actual_days: number | null; npt_amount: number | null; npt_share_percent: number | null
+  upa_amount?: number | null; upa_share_percent?: number | null
   recorded_days: number; first_cost_date: string | null; last_cost_date: string | null
   score: number; band: HealthBand; critical: number; warning: number; info: number
   summary: string; forecast: IntelligenceForecast; analysed: boolean
 }
 export type IntelligenceDay = {
-  cost_date: string; actual: number; cumulative: number; npt: number; baseline: number | null
+  cost_date: string; actual: number; operational?: number; tangibles?: number
+  services?: number; consumables?: number; other_expenses?: number; tangible_booking_day?: boolean
+  cumulative: number; npt: number; baseline: number | null
   planned_cumulative: number | null; cusum_up: number | null; cusum_down: number | null; spike: boolean
+}
+export type IntelligenceGroupBreakdown = {
+  label: string; planned: number | null; actual: number; balance: number | null
+  utilisation_percent: number | null; share_percent: number | null
+}
+export type IntelligenceSectionBreakdown = {
+  section_code: string; section_name: string; scope: string
+  planned_days: number | null; active_days: number; amount: number; share_percent: number | null
+}
+export type IntelligenceActivityBreakdown = {
+  activity_code: string; activity_name: string; classification: string
+  active_days: number; amount: number; share_percent: number | null
+}
+export type IntelligenceUnitEconomics = {
+  operational_actual: number; tangible_actual: number; tangible_afe: number | null
+  tangible_utilisation_percent: number | null; tangible_booking_dates: string[]
+  operational_daily_avg: number | null; planned_operational_daily: number | null
+  cost_per_meter: number | null; actual_depth: number | null; planned_depth: number | null
+  depth_progress_percent: number | null; burn_efficiency_index: number | null
+  upa_amount: number; upa_share_percent: number | null
+  npt_days: number | null; upa_days: number | null; top_cost_driver: string
+}
+export type IntelligenceWellBreakdown = {
+  cost_groups: IntelligenceGroupBreakdown[]
+  sections: IntelligenceSectionBreakdown[]
+  activities: IntelligenceActivityBreakdown[]
+  unit_economics: IntelligenceUnitEconomics
 }
 export type IntelligenceWellDetail = {
   well: IntelligenceWell; findings: IntelligenceFinding[]; days: IntelligenceDay[]
   projection: { cost_date: string; estimate: number; low: number; high: number }[]
   missing_dates: string[]; cusum_limit: number; drift_baseline: number | null
-  drift_start: string | null; drift_direction: string; notes: string[]
+  drift_start: string | null; drift_direction: string; breakdown?: IntelligenceWellBreakdown | null; notes: string[]
 }
 export type IntelligenceOverview = {
   generated_at: string; as_of: string; date_from: string | null; date_to: string | null; currency: string
   capabilities: { budget: boolean; actuals: boolean; plan: boolean; export: boolean }
   kpis: {
     wells: number; analysed_wells: number; afe_amount: number | null; actual_amount: number | null
+    utilisation_percent?: number | null
     forecast_amount: number | null; forecast_variance: number | null; forecast_variance_percent: number | null
     amount_at_risk: number | null; critical: number; warning: number; info: number; wells_at_risk: number
     score: number; band: HealthBand

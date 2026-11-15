@@ -35,6 +35,7 @@ class IntelligenceForecast(BaseModel):
     recent_daily: float | None = None
     planned_daily: float | None = None
     remaining_days: float | None = None
+    remaining_tangibles: float = 0.0
     estimate: float | None = None
     low: float | None = None
     high: float | None = None
@@ -55,10 +56,14 @@ class IntelligenceWell(BaseModel):
     afe_amount: float | None = None
     actual_amount: float | None = None
     utilisation_percent: float | None = None
+    operational_amount: float | None = None
+    tangible_amount: float | None = None
     planned_days: float | None = None
     actual_days: float | None = None
     npt_amount: float | None = None
     npt_share_percent: float | None = None
+    upa_amount: float | None = None
+    upa_share_percent: float | None = None
     recorded_days: int = 0
     first_cost_date: date | None = None
     last_cost_date: date | None = None
@@ -75,6 +80,12 @@ class IntelligenceWell(BaseModel):
 class IntelligenceDay(BaseModel):
     cost_date: date
     actual: float
+    operational: float = 0.0
+    tangibles: float = 0.0
+    services: float = 0.0
+    consumables: float = 0.0
+    other_expenses: float = 0.0
+    tangible_booking_day: bool = False
     cumulative: float
     npt: float = 0
     baseline: float | None = None
@@ -82,6 +93,61 @@ class IntelligenceDay(BaseModel):
     cusum_up: float | None = None
     cusum_down: float | None = None
     spike: bool = False
+
+
+class IntelligenceGroupBreakdown(BaseModel):
+    label: str
+    planned: float | None = None
+    actual: float = 0.0
+    balance: float | None = None
+    utilisation_percent: float | None = None
+    share_percent: float | None = None
+
+
+class IntelligenceSectionBreakdown(BaseModel):
+    section_code: str
+    section_name: str
+    scope: str = "drilling"
+    planned_days: float | None = None
+    active_days: int = 0
+    amount: float = 0.0
+    share_percent: float | None = None
+
+
+class IntelligenceActivityBreakdown(BaseModel):
+    activity_code: str
+    activity_name: str
+    classification: str = "Planned"
+    active_days: int = 0
+    amount: float = 0.0
+    share_percent: float | None = None
+
+
+class IntelligenceUnitEconomics(BaseModel):
+    operational_actual: float = 0.0
+    tangible_actual: float = 0.0
+    tangible_afe: float | None = None
+    tangible_utilisation_percent: float | None = None
+    tangible_booking_dates: list[date] = []
+    operational_daily_avg: float | None = None
+    planned_operational_daily: float | None = None
+    cost_per_meter: float | None = None
+    actual_depth: float | None = None
+    planned_depth: float | None = None
+    depth_progress_percent: float | None = None
+    burn_efficiency_index: float | None = None
+    upa_amount: float = 0.0
+    upa_share_percent: float | None = None
+    npt_days: float | None = None
+    upa_days: float | None = None
+    top_cost_driver: str = ""
+
+
+class IntelligenceWellBreakdown(BaseModel):
+    cost_groups: list[IntelligenceGroupBreakdown] = []
+    sections: list[IntelligenceSectionBreakdown] = []
+    activities: list[IntelligenceActivityBreakdown] = []
+    unit_economics: IntelligenceUnitEconomics = IntelligenceUnitEconomics()
 
 
 class IntelligenceProjection(BaseModel):
@@ -101,6 +167,7 @@ class IntelligenceWellDetail(BaseModel):
     drift_baseline: float | None = None
     drift_start: date | None = None
     drift_direction: str = ""
+    breakdown: IntelligenceWellBreakdown | None = None
     notes: list[str] = []
 
 
@@ -109,6 +176,7 @@ class IntelligenceKpis(BaseModel):
     analysed_wells: int = 0
     afe_amount: float | None = None
     actual_amount: float | None = None
+    utilisation_percent: float | None = None
     forecast_amount: float | None = None
     forecast_variance: float | None = None
     forecast_variance_percent: float | None = None

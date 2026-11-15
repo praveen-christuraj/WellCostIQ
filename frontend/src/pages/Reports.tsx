@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import {
   AssessmentOutlined, ArrowForwardRounded, BuildOutlined, HistoryOutlined, Inventory2Outlined, InsightsOutlined,
-  PrecisionManufacturingOutlined, QueryStatsOutlined, ScheduleRounded, ScienceOutlined,
+  PictureAsPdfOutlined, PrecisionManufacturingOutlined, QueryStatsOutlined, ScheduleRounded, ScienceOutlined,
   StorefrontOutlined, TuneRounded, WaterDropOutlined,
 } from '@mui/icons-material'
 import { Box, Button, Typography } from '@mui/material'
 import type { SvgIconComponent } from '@mui/icons-material'
 import { Link as RouterLink } from 'react-router-dom'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { WellBundlePdfDialog } from '../components/reports/WellBundlePdfDialog'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
@@ -69,9 +70,11 @@ export default function Reports() {
   const canReadRig = can('rig-well:read')
   const canReadAfe = can('afe:read')
   const canReadDaily = can('daily-cost:read')
+  const canExportDaily = can('daily-cost:export')
   const [dashboard, setDashboard] = useState<Dashboard>({ wells: null, afes: null, daily: null, activity: [] })
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
+  const [bundleOpen, setBundleOpen] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -108,10 +111,12 @@ export default function Reports() {
       title="Reports"
       subtitle="Consolidated views of well plans, AFE budgets and recorded actual cost. Every report states its population, currency basis and date bounds, and exports the same rows it shows."
       action={<>
+        {canReadDaily && canExportDaily ? <Button variant="outlined" startIcon={<PictureAsPdfOutlined/>} onClick={() => setBundleOpen(true)}>Well PDF bundle</Button> : null}
         {can('report-builder:read') || can('report-builder:create') ? <Button component={RouterLink} to="/reports/builder" variant="outlined" startIcon={<TuneRounded/>}>Report Builder</Button> : null}
         {can('custom-reports:read') ? <Button component={RouterLink} to="/reports/custom" variant="contained" endIcon={<ArrowForwardRounded/>}>Custom Reports</Button> : null}
       </>}
     />
+    <WellBundlePdfDialog open={bundleOpen} onClose={() => setBundleOpen(false)}/>
     <ErrorMessage message={error}/>
     {busy ? <DatasetState kind="loading" title="Loading the report catalogue…"/> : <>
       <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: 'repeat(4, minmax(0,1fr))' } }}>
@@ -130,7 +135,23 @@ export default function Reports() {
         <Box sx={{ flex: 1, height: '1px', bgcolor: 'divider' }}/>
       </Box> : null}
 
-      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' } }}>
+      <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'repeat(3, minmax(0, 1fr))' } }}>
+        {canReadDaily && canExportDaily && <SectionCard
+          title="Consolidated Well PDF Bundle"
+          subtitle="Export one continuous PDF dossier per well & scope (Drilling, Completion, or Both) combining all seven operational and cost reports."
+          meta={<Tag tone="success">7-in-1 PDF</Tag>}
+        >
+          <Box display="flex" alignItems="flex-start" gap={2}>
+            <Box className="table-icon" sx={{ width: 38, height: 38 }}><PictureAsPdfOutlined sx={{ fontSize: 19 }}/></Box>
+            <Typography fontSize={12} color="text.secondary" sx={{ lineHeight: 1.55, flex: 1, minWidth: 0 }}>
+              Bundles AFE Estimate, Daily Cost Report, Drill-In Report, Well Cost Analysis Visualized, LIH Cost Register, NDT Inspection Register and Mud Cost Analysis (with per-section KPIs and labelled print charts).
+            </Typography>
+          </Box>
+          <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" sx={{ mt: 1.75, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography fontSize={10.5} color="text.secondary" sx={{ flex: 1, minWidth: 0 }}>Scoped to Drilling, Completion or Both.</Typography>
+            <Button size="small" variant="contained" startIcon={<PictureAsPdfOutlined sx={{ fontSize: 15 }}/>} onClick={() => setBundleOpen(true)}>Export bundle</Button>
+          </Box>
+        </SectionCard>}
         {canReadRig && (canReadAfe || canReadDaily) && <SectionCard
           title="Well-wise cost comparisons"
           subtitle="Configured wells, AFE totals and daily actuals side by side, with planned versus actual days, remaining budget and cost utilisation."
