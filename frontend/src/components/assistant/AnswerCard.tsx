@@ -5,30 +5,50 @@ import {
 } from '@mui/material'
 import { ArrowForwardRounded, CheckCircleOutlined, MenuBookOutlined, LockOutlined, RouteRounded } from '@mui/icons-material'
 import { Tag } from '../Common'
+import { AiStatusAlert } from './AiStatusAlert'
+import { formatAiDuration } from '../../lib/ai'
 import { confidenceLabel, isPermissionAnswer, type AssistantAnswer } from '../../lib/assistant'
 
 /**
  * One answer, rendered exactly as the service returned it.
  *
- * Nothing here rephrases or rounds a figure: the sentence is the memory entry or
- * the computed statement, `facts` are the labelled numbers behind it, `steps` the
- * order of work, and `sources` the pages that prove it. A permission refusal is
- * styled as a refusal so it can never be mistaken for a figure.
+ * Nothing here rephrases or rounds a figure: the sentence is the memory entry,
+ * the computed statement, or the offline Ollama reply grounded in workspace data,
+ * `facts` are the labelled numbers behind it, `steps` the order of work, and
+ * `sources` the pages that prove it. A permission refusal is styled as a refusal
+ * so it can never be mistaken for a figure.
  */
-export function AnswerCard({ answer, onAsk }: {
+export function AnswerCard({ answer, onAsk, onRetryAi, onCheckAi }: {
   answer: AssistantAnswer
   /** Follow-up questions the caller can click, answered in place. */
   onAsk?: (question: string) => void
+  onRetryAi?: () => void
+  onCheckAi?: () => void
 }) {
   const refused = isPermissionAnswer(answer)
+  const aiTiming = answer.ai_used ? formatAiDuration(answer.ai_duration_ms) : ''
   return <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.4 }, borderRadius: 2, bgcolor: 'background.paper' }}>
+    {answer.ai_error && <Box sx={{ mb: 1.6 }}>
+      <AiStatusAlert
+        message={answer.ai_error}
+        errorCode={answer.ai_error_code}
+        model={answer.ai_model}
+        fallbackNote="Showing the verified local database and memory answer below while the AI host is unavailable."
+        onRetry={onRetryAi}
+        onCheckConnection={onCheckAi}
+      />
+    </Box>}
+
     <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" mb={1.4}>
       <Tag tone={refused ? 'warning' : answer.confidence === 'low' ? 'neutral' : 'success'}>
         {refused ? 'Not permitted' : confidenceLabel(answer.confidence)}
       </Tag>
+      {answer.ai_used && <Tag tone="info">{`AI · ${answer.ai_model || 'Ollama'}${aiTiming ? ` (${aiTiming})` : ''}`}</Tag>}
+      {answer.ai_error && <Tag tone="warning">Local fallback</Tag>}
       {answer.memory_key && <Chip size="small" variant="outlined" label={answer.memory_key} sx={{ height: 22, fontSize: 10.5, fontFamily: 'monospace' }}/>}
       {answer.intent === 'data_health' && <Tag tone="info">Data health</Tag>}
-      {(answer.intent === 'price_lookup' || answer.intent === 'cost_search' || answer.intent === 'cost_position') && <Tag tone="info">Live data</Tag>}
+      {(answer.intent === 'price_lookup' || answer.intent === 'cost_search' || answer.intent === 'cost_position' || answer.intent === 'well_comparison') && <Tag tone="info">Live data</Tag>}
+      {answer.intent === 'well_comparison' && <Tag tone="info">Well comparison</Tag>}
       {answer.category === 'calculation' && <Tag tone="info">Calculation</Tag>}
     </Box>
 
@@ -92,7 +112,7 @@ export function AnswerCard({ answer, onAsk }: {
               </TableBody>
             </Table>
           </TableContainer>
-          {tbl.footer && <Typography fontSize={11.2} color="text.secondary" sx={{ mt: .55 }}>{tbl.footer}</Typography>}
+          {(tbl.footer || tbl.note) && <Typography fontSize={11.2} color="text.secondary" sx={{ mt: .55 }}>{tbl.footer || tbl.note}</Typography>}
         </Box>
       })}
     </Box>}

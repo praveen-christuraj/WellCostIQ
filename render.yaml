@@ -52,6 +52,10 @@ services:
         value: "true"
       - key: ENTRY_CHECK_HISTORY_SHEETS
         value: "30"
+      # Offline LAN Ollama integration stays off on cloud-hosted Render unless an
+      # explicit private Ollama service is configured.
+      - key: OLLAMA_ENABLED
+        value: "false"
       - key: PASSWORD_MAX_AGE_DAYS
         value: "90"
       - key: PASSWORD_EXPIRY_WARNING_DAYS

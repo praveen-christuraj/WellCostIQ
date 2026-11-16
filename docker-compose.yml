@@ -91,6 +91,23 @@ services:
       ENTRY_CHECK_HISTORY_SHEETS: ${ENTRY_CHECK_HISTORY_SHEETS:-30}
       ENTRY_CHECK_PROFILE_WINDOW_DAYS: ${ENTRY_CHECK_PROFILE_WINDOW_DAYS:-730}
       ENTRY_CHECK_PROFILE_MAX_AGE_HOURS: ${ENTRY_CHECK_PROFILE_MAX_AGE_HOURS:-24}
+      # Offline LAN Ollama model (Guide Q&A and opt-in Cost Intelligence review).
+      # Pair with docker-compose.ollama.yml when OLLAMA_ENABLED=true so only `api`
+      # gets LAN access while `db` remains isolated on internal `backend_net`.
+      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://127.0.0.1:11434}
+      OLLAMA_API_PATH: ${OLLAMA_API_PATH:-/api/chat}
+      OLLAMA_TAGS_PATH: ${OLLAMA_TAGS_PATH:-/api/tags}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:4b-q4_K_M}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      OLLAMA_CONNECT_TIMEOUT_SECONDS: ${OLLAMA_CONNECT_TIMEOUT_SECONDS:-5}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-90}
+      OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-0.1}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-8192}
+      OLLAMA_MAX_TOKENS: ${OLLAMA_MAX_TOKENS:-1200}
+      OLLAMA_THINK: ${OLLAMA_THINK:-false}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-15m}
+      OLLAMA_CA_CERT: ${OLLAMA_CA_CERT:-}
       ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
       REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
       # Password lifecycle: age in days, reuse depth and sign-in lockout.

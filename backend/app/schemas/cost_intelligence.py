@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class IntelligenceEvidence(BaseModel):
@@ -240,3 +240,79 @@ class IntelligenceExportAudit(BaseModel):
     format: Literal["csv", "xlsx", "pdf"]
     record_count: int = 0
     sections: str = ""
+
+
+AiReviewScope = Literal["portfolio", "well"]
+AiReviewFocus = Literal["full", "anomalies", "mistakes", "budget"]
+AiFindingCategory = Literal["anomaly", "entry-mistake", "budget", "trend", "npt-upa", "data-quality"]
+
+
+class IntelligenceAiReviewIn(BaseModel):
+    """Opt-in request to engage the offline LAN Ollama model on Cost Intelligence."""
+
+    scope: AiReviewScope = "portfolio"
+    focus: AiReviewFocus = "full"
+    date_from: date | None = None
+    date_to: date | None = None
+    rig_id: str = Field(default="", max_length=36)
+    well_id: str = Field(default="", max_length=36)
+    well_status: str = Field(default="", max_length=20)
+    currency: str = Field(default="", max_length=10)
+    include_draft: bool = True
+    question: str = Field(default="", max_length=500)
+
+
+class IntelligenceAiFinding(BaseModel):
+    """One AI-synthesized anomaly, suspected entry mistake, or cost risk."""
+
+    severity: Literal["critical", "warning", "info"] = "info"
+    category: AiFindingCategory = "anomaly"
+    well_id: str = ""
+    well_code: str = ""
+    reference: str = ""
+    title: str
+    detail: str
+    recommendation: str = ""
+    action_path: str = ""
+    action_label: str = ""
+
+
+class IntelligenceAiEntrySignal(BaseModel):
+    """Verified daily-sheet entry check inspected during the AI review."""
+
+    well_id: str
+    well_code: str
+    entry_id: str
+    daily_cost_code: str
+    cost_date: date
+    severity: Literal["warning", "notice"]
+    title: str
+    message: str
+    current_display: str = ""
+    suggested_display: str = ""
+    action_path: str
+
+
+class IntelligenceAiReviewOut(BaseModel):
+    """Automated cost analytic review generated on demand by Ollama."""
+
+    generated_at: datetime
+    as_of: date
+    scope: AiReviewScope
+    focus: AiReviewFocus
+    well_id: str = ""
+    well_code: str = ""
+    currency: str = ""
+    model: str
+    endpoint: str
+    duration_ms: int
+    inspected_wells: int = 0
+    statistical_findings_count: int = 0
+    entry_signals_count: int = 0
+    risk_posture: Literal["good", "watch", "at-risk"] = "good"
+    executive_summary: str
+    findings: list[IntelligenceAiFinding] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+    data_quality_notes: list[str] = Field(default_factory=list)
+    entry_signals: list[IntelligenceAiEntrySignal] = Field(default_factory=list)
+

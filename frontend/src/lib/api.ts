@@ -8,7 +8,7 @@ const ROOT = '/api/v1'
 // API contract. A lower server version means the frontend was deployed before
 // its API and must not disguise missing routes or old KPI semantics as a missing
 // business record.
-export const REQUIRED_API_VERSION = '0.12.0'
+export const REQUIRED_API_VERSION = '0.13.0'
 let accessToken: string | null = null
 let refreshing: Promise<boolean> | null = null
 export const setAccessToken = (value: string | null) => { accessToken = value }
@@ -254,6 +254,15 @@ function apiError(detail: unknown, status: number, action?: string): ApiError {
 
 function notifyError(error: ApiError): void {
   window.dispatchEvent(new CustomEvent('api-error', { detail: { message: error.message, status: error.status } }))
+}
+
+// Surface a structured service-level failure (such as an offline LAN Ollama
+// communication alert when the response also carries a safe local fallback)
+// through the same persistent top-right notification banner as failed requests.
+export function reportApiError(message: string, status = 503): void {
+  const cleaned = message.trim()
+  if (!cleaned) return
+  window.dispatchEvent(new CustomEvent('api-error', { detail: { message: cleaned, status } }))
 }
 
 export const body = (value: unknown) => JSON.stringify(value)

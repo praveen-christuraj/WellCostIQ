@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink, useLocation } from 'react-router-dom'
 import {
-  CloseRounded, MenuBookOutlined, OpenInNewRounded, SendRounded, SupportAgentOutlined,
+  CloseRounded, MenuBookOutlined, OpenInNewRounded, SendRounded, SupportAgentOutlined, WifiFindRounded,
 } from '@mui/icons-material'
 import {
-  Box, Button, Chip, CircularProgress, Divider, Drawer, Fab, IconButton, InputAdornment,
-  Link, TextField, Tooltip, Typography, useMediaQuery, useTheme,
+  Box, Button, Chip, CircularProgress, Divider, Drawer, Fab, FormControlLabel, IconButton,
+  InputAdornment, Link, Switch, TextField, Tooltip, Typography, useMediaQuery, useTheme,
 } from '@mui/material'
-import { ErrorMessage } from '../Common'
+import { ErrorMessage, Tag } from '../Common'
+import { AiStatusAlert } from './AiStatusAlert'
 import { AnswerCard } from './AnswerCard'
 import { useAuth } from '../../context/AuthContext'
-import { askGuide, assistantOverview, type AssistantAnswer, type AssistantOverview } from '../../lib/assistant'
+import { aiStatusBadge, type AiConnectionStatus } from '../../lib/ai'
+import { reportApiError } from '../../lib/api'
+import {
+  askGuide, assistantAiStatus, assistantOverview,
+  type AssistantAnswer, type AssistantOverview,
+} from '../../lib/assistant'
 
 /**
  * "Ask the guide" from anywhere in the workspace.
@@ -32,13 +38,43 @@ export default function AssistantLauncher() {
   const [answer, setAnswer] = useState<AssistantAnswer | null>(null)
   const [asking, setAsking] = useState(false)
   const [error, setError] = useState('')
+  const [useAi, setUseAi] = useState(false)
+  const [userToggledAi, setUserToggledAi] = useState(false)
+  const [aiStatus, setAiStatus] = useState<AiConnectionStatus | null>(null)
+  const [checkingAi, setCheckingAi] = useState(false)
+
+  const probeAi = useCallback(async (alertOnFailure = true) => {
+    setCheckingAi(true)
+    try {
+      const status = await assistantAiStatus(true)
+      setAiStatus(status)
+      if (alertOnFailure && status.status === 'error' && status.message) {
+        reportApiError(status.message, 503)
+      }
+    } catch (failure) {
+      const msg = (failure as Error).message || 'AI communication error: unable to verify the Ollama host.'
+      if (alertOnFailure) reportApiError(msg, 503)
+    } finally {
+      setCheckingAi(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (!open) return
     let alive = true
-    void assistantOverview().then(value => { if (alive) setOverview(value) }).catch(() => undefined)
+    void assistantOverview().then(value => {
+      if (!alive) return
+      setOverview(value)
+      if (value.ai) {
+        setAiStatus(prev => (prev?.probed ? prev : value.ai!))
+        if (value.ai.enabled && !userToggledAi) {
+          setUseAi(true)
+          void probeAi(true)
+        }
+      }
+    }).catch(() => undefined)
     return () => { alive = false }
-  }, [open])
+  }, [open, probeAi, userToggledAi])
 
   // Alt+G opens the guide from anywhere, the same way the tooltip promises.
   useEffect(() => {
@@ -52,22 +88,47 @@ export default function AssistantLauncher() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const ask = useCallback(async (text: string) => {
+  const ask = useCallback(async (text: string, forceAi?: boolean) => {
     const value = text.trim()
     if (!value || asking) return
+    const engageAi = forceAi ?? useAi
     setAsking(true)
     setError('')
     setAsked(value)
     try {
-      setAnswer(await askGuide(value, location.pathname))
+      const result = await askGuide(value, location.pathname, engageAi)
+      setAnswer(result)
       setQuestion('')
+      if (result.ai_error) {
+        reportApiError(result.ai_error, 503)
+        setAiStatus(prev => prev ? {
+          ...prev,
+          status: result.ai_error_code === 'disabled' ? 'disabled' : 'error',
+          probed: true,
+          reachable: false,
+          error_code: result.ai_error_code || 'unreachable',
+          message: result.ai_error || '',
+        } : prev)
+      } else if (result.ai_used) {
+        setAiStatus(prev => prev ? {
+          ...prev,
+          enabled: true,
+          model: result.ai_model || prev.model,
+          status: 'ready',
+          probed: true,
+          reachable: true,
+          model_available: true,
+          error_code: '',
+          message: `Connected · ${result.ai_model || prev.model}`,
+        } : prev)
+      }
     } catch (failure) {
       setError((failure as Error).message)
       setAnswer(null)
     } finally {
       setAsking(false)
     }
-  }, [asking, location.pathname])
+  }, [asking, location.pathname, useAi])
 
   if (!can('assistant:read')) return null
 
@@ -96,6 +157,50 @@ export default function AssistantLauncher() {
       </Box>
 
       <Box sx={{ flex: 1, overflowY: 'auto', p: 2, display: 'grid', gap: 1.6, alignContent: 'start' }}>
+        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.6, px: 1.25, py: 0.9, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
+          <FormControlLabel
+            sx={{ m: 0, gap: 0.5 }}
+            control={
+              <Switch
+                size="small"
+                checked={useAi}
+                onChange={event => {
+                  const next = event.target.checked
+                  setUserToggledAi(true)
+                  setUseAi(next)
+                  if (next) void probeAi(true)
+                }}
+                slotProps={{ input: { 'aria-label': 'Engage offline AI model in guide drawer' } }}
+              />
+            }
+            label={<Typography fontSize={11.8} fontWeight={700}>AI model</Typography>}
+          />
+          <Box display="flex" alignItems="center" gap={0.6}>
+            {(() => {
+              const badge = aiStatusBadge(aiStatus ?? overview?.ai, checkingAi)
+              return <Tag tone={badge.tone}>{badge.label}</Tag>
+            })()}
+            <Tooltip title="Check Ollama LAN connection">
+              <span>
+                <IconButton size="small" aria-label="Check AI connection" disabled={checkingAi || asking} onClick={() => void probeAi(true)}>
+                  {checkingAi ? <CircularProgress size={13}/> : <WifiFindRounded fontSize="small"/>}
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Box>
+        </Box>
+
+        {useAi && aiStatus && (aiStatus.status === 'error' || aiStatus.status === 'disabled') && !answer?.ai_error && (
+          <AiStatusAlert
+            message={aiStatus.message}
+            errorCode={aiStatus.error_code}
+            model={aiStatus.model}
+            endpoint={aiStatus.endpoint}
+            busy={checkingAi || asking}
+            onCheckConnection={() => void probeAi(true)}
+          />
+        )}
+
         {overview && overview.outstanding_checks > 0 && <Box sx={{
           border: '1px solid', borderColor: 'divider', borderRadius: 1.6, p: 1.2, bgcolor: 'action.hover',
         }}>
@@ -114,12 +219,19 @@ export default function AssistantLauncher() {
 
         {asking && <Box display="flex" alignItems="center" gap={1.2} sx={{ py: 2 }}>
           <CircularProgress size={16}/>
-          <Typography fontSize={11.5} color="text.secondary">Reading memory and your figures…</Typography>
+          <Typography fontSize={11.5} color="text.secondary">
+            {useAi ? 'Searching permitted records and consulting the AI model…' : 'Reading memory and your figures…'}
+          </Typography>
         </Box>}
 
         {error && <ErrorMessage message={error}/>}
 
-        {!asking && answer && <AnswerCard answer={answer} onAsk={next => void ask(next)}/>}
+        {!asking && answer && <AnswerCard
+          answer={answer}
+          onAsk={next => void ask(next)}
+          onRetryAi={asked ? () => void ask(asked, true) : undefined}
+          onCheckAi={() => void probeAi(true)}
+        />}
 
         {!asking && !answer && !error && <Box>
           <Typography fontSize={11.5} color="text.secondary" sx={{ lineHeight: 1.6, mb: 1 }}>

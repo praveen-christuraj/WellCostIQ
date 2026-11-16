@@ -1,0 +1,19 @@
+# Optional Docker Compose override for communicating with an offline Ollama host
+# on the local network (or on the Docker host via http://host.docker.internal:11434).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d --build
+#
+# `backend_net` remains strictly `internal: true` so PostgreSQL keeps zero egress;
+# only `api` joins `ai_lan_net` to reach OLLAMA_BASE_URL configured in `.env`.
+services:
+  api:
+    networks:
+      - backend_net
+      - ai_lan_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  ai_lan_net:
+    driver: bridge

@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.ai import AiConnectionStatus, AiErrorCode
+
 MemoryCategory = Literal["workflow", "calculation", "data-entry", "navigation", "faq", "policy"]
 Confidence = Literal["high", "medium", "low"]
 
@@ -34,6 +36,8 @@ class AssistantTable(BaseModel):
     title: str
     columns: list[str]
     rows: list[list[str]]
+    numeric: list[int] = Field(default_factory=list)
+    footer: str = ""
     note: str = ""
 
 
@@ -50,13 +54,19 @@ class AssistantAnswer(BaseModel):
     steps: list[str] = Field(default_factory=list)
     sources: list[AssistantSource] = Field(default_factory=list)
     follow_ups: list[str] = Field(default_factory=list)
+    ai_used: bool = False
+    ai_model: str = ""
+    ai_duration_ms: int | None = None
+    ai_error: str = ""
+    ai_error_code: AiErrorCode = ""
 
 
 class AssistantAskIn(BaseModel):
-    """One question, optionally carrying the page the user is looking at."""
+    """One question, optionally carrying the page route and offline AI switch."""
 
     question: str = Field(min_length=1, max_length=500)
     route: str = Field(default="", max_length=200)
+    use_ai: bool = False
 
 
 class AssistantMemoryOut(BaseModel):
@@ -120,3 +130,4 @@ class AssistantOverview(BaseModel):
     checks: list[AssistantFact] = Field(default_factory=list)
     quick_prompts: list[str] = Field(default_factory=list)
     recent_questions: list[str] = Field(default_factory=list)
+    ai: AiConnectionStatus = Field(default_factory=AiConnectionStatus)
