@@ -11,8 +11,17 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.deps import Current, Db, require
-from app.schemas.cost_intelligence import IntelligenceExportAudit, IntelligenceOverview, IntelligenceWellDetail
+from app.schemas.ai import AiConnectionStatus
+from app.schemas.cost_intelligence import (
+    IntelligenceAiReviewIn,
+    IntelligenceAiReviewOut,
+    IntelligenceExportAudit,
+    IntelligenceOverview,
+    IntelligenceWellDetail,
+)
 from app.services import cost_intelligence as service
+from app.services import cost_intelligence_ai as ai_service
+from app.services import ollama
 
 router = APIRouter(
     prefix="/cost-intelligence", tags=["Cost Intelligence"],
@@ -59,3 +68,17 @@ def well_detail(
 def export_audit(data: IntelligenceExportAudit, request: Request, db: Db, user: Current) -> None:
     """Record that the report left the application (the file is built in the browser)."""
     service.record_export(db, user, fmt=data.format, record_count=data.record_count, sections=data.sections, request=request)
+
+
+@router.get("/ai-status", response_model=AiConnectionStatus)
+def ai_status(probe: bool = Query(default=False)) -> AiConnectionStatus:
+    """Offline LAN Ollama posture and optional live reachability probe."""
+    return ollama.check_status(probe=probe)
+
+
+@router.post("/ai-review", response_model=IntelligenceAiReviewOut)
+def ai_review(
+    data: IntelligenceAiReviewIn, request: Request, db: Db, user: Current,
+) -> IntelligenceAiReviewOut:
+    """Opt-in AI cost analysis for anomalies, suspected mistakes and analytic review."""
+    return ai_service.generate_review(db, user, data, request=request)

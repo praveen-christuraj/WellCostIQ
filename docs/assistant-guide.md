@@ -8,10 +8,16 @@ which one produced the answer:
 | How does this application work? | **Memory** — 22 shipped entries, quoted verbatim | "How are actual days calculated?" |
 | What does *my* workspace say? | The same services the pages use, under the caller's permissions | "AFE balance on WELL-01" |
 
-There is **no model call anywhere**. The same question always produces the same,
-checkable answer, and an administrator can read exactly what the guide is allowed
-to say. A question it cannot match is reported as unknown with the list of topics
-it does know — it never guesses.
+By default (`OLLAMA_ENABLED=false`) there is **no model call anywhere**: the same
+question always produces the same, checkable answer from curated memory and
+exact `Decimal` workspace calculations (including side-by-side multi-well
+comparisons such as `Compare "Well X" total cost with "Well Y"`). When an
+administrator enables offline LAN Ollama (`qwen3:4b-q4_K_M`) in `.env` — see
+[`ollama-ai.md`](ollama-ai.md) — users can toggle **AI database & workflow
+mode** in the Guide or `Alt+G` drawer to ask open-ended questions grounded
+strictly in their organization's RBAC-filtered records and application
+workflows. If the remote AI PC cannot be reached, the Guide alerts the user
+immediately and still displays the verified local answer.
 
 ## Where to find it
 
@@ -76,6 +82,7 @@ visible to another workspace.
 | Method | Path | Capability |
 | --- | --- | --- |
 | GET | `/api/v1/assistant/overview` | `assistant:read` |
+| GET | `/api/v1/assistant/ai-status?probe=true\|false` | `assistant:read` |
 | POST | `/api/v1/assistant/ask` | `assistant:read` |
 | GET | `/api/v1/assistant/history` | `assistant:read` (own questions only) |
 | GET | `/api/v1/assistant/memory` | `assistant:read` |
@@ -83,8 +90,10 @@ visible to another workspace.
 | PATCH | `/api/v1/assistant/memory/{id}` | `assistant:manage` |
 | DELETE | `/api/v1/assistant/memory/{id}` | `assistant:manage` |
 
-`POST /ask` takes `{question, route?}`; `route` is the page the user was on and only
-affects ranking. Every memory write is audited with action `create`, `update` or
+`POST /ask` takes `{question, route?, use_ai?}`; `route` is the page the user was
+on and only affects ranking, and `use_ai: true` engages the offline LAN Ollama
+model over verified tenant-scoped records (audited with `action="ai-query"` on
+`assistant`). Every memory write is audited with action `create`, `update` or
 `delete` on entity `assistant_memory`.
 
 ## Rules for contributors

@@ -1872,17 +1872,21 @@ def _answer_cost_search(
                 ])
 
     if can_afe:
-        afe_pred = _matches_any([Afe.afe_code, Afe.afe_name, Afe.remarks], terms)
-        if afe_pred is not None:
-            for afe in db.scalars(
-                select(Afe).where(Afe.organization_id == organization_id, Afe.is_deleted.is_(False), afe_pred).limit(8)
-            ).all():
+        from app.services import afe as afe_service
+
+        lowered_terms = [t.lower() for t in terms]
+        for afe_out in afe_service.list_afes(db, organization_id, deleted=False):
+            hay = f"{afe_out.afe_code} {afe_out.afe_name} {afe_out.well_code} {afe_out.remarks}".lower()
+            if any(term in hay for term in lowered_terms):
+                amount = afe_out.adjusted_total if afe_out.has_sow_adjustment and afe_out.adjusted_total is not None else afe_out.total_cost
                 afe_rows.append([
-                    f"{afe.afe_code} · {afe.afe_name}",
-                    (afe.scope or "").title() or "—",
-                    afe.status.title(),
-                    f"{afe.standard_currency} {_money(afe.total_amount)}",
+                    f"{afe_out.afe_code} · {afe_out.afe_name}",
+                    (afe_out.configuration_scope or "").title() or "—",
+                    afe_out.status.title(),
+                    f"{afe_out.standard_currency} {_money(amount)}".strip(),
                 ])
+                if len(afe_rows) >= 8:
+                    break
 
     total_hits = len(daily_rows) + len(lih_rows) + len(ndt_rows) + len(catalogue_rows) + len(afe_rows)
     if total_hits == 0:
@@ -2031,6 +2035,226 @@ def _knowledge_answer(
     return answer
 
 
+def _maybe_well_comparison(
+    db: Session,
+    organization_id: str,
+    question: str,
+    permissions: set[str],
+) -> tuple[AssistantAnswer | None, list[Well], list[str], Any]:
+    """Detect and answer single/multi-well comparisons with exact Decimal figures."""
+    from app.services import ai_context
+
+    wants_compare = ai_context.is_comparison_question(question)
+    lower = question.lower()
+    asks_well_topic = wants_compare or any(
+        k in lower for k in ("well", "cost", "afe", "budget", "spend", "actual", "balance", "npt", "upa", "lih", "mud")
+    )
+    if not (_can(permissions, "daily-cost:read") or _can(permissions, "rig-well:read")):
+        if wants_compare and "well" in lower:
+            return _permission_answer("daily-cost:read"), [], [], None
+        return None, [], [], None
+
+    matched_wells, unmatched_wells = ai_context.find_well_mentions(db, organization_id, question)
+    asks_all_wells_compare = wants_compare and any(
+        phrase in lower for phrase in ("all wells", "active wells", "every well", "our wells", "wells in")
+    )
+    should_compare = (
+        len(matched_wells) >= 2
+        or (wants_compare and bool(unmatched_wells))
+        or asks_all_wells_compare
+    )
+    if not should_compare and not (matched_wells and asks_well_topic):
+        return None, matched_wells, unmatched_wells, None
+
+    if should_compare and not _can(permissions, "daily-cost:read"):
+        return _permission_answer("daily-cost:read"), matched_wells, unmatched_wells, None
+
+    all_wells = list(
+        db.scalars(
+            select(Well)
+            .where(Well.organization_id == organization_id, Well.is_deleted.is_(False))
+            .order_by(Well.well_code)
+        ).all()
+    )
+    all_labels = [_well_label(w) for w in all_wells]
+
+    if should_compare:
+        target_wells = list(matched_wells)
+        if not target_wells and asks_all_wells_compare:
+            active_only = [w for w in all_wells if w.status == "active"] if "active wells" in lower else all_wells
+            target_wells = (active_only or all_wells)[: ai_context.MAX_COMPARED_WELLS]
+        if not target_wells:
+            missing = ", ".join(f"'{u}'" for u in unmatched_wells)
+            available = ", ".join(all_labels[:10]) or "none recorded yet"
+            return (
+                AssistantAnswer(
+                    answer=(
+                        f"No well in this workspace matched {missing}. "
+                        f"Available wells: {available}. Name two workspace wells to compare their total cost, AFE budget and variance."
+                    ),
+                    intent="well_comparison",
+                    confidence="medium",
+                    category="calculation",
+                    sources=[AssistantSource(label="Well cost comparison", route="/reports/well-cost-comparison")],
+                    follow_ups=["What is missing in my workspace?", "How is the AFE balance calculated?"],
+                ),
+                matched_wells,
+                unmatched_wells,
+                None,
+            )
+        comp = ai_context.build_well_comparison(
+            db,
+            organization_id,
+            target_wells,
+            unmatched=unmatched_wells,
+            all_well_labels=all_labels,
+        )
+        return (
+            AssistantAnswer(
+                answer=comp.prose,
+                intent="well_comparison",
+                confidence="high",
+                category="calculation",
+                facts=comp.facts,
+                tables=comp.tables,
+                sources=comp.sources,
+                follow_ups=comp.follow_ups,
+            ),
+            target_wells,
+            unmatched_wells,
+            comp,
+        )
+
+    # Single matched well context (for AI grounding even when an existing single-well handler answers).
+    if _can(permissions, "daily-cost:read") and len(matched_wells) == 1:
+        comp = ai_context.build_well_comparison(
+            db,
+            organization_id,
+            matched_wells,
+            unmatched=unmatched_wells,
+            all_well_labels=all_labels,
+        )
+        return None, matched_wells, unmatched_wells, comp
+    return None, matched_wells, unmatched_wells, None
+
+
+def _default_ai_sources(question: str, permissions: set[str]) -> list[AssistantSource]:
+    lower = question.lower()
+    out: list[AssistantSource] = []
+    candidates = (
+        (("invoice", "idvs", "epicor", "payable"), "invoice-processing:read", "Invoice Processing", "/invoice-processing"),
+        (("fuel", "ago", "diesel", "rig saving"), "daily-cost:read", "Fuel Cost Register", "/daily-cost/fuel-cost-register"),
+        (("mud", "obm", "wbm", "sobm", "bbl"), "daily-cost:read", "Mud Cost Analysis", "/daily-cost/mud-cost-analysis"),
+        (("lih", "lost in hole", "fish"), "daily-cost:read", "LIH Cost Register", "/daily-cost/lih-register"),
+        (("ndt", "inspection", "backload"), "daily-cost:read", "NDT Inspection Register", "/daily-cost/ndt-inspections"),
+        (("anomal", "spike", "drift", "health", "intelligence"), "cost-intelligence:read", "Cost Intelligence", "/reports/cost-intelligence"),
+        (("afe", "sow", "estimate"), "afe:read", "AFE Register", "/afe/register"),
+        (("vendor", "supplier", "po", "so"), "master-data:read", "Vendors & PO/SO", "/master-data/vendors"),
+        (("well", "cost", "budget", "npt", "upa"), "daily-cost:read", "Well Cost Comparison", "/reports/well-cost-comparison"),
+    )
+    for needles, perm, label, page_route in candidates:
+        if _can(permissions, perm) and any(n in lower for n in needles):
+            out.append(AssistantSource(label=label, route=page_route))
+        if len(out) >= 3:
+            break
+    return out
+
+
+def _enrich_with_ollama(
+    db: Session,
+    organization_id: str,
+    *,
+    user: User,
+    question: str,
+    route: str,
+    permissions: set[str],
+    base: AssistantAnswer,
+    matched_wells: list[Well],
+    unmatched_wells: list[str],
+    comparison: Any,
+) -> AssistantAnswer:
+    """Invoke the configured LAN Ollama model over verified workspace context."""
+    from app.services import ai_context, ollama as ollama_service
+
+    if base.intent == "permission":
+        return base
+
+    mem_rows = db.scalars(
+        select(AssistantMemory).where(
+            AssistantMemory.organization_id == organization_id,
+            AssistantMemory.is_active.is_(True),
+        )
+    ).all()
+    top_memories = [
+        row
+        for score, row in sorted(
+            ((_knowledge_score(r, question, route, permissions), r) for r in mem_rows if _can(permissions, r.permission)),
+            key=lambda item: (-item[0], item[1].sort_order),
+        )
+        if score >= 1.5
+    ][:5]
+
+    dossier = ai_context.build_assistant_dossier(
+        db,
+        organization_id,
+        user=user,
+        question=question,
+        route=route,
+        capabilities=permissions,
+        matched_memories=top_memories,
+        focus_wells=matched_wells,
+        unmatched_wells=unmatched_wells,
+        comparison=comparison,
+    )
+    user_prompt = (
+        f"VERIFIED WORKSPACE DATABASE CONTEXT & WELLCOSTIQ WORKFLOW & MEMORY:\n"
+        f"{dossier}\n\n"
+        f"USER QUESTION:\n{question}\n\n"
+        "Provide a clear, accurate answer strictly from the verified records and workflow rules above."
+    )
+    try:
+        reply = ollama_service.chat(
+            system_prompt=ai_context.ASSISTANT_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+        )
+    except ollama_service.OllamaCommunicationError as exc:
+        return base.model_copy(
+            update={
+                "ai_used": False,
+                "ai_model": exc.model,
+                "ai_error": exc.message,
+                "ai_error_code": exc.code,
+            }
+        )
+
+    sources = list(base.sources) or _default_ai_sources(question, permissions)
+    facts = list(base.facts)
+    tables = list(base.tables)
+    if comparison is not None and not tables and base.intent not in ("price_lookup", "cost_search"):
+        tables = list(comparison.tables)
+        if not facts:
+            facts = list(comparison.facts)
+        for src in comparison.sources:
+            if src not in sources:
+                sources.append(src)
+
+    confidence = "high" if (facts or tables or top_memories or base.confidence == "high") else "medium"
+    return base.model_copy(
+        update={
+            "answer": reply.content,
+            "confidence": confidence,
+            "facts": facts,
+            "tables": tables,
+            "sources": sources,
+            "ai_used": True,
+            "ai_model": reply.model,
+            "ai_duration_ms": reply.duration_ms,
+            "ai_error": "",
+            "ai_error_code": "",
+        }
+    )
+
+
 def ask(
     db: Session,
     organization_id: str,
@@ -2039,8 +2263,9 @@ def ask(
     *,
     route: str = "",
     save: bool = True,
+    use_ai: bool = False,
 ) -> AssistantAnswer:
-    """Answer one question from memory and the workspace's own figures."""
+    """Answer one question from memory, workspace figures, and optional LAN Ollama AI."""
     permissions = _permissions(user)
     if not _can(permissions, "assistant:read"):
         return _permission_answer("assistant:read")
@@ -2053,8 +2278,16 @@ def ask(
         )
     seed_memory(db, organization_id)
     intent = _detect_intent(text)
+    matched_wells: list[Well] = []
+    unmatched_wells: list[str] = []
+    comparison: Any = None
     try:
-        if intent == "data_health":
+        comp_answer, matched_wells, unmatched_wells, comparison = _maybe_well_comparison(
+            db, organization_id, text, permissions
+        )
+        if comp_answer is not None:
+            answer = comp_answer
+        elif intent == "data_health":
             answer = _answer_data_health(db, organization_id, permissions)
         elif intent == "price_lookup":
             answer = _answer_price_lookup(db, organization_id, text, permissions)
@@ -2073,11 +2306,37 @@ def ask(
         elif intent == "npt_upa" and _can(permissions, "daily-cost:read"):
             answer = _answer_npt_upa(db, organization_id, text)
         elif intent == "cost_position" and _can(permissions, "daily-cost:read"):
-            answer = _answer_cost_position(db, organization_id, text, permissions)
+            if len(matched_wells) == 1 and comparison is not None and unmatched_wells:
+                answer = AssistantAnswer(
+                    answer=comparison.prose,
+                    intent="cost_position",
+                    confidence="high",
+                    category="calculation",
+                    facts=comparison.facts,
+                    tables=comparison.tables,
+                    sources=comparison.sources,
+                    follow_ups=comparison.follow_ups,
+                )
+            else:
+                answer = _answer_cost_position(db, organization_id, text, permissions)
         elif intent in ("actual_days", "forecast", "out_of_scope", "npt_upa", "cost_position", "status"):
             answer = _permission_answer("daily-cost:read" if intent != "status" else "rig-well:read")
         else:
-            answer = _knowledge_answer(db, organization_id, text, route, permissions)
+            if len(matched_wells) == 1 and comparison is not None and any(
+                k in text.lower() for k in ("total cost", "well cost", "cost of", "total spend", "how much")
+            ):
+                answer = AssistantAnswer(
+                    answer=comparison.prose,
+                    intent="cost_position",
+                    confidence="high",
+                    category="calculation",
+                    facts=comparison.facts,
+                    tables=comparison.tables,
+                    sources=comparison.sources,
+                    follow_ups=comparison.follow_ups,
+                )
+            else:
+                answer = _knowledge_answer(db, organization_id, text, route, permissions)
     except Exception:  # noqa: BLE001 - a bad stored figure must not break the assistant
         answer = AssistantAnswer(
             answer=(
@@ -2088,6 +2347,37 @@ def ask(
             confidence="low",
             category="faq",
         )
+    if use_ai:
+        try:
+            answer = _enrich_with_ollama(
+                db,
+                organization_id,
+                user=user,
+                question=text,
+                route=route,
+                permissions=permissions,
+                base=answer,
+                matched_wells=matched_wells,
+                unmatched_wells=unmatched_wells,
+                comparison=comparison,
+            )
+        except Exception:  # noqa: BLE001 - preserve the verified deterministic answer on any unexpected failure
+            import logging
+            from app.core.config import get_settings
+
+            logging.getLogger(__name__).exception("Unexpected assistant AI enrichment error")
+            cfg = get_settings()
+            answer = answer.model_copy(
+                update={
+                    "ai_used": False,
+                    "ai_model": cfg.ollama_model,
+                    "ai_error": (
+                        "AI communication error: failed to prepare or complete the AI request. "
+                        "Verified workspace answer shown below; check server logs and retry."
+                    ),
+                    "ai_error_code": "server_error",
+                }
+            )
     if save:
         db.add(AssistantConversation(
             organization_id=organization_id,
@@ -2132,17 +2422,24 @@ def overview(db: Session, organization_id: str, user: User) -> AssistantOverview
         outstanding_checks=len(checks),
         checks=checks,
         quick_prompts=[
+            "Compare all active wells",
             "What should I enter on a daily cost sheet?",
             "How are actual days calculated?",
             "What is missing in my workspace?",
             "List tangibles",
             "List consumables",
             "How is cost attributed to a responsible party?",
-            "Where is the well cost analysis?",
             "What counts as out of scope?",
         ],
         recent_questions=recent,
+        ai=_ai_overview_status(),
     )
+
+
+def _ai_overview_status():
+    from app.services import ollama as ollama_service
+
+    return ollama_service.check_status(probe=False)
 
 
 def conversation_history(db: Session, organization_id: str, user: User) -> list[dict[str, Any]]:

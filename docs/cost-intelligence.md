@@ -56,7 +56,23 @@ remaining days to project, so the page states its daily rate instead.
 *Export report* offers three presets (management brief, full analysis, record
 quality review) and a checkbox per section. The PDF carries the charts as shown;
 Excel has a findings sheet and a well health sheet; CSV is the findings list as
-filtered. Each export writes an audit entry naming the format and sections.
+filtered. When an on-demand AI review has been generated, an optional *AI cost
+analytic review* checkbox adds the AI executive summary, findings and actions to
+the PDF and an `AI review` worksheet to the Excel export. Each export writes an
+audit entry naming the format and sections.
+
+## Optional offline AI cost analytic review
+
+By default Cost Intelligence calls no model. An **Engage AI model** toggle at
+the top of the page lets a user opt in on demand to review the filtered
+portfolio or a selected well with the offline LAN Ollama model
+(`qwen3:4b-q4_K_M`) configured in `.env` (`GET /api/v1/cost-intelligence/ai-status`
+and `POST /api/v1/cost-intelligence/ai-review`, capability
+`cost-intelligence:read`, audited as `ai-review` on `cost_intelligence`). The
+review combines the statistical findings above with open Daily Cost Sheet Entry
+Check mistake signals and unbudgeted/SOW/mud/LIH reconciliation context, and
+raises a clear inline and notification alert if the remote Ollama host cannot be
+reached without affecting the statistical page. See [`ollama-ai.md`](ollama-ai.md).
 
 ## Limits
 

@@ -8,6 +8,7 @@ capabilities: it reads the same services the pages do.
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.deps import Current, Db, require
+from app.schemas.ai import AiConnectionStatus
 from app.schemas.assistant import (
     AssistantAnswer,
     AssistantAskIn,
@@ -18,7 +19,7 @@ from app.schemas.assistant import (
     AssistantOverview,
 )
 from app.services import assistant as service
-from app.services import audit
+from app.services import audit, ollama
 
 router = APIRouter(prefix="/assistant", tags=["In-application guide"])
 
@@ -29,12 +30,43 @@ def overview(db: Db, user: Current) -> AssistantOverview:
     return service.overview(db, user.organization_id, user)
 
 
+@router.get(
+    "/ai-status",
+    response_model=AiConnectionStatus,
+    dependencies=[Depends(require("assistant:read"))],
+)
+def ai_status(probe: bool = Query(default=False)) -> AiConnectionStatus:
+    """Configuration posture and optional LAN reachability check for Ollama."""
+    return ollama.check_status(probe=probe)
+
+
 @router.post("/ask", response_model=AssistantAnswer)
-def ask(payload: AssistantAskIn, db: Db, user: Current) -> AssistantAnswer:
-    """Answer one question from the constant memory and the workspace's own figures."""
+def ask(payload: AssistantAskIn, db: Db, user: Current, request: Request) -> AssistantAnswer:
+    """Answer one question from constant memory, workspace figures, and optional LAN Ollama AI."""
     answer = service.ask(
-        db, user.organization_id, user, payload.question, route=payload.route,
+        db,
+        user.organization_id,
+        user,
+        payload.question,
+        route=payload.route,
+        use_ai=payload.use_ai,
     )
+    if payload.use_ai and answer.intent != "permission":
+        outcome = (
+            f"answered by {answer.ai_model}"
+            if answer.ai_used
+            else f"communication alert ({answer.ai_error_code or 'error'}), local fallback used"
+        )
+        audit.record(
+            db,
+            organization_id=user.organization_id,
+            action="ai-query",
+            entity_type="assistant",
+            actor=user,
+            entity_label=answer.ai_model or "ollama",
+            summary=f"Guide AI query ({answer.intent}): {outcome}",
+            request=request,
+        )
     db.commit()
     return answer
 

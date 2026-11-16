@@ -2,17 +2,21 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink, useLocation } from 'react-router-dom'
 import {
   AddRounded, ArrowForwardRounded, DeleteOutlineRounded, EditOutlined, HelpOutlineRounded,
-  LockOutlined, MenuBookOutlined, RefreshRounded, SearchRounded, SendRounded, TuneRounded,
+  LockOutlined, MenuBookOutlined, PsychologyOutlined, RefreshRounded, SearchRounded,
+  SendRounded, TuneRounded, WifiFindRounded,
 } from '@mui/icons-material'
 import {
-  Alert, Box, Button, Chip, CircularProgress, Divider, IconButton, InputAdornment, Link,
-  MenuItem, Paper, Tab, Tabs, TextField, Typography,
+  Alert, Box, Button, Chip, CircularProgress, Divider, FormControlLabel, IconButton,
+  InputAdornment, Link, MenuItem, Paper, Switch, Tab, Tabs, TextField, Typography,
 } from '@mui/material'
 import { ErrorMessage, FormDialog, PageHeading, Tag } from '../components/Common'
+import { AiStatusAlert } from '../components/assistant/AiStatusAlert'
 import { AnswerCard, GuideIntro } from '../components/assistant/AnswerCard'
 import { useAuth } from '../context/AuthContext'
+import { aiStatusBadge, type AiConnectionStatus } from '../lib/ai'
+import { reportApiError } from '../lib/api'
 import {
-  ASSISTANT_CATEGORIES, askGuide, assistantHistory, assistantMemory, assistantOverview,
+  ASSISTANT_CATEGORIES, askGuide, assistantAiStatus, assistantHistory, assistantMemory, assistantOverview,
   createAssistantMemory, deleteAssistantMemory, updateAssistantMemory,
   type AssistantAnswer, type AssistantConversation, type AssistantMemoryCategory,
   type AssistantMemoryEntry, type AssistantOverview,
@@ -105,6 +109,11 @@ export default function Assistant() {
   const [asked, setAsked] = useState<string>('')
   const [history, setHistory] = useState<AssistantConversation[]>([])
   const [error, setError] = useState('')
+  const [useAi, setUseAi] = useState(false)
+  const [userToggledAi, setUserToggledAi] = useState(false)
+  const [aiStatus, setAiStatus] = useState<AiConnectionStatus | null>(null)
+  const [checkingAi, setCheckingAi] = useState(false)
+  const [aiBannerDismissed, setAiBannerDismissed] = useState(false)
 
   const [memory, setMemory] = useState<AssistantMemoryEntry[]>([])
   const [memoryError, setMemoryError] = useState('')
@@ -129,25 +138,109 @@ export default function Assistant() {
     }
   }, [])
 
+  const probeAiConnection = useCallback(async (alertOnFailure = true) => {
+    setCheckingAi(true)
+    setAiBannerDismissed(false)
+    try {
+      const status = await assistantAiStatus(true)
+      setAiStatus(status)
+      if (alertOnFailure && status.status === 'error' && status.message) {
+        reportApiError(status.message, 503)
+      }
+      return status
+    } catch (failure) {
+      const msg = (failure as Error).message || 'AI communication error: unable to verify the Ollama host.'
+      setAiStatus(prev => ({
+        enabled: prev?.enabled ?? true,
+        provider: 'ollama',
+        model: prev?.model ?? '',
+        endpoint: prev?.endpoint ?? '',
+        api_path: prev?.api_path ?? '/api/chat',
+        timeout_seconds: prev?.timeout_seconds ?? 90,
+        status: 'error',
+        probed: true,
+        reachable: false,
+        model_available: null,
+        installed_models: [],
+        latency_ms: null,
+        error_code: 'unreachable',
+        message: msg,
+      }))
+      if (alertOnFailure) reportApiError(msg, 503)
+      return null
+    } finally {
+      setCheckingAi(false)
+    }
+  }, [])
+
   useEffect(() => {
     let alive = true
-    void assistantOverview().then(value => { if (alive) setOverview(value) }).catch(() => undefined)
+    void assistantOverview().then(value => {
+      if (!alive) return
+      setOverview(value)
+      if (value.ai) {
+        setAiStatus(prev => (prev?.probed ? prev : value.ai!))
+        if (value.ai.enabled && !userToggledAi) {
+          setUseAi(true)
+          void probeAiConnection(true)
+        }
+      }
+    }).catch(() => undefined)
     void assistantHistory().then(value => { if (alive) setHistory(value) }).catch(() => undefined)
     return () => { alive = false }
-  }, [])
+  }, [probeAiConnection, userToggledAi])
 
   useEffect(() => { void loadMemory() }, [loadMemory])
 
-  const ask = useCallback(async (text: string) => {
+  const handleToggleAi = useCallback((next: boolean) => {
+    setUserToggledAi(true)
+    setUseAi(next)
+    setAiBannerDismissed(false)
+    if (next) void probeAiConnection(true)
+  }, [probeAiConnection])
+
+  const ask = useCallback(async (text: string, forceAi?: boolean) => {
     const value = text.trim()
     if (!value || asking) return
+    const engageAi = forceAi ?? useAi
     setAsking(true)
     setError('')
     setAsked(value)
     try {
-      const result = await askGuide(value, location.pathname === '/assistant' ? '' : location.pathname)
+      const result = await askGuide(value, location.pathname === '/assistant' ? '' : location.pathname, engageAi)
       setAnswer(result)
       setQuestion('')
+      if (result.ai_error) {
+        reportApiError(result.ai_error, 503)
+        setAiStatus(prev => ({
+          enabled: result.ai_error_code !== 'disabled',
+          provider: 'ollama',
+          model: result.ai_model || prev?.model || '',
+          endpoint: prev?.endpoint ?? '',
+          api_path: prev?.api_path ?? '/api/chat',
+          timeout_seconds: prev?.timeout_seconds ?? 90,
+          status: result.ai_error_code === 'disabled' ? 'disabled' : 'error',
+          probed: true,
+          reachable: false,
+          model_available: result.ai_error_code === 'model_missing' ? false : null,
+          installed_models: prev?.installed_models ?? [],
+          latency_ms: null,
+          error_code: result.ai_error_code || 'unreachable',
+          message: result.ai_error || '',
+        }))
+      } else if (result.ai_used) {
+        setAiStatus(prev => prev ? {
+          ...prev,
+          enabled: true,
+          model: result.ai_model || prev.model,
+          status: 'ready',
+          probed: true,
+          reachable: true,
+          model_available: true,
+          error_code: '',
+          message: `Connected · answered by ${result.ai_model || prev.model}`,
+        } : prev)
+      }
       void assistantHistory().then(setHistory).catch(() => undefined)
       void assistantOverview().then(setOverview).catch(() => undefined)
     } catch (failure) {
@@ -156,7 +249,7 @@ export default function Assistant() {
     } finally {
       setAsking(false)
     }
-  }, [asking, location.pathname])
+  }, [asking, location.pathname, useAi])
 
   const openCreate = () => { setDraft(EMPTY_DRAFT); setDialogError(''); setDialog({ mode: 'create' }) }
   const openEdit = (entry: AssistantMemoryEntry) => { setDraft(draftFrom(entry)); setDialogError(''); setDialog({ mode: 'edit', entry }) }
@@ -244,6 +337,52 @@ export default function Assistant() {
     {tab === 'ask' && <Box display="grid" gap={2.2} gridTemplateColumns={{ xs: '1fr', lg: 'minmax(0, 1.85fr) minmax(0, 1fr)' }}>
       <Box display="grid" gap={2} alignContent="start">
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between" gap={1.2} flexWrap="wrap" mb={1.4} pb={1.2} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
+            <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+              <PsychologyOutlined sx={{ fontSize: 19, color: useAi ? 'primary.main' : 'text.secondary' }}/>
+              <FormControlLabel
+                sx={{ m: 0, gap: 0.6 }}
+                control={
+                  <Switch
+                    size="small"
+                    checked={useAi}
+                    onChange={event => handleToggleAi(event.target.checked)}
+                    slotProps={{ input: { 'aria-label': 'Engage offline AI model' } }}
+                  />
+                }
+                label={<Typography fontSize={12.5} fontWeight={700}>AI database & workflow mode</Typography>}
+              />
+              {(() => {
+                const badge = aiStatusBadge(aiStatus ?? overview?.ai, checkingAi)
+                return <Tag tone={badge.tone}>{badge.label}</Tag>
+              })()}
+            </Box>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={checkingAi ? <CircularProgress size={13}/> : <WifiFindRounded fontSize="small"/>}
+              disabled={checkingAi || asking}
+              onClick={() => void probeAiConnection(true)}
+            >
+              {checkingAi ? 'Checking…' : 'Check connection'}
+            </Button>
+          </Box>
+
+          {useAi && !aiBannerDismissed && aiStatus && (aiStatus.status === 'error' || aiStatus.status === 'disabled') && !answer?.ai_error && (
+            <Box sx={{ mb: 1.5 }}>
+              <AiStatusAlert
+                message={aiStatus.message}
+                errorCode={aiStatus.error_code}
+                model={aiStatus.model}
+                endpoint={aiStatus.endpoint}
+                busy={checkingAi || asking}
+                fallbackNote="Questions will still return exact verified workspace and memory figures until the Ollama PC responds."
+                onCheckConnection={() => void probeAiConnection(true)}
+                onDismiss={() => setAiBannerDismissed(true)}
+              />
+            </Box>
+          )}
+
           <Box
             component="form"
             onSubmit={event => { event.preventDefault(); void ask(question) }}
@@ -251,7 +390,9 @@ export default function Assistant() {
           >
             <TextField
               value={question} onChange={event => setQuestion(event.target.value)}
-              placeholder="Ask about a workflow, a calculation, a figure or a page…"
+              placeholder={useAi
+                ? 'Ask about a well cost, compare "Well X" with "Well Y", inspect invoices, or ask a workflow…'
+                : 'Ask about a workflow, a calculation, compare two wells, or find a page…'}
               inputProps={{ maxLength: 500, 'aria-label': 'Your question for the guide' }}
               size="small" fullWidth autoFocus
               InputProps={{ startAdornment: <InputAdornment position="start"><SearchRounded fontSize="small"/></InputAdornment> }}
@@ -276,7 +417,11 @@ export default function Assistant() {
           <CircularProgress size={18}/>
           <Box>
             <Typography fontSize={12.8} fontWeight={700}>{asked}</Typography>
-            <Typography fontSize={11.5} color="text.secondary">Reading memory and the workspace figures you may see…</Typography>
+            <Typography fontSize={11.5} color="text.secondary">
+              {useAi
+                ? `Searching permitted workspace records and consulting ${aiStatus?.model || overview?.ai?.model || 'the LAN Ollama model'}…`
+                : 'Reading memory and the workspace figures you may see…'}
+            </Typography>
           </Box>
         </Paper>}
 
@@ -285,7 +430,12 @@ export default function Assistant() {
             <Typography fontSize={11.5} fontWeight={800} letterSpacing={.6} textTransform="uppercase" color="text.secondary">Your question</Typography>
             <Typography fontSize={12.6} fontWeight={600} sx={{ overflowWrap: 'anywhere' }}>{asked}</Typography>
           </Box>}
-          <AnswerCard answer={answer} onAsk={next => void ask(next)}/>
+          <AnswerCard
+            answer={answer}
+            onAsk={next => void ask(next)}
+            onRetryAi={asked ? () => void ask(asked, true) : undefined}
+            onCheckAi={() => void probeAiConnection(true)}
+          />
         </>}
 
         {!asking && !answer && !error && <GuideIntro prompts={quickPrompts} onAsk={next => void ask(next)}/>}

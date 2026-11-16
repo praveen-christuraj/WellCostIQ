@@ -190,6 +190,11 @@ service from `render.yaml`.
 | `ENTRY_CHECKS_ENABLED` | No | Default `true`. Entry checks on the daily cost sheet (see [`entry-checks.md`](entry-checks.md)); `false` hides every finding and stops the profile refresh |
 | `ENTRY_CHECK_HISTORY_SHEETS` | No | Default `30` (5-120). Sheets of the same AFE, nearest in date, a sheet is compared with |
 | `ENTRY_CHECK_PROFILE_WINDOW_DAYS` / `ENTRY_CHECK_PROFILE_MAX_AGE_HOURS` | No | Defaults `730` / `24`. How far back a workspace item profile reads, and how long it is used before it is rebuilt |
+| `OLLAMA_ENABLED` | No | Default `false`. Enables offline LAN Ollama AI (`qwen3:4b-q4_K_M`) in the Guide and the opt-in Cost Intelligence AI toggle; see [`ollama-ai.md`](ollama-ai.md). On Docker Compose start with `make up-ai` (`docker-compose.ollama.yml`) so `api` can reach the LAN host while `db` stays internal |
+| `OLLAMA_BASE_URL` / `OLLAMA_API_PATH` / `OLLAMA_TAGS_PATH` | No | Defaults `http://127.0.0.1:11434` / `/api/chat` / `/api/tags`. Remote LAN Ollama PC URL (e.g. `http://192.168.1.50:11434`) and API routes |
+| `OLLAMA_MODEL` / `OLLAMA_API_KEY` / `OLLAMA_CA_CERT` | No | Default model `qwen3:4b-q4_K_M`; optional Bearer token and internal TLS CA certificate path when an authenticating/HTTPS proxy fronts Ollama |
+| `OLLAMA_CONNECT_TIMEOUT_SECONDS` / `OLLAMA_TIMEOUT_SECONDS` | No | Defaults `5` / `90` (seconds). Fast TCP failure detection and full generation read timeout |
+| `OLLAMA_TEMPERATURE` / `OLLAMA_NUM_CTX` / `OLLAMA_MAX_TOKENS` / `OLLAMA_THINK` / `OLLAMA_KEEP_ALIVE` | No | Defaults `0.1` / `8192` / `1200` / `false` / `15m`. Sampling, context window, completion cap, Qwen3 thinking toggle and model warm retention |
 | `APP_NAME` | No | Default `WellCostIQ` |
 | `APP_TAGLINE` | No | Default `Well Cost Estimation & Tracking`; shown as the API description in `/docs` and OpenAPI |
 

@@ -3,6 +3,9 @@
  * the page, its export and its check. The analysis itself runs on the server
  * (`backend/app/domain/cost_intelligence.py`); nothing here derives a finding.
  */
+import { api, body } from './api'
+import type { AiConnectionStatus } from './ai'
+
 export type Severity = 'critical' | 'warning' | 'info'
 export type FindingCategory = 'budget' | 'trend' | 'anomaly' | 'schedule' | 'npt' | 'data-quality'
 export type HealthBand = 'good' | 'watch' | 'at-risk'
@@ -138,3 +141,99 @@ export function filterFindings(
     && (!filters.wellId || row.well_id === filters.wellId)
     && (!needle || `${row.well_code} ${row.title} ${row.detail} ${row.suggestion}`.toLowerCase().includes(needle)))
 }
+
+export type AiReviewScope = 'portfolio' | 'well'
+export type AiReviewFocus = 'full' | 'anomalies' | 'mistakes' | 'budget'
+export type AiFindingCategory = 'anomaly' | 'entry-mistake' | 'budget' | 'trend' | 'npt-upa' | 'data-quality'
+
+export type IntelligenceAiFinding = {
+  severity: Severity
+  category: AiFindingCategory
+  well_id: string
+  well_code: string
+  reference: string
+  title: string
+  detail: string
+  recommendation: string
+  action_path: string
+  action_label: string
+}
+
+export type IntelligenceAiEntrySignal = {
+  well_id: string
+  well_code: string
+  entry_id: string
+  daily_cost_code: string
+  cost_date: string
+  severity: 'warning' | 'notice'
+  title: string
+  message: string
+  current_display: string
+  suggested_display: string
+  action_path: string
+}
+
+export type IntelligenceAiReviewInput = {
+  scope: AiReviewScope
+  focus: AiReviewFocus
+  date_from?: string | null
+  date_to?: string | null
+  rig_id?: string
+  well_id?: string
+  well_status?: string
+  currency?: string
+  include_draft?: boolean
+  question?: string
+}
+
+export type IntelligenceAiReview = {
+  generated_at: string
+  as_of: string
+  scope: AiReviewScope
+  focus: AiReviewFocus
+  well_id: string
+  well_code: string
+  currency: string
+  model: string
+  endpoint: string
+  duration_ms: number
+  inspected_wells: number
+  statistical_findings_count: number
+  entry_signals_count: number
+  risk_posture: HealthBand
+  executive_summary: string
+  findings: IntelligenceAiFinding[]
+  recommendations: string[]
+  data_quality_notes: string[]
+  entry_signals: IntelligenceAiEntrySignal[]
+}
+
+export const AI_FOCUS_OPTIONS: { value: AiReviewFocus; label: string }[] = [
+  { value: 'full', label: 'Full automated cost review' },
+  { value: 'anomalies', label: 'Anomalies & spending drift' },
+  { value: 'mistakes', label: 'Entry mistakes & record audit' },
+  { value: 'budget', label: 'AFE budget & forecast review' },
+]
+
+export const AI_CATEGORY_LABEL: Record<AiFindingCategory, string> = {
+  anomaly: 'Cost anomaly',
+  'entry-mistake': 'Suspected entry mistake',
+  budget: 'AFE & forecast',
+  trend: 'Drift & schedule',
+  'npt-upa': 'NPT / UPA exposure',
+  'data-quality': 'Record hygiene',
+}
+
+export const costIntelligenceAiStatus = (probe = false) =>
+  api<AiConnectionStatus>(`/cost-intelligence/ai-status${probe ? '?probe=true' : ''}`, {
+    silent: true,
+    action: 'Check AI model connection',
+  })
+
+export const requestCostIntelligenceAiReview = (input: IntelligenceAiReviewInput) =>
+  api<IntelligenceAiReview>('/cost-intelligence/ai-review', {
+    method: 'POST',
+    body: body(input),
+    action: 'Run AI cost analytic review',
+  })
+

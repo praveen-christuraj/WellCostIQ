@@ -10,6 +10,7 @@ import {
   PictureAsPdfOutlined, RefreshRounded,
 } from '@mui/icons-material'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { AiCostReviewPanel } from '../components/costIntelligence/AiCostReviewPanel'
 import { ChartPanel } from '../components/ui/ChartPanel'
 import { DatasetState } from '../components/ui/DatasetState'
 import { ExportReportDialog } from '../components/ui/ExportReportDialog'
@@ -22,10 +23,10 @@ import { chartPalette } from '../designSystem'
 import { api, body } from '../lib/api'
 import { chartData, chartDrillHandler, chartRowId } from '../lib/chartInteraction'
 import {
-  amount, BAND_LABEL, BAND_TONE, CATEGORY_LABEL, filterFindings, REPORT_PRESETS, REPORT_SECTIONS,
-  SEVERITY_LABEL, SEVERITY_TONE, signedPercent,
-  type IntelligenceFinding, type IntelligenceOverview, type IntelligenceWell, type IntelligenceWellDetail,
-  type ReportSectionKey,
+  AI_CATEGORY_LABEL, amount, BAND_LABEL, BAND_TONE, CATEGORY_LABEL, filterFindings,
+  REPORT_PRESETS, REPORT_SECTIONS, SEVERITY_LABEL, SEVERITY_TONE, signedPercent,
+  type IntelligenceAiReview, type IntelligenceFinding, type IntelligenceOverview,
+  type IntelligenceWell, type IntelligenceWellDetail, type ReportSectionKey,
 } from '../lib/costIntelligence'
 import { detailSheet, writeWorkbook } from '../lib/matrixWorkbook'
 import type { ReportDocument, ReportFigure, ReportSection } from '../lib/reportPdf'
@@ -53,6 +54,7 @@ export default function CostIntelligence() {
   const theme = useTheme()
   const { mode } = useColorMode()
   const palette = useMemo(() => chartPalette(mode), [mode])
+  const [aiReview, setAiReview] = useState<IntelligenceAiReview | null>(null)
   const axis = useMemo(() => ({ text: theme.palette.text.secondary, line: theme.palette.divider }), [theme])
   const tone = theme.palette
 
@@ -286,10 +288,36 @@ export default function CostIntelligence() {
     try {
       const rows = findings.map(findingRecord)
       if (format === 'xlsx') {
-        await writeWorkbook('cost-intelligence.xlsx', [
+        const sheets = [
           detailSheet('Findings', findingColumns, rows),
           detailSheet('Well health', wellColumns, wells.map(wellRecord)),
-        ])
+        ]
+        if (aiReview) {
+          sheets.push(
+            detailSheet(
+              'AI review',
+              [
+                { key: 'severity', label: 'Severity' },
+                { key: 'category', label: 'Category' },
+                { key: 'well', label: 'Well' },
+                { key: 'reference', label: 'Date / Ref' },
+                { key: 'title', label: 'Finding' },
+                { key: 'detail', label: 'Evidence' },
+                { key: 'recommendation', label: 'Recommendation' },
+              ],
+              aiReview.findings.map(item => ({
+                severity: SEVERITY_LABEL[item.severity],
+                category: AI_CATEGORY_LABEL[item.category] ?? item.category,
+                well: item.well_code || 'Portfolio',
+                reference: item.reference,
+                title: item.title,
+                detail: item.detail,
+                recommendation: item.recommendation,
+              })),
+            ),
+          )
+        }
+        await writeWorkbook('cost-intelligence.xlsx', sheets)
       } else {
         const cell = (value: unknown) => {
           const text = String(value ?? '')
@@ -414,6 +442,29 @@ export default function CostIntelligence() {
         notes: detail.notes,
       })
     }
+    if (aiReview) {
+      out.push({
+        title: `AI Cost Analytic Review (${aiReview.model})`,
+        subtitle: `${aiReview.scope === 'well' && aiReview.well_code ? `Well ${aiReview.well_code}` : `Portfolio (${aiReview.inspected_wells} wells)`} · Posture: ${BAND_LABEL[aiReview.risk_posture]}`,
+        notes: [
+          aiReview.executive_summary,
+          ...aiReview.recommendations.map((rec, idx) => `Action ${idx + 1}: ${rec}`),
+          ...aiReview.data_quality_notes.map(note => `Data note: ${note}`),
+        ],
+        tables: options.includeTables && aiReview.findings.length ? [{
+          title: 'AI-identified anomalies, mistakes & risks',
+          head: ['Severity', 'Category', 'Well / Ref', 'Finding', 'Recommended action'],
+          wide: [3, 4],
+          body: aiReview.findings.map(item => [
+            SEVERITY_LABEL[item.severity],
+            AI_CATEGORY_LABEL[item.category] ?? item.category,
+            [item.well_code || 'Portfolio', item.reference].filter(Boolean).join(' · '),
+            `${item.title}: ${item.detail}`,
+            item.recommendation || '—',
+          ]),
+        }] : undefined,
+      })
+    }
     if (data && has('methods')) out.push({ title: 'How the analysis works', notes: data.methods })
     return {
       title: 'Cost Intelligence report',
@@ -425,7 +476,7 @@ export default function CostIntelligence() {
       fileName: 'cost-intelligence-report',
       orientation: options.orientation,
     }
-  }, [data, kpis, sections, wells, findings, detail, currency, from, to, status, filtersActive])
+  }, [data, kpis, sections, wells, findings, detail, currency, from, to, status, filtersActive, aiReview])
 
   const toggleSection = (key: ReportSectionKey) => setSections(current => (current.includes(key) ? current.filter(item => item !== key) : [...current, key]))
   const selectedWell = wells.find(row => row.well_id === wellId)
@@ -503,6 +554,17 @@ export default function CostIntelligence() {
           {data.headline.map(line => <Typography key={line} component="li" fontSize={13}>{line}</Typography>)}
         </Box>
       </SectionCard>
+
+      <AiCostReviewPanel
+        wells={wells}
+        selectedWell={selectedWell}
+        dateFrom={from}
+        dateTo={to}
+        wellStatus={status}
+        currency={currency}
+        onNavigate={navigate}
+        onReviewChange={setAiReview}
+      />
 
       <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))', lg: 'repeat(6, minmax(0, 1fr))' }, mb: 2 }}>
         <StatCard label="Health score" value={`${kpis.score} / 100`} tone={kpis.band === 'good' ? 'positive' : kpis.band === 'watch' ? 'warning' : 'error'}

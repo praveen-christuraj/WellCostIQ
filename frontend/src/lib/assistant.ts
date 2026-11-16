@@ -6,6 +6,7 @@
 // no generated prose to escape and no figure that is not labelled.
 
 import { api, body } from './api'
+import type { AiConnectionStatus, AiErrorCode } from './ai'
 
 export type AssistantConfidence = 'high' | 'medium' | 'low'
 
@@ -36,6 +37,7 @@ export type AssistantTable = {
   rows: string[][]
   numeric?: number[]
   footer?: string
+  note?: string
 }
 
 export type AssistantAnswer = {
@@ -49,6 +51,11 @@ export type AssistantAnswer = {
   steps: string[]
   sources: AssistantSource[]
   follow_ups: string[]
+  ai_used?: boolean
+  ai_model?: string
+  ai_duration_ms?: number | null
+  ai_error?: string
+  ai_error_code?: AiErrorCode
 }
 
 export type AssistantOverview = {
@@ -60,6 +67,7 @@ export type AssistantOverview = {
   checks: AssistantFact[]
   quick_prompts: string[]
   recent_questions: string[]
+  ai?: AiConnectionStatus
 }
 
 export type AssistantMemoryEntry = {
@@ -102,8 +110,18 @@ export type AssistantConversation = {
 
 export const assistantOverview = () => api<AssistantOverview>('/assistant/overview', { silent: true })
 
-export const askGuide = (question: string, route = '') =>
-  api<AssistantAnswer>('/assistant/ask', { method: 'POST', body: body({ question, route }), action: 'Ask the guide' })
+export const assistantAiStatus = (probe = false) =>
+  api<AiConnectionStatus>(`/assistant/ai-status${probe ? '?probe=true' : ''}`, {
+    silent: true,
+    action: 'Check AI model connection',
+  })
+
+export const askGuide = (question: string, route = '', useAi = false) =>
+  api<AssistantAnswer>('/assistant/ask', {
+    method: 'POST',
+    body: body(useAi ? { question, route, use_ai: true } : { question, route }),
+    action: useAi ? 'Ask the AI guide' : 'Ask the guide',
+  })
 
 export const assistantMemory = () => api<AssistantMemoryEntry[]>('/assistant/memory')
 
