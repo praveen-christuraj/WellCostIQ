@@ -1,5 +1,13 @@
 # Durable project memory
 
+## Fuel vendor registration, report exploration and personal finding state (2026-11-16)
+
+- Fuel companies can be created from a workspace vendor ID without a supplied name; the server resolves the active workspace vendor name and keeps manual names supported. Tests include cross-workspace rejection.
+- Report Designer exposes the existing one-hop permitted catalogue relationships as an expandable field tree, with click-to-add fields; it does not create arbitrary joins. Report columns use `kind`, not the `source_kind` used by filters: never send `source_kind` in a column payload.
+- AFE register offers rig → well browsing, filtering the existing table and its exports. Filter changes clear selections.
+- Deterministic Cost Intelligence findings have per-user, per-workspace acknowledge/dismiss/unread states in `cost_intelligence_read_states` (migration `d6a2b8c3e901`). Finding keys include well, code, date and title; they are not per drilling/completion scope. States are audited, hidden from the database browser/report catalogue, and do not change analysis, scores or charts. AI findings are not covered. API contract is 0.14.0. See `docs/cost-intelligence.md`.
+- **Not implemented:** effective-dated daily repricing and late-added catalogue items. `docs/effective-dated-daily-cost-plan.md` explains the snapshot architecture and decisions needed around submitted records, overrides, provenance and FX. Do not imply rates currently reprice automatically.
+
 ## Offline LAN Ollama AI (`qwen3:4b-q4_K_M`) in the Guide & Cost Intelligence (2026-11-16)
 
 - **User directive.** Connect WellCostIQ to an offline Ollama model (`qwen3:4b-q4_K_M`) running on another PC on the same LAN, configured entirely in `.env`, without breaking any existing functionality: (1) study the workspace database and application workflows to answer questions in the Guide — including single-well total cost and multi-well comparisons ("Well X" vs "Well Y"); (2) clearly alert the user on any AI communication failure; (3) keep Cost Intelligence deterministic by default and engage the AI model only via an explicit user toggle to identify anomalies, entry mistakes and automated cost analytic reviews.

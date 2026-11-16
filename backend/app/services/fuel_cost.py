@@ -887,10 +887,10 @@ def list_companies(
 def create_company(
     db: Session, organization_id: str, data: FuelCompanyIn, user: User, request: Request | None
 ) -> FuelCompanyOut:
-    name = data.company_name.strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="Company name is mandatory")
     vendor = _vendor_or_404(db, organization_id, data.vendor_id) if data.vendor_id else None
+    name = data.company_name.strip() or (vendor.vendor_name.strip() if vendor else "")
+    if not name:
+        raise HTTPException(status_code=422, detail="Company name is mandatory when no vendor is selected")
     existing = _company_named(db, organization_id, name)
     if existing is not None and not existing.is_deleted:
         raise HTTPException(

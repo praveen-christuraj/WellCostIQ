@@ -171,7 +171,7 @@ def _finding_out(finding: domain.Finding) -> IntelligenceFinding:
     path, label = _action(finding)
     identity = f"{finding.well_id}|{finding.code}|{finding.cost_date or ''}|{finding.title}"
     return IntelligenceFinding(
-        id=sha1(identity.encode()).hexdigest()[:16],  # noqa: S324 - a stable row key, not a security control
+        id=sha1(identity.encode(), usedforsecurity=False).hexdigest()[:16],  # Stable row key, not a security control.
         code=finding.code, severity=finding.severity, category=finding.category, title=finding.title,
         detail=finding.detail, basis=finding.basis, suggestion=finding.suggestion, well_id=finding.well_id,
         well_code=finding.well_code, cost_date=finding.cost_date, amount=_round(finding.amount),

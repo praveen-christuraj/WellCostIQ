@@ -831,3 +831,18 @@ def test_fuel_ledger_wording_is_configured_not_hardcoded():
                 AuditLog.created_at.desc()
             ).first()
             assert entry is not None and "High Speed Diesel" in entry.summary
+
+
+def test_register_company_from_master_vendor_without_name():
+    with TestClient(app) as client:
+        north, south = login(client), login(client, "south")
+        vendor = _post(client, "/api/v1/master-data/vendors", north, {
+            "vendor_code": "V-NEW", "vendor_name": "Master Vendor", "category": "Drilling", "status": "active",
+        })
+        company = _post(client, "/api/v1/fuel-cost/companies", north, {"vendor_id": vendor["id"], "is_default": True})
+        assert company["company_name"] == "Master Vendor"
+        assert company["vendor_id"] == vendor["id"]
+        assert client.post('/api/v1/fuel-cost/companies', headers=north, json={"vendor_id": vendor["id"]}).status_code == 409
+        assert client.post('/api/v1/fuel-cost/companies', headers=south, json={"vendor_id": vendor["id"]}).status_code == 422
+        assert client.post('/api/v1/fuel-cost/companies', headers=north, json={}).status_code == 422
+        assert client.post('/api/v1/fuel-cost/companies', headers=north, json={"company_name": "   "}).status_code == 422
