@@ -43,9 +43,16 @@ function decodeField(value: string): { source_kind: string; related_key_column: 
   return { source_kind: kind || 'DATA', related_key_column: key || '', related_table: table || '', column_name: column || '' }
 }
 
-function encodeField(source: { source_kind?: string; related_key_column?: string; related_table?: string; column_name?: string }): string {
-  const kind = source.source_kind || 'DATA'
+function encodeField(source: { source_kind?: string; kind?: string; related_key_column?: string; related_table?: string; column_name?: string }): string {
+  const kind = source.source_kind || source.kind || 'DATA'
   return `${kind}::${source.related_key_column || ''}::${source.related_table || ''}::${source.column_name || ''}`
+}
+
+// Report columns have a `kind`, unlike filters which have `source_kind`.
+// Do not add source_kind to a column: the API rejects extra fields.
+function decodeColumnField(value: string) {
+  const { related_key_column, related_table, column_name } = decodeField(value)
+  return { related_key_column, related_table, column_name }
 }
 
 function payloadOf(design: ReportDesign): ReportDesign {
@@ -196,21 +203,34 @@ export default function ReportDesigner() {
     columns: current.columns.map((column, position) => position === index ? { ...column, ...patch } : column),
   }))
 
-  const addColumn = (kind: ColumnKind) => setDesign(current => {
-    const index = current.columns.length
-    const column = emptyColumn(index)
-    const first = detail?.columns.find(item => item.data_type === (kind === 'CALCULATED' ? 'number' : 'text')) ?? detail?.columns[0]
-    return {
-      ...current,
-      columns: [...current.columns, {
-        ...column, kind,
-        column_name: kind === 'CALCULATED' ? '' : (first?.column ?? ''),
-        data_type: kind === 'CALCULATED' ? 'number' : (first?.data_type === 'boolean' ? 'text' : first?.data_type as ReportColumn['data_type'] ?? 'text'),
-        label: kind === 'CALCULATED' ? '' : (first?.label ?? ''),
-        aggregate: kind === 'CALCULATED' ? 'NONE' : column.aggregate,
-      }],
+  const nextColumn = (columns: ReportColumn[]) => {
+    let index = columns.length
+    while (columns.some(column => column.key === emptyColumn(index).key)) index += 1
+    return emptyColumn(index)
+  }
+
+  const addField = (option: FieldOption) => setDesign(current => ({
+    ...current,
+    columns: [...current.columns, {
+      ...nextColumn(current.columns),
+      kind: option.value.startsWith('RELATED') ? 'RELATED' : 'DATA',
+      ...decodeColumnField(option.value),
+      data_type: option.dataType === 'boolean' ? 'text' : option.dataType as ReportColumn['data_type'],
+      label: option.label,
+    }],
+  }))
+
+  const addColumn = (kind: ColumnKind) => {
+    if (kind !== 'CALCULATED') {
+      const first = options.find(option => option.value.startsWith(`${kind}::`))
+      if (first) addField(first)
+      return
     }
-  })
+    setDesign(current => ({
+      ...current,
+      columns: [...current.columns, { ...nextColumn(current.columns), kind, column_name: '', data_type: 'number', label: '', aggregate: 'NONE' }],
+    }))
+  }
 
   const removeColumn = (index: number) => setDesign(current => {
     const removed = current.columns[index]
@@ -269,7 +289,7 @@ export default function ReportDesigner() {
 
   const stepContent = [
     <DataStep key="data" design={design} catalog={catalog} detail={detail} update={update} changeSource={table => void changeSource(table)}/>,
-    <ColumnsStep key="columns" design={design} options={options} updateColumn={updateColumn} addColumn={addColumn}
+    <ColumnsStep key="columns" design={design} detail={detail} options={options} updateColumn={updateColumn} addColumn={addColumn} addField={addField}
       removeColumn={removeColumn} moveColumn={moveColumn}/>,
     <LayoutStep key="layout" design={design} update={update} setDesign={setDesign} numericColumns={numericColumns}/>,
     <FiltersStep key="filters" design={design} options={options} setDesign={setDesign}/>,
@@ -402,11 +422,13 @@ function DataStep({ design, catalog, detail, update, changeSource }: {
 // Step 2 — columns
 // ---------------------------------------------------------------------------
 
-function ColumnsStep({ design, options, updateColumn, addColumn, removeColumn, moveColumn }: {
+function ColumnsStep({ design, detail, options, updateColumn, addColumn, addField, removeColumn, moveColumn }: {
   design: ReportDesign
+  detail: CatalogDetail | null
   options: FieldOption[]
   updateColumn: (index: number, patch: Partial<ReportColumn>) => void
   addColumn: (kind: ColumnKind) => void
+  addField: (option: FieldOption) => void
   removeColumn: (index: number) => void
   moveColumn: (index: number, direction: -1 | 1) => void
 }) {
@@ -426,7 +448,29 @@ function ColumnsStep({ design, options, updateColumn, addColumn, removeColumn, m
         <Button size="small" variant="outlined" startIcon={<FunctionsRounded/>} onClick={() => addColumn('CALCULATED')}>Calculated</Button>
       </Box>
     </Box>
-    {design.columns.length === 0 && <Alert severity="info">No columns yet. Add at least one; the first step lets you change the table later.</Alert>}
+    {detail && <Accordion variant="outlined" disableGutters>
+      <AccordionSummary expandIcon={<ExpandMoreRounded/>}>
+        <Box><Typography fontWeight={700}>Explore tables and add fields</Typography>
+          <Typography color="text.secondary" fontSize={12}>Start with {detail.label}; expand a linked table to add its fields.</Typography></Box>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Alert severity="info" sx={{ mb: 1 }}>Links shown here are the relationships available for this source. Choose a field to add it; use Layout to group and summarise numeric columns.</Alert>
+        <Accordion disableGutters variant="outlined">
+          <AccordionSummary expandIcon={<ExpandMoreRounded/>}><Typography fontWeight={700}>{detail.label} · source table</Typography></AccordionSummary>
+          <AccordionDetails><Box display="flex" gap={1} flexWrap="wrap">
+            {options.filter(option => option.value.startsWith('DATA::')).map(option => <Button key={option.value} size="small" variant="outlined" onClick={() => addField(option)}>{option.label} · {option.dataType}</Button>)}
+          </Box></AccordionDetails>
+        </Accordion>
+        {detail.relations.map(relation => <Accordion key={`${relation.key_column}-${relation.table}`} disableGutters variant="outlined">
+          <AccordionSummary expandIcon={<ExpandMoreRounded/>}><Box><Typography fontWeight={700}>↳ {relation.label}</Typography><Typography color="text.secondary" fontSize={12}>{detail.table}.{relation.key_column} → {relation.table}</Typography></Box></AccordionSummary>
+          <AccordionDetails><Box display="flex" gap={1} flexWrap="wrap">
+            {options.filter(option => option.value.startsWith(`RELATED::${relation.key_column}::${relation.table}::`)).map(option => <Button key={option.value} size="small" variant="outlined" onClick={() => addField(option)}>{option.label} · {option.dataType}</Button>)}
+          </Box></AccordionDetails>
+        </Accordion>)}
+        {detail.relations.length === 0 && <Typography color="text.secondary" fontSize={12} sx={{ mt: 1 }}>No related tables are available for this source.</Typography>}
+      </AccordionDetails>
+    </Accordion>}
+    {design.columns.length === 0 && <Alert severity="info">No columns yet. For example, add a well or date field and a cost amount, then use Layout to group the amounts. Change the source on the first step if needed.</Alert>}
     {design.columns.map((column, index) => <ColumnCard key={`${column.key}-${index}`} column={column} index={index}
       options={options} taken={taken} last={index === design.columns.length - 1}
       updateColumn={updateColumn} removeColumn={removeColumn} moveColumn={moveColumn}/>)}
@@ -473,7 +517,7 @@ function ColumnCard({ column, index, options, taken, last, updateColumn, removeC
           const first = options.find(option => (kind === 'RELATED' ? option.value.startsWith('RELATED') : option.value.startsWith('DATA')))
           updateColumn(index, kind === 'CALCULATED'
             ? { kind, column_name: '', related_table: '', related_key_column: '', data_type: 'number', formula: column.formula || '' }
-            : { kind, ...decodeField(first?.value ?? 'DATA::::'), data_type: (first?.dataType as ReportColumn['data_type']) || 'text' })
+            : { kind, ...decodeColumnField(first?.value ?? 'DATA::::'), data_type: (first?.dataType as ReportColumn['data_type']) || 'text' })
         }}>
         <MenuItem value="DATA">A column in this table</MenuItem>
         <MenuItem value="RELATED">A column in a related table</MenuItem>
@@ -485,7 +529,7 @@ function ColumnCard({ column, index, options, taken, last, updateColumn, removeC
       </TextField>}
       {column.kind !== 'CALCULATED' && <TextField size="small" select label="Field" value={encodeField(column)}
         onChange={event => {
-          const decoded = decodeField(event.target.value)
+          const decoded = decodeColumnField(event.target.value)
           const meta = options.find(option => option.value === event.target.value)
           updateColumn(index, {
             ...decoded,

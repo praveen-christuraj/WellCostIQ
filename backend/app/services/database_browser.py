@@ -34,7 +34,9 @@ from sqlalchemy.orm import Session
 from app.core.spreadsheets import safe_csv_cell
 
 # Tables that are internal plumbing or hold session secrets: never listed.
-HIDDEN_TABLES = frozenset({"alembic_version", "refresh_sessions"})
+# Personal finding read states are accessible only through the caller-scoped API,
+# not through workspace-wide database browsing or report-builder catalogues.
+HIDDEN_TABLES = frozenset({"alembic_version", "refresh_sessions", "cost_intelligence_read_states"})
 # Columns that hold credentials, token material or lockout state: never shown.
 HIDDEN_COLUMN_PATTERN = re.compile(r"password|secret|token|hash", re.IGNORECASE)
 HIDDEN_COLUMNS = frozenset({"failed_logins", "locked_until", "token_version"})

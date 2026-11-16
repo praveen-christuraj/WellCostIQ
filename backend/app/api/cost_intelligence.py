@@ -1,14 +1,21 @@
 """Cost Intelligence endpoints: automated cost analysis, findings and suggestions.
 
-Read-only. `cost-intelligence:read` opens the module; the figures themselves
+Analysis is read-only; personal finding states are recorded separately.
+`cost-intelligence:read` opens the module; the figures themselves
 still follow the source modules (`afe:read`, `daily-cost:read`, `rig-well:read`)
 exactly as on the Operations dashboard, so this capability never widens what a
 caller can see. `cost-intelligence:export` allows the audited report export.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
+from pydantic import BaseModel
+from sqlalchemy import select
+
+from app.models.cost_intelligence import FindingReadState
+from app.services import audit
 
 from app.api.deps import Current, Db, require
 from app.schemas.ai import AiConnectionStatus
@@ -82,3 +89,43 @@ def ai_review(
 ) -> IntelligenceAiReviewOut:
     """Opt-in AI cost analysis for anomalies, suspected mistakes and analytic review."""
     return ai_service.generate_review(db, user, data, request=request)
+
+
+class FindingStateIn(BaseModel):
+    state: Literal["acknowledged", "dismissed", "unread"]
+
+
+@router.get("/finding-states")
+def finding_states(db: Db, user: Current) -> dict[str, str]:
+    """Only the current user's states in this workspace; analysis itself remains unchanged."""
+    rows = db.scalars(select(FindingReadState).where(
+        FindingReadState.organization_id == user.organization_id,
+        FindingReadState.user_id == user.id,
+    )).all()
+    return {row.finding_id: row.state for row in rows}
+
+
+@router.put("/finding-states/{finding_id}", status_code=204)
+def set_finding_state(
+    data: FindingStateIn, request: Request, db: Db, user: Current,
+    finding_id: str = Path(pattern=r"^[0-9a-f]{16}$"),
+) -> None:
+    """Mark a stable, well-specific finding as read, or restore it to the queue."""
+    row = db.scalar(select(FindingReadState).where(
+        FindingReadState.organization_id == user.organization_id,
+        FindingReadState.user_id == user.id,
+        FindingReadState.finding_id == finding_id,
+    ))
+    if data.state == "unread":
+        if row is not None:
+            db.delete(row)
+    elif row is None:
+        db.add(FindingReadState(organization_id=user.organization_id, user_id=user.id,
+                                finding_id=finding_id, state=data.state))
+    else:
+        row.state = data.state
+        row.updated_at = datetime.now(timezone.utc)
+    audit.record(db, organization_id=user.organization_id, actor=user, action=data.state,
+                 entity_type="cost_intelligence_finding", entity_id=finding_id,
+                 entity_label="Cost Intelligence finding", summary=f"Marked finding {finding_id} as {data.state}", request=request)
+    db.commit()

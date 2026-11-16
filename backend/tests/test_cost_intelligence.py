@@ -191,3 +191,31 @@ def test_overview_matches_the_dashboard_and_respects_access():
             assert entry.action == "export" and "XLSX" in entry.summary and "summary,findings" in entry.summary
 
         assert client.get("/api/v1/cost-intelligence/overview?from=2026-02-01&to=2026-01-01", headers=owner).status_code == 422
+
+
+def test_finding_read_states_are_personal_tenant_scoped_audited_and_reversible():
+    with TestClient(app) as client:
+        owner = login(client)
+        south = login(client, organization="south")
+        _grant("reader@example.com", ("cost-intelligence:read",))
+        reader = login(client, email="reader@example.com")
+        _grant("no-ci@example.com", ("daily-cost:read",))
+        no_ci = login(client, email="no-ci@example.com")
+        path = "/api/v1/cost-intelligence/finding-states"
+        finding = "0123456789abcdef"
+        assert client.get(path, headers=no_ci).status_code == 403
+        assert client.put(f"{path}/{finding}", headers=no_ci, json={"state": "dismissed"}).status_code == 403
+        assert client.put(f"{path}/bad", headers=owner, json={"state": "dismissed"}).status_code == 422
+        assert client.put(f"{path}/{finding}", headers=owner, json={"state": "invalid"}).status_code == 422
+        assert client.put(f"{path}/{finding}", headers=owner, json={"state": "acknowledged"}).status_code == 204
+        assert client.get(path, headers=owner).json() == {finding: "acknowledged"}
+        assert client.get(path, headers=reader).json() == {}
+        assert client.get(path, headers=south).json() == {}
+        assert client.put(f"{path}/{finding}", headers=reader, json={"state": "dismissed"}).status_code == 204
+        assert client.put(f"{path}/{finding}", headers=owner, json={"state": "unread"}).status_code == 204
+        assert client.get(path, headers=owner).json() == {}
+        assert client.get(path, headers=reader).json() == {finding: "dismissed"}
+        with SessionLocal() as db:
+            assert db.query(AuditLog).filter(AuditLog.entity_type == "cost_intelligence_finding").count() == 3
+        from app.services.database_browser import HIDDEN_TABLES
+        assert "cost_intelligence_read_states" in HIDDEN_TABLES

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AddRounded, ArrowForwardRounded, DeleteOutlineRounded, EditOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, CircularProgress, Paper, Tooltip, Typography } from '@mui/material'
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, CircularProgress, Paper, Tooltip, Typography } from '@mui/material'
+import { ExpandMoreRounded } from '@mui/icons-material'
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../DataTable'
 import { ErrorMessage, FormDialog, Tag } from '../Common'
@@ -43,7 +44,22 @@ export function AfeRegisterTab({ reference, onReferenceChanged }: {
   const { can } = useAuth()
   const navigate = useNavigate()
   const [rows, setRows] = useState<Afe[]>([])
+  const [rigFilter, setRigFilter] = useState('')
+  const [wellFilter, setWellFilter] = useState('')
   const [selected, setSelected] = useState<Afe[]>([])
+  const grouped = useMemo(() => {
+    const rigs = new Map<string, { label: string; wells: Map<string, { label: string; count: number }>; count: number }>()
+    rows.forEach(row => {
+      if (!rigs.has(row.rig_id)) rigs.set(row.rig_id, { label: `${row.rig_code} · ${row.rig_name}`, wells: new Map(), count: 0 })
+      const rig = rigs.get(row.rig_id)!
+      rig.count += 1
+      if (!rig.wells.has(row.well_id)) rig.wells.set(row.well_id, { label: `${row.well_code} · ${row.well_name}`, count: 0 })
+      rig.wells.get(row.well_id)!.count += 1
+    })
+    return [...rigs.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label))
+  }, [rows])
+  const visibleRows = useMemo(() => rows.filter(row => (!rigFilter || row.rig_id === rigFilter) && (!wellFilter || row.well_id === wellFilter)), [rows, rigFilter, wellFilter])
+  const selectScope = (rig: string, well = '') => { setSelected([]); setRigFilter(rig); setWellFilter(well) }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -173,11 +189,29 @@ export function AfeRegisterTab({ reference, onReferenceChanged }: {
       </Alert>}
     </Paper>
 
+    <Accordion variant="outlined" disableGutters sx={{ mb: 1.5 }}>
+      <AccordionSummary expandIcon={<ExpandMoreRounded/>}><Box>
+        <Typography fontWeight={700}>Browse AFEs by rig and well</Typography>
+        <Typography color="text.secondary" fontSize={12}>{visibleRows.length} of {rows.length} AFEs in the selected scope. Expand to choose a rig or well.</Typography>
+      </Box></AccordionSummary>
+      <AccordionDetails>
+        <Button size="small" variant={!rigFilter ? 'contained' : 'outlined'} onClick={() => selectScope('')}>All rigs and wells</Button>
+        {grouped.map(([rigId, rig]) => <Accordion key={rigId} variant="outlined" disableGutters sx={{ mt: 1 }}>
+          <AccordionSummary expandIcon={<ExpandMoreRounded/>}><Typography fontWeight={700}>{rig.label} · {rig.count} AFE{rig.count === 1 ? '' : 's'}</Typography></AccordionSummary>
+          <AccordionDetails><Box display="flex" gap={1} flexWrap="wrap">
+            <Button size="small" variant={rigFilter === rigId && !wellFilter ? 'contained' : 'outlined'} onClick={() => selectScope(rigId)}>All wells on this rig</Button>
+            {[...rig.wells.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([wellId, well]) => <Button key={wellId} size="small" variant={wellFilter === wellId ? 'contained' : 'outlined'} onClick={() => selectScope(rigId, wellId)}>{well.label} · {well.count}</Button>)}
+          </Box></AccordionDetails>
+        </Accordion>)}
+      </AccordionDetails>
+    </Accordion>
+
     {loading
       ? <Box py={8} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={26}/></Box>
       : <DataTable
         fillHeight
-        rows={rows}
+        rows={visibleRows}
+        selectionResetKey={`${rigFilter}:${wellFilter}`}
         columns={columns}
         searchPlaceholder="Search AFEs by code, name, rig, well, type or status..."
         exportName="afe-register"

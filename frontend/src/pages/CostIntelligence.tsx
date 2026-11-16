@@ -44,8 +44,8 @@ const plottedWell = (row: IntelligenceWell) => chartRowId('ci-well', row.well_id
 
 /**
  * Cost Intelligence: the server analyses the cost record and this page shows
- * what it found, why, and what to do next. Read-only: no finding changes or
- * blocks a record. Charts go through the shared chart host, and every chart
+ * what it found, why, and what to do next. Personal read states never change
+ * or block a source record. Charts go through the shared chart host, and every chart
  * point that selects a well carries that well's identity (never its position).
  */
 export default function CostIntelligence() {
@@ -72,6 +72,28 @@ export default function CostIntelligence() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(20)
   const [expanded, setExpanded] = useState('')
+  const [readStates, setReadStates] = useState<Record<string, string>>({})
+  const [showRead, setShowRead] = useState(false)
+  const [stateBusy, setStateBusy] = useState('')
+  const [stateError, setStateError] = useState('')
+
+  useEffect(() => {
+    api<Record<string, string>>('/cost-intelligence/finding-states', { action: 'Load finding read states' })
+      .then(setReadStates).catch(caught => setStateError((caught as Error).message))
+  }, [])
+
+  const markFinding = async (id: string, state: 'acknowledged' | 'dismissed' | 'unread') => {
+    setStateBusy(id); setStateError('')
+    try {
+      await api(`/cost-intelligence/finding-states/${id}`, { method: 'PUT', body: body({ state }), action: 'Update finding read state' })
+      setReadStates(current => {
+        const next = { ...current }
+        if (state === 'unread') delete next[id]
+        else next[id] = state
+        return next
+      })
+    } catch (caught) { setStateError((caught as Error).message) } finally { setStateBusy('') }
+  }
 
   const [wellId, setWellId] = useState('')
   const [detail, setDetail] = useState<IntelligenceWellDetail | null>(null)
@@ -123,11 +145,12 @@ export default function CostIntelligence() {
   const kpis = data?.kpis
   const wells = useMemo(() => data?.wells ?? [], [data])
   const findings = useMemo(
-    () => filterFindings(data?.findings ?? [], { severity, category, wellId: findingWell, search }),
-    [data, severity, category, findingWell, search],
+    () => filterFindings((data?.findings ?? []).filter(row => showRead || !readStates[row.id]), { severity, category, wellId: findingWell, search }),
+    [data, severity, category, findingWell, search, readStates, showRead],
   )
+  const suggestions = useMemo(() => (data?.suggestions ?? []).filter(row => !readStates[row.finding_id]), [data, readStates])
   const pageFindings = findings.slice(page * pageSize, page * pageSize + pageSize)
-  useEffect(() => { setPage(0) }, [severity, category, findingWell, search, data])
+  useEffect(() => { setPage(0) }, [severity, category, findingWell, search, data, readStates, showRead])
   const filtersActive = Boolean(severity || category || findingWell || search || status || from || to)
 
   // ---- charts ----------------------------------------------------------------
@@ -375,7 +398,7 @@ export default function CostIntelligence() {
         subtitle: 'Ranked by severity, then by the amount involved.',
         tables: [{
           head: ['#', 'Severity', 'Well', 'Finding', 'Suggested action', `Amount (${currency})`], numeric: [0, 5], wide: [4],
-          body: data.suggestions.map(row => [row.rank, SEVERITY_LABEL[row.severity], row.well_code, row.title, row.suggestion, amount(row.amount)]),
+          body: suggestions.map(row => [row.rank, SEVERITY_LABEL[row.severity], row.well_code, row.title, row.suggestion, amount(row.amount)]),
         }],
       })
     }
@@ -395,7 +418,7 @@ export default function CostIntelligence() {
     if (has('findings') && options.includeTables) {
       out.push({
         title: 'Findings',
-        subtitle: filtersActive ? 'As filtered on the page.' : 'Every finding in the analysed record.',
+        subtitle: showRead ? 'As filtered on the page, including read findings.' : 'As filtered on the page; acknowledged and dismissed findings are excluded.',
         tables: [{
           head: ['Severity', 'Well', 'Date', 'Finding', 'Detail', 'How it was derived'], wide: [4, 5],
           body: findings.map(row => [SEVERITY_LABEL[row.severity], row.well_code, row.cost_date ?? '', row.title, row.detail, row.basis]),
@@ -420,7 +443,7 @@ export default function CostIntelligence() {
         wellTables.push({
           title: 'Findings & suggested actions',
           head: ['Severity', 'Finding', 'Suggested action'], wide: [2],
-          body: detail.findings.map(row => [SEVERITY_LABEL[row.severity], row.title, row.suggestion]),
+          body: detail.findings.filter(row => showRead || !readStates[row.id]).map(row => [SEVERITY_LABEL[row.severity], row.title, row.suggestion]),
         })
       }
       out.push({
@@ -476,7 +499,7 @@ export default function CostIntelligence() {
       fileName: 'cost-intelligence-report',
       orientation: options.orientation,
     }
-  }, [data, kpis, sections, wells, findings, detail, currency, from, to, status, filtersActive, aiReview])
+  }, [data, kpis, sections, wells, findings, detail, currency, from, to, status, filtersActive, aiReview, suggestions, readStates, showRead])
 
   const toggleSection = (key: ReportSectionKey) => setSections(current => (current.includes(key) ? current.filter(item => item !== key) : [...current, key]))
   const selectedWell = wells.find(row => row.well_id === wellId)
@@ -582,8 +605,8 @@ export default function CostIntelligence() {
           hint={kpis.forecast_variance === null ? 'Needs AFE and daily cost access' : `${signedPercent(kpis.forecast_variance_percent)} against a combined AFE of ${amount(kpis.afe_amount, currency)}`}/>
         <StatCard label="Cost above AFE" value={amount(kpis.amount_at_risk, currency)} tone={kpis.amount_at_risk ? 'error' : 'default'}
           hint="Recorded or forecast overrun, summed over the wells"/>
-        <StatCard label="Findings to act on" value={`${kpis.critical + kpis.warning}`} tone={kpis.critical ? 'error' : kpis.warning ? 'warning' : 'positive'}
-          hint={`${kpis.critical} critical, ${kpis.warning} warning, ${kpis.info} note(s)`}/>
+        <StatCard label="Analysis findings" value={`${kpis.critical + kpis.warning}`} tone={kpis.critical ? 'error' : kpis.warning ? 'warning' : 'positive'}
+          hint={`${kpis.critical} critical, ${kpis.warning} warning, ${kpis.info} note(s) · includes read`}/>
         <StatCard label="Wells at risk" value={`${kpis.wells_at_risk} of ${kpis.wells}`} tone={kpis.wells_at_risk ? 'error' : 'positive'}
           hint={`${kpis.analysed_wells} analysed day by day`}/>
       </Box>
@@ -604,14 +627,14 @@ export default function CostIntelligence() {
       </Box>
 
       <SectionCard title="Suggested actions" subtitle="The findings that need a decision, ranked by severity and then by the amount involved." bodyPadding={0} sx={{ mb: 2 }}>
-        {data.suggestions.length === 0
+        {suggestions.length === 0
           ? <Box p={3}><Typography color="text.secondary" fontSize={13}>Nothing needs action in the analysed record.</Typography></Box>
           : <TableContainer><Table size="small">
             <TableHead><TableRow>
               <TableCell width={36}>#</TableCell><TableCell>Well</TableCell><TableCell>Finding</TableCell><TableCell>Suggested action</TableCell>
               <TableCell align="right">Amount ({currency})</TableCell><TableCell align="right">Go to</TableCell>
             </TableRow></TableHead>
-            <TableBody>{data.suggestions.map(row => <TableRow key={row.finding_id} hover>
+            <TableBody>{suggestions.map(row => <TableRow key={row.finding_id} hover>
               <TableCell>{row.rank}</TableCell>
               <TableCell><Button size="small" onClick={() => setWellId(row.well_id)} sx={{ minWidth: 0, px: .5 }}>{row.well_code}</Button></TableCell>
               <TableCell sx={{ maxWidth: 300 }}><Box display="flex" gap={1} alignItems="center"><Tag tone={SEVERITY_TONE[row.severity]}>{SEVERITY_LABEL[row.severity]}</Tag><Typography fontSize={12.5} fontWeight={700}>{row.title}</Typography></Box></TableCell>
@@ -769,8 +792,13 @@ export default function CostIntelligence() {
       </SectionCard>
 
       <SectionCard title="Findings" bodyPadding={0}
-        subtitle="Open a row for the figures behind it and how it was derived."
+        subtitle="Open a row for its basis and read actions. Scores and charts include all findings, including those marked read."
         meta={<Typography fontSize={12} color="text.secondary">{findings.length} of {data.findings.length}</Typography>}>
+        <Box px={2} py={1}>
+          {stateError && <Alert severity="error" role="alert">{stateError}</Alert>}
+          <FormControlLabel control={<Checkbox checked={showRead} onChange={event => setShowRead(event.target.checked)}/>} label="Show acknowledged and dismissed findings"/>
+          <Typography fontSize={12} color="text.secondary">Read state is personal to you and specific to the finding and well. Restore a finding to return it to the action queue.</Typography>
+        </Box>
         <TableContainer><Table size="small">
           <TableHead><TableRow>
             <TableCell width={40}/><TableCell>Severity</TableCell><TableCell>Well</TableCell><TableCell>Subject</TableCell>
@@ -788,7 +816,7 @@ export default function CostIntelligence() {
                   <TableCell><Tag tone={SEVERITY_TONE[row.severity]}>{SEVERITY_LABEL[row.severity]}</Tag></TableCell>
                   <TableCell>{row.well_code}</TableCell>
                   <TableCell>{CATEGORY_LABEL[row.category]}</TableCell>
-                  <TableCell sx={{ maxWidth: 520 }}><Typography fontSize={12.5} fontWeight={700}>{row.title}</Typography><Typography fontSize={12} color="text.secondary">{row.detail}</Typography></TableCell>
+                  <TableCell sx={{ maxWidth: 520 }}><Typography fontSize={12.5} fontWeight={700}>{row.title}</Typography>{readStates[row.id] && <Tag>{readStates[row.id]}</Tag>}<Typography fontSize={12} color="text.secondary">{row.detail}</Typography></TableCell>
                   <TableCell>{row.cost_date ?? '—'}</TableCell>
                   <TableCell align="right">{amount(row.amount)}</TableCell>
                 </TableRow>,
@@ -802,6 +830,9 @@ export default function CostIntelligence() {
                         {row.evidence.map(item => <Box key={item.label}><Typography fontSize={10.5} color="text.secondary" textTransform="uppercase" letterSpacing=".06em">{item.label}</Typography><Typography fontSize={13} fontWeight={700}>{item.value}</Typography></Box>)}
                       </Box>}
                       <Box display="flex" gap={1}>
+                        {readStates[row.id]
+                          ? <Button size="small" disabled={Boolean(stateBusy)} onClick={() => void markFinding(row.id, 'unread')}>Mark unread</Button>
+                          : <><Button size="small" disabled={Boolean(stateBusy)} onClick={() => void markFinding(row.id, 'acknowledged')}>Acknowledge</Button><Button size="small" disabled={Boolean(stateBusy)} onClick={() => void markFinding(row.id, 'dismissed')}>Dismiss</Button></>}
                         <Button size="small" onClick={() => setWellId(row.well_id)}>Analyse {row.well_code}</Button>
                         {row.action_path && <Button size="small" startIcon={<OpenInNewRounded sx={{ fontSize: 15 }}/>} onClick={() => navigate(row.action_path)}>{row.action_label}</Button>}
                       </Box>

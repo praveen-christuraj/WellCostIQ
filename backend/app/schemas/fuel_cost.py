@@ -84,7 +84,7 @@ class FuelCompanyIn(_Strict):
     to the daily entry set the consumption dialog pre-lists.
     """
 
-    company_name: str = Field(min_length=1, max_length=MAX_COMPANY_NAME)
+    company_name: str = Field(default="", max_length=MAX_COMPANY_NAME)
     vendor_id: str = Field(default="", max_length=36)
     is_default: bool = False
     remarks: str = Field(default="", max_length=MAX_REMARKS)

@@ -79,7 +79,7 @@ reached without affecting the statistical page. See [`ollama-ai.md`](ollama-ai.m
 - Up to 40 wells are analysed day by day per request (largest recorded cost
   first); the rest show budget position only. Filter to analyse them.
 - The trend check needs 12 recorded days; unusual days need 5 neighbouring days.
-- Findings cannot be dismissed or annotated; the module stores nothing.
+- Deterministic findings can be acknowledged or dismissed from the expanded finding row. The state is personal to the signed-in user and workspace, persists across sessions, and is keyed by finding identity (well, rule, date and title); use “Show acknowledged and dismissed findings” to restore one to unread. Read findings are hidden from the action queue, not removed from analysis, scores or charts. These identities represent the well-level analysis, not separate drilling/completion scopes; a changed finding identity can appear as new. AI-generated review findings do not yet have read states, and annotations are not supported.
 
 ## Verification
 

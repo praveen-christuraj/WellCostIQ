@@ -62,6 +62,7 @@ digraph WellCostIQ {
   "backend/app/models/assistant.py";
   "backend/app/models/backup.py";
   "backend/app/models/catalogue.py";
+  "backend/app/models/cost_intelligence.py";
   "backend/app/models/costing_set.py";
   "backend/app/models/daily_cost.py";
   "backend/app/models/entities.py";
@@ -381,6 +382,7 @@ digraph WellCostIQ {
   "backend/app/api/catalogue_options.py" -> "backend/app/services/__init__.py";
   "backend/app/api/catalogue_options.py" -> "backend/app/services/catalogue.py";
   "backend/app/api/cost_intelligence.py" -> "backend/app/api/deps.py";
+  "backend/app/api/cost_intelligence.py" -> "backend/app/models/cost_intelligence.py";
   "backend/app/api/cost_intelligence.py" -> "backend/app/schemas/ai.py";
   "backend/app/api/cost_intelligence.py" -> "backend/app/schemas/cost_intelligence.py";
   "backend/app/api/cost_intelligence.py" -> "backend/app/services/__init__.py";
@@ -504,6 +506,7 @@ digraph WellCostIQ {
   "backend/app/models/__init__.py" -> "backend/app/models/assistant.py";
   "backend/app/models/__init__.py" -> "backend/app/models/backup.py";
   "backend/app/models/__init__.py" -> "backend/app/models/catalogue.py";
+  "backend/app/models/__init__.py" -> "backend/app/models/cost_intelligence.py";
   "backend/app/models/__init__.py" -> "backend/app/models/costing_set.py";
   "backend/app/models/__init__.py" -> "backend/app/models/daily_cost.py";
   "backend/app/models/__init__.py" -> "backend/app/models/entities.py";
@@ -530,6 +533,7 @@ digraph WellCostIQ {
   "backend/app/models/backup.py" -> "backend/app/models/entities.py";
   "backend/app/models/catalogue.py" -> "backend/app/core/database.py";
   "backend/app/models/catalogue.py" -> "backend/app/models/master_data.py";
+  "backend/app/models/cost_intelligence.py" -> "backend/app/core/database.py";
   "backend/app/models/costing_set.py" -> "backend/app/core/database.py";
   "backend/app/models/costing_set.py" -> "backend/app/models/entities.py";
   "backend/app/models/daily_cost.py" -> "backend/app/core/database.py";
