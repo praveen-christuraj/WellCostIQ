@@ -7,11 +7,11 @@ import { api } from '../../lib/api'
 
 type Kind = 'operation-codes' | 'activity-codes' | 'npt-codes' | 'agencies' | 'causes'
 const KINDS: { key: Kind; label: string }[] = [
-  { key: 'operation-codes', label: 'Operation codes (A–T)' },
-  { key: 'activity-codes', label: 'Activity codes (1–37)' },
-  { key: 'npt-codes', label: 'NPT codes (75)' },
-  { key: 'agencies', label: 'Agencies (30)' },
-  { key: 'causes', label: 'Cause codes (17)' },
+  { key: 'operation-codes', label: 'Operation codes' },
+  { key: 'activity-codes', label: 'Activity codes' },
+  { key: 'npt-codes', label: 'NPT codes' },
+  { key: 'agencies', label: 'Agencies' },
+  { key: 'causes', label: 'Cause codes' },
 ]
 
 export default function OperationsLibrary() {
@@ -83,7 +83,7 @@ export default function OperationsLibrary() {
           rowKey='id'
           columns={[...(columns as never[]), { field: 'id', headerName: '', width: 90, sortable: false, cellRenderer: (p: { data: Record<string, unknown> }) => <Button size="small" onClick={() => startEdit(p.data)}>Edit</Button> }]}
         />
-        <Alert severity="info" sx={{ mt: 2 }}>The `Codes` sheet from operations reports seeded 256 activities, 37 activity codes, 75 NPT codes, 30 agencies, 17 causes and 10 phase codes — captured in `docs/operations/activity-taxonomy-extracted.csv`. Import via Master Data import (xlsx/csv) or add here. Mapping from OpenWells phase abbreviations (DRLPRO, DRLSUR, CSGIN2, EVAL…) → hole section + operation code lives in `ops_phase_map` (editable).</Alert>
+        <Alert severity="info" sx={{ mt: 2 }}>The `Codes` sheet from operations reports is fully soft-coded — import via Master Data import (xlsx/csv) or add here. Mapping from OpenWells phase abbreviations (DRLPRO, DRLSUR, CSGIN2, EVAL…) → hole section + operation code lives in `ops_phase_map` (editable). Streamlined after UAT.</Alert>
       </SectionCard>
 
       {formOpen && (

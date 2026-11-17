@@ -90,13 +90,16 @@ export default function OperationsOverview() {
   return (
     <Box>
       <PageHeading
-        eyebrow="Well Operations" title="Well Operations"
-        subtitle="Daily drilling & completion operations — reports, NPT and time-vs-depth (hours only, no cost)."
+        eyebrow="Well Operations" title="Operations Dashboard (Operations)"
+        subtitle="Daily drilling & completion operations — reports, NPT and time-vs-depth (hours only, no cost). Plan & timeline first, then daily reports, then analytics. Code library & settings last."
         action={
           <Box display="flex" gap={1} flexWrap="wrap">
+            <Button variant="outlined" href="/operations/plans" startIcon={<ScheduleOutlined />}>Plan & Timeline</Button>
             <Button variant="outlined" href="/operations/documents" startIcon={<CloudUploadOutlined />}>Documents</Button>
-            <Button variant="outlined" href="/operations/reports" startIcon={<DescriptionOutlined />}>Reports</Button>
+            <Button variant="outlined" href="/operations/reports" startIcon={<DescriptionOutlined />}>Daily Reports</Button>
             <Button variant="contained" href="/operations/analytics" startIcon={<InsightsOutlined />}>Analytics</Button>
+            <Button variant="outlined" href="/operations/library" startIcon={<SpeedOutlined />}>Code Library</Button>
+            <Button variant="outlined" href="/operations/settings" startIcon={<WarningAmberRounded />}>Settings</Button>
           </Box>
         }
       />
@@ -182,7 +185,7 @@ export default function OperationsOverview() {
       <Box mt={2}>
         <SectionCard title="How it works — the operations spine">
           <Typography fontSize={13} color="text.secondary" paragraph>
-            Upload a DDR/DCR/DMR/RMR (PDF or Excel) into the well/scope directory → extraction drafts the 24h time log with classification (Planned/UPA/NPT), allocation (PT/NPT/UPA/SP), productivity, depth/ROP and confidence → you verify in the review workspace (PDF on left, parsed fields on right, provenance chips and findings) → submit → approve. The dashboard, time-vs-depth chart, lead/lag and ROP are all computed from approved blocks — no re-typing.
+            Order of operations: Well configured → Plan & Timeline (bulk upload/download Excel, system studies timeline, user corrects/saves, system calculates planned days) → Daily Reports (extract data from PDFs/Excel, edit/delete/mark actions, grouped by Rigs/Wells) → Analytics (charts/visuals streamlined) → Code Library & Settings (one-time configurations, soft-coded types).
           </Typography>
           <Box display="flex" gap={1} flexWrap="wrap">
             <Chip label="Rig-scoped" size="small" />
