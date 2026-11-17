@@ -300,6 +300,10 @@ class OpsActivityBlockIn(_Strict):
 
 
 class OpsActivityBlockOut(OpsActivityBlockIn):
+    # Extracted drafts can have more rows or out-of-range durations. Return the
+    # stored values for review; the editor limits apply on write, not on read.
+    sequence_no: int
+    duration_minutes: int
     id: str
     organization_id: str
     report_id: str

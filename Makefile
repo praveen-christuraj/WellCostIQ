@@ -130,6 +130,14 @@ chart-drill-check:
 		--outfile=node_modules/.cache/chart-drill-check.mjs --loader:.jsx=jsx --external:jsdom && \
 		node node_modules/.cache/chart-drill-check.mjs
 
+.PHONY: operations-overview-check
+operations-overview-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/operations-overview-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/operations-overview-check.mjs --external:jsdom && \
+		node node_modules/.cache/operations-overview-check.mjs
+
 # Cost Intelligence: the analysis finds what the shaped demo wells contain, and
 # the page selects the well whose bar was pressed.
 cost-intelligence-check:

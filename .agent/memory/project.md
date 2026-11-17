@@ -1,5 +1,9 @@
 # Durable project memory
 
+## Well Operations dashboard — recent reports (2026-11-17)
+
+- `GET /api/v1/operations/dashboard` uses `OpsDashboardOut`; its `recent_reports` must go through the same `_to_report_out` serializer as the reports register. `blocks` is a public list (empty for a report with no blocks); `_blocks` is an internal service attribute. The Overview treats a missing list from an older API as an unavailable count, not as zero. Stored draft rows remain readable even when their sequence number or duration exceeds the editor's input bounds (the sample Operations Summary workbooks produce 201 blocks). Regression checks: `tests/test_operations_dashboard.py` in the backend and `make operations-overview-check` for the mounted page.
+
 ## Well Operations module — study and plan v2 (2026-11-17)
 
 - **User directive.** Build a new **Well Operations** module (daily drilling operations) that breaks down DDR/DCR/DMR/RMR, allocates Planned/NPT/UPA hours, summarises uploads, plots Time vs Depth against the plan, computes lead/lag and ROP, keeps documents in a directory per well and per drilling/completion scope, and makes everything user-verified (draft until the engineer confirms). Codes and categorisations must be user-configurable. It must **not interfere or correlate with the costing modules**; only Users, Rigs and Wells are shared. **No code, schema or migration has been written yet** — this phase delivered study + plan only.

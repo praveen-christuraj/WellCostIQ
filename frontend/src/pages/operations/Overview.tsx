@@ -161,8 +161,11 @@ export default function OperationsOverview() {
               {dashboard.recent_reports.slice(0, 8).map(r => (
                 <Box key={r.id} display="flex" alignItems="center" justifyContent="space-between" py={1} borderBottom={`1px solid ${theme.palette.divider}`}>
                   <Box>
-                    <Typography fontSize={13} fontWeight={700}>{r.well_code_snapshot} — {r.report_date} <Chip size="small" label={r.scope} sx={{ ml: 1 }} /> <Chip size="small" label={r.status} color={r.status === 'approved' ? 'success' : r.status === 'submitted' ? 'info' : 'default'} sx={{ ml: 0.5 }} /></Typography>
-                    <Typography fontSize={12} color="text.secondary">{r.rig_name_snapshot} · {r.report_type} {r.report_no_text} · {r.depth_end_m ? `${Number(r.depth_end_m).toFixed(0)} m` : '—'} · {r.blocks.length} blocks</Typography>
+                    <Typography component="div" fontSize={13} fontWeight={700}>{r.well_code_snapshot} — {r.report_date} <Chip size="small" label={r.scope} sx={{ ml: 1 }} /> <Chip size="small" label={r.status} color={r.status === 'approved' ? 'success' : r.status === 'submitted' ? 'info' : 'default'} sx={{ ml: 0.5 }} /></Typography>
+                    <Typography fontSize={12} color="text.secondary">
+                      {r.rig_name_snapshot} · {r.report_type} {r.report_no_text} · {r.depth_end_m ? `${Number(r.depth_end_m).toFixed(0)} m` : '—'} ·{' '}
+                      {Array.isArray(r.blocks) ? `${r.blocks.length} ${r.blocks.length === 1 ? 'block' : 'blocks'}` : 'Block count unavailable'}
+                    </Typography>
                   </Box>
                   <Button size="small" href={`/operations/reports/${r.id}`}>Open</Button>
                 </Box>
