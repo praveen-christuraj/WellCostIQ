@@ -79,6 +79,7 @@ MODULE_GROUPS: tuple[tuple[str, str], ...] = (
     ("drill_", "Master Data Management"),
     ("fuel_", "Master Data Management"),
     ("mud_", "Master Data Management"),
+    ("ops_", "Well Operations"),
 )
 
 

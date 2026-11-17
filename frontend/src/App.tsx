@@ -67,6 +67,14 @@ const ServiceWiseCostReport = lazy(() => import('./pages/reports/ServiceWiseCost
 const VendorWiseCostReport = lazy(() => import('./pages/reports/VendorWiseCostReport'))
 const NptUpaReport = lazy(() => import('./pages/reports/NptUpaReport'))
 const Assistant = lazy(() => import('./pages/Assistant'))
+const OperationsOverview = lazy(() => import('./pages/operations/Overview'))
+const OperationsDocuments = lazy(() => import('./pages/operations/Documents'))
+const OperationsReports = lazy(() => import('./pages/operations/Reports'))
+const OperationsReport = lazy(() => import('./pages/operations/ReportDetail'))
+const OperationsAnalytics = lazy(() => import('./pages/operations/Analytics'))
+const OperationsLibrary = lazy(() => import('./pages/operations/Library'))
+const OperationsSettings = lazy(() => import('./pages/operations/Settings'))
+const OperationsPlans = lazy(() => import('./pages/operations/Plans'))
 const CostIntelligence = lazy(() => import('./pages/CostIntelligence'))
 
 // Every listed permission is required (AND).
@@ -173,6 +181,14 @@ export default function App() {
           <Route path="reports/service-wise-cost" element={<Guard permission="daily-cost:read"><ServiceWiseCostReport/></Guard>}/>
           <Route path="reports/vendor-wise-cost" element={<Guard permission="daily-cost:read"><VendorWiseCostReport/></Guard>}/>
           <Route path="reports/npt-upa" element={<Guard permission="daily-cost:read"><NptUpaReport/></Guard>}/>
+          <Route path="operations" element={<Guard permission="ops-report:read"><OperationsOverview/></Guard>}/>
+          <Route path="operations/documents" element={<Guard permission="ops-doc:read"><OperationsDocuments/></Guard>}/>
+          <Route path="operations/reports" element={<Guard permission="ops-report:read"><OperationsReports/></Guard>}/>
+          <Route path="operations/reports/:id" element={<Guard permission="ops-report:read"><OperationsReport/></Guard>}/>
+          <Route path="operations/analytics" element={<Guard permission="ops-analytics:read"><OperationsAnalytics/></Guard>}/>
+          <Route path="operations/library" element={<Guard permission="ops-master:read"><OperationsLibrary/></Guard>}/>
+          <Route path="operations/settings" element={<Guard permission="ops-settings:read"><OperationsSettings/></Guard>}/>
+          <Route path="operations/plans" element={<Guard permission="ops-plan:read"><OperationsPlans/></Guard>}/>
           {/* An unknown address says so, and offers the way back, instead of
               silently pretending the user asked for the landing page. */}
           <Route path="*" element={<NotFound/>}/>

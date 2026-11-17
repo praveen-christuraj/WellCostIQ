@@ -79,6 +79,15 @@ const modules: NavModule[] = [
     { label: 'NDT Inspection Register', path: '/daily-cost/ndt-inspections', icon: FactCheckOutlined, permission: 'daily-cost:read' },
     { label: 'Well Cost Analysis', path: '/daily-cost/analysis', icon: InsightsOutlined, permission: 'daily-cost:read' },
   ] },
+  { label: 'Well Operations', icon: InsightsOutlined, items: [
+    { label: 'Overview', path: '/operations', icon: DashboardOutlined, permission: 'ops-report:read' },
+    { label: 'Documents', path: '/operations/documents', icon: DescriptionOutlined, permission: 'ops-doc:read' },
+    { label: 'Daily reports', path: '/operations/reports', icon: ScheduleRounded, permission: 'ops-report:read' },
+    { label: 'Analytics', path: '/operations/analytics', icon: InsightsOutlined, permission: 'ops-analytics:read' },
+    { label: 'Plans & timeline', path: '/operations/plans', icon: AssessmentOutlined, permission: 'ops-plan:read' },
+    { label: 'Code library', path: '/operations/library', icon: ListAltOutlined, permission: 'ops-master:read' },
+    { label: 'Settings', path: '/operations/settings', icon: SettingsOutlined, permission: 'ops-settings:read' },
+  ] },
   { label: 'Reports', icon: AssessmentOutlined, items: [
     { label: 'Overview', path: '/reports', icon: AssessmentOutlined, anyOf: ['rig-well:read', 'afe:read', 'daily-cost:read', 'report-builder:read', 'custom-reports:read'] },
     { label: 'Cost Intelligence', path: '/reports/cost-intelligence', icon: InsightsOutlined, permission: 'cost-intelligence:read' },
@@ -122,6 +131,7 @@ const DETAIL_LABELS: { prefix: string; label: string }[] = [
   { prefix: '/reports/builder/', label: 'Report designer' },
   { prefix: '/reports/custom/', label: 'Custom report' },
   { prefix: '/reports/custom-report/', label: 'Custom report' },
+  { prefix: '/operations/reports/', label: 'Daily operations report' },
   { prefix: '/other-management/database/', label: 'Table view' },
 ]
 
