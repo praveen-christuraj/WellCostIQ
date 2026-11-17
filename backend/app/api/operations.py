@@ -12,6 +12,7 @@ from app.schemas.operations import (
     OpsBulkActionOut,
     OpsCauseIn,
     OpsCauseOut,
+    OpsDashboardOut,
     OpsDocumentOut,
     OpsExtractionJobOut,
     OpsImportOut,
@@ -476,7 +477,7 @@ def reference(db: Db, user: Current):
 # ---------------------------------------------------------------------------
 # Dashboard / analytics
 # ---------------------------------------------------------------------------
-@router.get("/dashboard", dependencies=[Depends(require("ops-report:read"))])
+@router.get("/dashboard", response_model=OpsDashboardOut, dependencies=[Depends(require("ops-report:read"))])
 def dashboard(
     db: Db,
     user: Current,
@@ -485,7 +486,12 @@ def dashboard(
     date_from: date | None = Query(None, alias="from"),
     date_to: date | None = Query(None, alias="to"),
 ):
-    return analytics_svc.dashboard(db, user.organization_id, well_id=well_id or None, rig_id=rig_id or None, date_from=date_from, date_to=date_to)
+    result = analytics_svc.dashboard(
+        db, user.organization_id, well_id=well_id or None, rig_id=rig_id or None,
+        date_from=date_from, date_to=date_to,
+    )
+    result["recent_reports"] = [_to_report_out(report) for report in result["recent_reports"]]
+    return result
 
 
 @router.get("/analytics/time-depth", dependencies=[Depends(require("ops-analytics:read"))])
