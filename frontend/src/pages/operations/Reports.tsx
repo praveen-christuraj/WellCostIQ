@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { AddOutlined, DeleteOutlineRounded, RestoreOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, TextField } from '@mui/material'
+import { AddOutlined, DeleteOutlineRounded, EditOutlined, RestoreOutlined } from '@mui/icons-material'
+import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from '@mui/material'
 import { DataTable } from '../../components/DataTable'
 import { ErrorMessage, PageHeading } from '../../components/Common'
 import { SectionCard } from '../../components/ui/SectionCard'
@@ -94,7 +94,7 @@ export default function OperationsReports() {
             <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setCreateOpen(true)}>New report</Button>
             <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} disabled={!selected.length} onClick={doDelete}>Delete</Button>
             <Button variant="outlined" startIcon={<RestoreOutlined />} disabled={!selected.length} onClick={doRestore}>Restore</Button>
-            <Button variant="outlined" startIcon={<Edit />} disabled={!selected.length} onClick={doBulkEdit}>Bulk edit</Button>
+            <Button variant="outlined" startIcon={<EditOutlined />} disabled={!selected.length} onClick={doBulkEdit}>Bulk edit</Button>
             <Button variant="outlined" onClick={() => alert('Bulk export (Excel/CSV/PDF) to be implemented: exports selected reports grouped by Rig → Well.')}>Bulk Export</Button>
           </Box>
         }
@@ -110,7 +110,7 @@ export default function OperationsReports() {
           <TextField size="small" type="date" label="From" value={dateFrom} onChange={e => setDateFrom(e.target.value)} InputLabelProps={{ shrink: true }} />
           <TextField size="small" type="date" label="To" value={dateTo} onChange={e => setDateTo(e.target.value)} InputLabelProps={{ shrink: true }} />
           <Button variant="outlined" onClick={load}>Apply</Button>
-          <Button variant="outlined" startIcon={<Edit />} disabled={!selected.length} onClick={doBulkEdit}>Bulk edit</Button>
+          <Button variant="outlined" startIcon={<EditOutlined />} disabled={!selected.length} onClick={doBulkEdit}>Bulk edit</Button>
           <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} disabled={!selected.length} onClick={doDelete}>Delete</Button>
           <Button variant="outlined" startIcon={<RestoreOutlined />} disabled={!selected.length} onClick={doRestore}>Restore</Button>
         </Box>
@@ -140,14 +140,6 @@ export default function OperationsReports() {
               cellRenderer: (p: { value: string }) => <Chip size="small" label={p.value || 'none'} color={p.value === 'needs_review' ? 'warning' : p.value === 'reviewed' ? 'success' : 'default'} />,
             },
             { field: 'blocks', headerName: 'Blocks', width: 70, valueGetter: p => p.data?.blocks?.length ?? 0 },
-            {
-              field: 'mark', headerName: 'Mark', width: 60, sortable: false,
-              cellRenderer: (p: { data: OpsReport }) => (
-                <Box display="flex" gap={0.5}>
-                  <Button size="small" variant="outlined" onClick={() => console.log('Mark', p.data.id)}>Mark</Button>
-                </Box>
-              ),
-            },
             {
               field: 'id', headerName: '', width: 80, sortable: false,
               cellRenderer: (p: { data: OpsReport }) => <Button size="small" href={`/operations/reports/${p.data.id}`} variant="outlined">Open</Button>,
