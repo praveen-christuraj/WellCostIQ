@@ -8,10 +8,11 @@ const ROOT = '/api/v1'
 // API contract. A lower server version means the frontend was deployed before
 // its API and must not disguise missing routes or old KPI semantics as a missing
 // business record.
-export const REQUIRED_API_VERSION = '0.14.0'
+export const REQUIRED_API_VERSION = '0.15.0'
 let accessToken: string | null = null
 let refreshing: Promise<boolean> | null = null
 export const setAccessToken = (value: string | null) => { accessToken = value }
+export const getAccessToken = () => accessToken
 
 // Requests carry an optional `action` (what the user was doing) and `silent`.
 // `action` makes a generic server failure readable; `silent` keeps optional or

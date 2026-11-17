@@ -25,7 +25,7 @@ configure_logging()
 
 # Bumped when the API surface changes in a way a browser tab could notice; the
 # health probe and the error messages quote it so a stale deployment is obvious.
-API_VERSION = "0.14.0"
+API_VERSION = "0.15.0"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # Writes that authenticate with the refresh cookie are the only ones a cross-site
 # request could ride on; every other write needs a bearer token the browser does
@@ -194,6 +194,8 @@ app.include_router(catalogue_options_router, prefix="/api/v1")
 for catalogue_router in ITEM_ROUTERS.values():
     app.include_router(catalogue_router, prefix="/api/v1")
 app.add_exception_handler(CatalogueError, catalogue_error_handler)
+from app.api import operations as operations_router
+app.include_router(operations_router.router, prefix="/api/v1")
 app.include_router(master_data.router, prefix="/api/v1")
 
 

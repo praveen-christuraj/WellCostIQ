@@ -129,3 +129,20 @@ from app.models.report_builder import (
 )
 from app.models.assistant import AssistantConversation, AssistantMemory
 from app.models.entry_check import DailyCostCheckReview, DailyCostItemProfile
+from app.models.operations import (  # noqa: F401
+    OpsActivityBlock,
+    OpsDailyReport,
+    OpsDocument,
+    OpsExtractionJob,
+    OpsSettings,
+    OpsOperationCode,
+    OpsActivityCode,
+    OpsNptCode,
+    OpsAgency,
+    OpsCause,
+    OpsDailyMetric,
+    OpsPlanVersion,
+    OpsPlanItem,
+    OpsSurvey,
+    OpsUnaccountedTime,
+)
