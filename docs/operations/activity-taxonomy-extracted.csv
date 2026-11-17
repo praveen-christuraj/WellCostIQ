@@ -1,0 +1,716 @@
+group,code,label
+block,,OPL-2004
+block,,OPL-2005
+block,,OPL-2006
+block,,OML-143
+block,,OML-146
+block,,OPL-809
+block,,OPL-810
+block,,OML-13
+block,,OML-26
+field,,AGU
+field,,AMESHI
+field,,AKUBO
+field,,ENYIE
+field,,ANIEZE
+field,,OKWUIBOME
+field,,UNERE
+field,,SGEPL
+field,,SEL
+field,,Dawes North
+field,,EKINIMA
+field,,UTAS
+field,,AKAI
+field,,IBOTIO
+field,,EKIM
+field,,IKWEGBU
+field,,OGUALI
+field,,IBIGWE
+field,,UKPICHI
+field,,UNUNUMA
+field,,OROMA
+field,,ETE
+field,,IGBIKI
+field,,RUMUJI
+field,,IBIBIO
+field,,ETE-SOUTH
+field,,AROMA
+field,,KOLMANI
+field,,AKATA
+field,,IKAKI
+field,,OGINI
+field,,ACHARA-EAST
+field,,AKUOYIBO
+field,,ACHARA
+field,,BRL-1
+rig,,Rig-01
+rig,,Rig-02
+rig,,Rig-03
+rig,,Rig-04
+rig,,Rig-05
+rig,,Rig-06
+rig,,Rig-07
+rig,,Rig-08
+rig,,Rig-09
+rig,,Rig-10
+rig,,Rig-11
+rig,,Rig-12
+rig,,Rig-13
+rig,,Rig-14
+rig,,Rig-15
+rig,,Rig-16
+rig,,Rig-17
+rig,,Rig-18
+rig,,Rig-19
+rig,,Rig-20
+rig,,Rig-21
+rig,,Rig-22
+rig,,Rig-23
+rig,,Rig-24
+rig,,Rig-25
+drilling_phase_hole_size,,"20"""
+drilling_phase_hole_size,,"16"""
+drilling_phase_hole_size,,"12 ¼"""
+drilling_phase_hole_size,,"8 ½"""
+drilling_phase_hole_size,,"6"""
+drilling_phase_hole_size,,"26"""
+operation_group,,Drilling
+operation_group,,Casing
+operation_group,,Cementing
+operation_group,,Logging
+operation_group,,Rig Released
+operation_group,,Plug Back
+operation_group,,Drilling-ST
+operation_group,,Drilling-PH
+operation_group,,Drilling-MH
+operation_group,,Drilling-MH2
+operation_group,,Drilling-ST2
+operation_group,,wellhead
+activity,,SPUD
+activity,,CORING
+activity,,MWD SURVEYS
+activity,,RIH/POOH GYRO
+activity,,GYRO SURVEYS
+activity,,CONTROLLED/SIDE TRACK DRILLING
+activity,,TOOL ORIENTATION
+activity,,DRILL RATHOLE
+activity,,DIRECTIONAL WORK/KICK OFF
+activity,,MONITOR WELL
+activity,,FLOW CHECK
+activity,,PUMP/SPOT PILLS
+activity,,M/U BHA-DIRECTIONAL
+activity,,BRK BHA-DIRECTIONAL
+activity,,M/U BHA-C/O & SLICK
+activity,,BRK BHA--C/O & SLICK
+activity,,M/U BHA-RSS
+activity,,BRK BHA-RSS
+activity,,M/U BHA-CORING
+activity,,BRK BHA-CORING
+activity,,M/U BHA-WHIPSTOCK
+activity,,BRK BHA-WHIPSTOCK
+activity,,TRIP IN OH
+activity,,TRIP IN CH
+activity,,TRIP OUT OH
+activity,,TRIP OUT CH
+activity,,LAY DOWN DRILL PIPE
+activity,,PICK UP DRILL PIPE
+activity,,PICK UP 3RD PARTY TOOLS
+activity,,LAY DOWN 3RD PARTY TOOLS
+activity,,TEST 3RD PARTY TOOLS
+activity,,RUN IN/OUT STINGER
+activity,,SHALLOW TEST MWD
+activity,,INSPECT BHA
+activity,,MUD MOTOR SCRIBE
+activity,,WIPER TRIP
+activity,,HANDLE CORE BRLS
+activity,,PRESSURE TEST CASING
+activity,,DRILL CMT/DRILL OUT CMT/ DRILL FLOAT & SHOE
+activity,,FIT/LOT
+activity,,REAMING
+activity,,REAM & CLEAN
+activity,,BACK REAMING
+activity,,REAM—OPEN HOLE
+activity,,DRILL MOUSEHOLE
+activity,,RECIPROCATE STRING
+activity,,MONITOR WELL
+activity,,SAFETY MEETING
+activity,,"DRILLS/BOP, ETC"
+activity,,JSA (JOB SAFETY ANALYSIS)
+activity,,ON-JOB TRAINING
+activity,,PRE-JOB TRAINING
+activity,,QMS/RMS
+activity,,SAFETY INSPECTION
+activity,,SAFETY STAND DOWN
+activity,,THIRD PARTY ORIENTATION
+activity,,SPOT THIRD PARTY UNIT
+activity,,R/U & R/D THIRD PARTY UNIT
+activity,,M/U THIRD PARTY TOOLS
+activity,,L/D THIRD PARTY TOOLS
+activity,,DIRECTIONAL SURVEY AT TD
+activity,,WIRELINE SURVEYS— SINGLE SHOT SURVEYS
+activity,,WIRELINE SURVEYS— MULTI-SHOT SURVEYS
+activity,,WIRELINE LOGS
+activity,,LOGGING—Q-COMBO LOGS-WL
+activity,,LOGGING—T-COMBO LOGS-WL
+activity,,LOGGING—Q-COMBO LOGS-TLC
+activity,,LOGGING—T-COMBO LOGS-TLC
+activity,,LOGGING—MDT-TLC
+activity,,LOGGING—LATCH & UNLATCH
+activity,,LOGGING—CASED HOLE LOGS
+activity,,LOGGING—COILED TUBING LOGS
+activity,,LOGGING—INTEGRITY LOGS
+activity,,WELL TESTING
+activity,,LOGGING—RECORD LOGS
+activity,,CORRELATION
+activity,,DRILL STEM TEST
+activity,,HANDLE TEST TOOLS
+activity,,TRIP IN/OUT TEST TOOLS
+activity,,TEST FORMATION
+activity,,JARRING
+activity,,HANDLE FISHING TOOLS
+activity,,WAIT ON FISHING TOOLS
+activity,,TRIP FISHING TOOLS
+activity,,FISHING WIRELINE WORK
+activity,,BLOW/UNLOAD HOLE
+activity,,C&C DUE TO LOST CIRCULATION
+activity,,CEMENT FOR LOST CIRCULATION
+activity,,RUN CASING CH
+activity,,RUN CASING OH
+activity,,RUN LINER CH
+activity,,RUN LINER OH
+activity,,M/U LINER HANGER & TEST
+activity,,RUN LINER ON DP-CH
+activity,,RUN LINER ON DP-OH
+activity,,CIRCULATE/BRK CIRCULATION
+activity,,SET LINER HANGER
+activity,,SET PACKER
+activity,,POOH R-TOOL
+activity,,L/D R-TOOL
+activity,,SPOT CEMENTING UNIT
+activity,,R/U & R/D CEMENTING UNIT
+activity,,R/U & R/D CASING GEARS
+activity,,RUN CASING
+activity,,CHANGE ELEVATOR/BAILS
+activity,,CEMENTING
+activity,,TOP CEMENT JOBS
+activity,,GCPT
+activity,,CEMENT PLUGS
+activity,,PULLING CASING
+activity,,STAB IN CEMENTATION
+activity,,WAIT ON CEMENT
+activity,,PLUG BACK
+activity,,SQUEEZE CEMENT
+activity,,PREPARE SLURRY / FLUID
+activity,,PRESSURE TEST SURFACE LINES
+activity,,RIG UP BOP
+activity,,NIPPLE UP BOPS
+activity,,NIPPLE DOWN BOPS
+activity,,NIPPLE UP/DOWN DIVERTER SYSTEM
+activity,,CHANGE RAMS
+activity,,RUN WEAR BUSING
+activity,,RETRIEVE WEAR BUSHING
+activity,,INSTALL WELLHEAD-CHH
+activity,,INSTALL WELLHEAD-CHS
+activity,,INSTALL WELLHEAD-THS
+activity,,INSTALL WELLHEAD-CASING SLIP
+activity,,INSTALL WELLHEAD-UNITIZED
+activity,,INSTALL X-TREE
+activity,,INSATALL FLANGE
+activity,,RUN & RETRIEVE TESTING TOOL
+activity,,PRESSURE TEST BOPS
+activity,,FUNCTION TEST BOPS
+activity,,TEST DIVERTER
+activity,,TEST WELLHEAD/TREE
+activity,,CUT CONDUCTOR
+activity,,COLD CUT & DRESS CASING
+activity,,LINE UP FOR CIRCULATION
+activity,,CONDITION MUD & CIRCULATE
+activity,,BUILD VOLUME
+activity,,DISPLACE TO OIL BASE
+activity,,DISPLACE TO WATER BASE
+activity,,RECOVER OBM
+activity,,CIRCULATE AND CONDITION
+activity,,CHANGE OUT MUD SYSTEM
+activity,,DISPLACE TO COMPLETION FLUID
+activity,,CLEAN OUT MUD SYSTEM
+activity,,PUMP/SPOT PILLS
+activity,,DROP FOAM BALL
+activity,,CHC
+activity,,DRILL VERT HOLE
+activity,,DRILL DIR HOLE
+activity,,"RIH 13 ⅜"" OH CSG"
+activity,,"RIH 9 ⅝"" OH CSG"
+activity,,"RIH 9 ⅝"" CH CSG"
+activity,,"RIH 7"" OH CSG"
+activity,,"RIH 7"" CH CSG"
+activity,,"RIH 13 ⅜"" CH CSG"
+activity,,"RIH 7"" OH LINER"
+activity,,"RIH 7"" CH LINER"
+activity,,"RIH 4 ½"" OH LINER"
+activity,,"RIH 4 ½"" CH LINER"
+activity,,"RIH 4 ½"" OH CSG"
+activity,,"RIH 4 ½"" CH CSG"
+activity,,"RIH 20"" OH CSG"
+activity,,"DRILL 26"" HOLE"
+activity,,"DRILL 12 ¼"" VERT HOLE"
+activity,,"DRILL 16"" VERT HOLE"
+activity,,"DRILL 8 ½"" VERT HOLE"
+activity,,"DRILL 6"" HOLE"
+activity,,"DRILL 8 ½"" DIR HOLE"
+activity,,"DRILL 12 ¼"" DIR HOLE"
+activity,,"DRILL 16"" DIR HOLE"
+activity,,"POOH 12 ¼"" DIR BHA-OH"
+activity,,"POOH 16"" DIR BHA-OH"
+activity,,"POOH 6"" BHA-OH"
+activity,,"POOH 8 ½"" DIR BHA-OH"
+activity,,"POOH 26"" BHA-OH"
+activity,,"RIH 12 ¼"" DIR BHA-OH"
+activity,,"RIH 16"" DIR BHA-OH"
+activity,,"RIH 6"" BHA-OH"
+activity,,"RIH 8 ½"" DIR BHA-OH"
+activity,,"RIH 26"" BHA-OH"
+activity,,"POOH 12 ¼"" DIR BHA-CH"
+activity,,"POOH 16"" DIR BHA-CH"
+activity,,"POOH 6"" BHA-CH"
+activity,,"POOH 8 ½"" DIR BHA-CH"
+activity,,"POOH 26"" BHA-CH"
+activity,,"RIH 12 ¼"" DIR BHA-CH"
+activity,,"RIH 16"" DIR BHA-CH"
+activity,,"RIH 6"" BHA-CH"
+activity,,"RIH 8 ½"" DIR BHA-CH"
+activity,,"RIH 26"" BHA-CH"
+activity,,"POOH 12 ¼"" C/O BHA-CH"
+activity,,"POOH 16"" C/O BHA-CH"
+activity,,"POOH 6"" C/O BHA-CH"
+activity,,"POOH 8 ½"" C/O BHA-CH"
+activity,,"POOH 26"" C/O BHA-CH"
+activity,,"RIH 12 ¼"" C/O BHA-CH"
+activity,,"RIH 16"" C/O BHA-CH"
+activity,,"RIH 6"" C/O BHA-CH"
+activity,,"RIH 8 ½"" C/O BHA-CH"
+activity,,"RIH 26"" C/O BHA-CH"
+activity,,"POOH 12 ¼"" C/O BHA-OH"
+activity,,"POOH 16"" C/O BHA-OH"
+activity,,"POOH 6"" C/O BHA-OH"
+activity,,"POOH 8 ½"" C/O BHA-OH"
+activity,,"POOH 26"" C/O BHA-OH"
+activity,,"RIH 12 ¼"" C/O BHA-OH"
+activity,,"RIH 16"" C/O BHA-OH"
+activity,,"RIH 6"" C/O BHA-OH"
+activity,,"RIH 8 ½"" C/O BHA-OH"
+activity,,"RIH 26"" C/O BHA-OH"
+activity,,P/U Singles
+activity,,M/U Stands
+activity,,CUT & N/U Conductor Pipe
+activity,,L/D Singles
+activity,,P/U Tubings
+activity,,BHA M/U
+activity,,BHA L/D
+activity,,Slip-Cut Drillline
+activity,,Slip Drillline
+activity,,R/UP COLD CUTTER/ COLD CUT CASING
+activity,,M/UP LINER HANGER
+activity,,SETTING LINER HANGER
+activity,,PACKER SETTING (LINER HANGER)
+activity,,RELEASING LINER RUNNING TOOL
+activity,,DRILL- SHOE TRACK
+activity,,"RIH 26"" SLICK BHA"
+activity,,"RIH 12 ¼"" SLICK BHA"
+activity,,"RIH 16"" SLICK BHA"
+activity,,"POOH 26"" SLICK BHA"
+activity,,"POOH 12 ¼"" SLICK BHA"
+activity,,"POOH 16"" SLICK BHA"
+activity,,MWD DEPTH CALIBRATION
+activity,,PJSM
+activity,,WASH DOWN
+activity,,TOTCO SURVEY
+activity,,SOAK PILL
+activity,,SHORT TRIP
+activity,,"DRILL 12 ¼"" DIR HOLE-SECTION TD"
+activity,,MWD PREPARATION
+activity,,RIG MAINTENANCE
+activity,,TDS SERVICE
+activity,,RIG SERVICE
+activity,,WAIT ON WEATHER
+activity,,PJSM
+activity,,NO CIRCULATION
+activity,,WELDING
+activity,,UPA
+activity,,R/U DRILLING BAILS/SHORT BAILS
+activity,,R/U WIRELINE
+activity,,WIRELINE RUN
+activity,,Choke Drill & test well control equipment
+activity,,EQUIPMENT FAILURE
+activity,,M/UP LINER CEMENT HEAD ASSEMBELY
+hole_diameter,,"16"""
+hole_diameter,,"13 3/8"""
+hole_diameter,,"13 5/8"" SOW"
+hole_diameter,,"12 1/4"""
+hole_diameter,,"9 5/8"""
+hole_diameter,,"11"" CHS"
+hole_diameter,,"8 1/2"""
+hole_diameter,,"7"""
+hole_diameter,,"11"" THS"
+phase_code,,ABAN
+phase_code,,COMP
+phase_code,,DRILL
+phase_code,,MOB
+phase_code,,PREP
+phase_code,,PROD-MAN
+phase_code,,RE-EN
+phase_code,,SEC-WELL
+phase_code,,W.O.
+phase_code,,W.T.
+phase_name,,WELL ABANDONING
+phase_name,,COMPLETION
+phase_name,,DRILLING
+phase_name,,RIG MOVING
+phase_name,,PRELIMINARY
+phase_name,,PRODUCTION MAINTENANCE
+phase_name,,RE-ENTRY
+phase_name,,SECURE THE WELL
+phase_name,,WORK OVER
+phase_name,,WELL TESTING
+operation_code,,A
+operation_code,,B
+operation_code,,C
+operation_code,,D
+operation_code,,E
+operation_code,,F
+operation_code,,G
+operation_code,,H
+operation_code,,I
+operation_code,,J
+operation_code,,K
+operation_code,,L
+operation_code,,M
+operation_code,,N
+operation_code,,O
+operation_code,,P
+operation_code,,Q
+operation_code,,R
+operation_code,,S
+operation_code,,T
+operation_name,,MOVING (Rig up / Rig down)
+operation_name,,SKIDDING
+operation_name,,WELL HEAD & BOP
+operation_name,,CONDUCTOR PIPE
+operation_name,,DRILLING
+operation_name,,SIDE TRACK or RE-DRILLING
+operation_name,,CASING JOB
+operation_name,,CEMENTING JOB
+operation_name,,CORING
+operation_name,,LOGGING
+operation_name,,WELL COMPLETION
+operation_name,,WELL DECOMPLETION
+operation_name,,WELL PREPARATION
+operation_name,,SAND CONTROL
+operation_name,,WELLBORE TREATMENT
+operation_name,,WELL TEST & D.S.T.
+operation_name,,WELL ABANDONING
+operation_name,,SLIKE LINE
+operation_name,,COILED TUBING
+operation_name,,ARTIFICIAL LIFT
+activity_code,,1
+activity_code,,2
+activity_code,,3
+activity_code,,4
+activity_code,,5
+activity_code,,6
+activity_code,,7
+activity_code,,8
+activity_code,,9
+activity_code,,10
+activity_code,,11
+activity_code,,12
+activity_code,,13
+activity_code,,14
+activity_code,,15
+activity_code,,16
+activity_code,,17
+activity_code,,18
+activity_code,,19
+activity_code,,20
+activity_code,,21
+activity_code,,22
+activity_code,,23
+activity_code,,24
+activity_code,,25
+activity_code,,26
+activity_code,,27
+activity_code,,28
+activity_code,,29
+activity_code,,30
+activity_code,,31
+activity_code,,32
+activity_code,,33
+activity_code,,34
+activity_code,,35
+activity_code,,36
+activity_code,,37
+activity_code_name,,PREPARATION
+activity_code_name,,RIG MOVES
+activity_code_name,,ROTATION HOURS AT BOTTOM
+activity_code_name,,TRIPS
+activity_code_name,,INSTALLATION / DISASSEMBLY
+activity_code_name,,WIPER TRIP AND REAMING
+activity_code_name,,CIRCULATION
+activity_code_name,,FLUIDS PREPARATION
+activity_code_name,,FLUIDS PUMPING IN WELL
+activity_code_name,,FLUIDS/CORE RECOVERY (CORE
+activity_code_name,,MESUREMENT DETECTION IN WELL
+activity_code_name,,EQUIPMENT TEST
+activity_code_name,,WORKING ON
+activity_code_name,,MILLING
+activity_code_name,,THROUGH TUBING OPERATION
+activity_code_name,,SHOT / PERFORATION
+activity_code_name,,PLUGS & SQUEEZES
+activity_code_name,,CASING & TUBING CUT AND RECOVERY
+activity_code_name,,VARIOUS OPERATIONS IN WELL
+activity_code_name,,VARIOUS OPERATIONS AT SURFACE
+activity_code_name,,WAITING IN GENERAL
+activity_code_name,,WAITING ENVIRONMENTAL CONDITIONS
+activity_code_name,,WAITING MATERIALS
+activity_code_name,,WAITING MATERIALS
+activity_code_name,,MAINTENANCE AND REPAIR
+activity_code_name,,STRIKE
+activity_code_name,,NOT ACCURATE OR NO NEWS AVAILABLE
+activity_code_name,,HOLE OPENING
+activity_code_name,,FISHING
+activity_code_name,,VARIOUS SAFETY DRILLS
+activity_code_name,,REDRESS T.S.V.
+activity_code_name,,REDRESS S.C.S.S.V.
+activity_code_name,,TEST S.C.S.S.V.
+activity_code_name,,CEMENT DRILLING
+activity_code_name,,DIRECTIONAL WORK
+activity_code_name,,DOWN HOLE TEST LOT/ FIT/ CASING TEST
+activity_code_name,,HSE ISSUES
+plan_code,,P
+plan_code,,U
+plan_code,,TP01
+plan_code,,TP02
+plan_code,,TP03
+plan_code,,TP04
+plan_code,,TP05
+plan_code,,TP99
+plan_code,,TR01
+plan_code,,TR02
+plan_code,,TR03
+plan_code,,TR04
+plan_code,,TR05
+plan_code,,TR06
+plan_code,,TR07
+plan_code,,TR99
+plan_code,,TD01
+plan_code,,TD02
+plan_code,,TD03
+plan_code,,TD04
+plan_code,,TD05
+plan_code,,TD99
+plan_code,,TS01
+plan_code,,TS02
+plan_code,,TS03
+plan_code,,TS99
+plan_code,,TW01
+plan_code,,TW02
+plan_code,,TW03
+plan_code,,TW99
+plan_code,,XP01
+plan_code,,XP02
+plan_code,,XP03
+plan_code,,XP04
+plan_code,,XP05
+plan_code,,XP99
+plan_code,,XR01
+plan_code,,XR02
+plan_code,,XR03
+plan_code,,XR04
+plan_code,,XR05
+plan_code,,XR06
+plan_code,,XR07
+plan_code,,XR99
+plan_code,,XD01
+plan_code,,XD02
+plan_code,,XD03
+plan_code,,XD04
+plan_code,,XD05
+plan_code,,XD99
+plan_code,,XS01
+plan_code,,XS02
+plan_code,,XS03
+plan_code,,XS99
+plan_code,,XW01
+plan_code,,XW02
+plan_code,,XW03
+plan_code,,XW99
+plan_code,,SP
+plan_code,,TH
+plan_code,,CH
+plan_code,,BHAH
+plan_code,,EQF
+plan_code,,CRW
+plan_code,,OTH
+plan_code,,UPA
+plan_code,,TNA
+plan_code,,WOE
+plan_code,,DHP
+plan_code,,HC
+plan_code,,DLS
+plan_code,,TW01
+plan_code,,TW02
+plan_code,,TW03
+plan_code,,TW99
+plan_code_name,,PLANNED
+plan_code_name,,UNPLANNED
+plan_code_name,,Trouble-Well problems-Circulating Losses
+plan_code_name,,Trouble-Well problems-Stiking
+plan_code_name,,Trouble-Well problems-Fluid influx
+plan_code_name,,Trouble-Well problems-Other geological problems
+plan_code_name,,Trouble-Well problems-Cased hole problems
+plan_code_name,,Trouble-Well problems-Other well problems
+plan_code_name,,Trouble-Rig Failure-Drawwork
+plan_code_name,,Trouble-Rig Failure-Mud pumps
+plan_code_name,,Trouble-Rig Failure-Power generation system
+plan_code_name,,Trouble-Rig Failure-TDS
+plan_code_name,,Trouble-Rig Failure-Surface B.O.P.
+plan_code_name,,Trouble-Rig Failure-Subsea Equipment
+plan_code_name,,Trouble-Rig Failure-Mooring
+plan_code_name,,Trouble-Rig Failure-Other
+plan_code_name,,Trouble-Down Hole Equipment Failure-BHA/drill string
+plan_code_name,,Trouble-Down Hole Equipment Failure-Casing/Liner
+plan_code_name,,Trouble-Down Hole Equipment Failure-Completion/Tes
+plan_code_name,,Trouble-Down Hole Equipment Failure-Wire line equi
+plan_code_name,,Trouble-Down Hole Equipment Failure-Coiled tubing
+plan_code_name,,Trouble-Down Hole Equipment Failure-Other
+plan_code_name,,Trouble-Surface equipment Failure-Wellhead
+plan_code_name,,Trouble-Surface equipment Failure-Company surface
+plan_code_name,,Trouble-Surface equipment Failure-Contractors surf
+plan_code_name,,Trouble-Surface equipment Failure-Other
+plan_code_name,,Trouble-Waiting-Weather
+plan_code_name,,Trouble-Waiting-Contractors equipment/materials
+plan_code_name,,Trouble-Waiting-Company equipment/materials/orders
+plan_code_name,,Trouble-Waiting-Other
+plan_code_name,,Unplanned Trouble-Well problems-Circulating Losses
+plan_code_name,,Unplanned Trouble-Well problems-Stiking
+plan_code_name,,Unplanned Trouble-Well problems-Fluid influx
+plan_code_name,,Unplanned Trouble-Well problems-Other geological p
+plan_code_name,,Unplanned Trouble-Well problems-Cased hole problem
+plan_code_name,,Unplanned Trouble-Well problems-Other well problem
+plan_code_name,,Unplanned Trouble-Rig Failure-Drawwork
+plan_code_name,,Unplanned Trouble-Rig Failure-Mud pumps
+plan_code_name,,Unplanned Trouble-Rig Failure-Power generation sys
+plan_code_name,,Unplanned Trouble-Rig Failure-TDS
+plan_code_name,,Unplanned Trouble-Rig Failure-Surface B.O.P.
+plan_code_name,,Unplanned Trouble-Rig Failure-Subsea Equipment
+plan_code_name,,Unplanned Trouble-Rig Failure-Mooring
+plan_code_name,,Unplanned Trouble-Rig Failure-Other
+plan_code_name,,Unplanned Trouble-Down Hole Equipment Failure-Bha/
+plan_code_name,,Unplanned Trouble-Down Hole Equipment Failure-Casi
+plan_code_name,,Unplanned Trouble-Down Hole Equipment Failure-Comp
+plan_code_name,,Unplanned Trouble-Down Hole Equipment Failure-Wire
+plan_code_name,,Unplanned Trouble-Down Hole Equipment Failure-Coil
+plan_code_name,,Unplanned Trouble-Down Hole Equipment Failure-Othe
+plan_code_name,,Unplanned Trouble-Surface equipment Failure-Wellhe
+plan_code_name,,Unplanned Trouble-Surface equipment Failure-Compan
+plan_code_name,,Unplanned Trouble-Surface equipment Failure-Contra
+plan_code_name,,Unplanned Trouble-Surface equipment Failure-Other
+plan_code_name,,Unplanned Trouble-Waiting-Weather
+plan_code_name,,Unplanned Trouble-Waiting-Contractors equipment/ma
+plan_code_name,,Unplanned Trouble-Waiting-Company equipment/materi
+plan_code_name,,Unplanned Trouble-Waiting-Other
+plan_code_name,,Slow progress
+plan_code_name,,Tubular Handling
+plan_code_name,,Casing Handling
+plan_code_name,,BHA Handling
+plan_code_name,,Equipment Failure
+plan_code_name,,Crew Non-Performance & or Non Avilability
+plan_code_name,,Others reasons
+plan_code_name,,Unplanned Activity
+plan_code_name,,Tools Not Avilable Thrid party
+plan_code_name,,Waiting on Equipment
+plan_code_name,,Down Hole Problem
+plan_code_name,,Hole Cleaning
+plan_code_name,,Well Inclination
+plan_code_name,,Trouble-Waiting-Weather
+plan_code_name,,Trouble-Waiting-Contractors equipment/materials
+plan_code_name,,Trouble-Waiting-Company equipment/materials/orders
+plan_code_name,,Trouble-Waiting-Other
+agency_code,,SEEPCO
+agency_code,,SEEPCO-Sub Surface
+agency_code,,SEEPCO-Production
+agency_code,,SEEPCO-Weather
+agency_code,,BOGEL
+agency_code,,ALNL-GYRO
+agency_code,,ALNL-DD
+agency_code,,ALNL-MWD
+agency_code,,ALNL-Wireline
+agency_code,,CBNL-Cementing
+agency_code,,CBNL-Completion
+agency_code,,CBNL-Well testing
+agency_code,,CBNL-Coil Tubing
+agency_code,,ALNL-Slickline
+agency_code,,NOSL-Sub Surface
+agency_code,,NOSL-Production
+agency_code,,NOSL-Weather
+agency_code,,NOSL
+agency_code,,SEEPCO-Community
+agency_code,,NOSL-Community
+agency_code,,Geomud
+agency_code,,Schlumberger
+agency_code,,Halliburton
+agency_code,,Baker Hughes
+agency_code,,Weatherford
+agency_code,,Cameron
+agency_code,,Geoplex
+agency_code,,Ujiro
+agency_code,,Energy Quest
+agency_code,,SEL
+agency_name,,Operator
+agency_name,,Rig Contractor
+cause_code,,SP
+cause_code,,TH
+cause_code,,CH
+cause_code,,BHAH
+cause_code,,EQF
+cause_code,,CRW
+cause_code,,OTH
+cause_code,,UPA
+cause_code,,TNA
+cause_code,,WOE
+cause_code,,DHP
+cause_code,,HC
+cause_code,,DLS
+cause_code,,TW01
+cause_code,,TW02
+cause_code,,TW03
+cause_code,,TW99
+cause_name,,Slow progress
+cause_name,,Tubular Handling
+cause_name,,Casing Handling
+cause_name,,BHA Handling
+cause_name,,Equipment Failure
+cause_name,,Crew Non-Performance & or Non Avilability
+cause_name,,Others reasons
+cause_name,,Unplanned Activity
+cause_name,,Tools Not Avilable Thridr party
+cause_name,,Waiting on Equipment
+cause_name,,Down Hole Problem
+cause_name,,Hole Cleaning
+cause_name,,Well Inclination
+cause_name,,Trouble-Waiting-Weather
+cause_name,,Trouble-Waiting-Contractors equipment/materials
+cause_name,,Trouble-Waiting-Company equipment/materials/orders
+cause_name,,Trouble-Waiting-Other
+hole_section_no,,16
+hole_section_no,,12-1/4
+hole_section_no,,8-1/2
+hole_section_no,,6
+hole_section_no,,20
+hole_section_no,,26
+planned_unplanned,,P
+planned_unplanned,,U
+planned_unplanned,,NPT
+pt_npt_allocation,,NPT
+pt_npt_allocation,,PT
+pt_npt_allocation,,UPA
+pt_npt_allocation,,SP
