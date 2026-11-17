@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AddOutlined, DeleteOutlineRounded, RestoreOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, TextField } from '@mui/material'
 import { DataTable } from '../../components/DataTable'
 import { ErrorMessage, PageHeading } from '../../components/Common'
 import { SectionCard } from '../../components/ui/SectionCard'
 import { listReports, opsReference, createReport, bulkDeleteReports, bulkRestoreReports, type OpsReport, type OpsReference } from '../../lib/operations'
 
 function statusColor(v: string) {
-  if (v === 'approved') return 'positive' as const
+  if (v === 'approved') return 'success' as const
   if (v === 'submitted') return 'info' as const
   if (v === 'rejected') return 'error' as const
   if (v === 'draft' || v === 'in_review') return 'warning' as const
@@ -126,7 +126,7 @@ export default function OperationsReports() {
             },
             {
               field: 'extraction_status', headerName: 'Extraction', width: 130,
-              cellRenderer: (p: { value: string }) => <Chip size="small" label={p.value || 'none'} color={p.value === 'needs_review' ? 'warning' : p.value === 'reviewed' ? 'positive' : 'default'} />,
+              cellRenderer: (p: { value: string }) => <Chip size="small" label={p.value || 'none'} color={p.value === 'needs_review' ? 'warning' : p.value === 'reviewed' ? 'success' : 'default'} />,
             },
             { field: 'blocks', headerName: 'Blocks', width: 80, valueGetter: p => p.data?.blocks?.length ?? 0 },
             {

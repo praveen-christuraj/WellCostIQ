@@ -104,7 +104,7 @@ export default function OperationsAnalytics() {
               <MenuItem value="completion">Completion</MenuItem>
             </Select>
           </FormControl>
-          <Button variant="outlined" onClick={load}>Reload</Button>
+          <Button variant="outlined" onClick={load} disabled={!wellId || loading}>{loading ? 'Loading…' : 'Reload'}</Button>
         </Box>
         <Typography fontSize={11} color="text.secondary" mt={1}>Plan is versioned; activating a new version keeps the old for comparison. Actual maps blocks → plan items by activity/depth/window (reviewer can drag to fix). Timeline resolver keeps expected state per well/scope for dashboard, brief and “missing report” check — persisted, not cache.</Typography>
       </SectionCard>
