@@ -36,8 +36,8 @@ export default function OperationsAnalytics() {
     const actualSeries = data.actual.map(a => [a.cum_days, a.depth_m])
     return {
       tooltip: { trigger: 'axis' },
-      legend: { data: ['Plan', 'Actual'], bottom: 0 },
-      grid: { left: 60, right: 20, top: 20, bottom: 40 },
+      legend: { data: ['Plan', 'Actual'], bottom: 10, left: 'center' },
+      grid: { left: 80, right: 40, top: 40, bottom: 60 },
       xAxis: { type: 'value', name: 'Cumulative days', nameLocation: 'middle', nameGap: 30 },
       yAxis: { type: 'value', name: 'Depth (m)', inverse: true },
       series: [
@@ -51,7 +51,8 @@ export default function OperationsAnalytics() {
     if (!data?.lag_series?.length) return null
     return {
       tooltip: { trigger: 'axis' },
-      grid: { left: 40, right: 20, top: 20, bottom: 40 },
+      grid: { left: 80, right: 40, top: 40, bottom: 60 },
+      legend: { data: ['Lag days'], bottom: 10, left: 'center' },
       xAxis: { type: 'category', data: data.lag_series.map(l => l.report_date), axisLabel: { rotate: 15, fontSize: 10 } },
       yAxis: { type: 'value', name: 'Lag (days) — positive = behind' },
       series: [
@@ -86,7 +87,7 @@ export default function OperationsAnalytics() {
 
   return (
     <Box>
-      <PageHeading eyebrow="Well Operations" title="Analytics — Time vs Depth" subtitle="Actual (staircase from blocks) vs planned (rate-based plan builder). Lead = actual − planned: positive = behind (lag), negative = ahead. ROP = footage ÷ rotating hours (on-bottom only). Every point drills through to its blocks." />
+      <PageHeading eyebrow="Well Operations" title="Analytics — Time vs Depth" subtitle="Actual (staircase from blocks) vs planned (rate-based plan builder). Lead = actual − planned: positive = behind (lag), negative = ahead. ROP = footage ÷ rotating hours (on-bottom only). Every point drills through to its blocks. (3rd in operations order: Plans/Timeline → Daily Reports → Analytics → Library/Settings)" />
       {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
 
       <SectionCard title="Filters">

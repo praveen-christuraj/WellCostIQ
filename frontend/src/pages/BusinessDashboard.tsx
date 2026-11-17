@@ -870,8 +870,8 @@ export default function BusinessDashboard() {
 
   return <>
     <PageHeading
-      eyebrow="HOME / OPERATIONS DASHBOARD"
-      title="Operations dashboard"
+      eyebrow="HOME / COSTING DASHBOARD"
+      title="Costing Dashboard"
       subtitle="Rig and well plans, AFE budgets, SOW adjustments, actual cost, NPT/UPA time and depth progress in one view. Every figure keeps the currency it was reported in; open a well to follow it back to the records."
       action={<Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
         <FormControlLabel

@@ -34,6 +34,8 @@ export default function OperationsReports() {
   const [createNo, setCreateNo] = useState('')
   const [saving, setSaving] = useState(false)
   const [_showDeleted, _setShowDeleted] = useState(false)
+  const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
 
   const load = async () => {
     setLoading(true); setError('')
@@ -77,17 +79,23 @@ export default function OperationsReports() {
     if (!selected.length) return
     try { await bulkRestoreReports(selected); setSelected([]); await load() } catch (e) { setError((e as Error).message) }
   }
+  const doBulkEdit = () => {
+    if (!selected.length) return
+    setBulkEditOpen(true)
+  }
 
   return (
     <Box>
       <PageHeading
         eyebrow="Well Operations" title="Daily reports"
-        subtitle="DDR/DCR/D​MR/RMR — each well × scope × date is one period. The 24h log reconciles to planned/UPA/NPT hours; brief and depth-vs-time are computed, not typed."
+        subtitle="DDR/DCR/D​MR/RMR — each well × scope × date is one period. The 24h log reconciles to planned/UPA/NPT hours; brief and depth-vs-time are computed, not typed. (Grouped by Rig → Well; 2nd in operations order: Plans/Timeline → Daily Reports → Analytics → Library/Settings)"
         action={
           <Box display="flex" gap={1}>
             <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setCreateOpen(true)}>New report</Button>
             <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} disabled={!selected.length} onClick={doDelete}>Delete</Button>
             <Button variant="outlined" startIcon={<RestoreOutlined />} disabled={!selected.length} onClick={doRestore}>Restore</Button>
+            <Button variant="outlined" startIcon={<Edit />} disabled={!selected.length} onClick={doBulkEdit}>Bulk edit</Button>
+            <Button variant="outlined" onClick={() => alert('Bulk export (Excel/CSV/PDF) to be implemented: exports selected reports grouped by Rig → Well.')}>Bulk Export</Button>
           </Box>
         }
       />
@@ -102,6 +110,9 @@ export default function OperationsReports() {
           <TextField size="small" type="date" label="From" value={dateFrom} onChange={e => setDateFrom(e.target.value)} InputLabelProps={{ shrink: true }} />
           <TextField size="small" type="date" label="To" value={dateTo} onChange={e => setDateTo(e.target.value)} InputLabelProps={{ shrink: true }} />
           <Button variant="outlined" onClick={load}>Apply</Button>
+          <Button variant="outlined" startIcon={<Edit />} disabled={!selected.length} onClick={doBulkEdit}>Bulk edit</Button>
+          <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} disabled={!selected.length} onClick={doDelete}>Delete</Button>
+          <Button variant="outlined" startIcon={<RestoreOutlined />} disabled={!selected.length} onClick={doRestore}>Restore</Button>
         </Box>
       </SectionCard>
 
@@ -112,25 +123,33 @@ export default function OperationsReports() {
           rowKey='id'
           onSelectionChange={rows => setSelected(rows.map((r: { id: string }) => r.id))}
           columns={[
-            { field: 'report_date', headerName: 'Date', width: 120 },
-            { field: 'well_code_snapshot', headerName: 'Well', width: 150 },
-            { field: 'rig_code_snapshot', headerName: 'Rig', width: 120, valueFormatter: p => p.value || '—' },
-            { field: 'scope', headerName: 'Scope', width: 110 },
-            { field: 'report_type', headerName: 'Type', width: 80 },
-            { field: 'report_no_text', headerName: 'No.', width: 90, valueFormatter: p => p.value || '—' },
-            { field: 'day_number', headerName: 'Day', width: 70, valueFormatter: p => p.value ?? '—' },
-            { field: 'depth_end_m', headerName: 'Depth (m)', width: 110, valueFormatter: p => p.value ? Number(p.value).toFixed(1) : '—' },
+            { field: 'report_date', headerName: 'Date', width: 100 },
+            { field: 'well_code_snapshot', headerName: 'Well', width: 120 },
+            { field: 'rig_code_snapshot', headerName: 'Rig', width: 100, valueFormatter: p => p.value || '—' },
+            { field: 'scope', headerName: 'Scope', width: 90 },
+            { field: 'report_type', headerName: 'Type', width: 70 },
+            { field: 'report_no_text', headerName: 'No.', width: 70, valueFormatter: p => p.value || '—' },
+            { field: 'day_number', headerName: 'Day', width: 60, valueFormatter: p => p.value ?? '—' },
+            { field: 'depth_end_m', headerName: 'Depth (m)', width: 90, valueFormatter: p => p.value ? Number(p.value).toFixed(1) : '—' },
             {
-              field: 'status', headerName: 'Status', width: 120,
+              field: 'status', headerName: 'Status', width: 100,
               cellRenderer: (p: { value: string }) => <Chip size="small" label={p.value} color={statusColor(p.value)} />,
             },
             {
-              field: 'extraction_status', headerName: 'Extraction', width: 130,
+              field: 'extraction_status', headerName: 'Extraction', width: 110,
               cellRenderer: (p: { value: string }) => <Chip size="small" label={p.value || 'none'} color={p.value === 'needs_review' ? 'warning' : p.value === 'reviewed' ? 'success' : 'default'} />,
             },
-            { field: 'blocks', headerName: 'Blocks', width: 80, valueGetter: p => p.data?.blocks?.length ?? 0 },
+            { field: 'blocks', headerName: 'Blocks', width: 70, valueGetter: p => p.data?.blocks?.length ?? 0 },
             {
-              field: 'id', headerName: '', width: 100, sortable: false,
+              field: 'mark', headerName: 'Mark', width: 60, sortable: false,
+              cellRenderer: (p: { data: OpsReport }) => (
+                <Box display="flex" gap={0.5}>
+                  <Button size="small" variant="outlined" onClick={() => console.log('Mark', p.data.id)}>Mark</Button>
+                </Box>
+              ),
+            },
+            {
+              field: 'id', headerName: '', width: 80, sortable: false,
               cellRenderer: (p: { data: OpsReport }) => <Button size="small" href={`/operations/reports/${p.data.id}`} variant="outlined">Open</Button>,
             },
           ]}
@@ -153,6 +172,28 @@ export default function OperationsReports() {
         <DialogActions>
           <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
           <Button variant="contained" disabled={!createWell || !createDate || saving} onClick={doCreate}>{saving ? 'Creating…' : 'Create'}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={bulkEditOpen} onClose={() => setBulkEditOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Bulk edit reports ({selected.length})</DialogTitle>
+        <DialogContent>
+          <Typography fontSize={13}>Edit selected reports (e.g. status, scope, type, date) — applying costing workflow actions.</Typography>
+          <Box mt={2} display="flex" gap={2}>
+            <Button variant="contained" onClick={() => { /* TODO: implement bulk edit API call */ setBulkEditOpen(false); load() }}>Apply</Button>
+            <Button onClick={() => setBulkEditOpen(false)}>Cancel</Button>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkDeleteOpen} onClose={() => setBulkDeleteOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Confirm bulk delete</DialogTitle>
+        <DialogContent>
+          <Typography fontSize={13}>Are you sure you want to delete {selected.length} report(s)? This follows the costing workflow delete action.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkDeleteOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={() => { doDelete(); setBulkDeleteOpen(false) }}>Delete</Button>
         </DialogActions>
       </Dialog>
     </Box>

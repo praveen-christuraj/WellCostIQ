@@ -22,6 +22,8 @@ export default function OperationsPlans() {
   const [itemDesc, setItemDesc] = useState('')
   const [itemDepth, setItemDepth] = useState('')
   const [itemHours, setItemHours] = useState('')
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false)
+  const [bulkDownloadOpen, setBulkDownloadOpen] = useState(false)
 
   const load = async () => {
     setLoading(true); setError('')
@@ -53,18 +55,26 @@ export default function OperationsPlans() {
     setError('')
     try { await activatePlan(planId); await load() } catch (e) { setError((e as Error).message) }
   }
+  const doBulkUpload = () => {
+    setBulkUploadOpen(true)
+  }
+  const doBulkDownload = () => {
+    setBulkDownloadOpen(true)
+  }
 
   return (
     <Box>
-      <PageHeading eyebrow="Well Operations" title="Plans & timeline" subtitle="Versioned plan per well/scope — items carry target depth, planned hours, ROP/trip-speed assumptions and contingency. Activating a new version supersedes the old (kept for comparison). Lead/lag = actual cum days − planned cum days at same depth (positive = behind)." />
+      <PageHeading eyebrow="Well Operations" title="Plans & timeline" subtitle="Versioned plan per well/scope — items carry target depth, planned hours, ROP/trip-speed assumptions and contingency. Activating a new version supersedes the old (kept for comparison). Lead/lag = actual cum days − planned cum days at same depth (positive = behind). Bulk upload/download Excel/CSV supported. System studies timeline (depth/hours) from Excel. (1st in operations order: Plans/Timeline → Daily Reports → Analytics → Library/Settings)" />
       {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
 
       <SectionCard title="Filters & actions">
-        <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr 1fr auto' }}>
+        <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr 1fr auto auto' }}>
           <FormControl size="small"><InputLabel>Well</InputLabel><Select value={filterWell} label="Well" onChange={e => setFilterWell(e.target.value)}><MenuItem value="">All wells</MenuItem>{ref?.wells.map(w => <MenuItem key={w.id} value={w.id}>{w.display_name}</MenuItem>)}</Select></FormControl>
           <FormControl size="small"><InputLabel>Scope</InputLabel><Select value={filterScope} label="Scope" onChange={e => setFilterScope(e.target.value)}><MenuItem value="">All</MenuItem><MenuItem value="drilling">Drilling</MenuItem><MenuItem value="completion">Completion</MenuItem></Select></FormControl>
           <Button variant="outlined" onClick={load}>Apply</Button>
           <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setCreateOpen(true)}>New plan</Button>
+          <Button variant="outlined" onClick={doBulkUpload}>Bulk upload</Button>
+          <Button variant="outlined" onClick={doBulkDownload}>Bulk download</Button>
         </Box>
       </SectionCard>
 
@@ -122,6 +132,28 @@ export default function OperationsPlans() {
           </Box>
         </DialogContent>
         <DialogActions><Button onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="contained" disabled={!createWell || !createLabel} onClick={doCreate}>Create</Button></DialogActions>
+      </Dialog>
+
+      <Dialog open={bulkUploadOpen} onClose={() => setBulkUploadOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Bulk upload plan (Excel/CSV)</DialogTitle>
+        <DialogContent>
+          <Typography fontSize={13}>Upload Excel/CSV to create or update plans. System will study timeline (depth/hours) from Excel.</Typography>
+          <Box mt={2} display="flex" gap={1}>
+            <Button variant="contained" onClick={() => { /* TODO: implement bulk upload API call */ setBulkUploadOpen(false); load() }}>Upload</Button>
+            <Button onClick={() => setBulkUploadOpen(false)}>Cancel</Button>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkDownloadOpen} onClose={() => setBulkDownloadOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Bulk download plan (Excel/CSV)</DialogTitle>
+        <DialogContent>
+          <Typography fontSize={13}>Download all plans as Excel/CSV.</Typography>
+          <Box mt={2} display="flex" gap={1}>
+            <Button variant="contained" onClick={() => { /* TODO: implement bulk download API call */ setBulkDownloadOpen(false); load() }}>Download</Button>
+            <Button onClick={() => setBulkDownloadOpen(false)}>Cancel</Button>
+          </Box>
+        </DialogContent>
       </Dialog>
     </Box>
   )

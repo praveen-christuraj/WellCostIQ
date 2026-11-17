@@ -44,7 +44,7 @@ export default function OperationsSettings() {
 
   return (
     <Box>
-      <PageHeading eyebrow="Well Operations" title="Operations settings" subtitle="Per-workspace: day boundary, timezone, tour pattern, NPT completeness rules, depth unit and ROP basis. Changes are audited; tolerances affect validation." />
+      <PageHeading eyebrow="Well Operations" title="Operations settings" subtitle="Per-workspace: day boundary, timezone, tour pattern, NPT completeness rules, depth unit and ROP basis, and document types. Changes are audited; tolerances affect validation. (Last in operations order: Plans/Timeline → Daily Reports → Analytics → Library/Settings)" />
       {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
       {message && <Box mb={2}><Alert severity="success">{message}</Alert></Box>}
 
@@ -72,6 +72,13 @@ export default function OperationsSettings() {
           <TextField size="small" label="Document max MB" type="number" value={draft.document_max_mb ?? 25} onChange={e => setDraft(d => ({ ...d, document_max_mb: Number(e.target.value) }))} />
         </Box>
         <Alert severity="info" sx={{ mt: 2 }}>NPT can never be productive (DB check). UPA requires a reason. Overlaps are always blocking; sum ≠ period becomes unaccounted time, flagged in dashboard — never a hard block on a mid-report print. Allowed file types: pdf, xlsx, xlsm, xls, csv, docx — MIME sniffed.</Alert>
+      </SectionCard>
+
+      <SectionCard title="Document types configuration (soft-coded)">
+        <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr' }}>
+          <TextField size="small" label="Document types (comma-separated)" value={draft.document_types ?? 'DDR,DCR,DMR,RMR,other'} onChange={e => setDraft(d => ({ ...d, document_types: e.target.value }))} helperText="Soft-coded types used in Documents page (moved from hardcoded). Extraction logic is strictly in Daily Reports page." />
+        </Box>
+        <Alert severity="info" sx={{ mt: 2 }}>Document types are now soft-coded here. Extraction is only in Daily Reports; Documents page only handles upload/download/grouping.</Alert>
       </SectionCard>
 
       <Box mt={2}><Button variant="contained" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</Button></Box>

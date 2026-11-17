@@ -38,6 +38,7 @@ export default function OperationsReportDetail() {
   const [headerDraft, setHeaderDraft] = useState<Partial<OpsReport>>({})
   const [rejectOpen, setRejectOpen] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
+  const [agencyDropdown, setAgencyDropdown] = useState<{ id: string; agency_code: string; agency_name: string; category: string }[]>([])
 
   const load = async () => {
     if (!id) return
@@ -45,6 +46,9 @@ export default function OperationsReportDetail() {
     try {
       const [r, reference] = await Promise.all([getReport(id), ref ? Promise.resolve(ref) : opsReference()])
       setReport(r); setBlockDrafts(r.blocks || []); setRef(reference)
+      // Populate agency dropdown from Master Data vendors
+      const agencies = reference?.agencies || []
+      setAgencyDropdown(agencies.map(a => ({ id: a.id, agency_code: a.agency_code, agency_name: a.agency_name, category: a.category || '' })))
       try { const b = await getBrief(r.id); setBrief(b) } catch { /* ignore */ }
     } catch (e) { setError((e as Error).message) } finally { setLoading(false) }
   }
@@ -303,6 +307,13 @@ export default function OperationsReportDetail() {
               <Select value={editForm.npt_code_id || ''} label="NPT code" onChange={e => setEditForm(f => ({ ...f, npt_code_id: e.target.value || null }))}>
                 <MenuItem value="">None</MenuItem>
                 {ref?.npt_codes.map(n => <MenuItem key={n.id} value={n.id}>{n.npt_code} — {n.npt_name}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <FormControl size="small">
+              <InputLabel>Agency (Vendor master)</InputLabel>
+              <Select value={editForm.agency_id || ''} label="Agency" onChange={e => setEditForm(f => ({ ...f, agency_id: e.target.value || null }))}>
+                <MenuItem value="">None</MenuItem>
+                {agencyDropdown.map(a => <MenuItem key={a.id} value={a.id}>{a.agency_code} — {a.agency_name} ({a.category})</MenuItem>)}
               </Select>
             </FormControl>
             <TextField size="small" label="Responsible party" value={editForm.responsible_party || ''} onChange={e => setEditForm(f => ({ ...f, responsible_party: e.target.value }))} />

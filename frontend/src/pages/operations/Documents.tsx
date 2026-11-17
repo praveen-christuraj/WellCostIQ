@@ -4,7 +4,7 @@ import { Alert, Box, Button, Chip, FormControl, InputLabel, MenuItem, Select, Te
 import { DataTable } from '../../components/DataTable'
 import { ErrorMessage, PageHeading } from '../../components/Common'
 import { SectionCard } from '../../components/ui/SectionCard'
-import { listDocuments, extractDocument, opsReference, type OpsDocument, type OpsReference } from '../../lib/operations'
+import { listDocuments, opsReference, type OpsDocument, type OpsReference } from '../../lib/operations'
 import { api } from '../../lib/api'
 
 export default function OperationsDocuments() {
@@ -65,10 +65,8 @@ export default function OperationsDocuments() {
     } catch (e) { setError((e as Error).message) } finally { setUploading(false) }
   }
 
-  const doExtract = async (id: string) => {
-    setError('')
-    try { await extractDocument(id); await load() } catch (e) { setError((e as Error).message) }
-  }
+  // Extraction is ONLY for Daily Reports (Task 1 & 10). Documents page has no extraction logic.
+  // const doExtract = async (id: string) => { ... }
 
   const doDownload = async (doc: OpsDocument) => {
     try {
@@ -91,7 +89,7 @@ export default function OperationsDocuments() {
 
   return (
     <Box>
-      <PageHeading eyebrow="Well Operations" title="Document vault" subtitle="Directory per well and per scope (drilling/completion) → upload DDR/DCR/DMR/RMR PDFs or Excel. Engine extracts 24h log, classification and ROP; deduplicates by SHA-256; versions on replace." />
+      <PageHeading eyebrow="Well Operations" title="Document vault" subtitle="Directory per well and per scope (drilling/completion) → upload DDR/DCR/DMR/RMR PDFs or Excel. Engine extracts 24h log, classification and ROP; deduplicates by SHA-256; versions on replace. (Grouped by Rig → Well; 6th in operations order: Plans/Timeline → Daily Reports → Analytics → Library/Settings → Documents → Settings)" />
 
       {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
 
@@ -192,11 +190,10 @@ export default function OperationsDocuments() {
               },
             },
             {
-              field: 'id', headerName: 'Actions', width: 220, sortable: false,
+              field: 'id', headerName: 'Actions', width: 150, sortable: false,
               cellRenderer: (p: { data: OpsDocument }) => (
                 <Box display="flex" gap={0.5}>
                   <Button size="small" onClick={() => doDownload(p.data)}>Download</Button>
-                  <Button size="small" variant="outlined" onClick={() => doExtract(p.data.id)}>Re-extract</Button>
                 </Box>
               ),
             },
