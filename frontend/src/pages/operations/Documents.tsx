@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CloudUploadOutlined, DownloadOutlined, FindInPageOutlined, DeleteOutlineRounded } from '@mui/icons-material'
+import { CloudUploadOutlined, DeleteOutlineRounded } from '@mui/icons-material'
 import { Alert, Box, Button, Chip, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from '@mui/material'
 import { DataTable } from '../../components/DataTable'
 import { ErrorMessage, PageHeading } from '../../components/Common'
@@ -174,7 +174,6 @@ export default function OperationsDocuments() {
       <SectionCard title={`Documents — ${docs.length} file(s)`} >
         <DataTable
           rows={docs}
-          loading={loading}
           rowKey='id'
           onSelectionChange={rows => setSelected(rows.map((r: { id: string }) => r.id))}
           columns={[
@@ -198,7 +197,6 @@ export default function OperationsDocuments() {
                 <Box display="flex" gap={0.5}>
                   <Button size="small" onClick={() => doDownload(p.data)}>Download</Button>
                   <Button size="small" variant="outlined" onClick={() => doExtract(p.data.id)}>Re-extract</Button>
-                  {p.data.source_document_id ? null : null}
                 </Box>
               ),
             },

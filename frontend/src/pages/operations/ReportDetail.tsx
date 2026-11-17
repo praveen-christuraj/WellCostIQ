@@ -19,7 +19,7 @@ import { getReport, saveReport, submitReport, approveReport, rejectReport, getBr
 function clsColor(cls: string) {
   if (cls === 'NPT') return 'error' as const
   if (cls === 'UPA') return 'warning' as const
-  return 'positive' as const
+  return 'success' as const
 }
 
 export default function OperationsReportDetail() {
@@ -60,7 +60,7 @@ export default function OperationsReportDetail() {
   const canEdit = report?.status === 'draft' || report?.status === 'in_review' || report?.status === 'rejected'
   const findings: string[] = []
   if (Math.abs(unacc) > 2) findings.push(`Unaccounted ${unacc} min — logged ${totalMin} vs period ${report?.period_minutes || 1440}`)
-  blockDrafts.forEach((b, i) => {
+  blockDrafts.forEach(b => {
     if (b.classification === 'NPT' && !b.npt_code_id) findings.push(`Block ${b.sequence_no} NPT missing code`)
     if (b.classification === 'NPT' && b.is_productive) findings.push(`Block ${b.sequence_no} NPT cannot be productive`)
     if (b.classification === 'NPT' && !b.reason) findings.push(`Block ${b.sequence_no} NPT missing reason`)
@@ -217,11 +217,11 @@ export default function OperationsReportDetail() {
         <Button variant="outlined" onClick={() => navigate('/operations/reports')}>Back to list</Button>
         {canEdit && <Button variant="contained" startIcon={<SaveOutlined />} disabled={saving} onClick={doSave}>{saving ? 'Saving…' : 'Save draft'}</Button>}
         {canEdit && <Button variant="outlined" onClick={addBlock}>Add block</Button>}
-        {report.status === 'draft' && <Button variant="contained" color="positive" startIcon={<SendOutlined />} onClick={doSubmit}>Submit</Button>}
-        {report.status === 'submitted' && <Button variant="contained" color="positive" startIcon={<ThumbUpOutlined />} onClick={doApprove}>Approve</Button>}
+        {report.status === 'draft' && <Button variant="contained" color="success" startIcon={<SendOutlined />} onClick={doSubmit}>Submit</Button>}
+        {report.status === 'submitted' && <Button variant="contained" color="success" startIcon={<ThumbUpOutlined />} onClick={doApprove}>Approve</Button>}
         {report.status === 'submitted' && <Button variant="outlined" color="error" startIcon={<BlockOutlined />} onClick={() => setRejectOpen(true)}>Reject</Button>}
         <Chip label={`${report.period_minutes} min period`} size="small" />
-        <Chip label={unacc === 0 ? 'Complete (≤2 min tol.)' : `Unaccounted ${unacc} min`} size="small" color={Math.abs(unacc) > 2 ? 'warning' : 'positive'} />
+        <Chip label={unacc === 0 ? 'Complete (≤2 min tol.)' : `Unaccounted ${unacc} min`} size="small" color={Math.abs(unacc) > 2 ? 'warning' : 'success'} />
       </Box>
 
       <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', lg: '2fr 1fr' }} mt={2}>

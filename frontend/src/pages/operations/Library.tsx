@@ -76,7 +76,7 @@ export default function OperationsLibrary() {
         {KINDS.map(k => <Tab key={k.key} value={k.key} label={k.label} />)}
       </Tabs>
 
-      <SectionCard title={`${KINDS.find(k => k.key === kind)?.label} — ${rows.length} record(s)`} action={<Button variant="contained" onClick={startCreate}>New</Button>}>
+      <SectionCard title={`${KINDS.find(k => k.key === kind)?.label} — ${rows.length} record(s)`} action={<Button variant="contained" onClick={startCreate} disabled={loading}>New</Button>}>
         <DataTable
           rows={rows}
           
