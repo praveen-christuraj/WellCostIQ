@@ -1,7 +1,7 @@
 # Direct production dependencies; compile into requirements.txt with hashes.
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
-sqlalchemy>=2.0,<3
+sqlalchemy>=2.1.8,<3
 psycopg[binary]>=3.2,<4
 alembic>=1.13,<2
 pydantic-settings>=2.4,<3
