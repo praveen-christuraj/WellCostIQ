@@ -92,7 +92,7 @@ export function MudCostSectionSettingsDialog({ row, onClose, onSave }: Props) {
         disabled={mudType === 'WBM'}
         type="number"
         required={mudType !== 'WBM'}
-        inputProps={{ step: '0.0000000001', min: 0 }}
+        inputProps={{ step: '0.001', min: 0 }}
         helperText={row ? `Saved in ${row.currency || 'the workspace currency'} — the AFE standard currency of this well's daily cost sheets.` : ''}
       />
       <TextField

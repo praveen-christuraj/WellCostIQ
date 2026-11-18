@@ -151,7 +151,7 @@ async function writeIdvsXlsx(fileName: string, sheet: IdvsSheet) {
   const base = { fontFamily: font, fontSize: pt.body, alignVertical: 'center' as const, borderStyle: 'thin' as const }
   const styleOf = (cell: SheetCell): Record<string, unknown> => {
     const style = { ...base, align: cell.align ?? 'left', fontWeight: cell.bold ? 'bold' : 'normal', wrap: true }
-    if (cell.amount !== undefined) return { ...style, type: Number, value: cell.amount, format: '#,##0.00;-#,##0.00', align: 'right' }
+    if (cell.amount !== undefined) return { ...style, type: Number, value: cell.amount, format: '#,##0.000;-#,##0.000', align: 'right' }
     if (cell.quantity !== undefined) return { ...style, type: Number, value: cell.quantity, format: 'General', align: 'right' }
     return { ...style, type: String, value: cell.text ?? '' }
   }

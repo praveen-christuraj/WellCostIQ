@@ -347,7 +347,7 @@ export function DailyCostBulkScopeDialog({
         </RadioGroup>
       </FormControl>
       {depthMode === 'assign' && <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
-        <TextField required type="number" label="Actual depth" value={actualDepth} onChange={event => setActualDepth(event.target.value)} inputProps={{ min: 0, step: 'any' }} helperText="The last entered depth for the date and section governs the register."/>
+        <TextField required type="number" label="Actual depth" value={actualDepth} onChange={event => setActualDepth(event.target.value)} inputProps={{ min: 0, step: 0.001 }} helperText="The last entered depth for the date and section governs the register."/>
         <TextField select label="Depth unit" value={actualDepthUnit} onChange={event => setActualDepthUnit(event.target.value as DepthUnit)} helperText="Feet are standardized to metres using ft ÷ 3.281.">
           <MenuItem value="m">Metres (m)</MenuItem>
           <MenuItem value="ft">Feet (ft)</MenuItem>
@@ -361,7 +361,7 @@ export function DailyCostBulkScopeDialog({
         </RadioGroup>
       </FormControl>
       {quantityMode === 'assign' && <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
-        <TextField required type="number" label="Charged quantity" value={quantity} onChange={event => setQuantity(event.target.value)} inputProps={{ min: 0.0000000001, max: 1_000_000, step: 'any' }} helperText={quantityUnit === 'hours' ? 'Maximum 24 hours per daily sheet.' : 'Applied to every selected service line.'}/>
+        <TextField required type="number" label="Charged quantity" value={quantity} onChange={event => setQuantity(event.target.value)} inputProps={{ min: 0.001, max: 1_000_000, step: 0.001 }} helperText={quantityUnit === 'hours' ? 'Maximum 24 hours per daily sheet.' : 'Applied to every selected service line.'}/>
         <TextField select label="Quantity unit" value={quantityUnit} onChange={event => setQuantityUnit(event.target.value as DailyQuantityUnit)}>
           {reference.quantity_units.map(unit => <MenuItem key={unit} value={unit}>{unit}</MenuItem>)}
         </TextField>

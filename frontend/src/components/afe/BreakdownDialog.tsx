@@ -43,7 +43,7 @@ export function BreakdownDialog({ open, title, currency, components, warnings, o
             </TableCell>
             <TableCell>{component.section_label || '—'}</TableCell>
             <TableCell>{component.phase_label || '—'}</TableCell>
-            <TableCell align="right">{component.quantity ? `${Number(component.quantity).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${component.unit}` : component.unit}</TableCell>
+            <TableCell align="right">{component.quantity ? `${Number(component.quantity).toLocaleString(undefined, { maximumFractionDigits: 3 })} ${component.unit}` : component.unit}</TableCell>
             <TableCell align="right">{component.rate ? amountText(component.rate) : '—'}</TableCell>
             <TableCell align="right">{amountText(component.amount, currency)}</TableCell>
           </TableRow>)}

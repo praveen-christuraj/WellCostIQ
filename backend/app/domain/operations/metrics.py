@@ -1,8 +1,9 @@
 """Measured penetration, independent of costs, forecast rates and shift length."""
 
 from decimal import ROUND_HALF_UP, Decimal
+from app.core.precision import DECIMAL_QUANT
 
-QUANTUM = Decimal("0.0000000001")
+QUANTUM = DECIMAL_QUANT
 
 
 def period_balance(report_type, period_minutes, logged_minutes):

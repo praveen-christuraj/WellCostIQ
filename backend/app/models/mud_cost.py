@@ -26,6 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.domain.mud_cost import (
     MUD_COST_DB_CATEGORY_KEYS,
@@ -71,8 +72,8 @@ class MudCostEntry(Base):
     section_scope: Mapped[str] = mapped_column(String(20), nullable=False)
     section_code_snapshot: Mapped[str] = mapped_column(String(50), nullable=False)
     section_name_snapshot: Mapped[str] = mapped_column(String(150), nullable=False)
-    section_from_depth: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    section_to_depth: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    section_from_depth: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    section_to_depth: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     entry_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -116,7 +117,7 @@ class MudCostEntryLine(Base):
     line_code: Mapped[str] = mapped_column(String(50), nullable=False)
     category: Mapped[str] = mapped_column(String(30), nullable=False)
     line_label: Mapped[str] = mapped_column(String(120), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     sort_order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
@@ -168,7 +169,7 @@ class MudCostSectionSetting(Base):
     section_name_snapshot: Mapped[str] = mapped_column(String(150), nullable=False)
     mud_type: Mapped[str] = mapped_column(String(10), nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
-    base_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    base_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     created_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     updated_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)

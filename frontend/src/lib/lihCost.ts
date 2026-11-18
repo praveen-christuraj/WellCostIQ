@@ -338,7 +338,7 @@ export function lihMeasure(value: string | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—'
   const parsed = Number(value)
   return Number.isFinite(parsed)
-    ? parsed.toLocaleString(undefined, { maximumFractionDigits: 4 })
+    ? parsed.toLocaleString(undefined, { maximumFractionDigits: 3 })
     : String(value)
 }
 

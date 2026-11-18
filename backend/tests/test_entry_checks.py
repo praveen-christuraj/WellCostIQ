@@ -282,7 +282,7 @@ def test_an_exchange_rate_entered_the_other_way_round_is_recognised_once():
     finding = findings[0]
     assert finding.severity == "warning" and finding.field_name == "exchange_rate"
     assert "the other way round" in finding.message
-    assert abs(Decimal(finding.suggested_value) - Decimal(1) / Decimal(1540)) < Decimal("0.0000001")
+    assert Decimal(finding.suggested_value) == Decimal("0.001")
     assert finding.apply_to == [("consumables", 0)]
 
 
@@ -611,7 +611,7 @@ def test_exchange_rate_and_depth_checks_on_saved_sheets():
         setup = _setup_daily_sheet(client, headers)
         rate = setup["baseline"]["service_rates"][0]
         first = setup["entry"]["id"]
-        naira = dict(currency="NGN", exchange_rate="0.00065", unit_rate="1500000", quantity="1")
+        naira = dict(currency="NGN", exchange_rate="0.001", unit_rate="1500000", quantity="1")
         _save(client, headers, first, _payload(
             [_service_line(setup, rate, depth=300)], other=[_other_line(setup, **naira)],
         ))
@@ -620,14 +620,14 @@ def test_exchange_rate_and_depth_checks_on_saved_sheets():
         second = _new_sheet(client, headers, setup, "2026-10-11")
         wrong_way = _payload(
             [_service_line(setup, rate, depth=350)],
-            other=[_other_line(setup, **{**naira, "exchange_rate": "1540"})],
+            other=[_other_line(setup, **{**naira, "exchange_rate": "1000"})],
         )
         preview = _preview(client, headers, second, wrong_way)
         [fx] = [item for item in preview["entry_checks"] if item["code"] == "unusual-fx"]
         assert fx["severity"] == "warning" and fx["field"] == "exchange_rate"
         assert "the other way round" in fx["message"]
         assert fx["lines"] == [{"group": "other_expenses", "index": 0}] == fx["apply_to"]
-        assert abs(Decimal(fx["suggested_value"]) - Decimal(1) / Decimal(1540)) < Decimal("0.0000001")
+        assert Decimal(fx["suggested_value"]) == Decimal("0.001")
         # Saving the slip overwrites the AFE's working rate; the other sheet still remembers.
         _save(client, headers, second, wrong_way)
         [saved_fx] = [item for item in _checks(client, headers, second)["checks"] if item["code"] == "unusual-fx"]

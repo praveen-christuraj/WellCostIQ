@@ -440,7 +440,7 @@ export default function LihCostRegister() {
       { header: 'UNITS', value: row => row.values.no_of_units.trim() },
       { header: 'UNIT', value: row => row.values.unit.trim() },
       { header: heading('UNIT COST'), value: row => row.values.unit_cost.trim() },
-      { header: heading('TOTAL COST'), value: row => lihLineTotal(row.values).toFixed(2) },
+      { header: heading('TOTAL COST'), value: row => lihLineTotal(row.values).toFixed(3) },
       { header: 'REMARKS', value: row => row.values.remarks.trim() },
       { header: 'STATE', value: row => (row.id ? 'saved' : 'not saved') },
     ]

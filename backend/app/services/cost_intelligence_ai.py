@@ -205,17 +205,17 @@ def _ledger_reconciliation_lines(
         if t.draft_sheets > 0:
             extras.append(f"draft_sheets={t.draft_sheets}/{t.sheets}")
         if t.lih_cost > 0:
-            extras.append(f"LIH={p}{t.lih_cost:,.2f} (total_incl_LIH={p}{t.actual_including_lih:,.2f})")
+            extras.append(f"LIH={p}{t.lih_cost:,.3f} (total_incl_LIH={p}{t.actual_including_lih:,.3f})")
         if t.has_mud_reconciliation:
-            extras.append(f"mud_reconciliation_adj={p}{t.mud_cost_adjustment:+,.2f}")
+            extras.append(f"mud_reconciliation_adj={p}{t.mud_cost_adjustment:+,.3f}")
         if t.has_adjustment and t.adjusted_planned is not None:
-            extras.append(f"SOW_revised_AFE={p}{t.adjusted_planned:,.2f} (orig {p}{t.planned:,.2f})")
+            extras.append(f"SOW_revised_AFE={p}{t.adjusted_planned:,.3f} (orig {p}{t.planned:,.3f})")
         if unbudgeted:
             top_ub = ", ".join(
-                f"{b.item_name} ({b.cost_group} {p}{b.actual_to_date:,.2f})"
+                f"{b.item_name} ({b.cost_group} {p}{b.actual_to_date:,.3f})"
                 for b in sorted(unbudgeted, key=lambda item: item.actual_to_date, reverse=True)[:3]
             )
-            extras.append(f"unbudgeted_lines={len(unbudgeted)} totalling {p}{unbudgeted_total:,.2f} [{top_ub}]")
+            extras.append(f"unbudgeted_lines={len(unbudgeted)} totalling {p}{unbudgeted_total:,.3f} [{top_ub}]")
         if summary.warnings:
             extras.append(
                 "warnings="
@@ -276,7 +276,7 @@ def _build_review_context(
         d_lines = [
             f"SELECTED WELL DEEP PROFILE — {dw.well_code} ({dw.well_name}):",
             f"  Drift: direction={detail.drift_direction or 'none'}, start={detail.drift_start or 'none'}, "
-            f"baseline={_fmt(detail.drift_baseline, wc)}/day, cusum_limit={detail.cusum_limit:.2f}",
+            f"baseline={_fmt(detail.drift_baseline, wc)}/day, cusum_limit={detail.cusum_limit:.3f}",
             f"  Missing daily sheet dates ({len(detail.missing_dates)}): "
             + (", ".join(d.isoformat() for d in detail.missing_dates[:12]) if detail.missing_dates else "none"),
         ]

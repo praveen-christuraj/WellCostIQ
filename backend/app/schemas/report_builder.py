@@ -8,7 +8,9 @@ display-formatted strings plus the raw totals the caller may export.
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.core.precision import DECIMAL_PLACES
 
 ReportType = Literal["TABULAR", "MATRIX"]
 ColumnKind = Literal["DATA", "RELATED", "CALCULATED"]
@@ -45,7 +47,7 @@ class ReportColumnIn(_Strict):
     related_key_column: str = Field(default="", max_length=120)
     formula: str = Field(default="", max_length=2000)
     data_type: DataType = "text"
-    decimals: int = Field(default=2, ge=0, le=8)
+    decimals: int = Field(default=DECIMAL_PLACES, ge=0, le=8)
     prefix: str = Field(default="", max_length=20)
     suffix: str = Field(default="", max_length=20)
     aggregate: Aggregate = "NONE"
@@ -54,6 +56,13 @@ class ReportColumnIn(_Strict):
     condition_logic: Literal["AND", "OR"] = "AND"
     width: int = Field(default=0, ge=0, le=2000)
     conditions: list[ReportConditionIn] = Field(default_factory=list)
+
+
+    @field_validator('decimals')
+    @classmethod
+    def limit_legacy_places(cls, value: int) -> int:
+        # Old designs and backups legitimately stored settings up to eight.
+        return min(DECIMAL_PLACES, value)
 
 
 class ReportFilterIn(_Strict):

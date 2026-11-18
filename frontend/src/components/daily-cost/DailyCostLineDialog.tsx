@@ -985,7 +985,7 @@ export function DailyCostLineDialog({
               type="number"
               value={commonActualDepth}
               onChange={e => setCommonActualDepth(e.target.value)}
-              inputProps={{ min: 0, step: 'any' }}
+              inputProps={{ min: 0, step: 0.001 }}
               helperText={depthHelperText}
             />
 
@@ -1009,7 +1009,7 @@ export function DailyCostLineDialog({
                   required
                   value={commonQuantity}
                   onChange={e => setCommonQuantity(e.target.value)}
-                  inputProps={{ min: 0.0001, step: 'any' }}
+                  inputProps={{ min: 0.001, step: 0.001 }}
                   helperText="Applies to all services added below."
                 />
                 <TextField
@@ -1205,7 +1205,7 @@ export function DailyCostLineDialog({
                             currency: nextOv === null && rate ? rate.currency.toUpperCase() : row.currency,
                           })
                         }}
-                        inputProps={{ min: 0, step: 'any' }}
+                        inputProps={{ min: 0, step: 0.001 }}
                         helperText="Service-scoped override; locked baseline rate remains unchanged."
                       />
 
@@ -1243,7 +1243,7 @@ export function DailyCostLineDialog({
                           label={`USD conversion rate (1 ${rowCurrency} = ? USD)`}
                           value={row.exchange_rate}
                           onChange={e => updateServiceRow(row.id, { exchange_rate: e.target.value })}
-                          inputProps={{ min: 0.000001, step: 'any' }}
+                          inputProps={{ min: 0.001, step: 0.001 }}
                           helperText={`Required for non-USD currency so USD values stay standardized across all wells.`}
                         />
                       )}
@@ -1411,7 +1411,7 @@ export function DailyCostLineDialog({
                     label={`USD conversion rate (1 ${(nonServiceForm.currency || '').toUpperCase()} = ? USD)`}
                     value={nonServiceForm.exchange_rate ?? ''}
                     onChange={e => setNonServiceForm(prev => (prev ? { ...prev, exchange_rate: e.target.value } : prev))}
-                    inputProps={{ min: 0.000001, step: 'any' }}
+                    inputProps={{ min: 0.001, step: 0.001 }}
                     helperText={
                       nonServiceForm.exchange_rate && Number(nonServiceForm.exchange_rate) > 0 && Number(nonServiceForm.unit_rate) > 0
                         ? `Converted to USD: ${dailyMoney(Number(nonServiceForm.quantity || 1) * Number(nonServiceForm.unit_rate) * Number(nonServiceForm.exchange_rate), 'USD')}`
@@ -1547,7 +1547,7 @@ export function DailyCostLineDialog({
                     label={`USD conversion rate (1 ${(nonServiceForm.currency || '').toUpperCase()} = ? USD)`}
                     value={nonServiceForm.exchange_rate ?? ''}
                     onChange={e => setNonServiceForm(prev => (prev ? { ...prev, exchange_rate: e.target.value } : prev))}
-                    inputProps={{ min: 0.000001, step: 'any' }}
+                    inputProps={{ min: 0.001, step: 0.001 }}
                     helperText="Required for non-USD currency so USD values are recorded across all wells."
                   />
                 )}
@@ -1649,7 +1649,7 @@ export function DailyCostLineDialog({
                     label={`USD conversion rate (1 ${(nonServiceForm.currency || '').toUpperCase()} = ? USD)`}
                     value={nonServiceForm.exchange_rate ?? ''}
                     onChange={e => setNonServiceForm(prev => (prev ? { ...prev, exchange_rate: e.target.value } : prev))}
-                    inputProps={{ min: 0.000001, step: 'any' }}
+                    inputProps={{ min: 0.001, step: 0.001 }}
                     helperText="Required for non-USD currency so USD values are recorded across all wells."
                   />
                 )}

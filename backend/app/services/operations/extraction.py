@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.domain.operations.classify import suggest
+from app.domain.operations.default_codes import describe_code, find_code
 from app.domain.operations.durations import resolve_period, utc
 from app.domain.operations.taxonomy import code_key
 from app.models.operations import (
@@ -241,45 +242,45 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None):
     trouble = lookup(OpsNptCode, "npt_code", "npt_name")
     mark_rules = lookup(OpsMarkRule, "mark_code")
     zone = ZoneInfo(cfg.operating_timezone)
+    unmapped_codes = set()
     for seq, b in enumerate(parsed["blocks"], 1):
         a = b["start"].replace(tzinfo=zone).astimezone(UTC)
         z = b["end"].replace(tzinfo=zone).astimezone(UTC)
-        code = codes.get(code_key(b["code"]))
+        raw_activity = b["code"].strip()
+        activity_family = 'OpenWells code token' if b.get('source_page') else 'Activity'
+        code = codes.get(code_key(raw_activity))
         elapsed = (
             (a - utc(plan.planned_start_at)).total_seconds() / 3600 if plan and plan.planned_start_at else None
         )
         if elapsed is None and report.scope == "drilling" and report.dfs_days is not None:
             elapsed = float(report.dfs_days) * 24 - (end - a).total_seconds() / 3600
+        raw_mark = b['mark'].strip()
+        raw_cause = b.get('cause', '').strip()
+        raw_operation = b.get('operation', '').strip()
+        rule = mark_rules.get(code_key(raw_mark))
         classification = suggest(
-            b["mark"], b["narrative"], code.default_allocation if code else None, timeline, elapsed
+            raw_mark, b['narrative'], code.default_allocation if code else None, timeline, elapsed,
+            mark_rule=rule, printed_allocation=b.get('allocation', ''),
         )
-        rule = mark_rules.get(code_key(b["mark"]))
-        if rule:
-            classification.update(
-                classification=rule.default_classification,
-                allocation=rule.default_allocation,
-                is_productive=rule.default_allocation != "NPT" and rule.default_classification != "NPT",
-                classification_source="workspace",
-                confidence=0.95,
-            )
-            classification["classification_evidence"] = (
-                f"Workspace mark {rule.mark_name} ({rule.mark_code}) · " + classification["classification_evidence"]
-            )
-        if plan:
-            classification["classification_evidence"] += f" · {plan.label[:70]} v{plan.version_no}"
-        if b["code"]:
-            classification["classification_evidence"] += f" · Code {b['code'][:50]}"
-        if b.get("allocation"):
-            classification["allocation"] = b["allocation"]
-            classification["is_productive"] = classification["classification"] != "NPT" and b["allocation"] != "NPT"
-            classification["classification_evidence"] += f" · Summary allocation: {b['allocation']}"
-        party = b.get("party", "")
+        evidence = []
+        if raw_activity:
+            label = f'{raw_activity} — {code.activity_name}' if code else describe_code(raw_activity, activity_family)
+            evidence.append(f'Activity: {label}')
+            if not code and raw_activity.isdigit() and not find_code(raw_activity, activity_family):
+                unmapped_codes.add(raw_activity)
+        evidence.append(classification['classification_evidence'])
+        if plan and (timeline or classification['classification_source'] == 'timeline'):
+            evidence.append(f'Programme: {plan.label[:70]} v{plan.version_no}')
+        if b.get('allocation'):
+            evidence.append(f'Summary allocation: {b["allocation"]}')
+        party = b.get('party', '')
         if party:
-            classification["classification_evidence"] += f" · Source agency: {party[:80]}; choose vendor"
-        raw_cause = b.get("cause", "").strip()
+            evidence.append(f'Source agency: {party[:80]}; choose vendor')
         cause = causes.get(code_key(raw_cause))
-        npt = trouble.get(code_key(raw_cause))
-        operation = operations.get(code_key(b.get("operation", "")))
+        default_trouble = find_code(raw_cause or raw_mark, 'Trouble / NPT')
+        npt = trouble.get(code_key(raw_cause or raw_mark))
+        operation = operations.get(code_key(raw_operation))
+        classification['classification_evidence'] = ' · '.join(evidence)
         classification["classification_evidence"] = classification["classification_evidence"][:500]
         db.add(
             OpsActivityBlock(
@@ -289,13 +290,18 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None):
                 started_at=a,
                 ended_at=z,
                 duration_minutes=round((z - a).total_seconds() / 60),
-                phase_raw=b["phase_raw"][:20],
+                phase_raw=b['phase_raw'][:20],
+                source_activity_code=raw_activity[:100],
+                source_operation_code=raw_operation[:100],
+                source_cause_code=raw_cause[:50],
+                source_mark=raw_mark[:30],
                 activity_code_id=code.id if code else None,
                 operation_code_id=operation.id if operation else None,
                 cause_code=cause.cause_code if cause else raw_cause[:50],
                 npt_code_id=npt.id if npt else None,
-                npt_code_snapshot=npt.npt_code if npt else "",
+                npt_code_snapshot=npt.npt_code if npt else (default_trouble.code if default_trouble else ""),
                 bit_depth_m=b.get("bit_depth_m"),
+                rotating_hours=b.get("rotating_hours"),
                 depth_from_m=b.get("depth_from_m"),
                 depth_to_m=b.get("depth_to_m"),
                 source_page=b.get("source_page", 0),
@@ -305,6 +311,10 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None):
                 **classification,
             )
         )
+    if unmapped_codes:
+        warnings.append('Unmapped numeric activity codes: ' + ', '.join(sorted(unmapped_codes)[:20])
+                        + '. Compare with the source or configure a workspace code.')
+        job.findings = '\n'.join(warnings)
     # Supplemental mud measurements follow, rather than renumber, the previous source's stations.
     last_station = (
         db.scalar(

@@ -51,6 +51,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.afe import CHARGE_CATEGORIES, CHARGING_BASES, CONSUMABLE_CATEGORIES
 from app.models.rig_well import now, uid
@@ -94,17 +95,17 @@ class AfeSowAdjustment(Base):
     standard_currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     # Snapshots of the saved estimate at creation time, for audit. Null while
     # the AFE has no converted total (pending conversion).
-    original_services_total: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    original_consumables_total: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    original_tangibles_total: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    original_total: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    original_services_total: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    original_consumables_total: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    original_tangibles_total: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    original_total: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     # Revised totals in the standard currency, derived server-side from the
     # revised estimate lines (after-side rows). adjusted_total is always the
     # sum of the three groups.
-    adjusted_services_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
-    adjusted_consumables_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
-    adjusted_tangibles_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
-    adjusted_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    adjusted_services_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
+    adjusted_consumables_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
+    adjusted_tangibles_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
+    adjusted_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
     created_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     approved_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -186,7 +187,7 @@ class AfeSowServiceLine(SowLineRecord):
         ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
-    service_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    service_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
 
     adjustment: Mapped[AfeSowAdjustment] = relationship(back_populates="service_lines", lazy="joined")
@@ -226,7 +227,7 @@ class AfeSowServiceRate(SowLineRecord):
         ForeignKey("afe_sow_service_lines.id", ondelete="CASCADE"), nullable=False, index=True
     )
     charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
-    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
 
     line: Mapped[AfeSowServiceLine] = relationship(back_populates="rates", lazy="joined")
 
@@ -245,7 +246,7 @@ class AfeSowServiceCharge(SowLineRecord):
         ForeignKey("afe_sow_service_lines.id", ondelete="CASCADE"), nullable=False, index=True
     )
     charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
     quantity_unit: Mapped[str] = mapped_column(String(10), default="days", server_default="days", nullable=False)
 
     line: Mapped[AfeSowServiceLine] = relationship(back_populates="charges", lazy="joined")
@@ -268,7 +269,7 @@ class AfeSowServiceSectionRate(SowLineRecord):
     phase_id: Mapped[str | None] = mapped_column(
         ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True
     )
-    amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
 
     line: Mapped[AfeSowServiceLine] = relationship(back_populates="section_rates", lazy="joined")
 
@@ -295,7 +296,7 @@ class AfeSowServiceScopeRate(SowLineRecord):
         ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
-    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
 
     line: Mapped[AfeSowServiceLine] = relationship(back_populates="scope_rates", lazy="joined")
 
@@ -320,7 +321,7 @@ class AfeSowServiceScopeDays(SowLineRecord):
     phase_id: Mapped[str | None] = mapped_column(
         ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True
     )
-    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
     quantity_unit: Mapped[str] = mapped_column(String(10), default="days", server_default="days", nullable=False)
 
     line: Mapped[AfeSowServiceLine] = relationship(back_populates="scope_days", lazy="joined")
@@ -356,10 +357,10 @@ class AfeSowConsumableLine(SowLineRecord):
     drill_bit_id: Mapped[str | None] = mapped_column(
         ForeignKey("drill_bits.id", ondelete="RESTRICT"), nullable=True, index=True
     )
-    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("1"), nullable=False)
-    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
-    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    estimated_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("1"), nullable=False)
+    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
+    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    estimated_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
 
@@ -383,9 +384,9 @@ class AfeSowTangibleLine(SowLineRecord):
     tangible_id: Mapped[str] = mapped_column(
         ForeignKey("tangibles.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("1"), nullable=False)
-    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
-    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("1"), nullable=False)
+    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
+    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     uom: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
@@ -419,7 +420,7 @@ class AfeSowExchangeRate(Base):
     )
     plan_side: Mapped[str] = mapped_column(String(10), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(10), nullable=False)
-    rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
@@ -460,8 +461,8 @@ class WellPlanAdjustment(Base):
     status: Mapped[str] = mapped_column(String(20), default="draft", server_default="draft", nullable=False)
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
     sow_summary: Mapped[str] = mapped_column(String(2000), default="", server_default="", nullable=False)
-    planned_days_before: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
-    planned_days_after: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    planned_days_before: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
+    planned_days_after: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), nullable=False)
     section_count_before: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     section_count_after: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
@@ -501,8 +502,8 @@ class WellPlanAdjustmentSection(SowLineRecord):
     hole_section_id: Mapped[str] = mapped_column(
         ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    from_depth: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    to_depth: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    from_depth: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    to_depth: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     remarks: Mapped[str] = mapped_column(String(1000), default="", server_default="", nullable=False)
 
     adjustment: Mapped[WellPlanAdjustment] = relationship(back_populates="sections", lazy="joined")
@@ -534,7 +535,7 @@ class WellPlanAdjustmentPhase(SowLineRecord):
         ForeignKey("well_plan_adjustment_sections.id", ondelete="CASCADE"), nullable=False, index=True
     )
     phase_id: Mapped[str] = mapped_column(ForeignKey("phases.id", ondelete="RESTRICT"), nullable=False, index=True)
-    days: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    days: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     remarks: Mapped[str] = mapped_column(String(1000), default="", server_default="", nullable=False)
 
     section: Mapped[WellPlanAdjustmentSection] = relationship(back_populates="phases", lazy="joined")

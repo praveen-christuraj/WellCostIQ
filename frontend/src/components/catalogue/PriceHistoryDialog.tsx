@@ -41,7 +41,7 @@ export function PriceHistoryDialog({ config, record, onClose }: { config: TypeCo
               <TableCell sx={{ fontWeight: 700 }}>{formatMoney(row.unit_rate)}</TableCell>
               <TableCell>{row.revision_number === 1 ? '—' : formatMoney(row.previous_unit_rate)}</TableCell>
               <TableCell sx={{ color: change === null ? 'text.secondary' : change > 0 ? 'error.main' : change < 0 ? 'success.main' : 'text.secondary' }}>
-                {change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}
+                {change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(3)}%`}
               </TableCell>
               {uplift && <TableCell>{formatPercent(row.cost_uplift)}</TableCell>}
               {uplift && <TableCell>{formatMoney(row.final_cost)}</TableCell>}

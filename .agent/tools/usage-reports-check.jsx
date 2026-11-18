@@ -127,7 +127,7 @@ for (const mode of ['light', 'dark']) {
   check(`${mode}: matrix renders both well column headers`, text.includes('WELL-01 — Well One') && text.includes('WELL-02 — Well Two'))
   check(`${mode}: matrix renders section sub headers`, text.includes('Surface hole') && text.includes('Intermediate hole'))
   check(`${mode}: matrix renders item identity with uom and make`, text.includes('Barite') && text.includes('BARITE · MT · Halliburton'))
-  check(`${mode}: matrix renders formatted quantities and money`, text.includes('900.00 USD') && text.includes('15') && text.includes('500.00 USD'))
+  check(`${mode}: matrix renders formatted quantities and money`, text.includes('900.000 USD') && text.includes('15') && text.includes('500.000 USD'))
   check(`${mode}: grand total row present`, text.includes('Grand total'))
 
   // Cost-only matrix hides every quantity column.
@@ -150,7 +150,7 @@ for (const mode of ['light', 'dark']) {
   })
   const costText = doc.body.textContent || ''
   check(`${mode}: cost-only report shows no QTY sub headers`, !costText.includes('QTY · COST'))
-  check(`${mode}: cost-only report still shows costs`, costText.includes('700.00 USD') && costText.includes('Well total'))
+  check(`${mode}: cost-only report still shows costs`, costText.includes('700.000 USD') && costText.includes('Well total'))
 
   // Tangible category bands.
   await act(async () => {
@@ -186,7 +186,7 @@ for (const mode of ['light', 'dark']) {
   })
   const nptText = doc.body.textContent || ''
   check(`${mode}: NPT/UPA matrix separates duration, affected dates and cost`, nptText.includes('NPT allocated days') && nptText.includes('NPT affected cost dates') && nptText.includes('NPT cost') && nptText.includes('UPA allocated hours') && nptText.includes('UPA affected cost dates') && nptText.includes('UPA cost'))
-  check(`${mode}: NPT/UPA totals and per-well allocations render`, nptText.includes('650.00 USD') && nptText.includes('All wells') && nptText.includes('0.5'))
+  check(`${mode}: NPT/UPA totals and per-well allocations render`, nptText.includes('650.000 USD') && nptText.includes('All wells') && nptText.includes('0.5'))
 
   // Filter panel.
   await act(async () => {

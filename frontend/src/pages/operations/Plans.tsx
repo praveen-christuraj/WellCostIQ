@@ -1,79 +1,60 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { AddOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, MenuItem, TextField } from '@mui/material'
-import { ErrorMessage, FormDialog, PageHeading } from '../../components/Common'
+import { Alert, Box, Button, TextField, Typography } from '@mui/material'
+import { Link as RouterLink } from 'react-router-dom'
+import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag } from '../../components/Common'
 import { DataTable } from '../../components/DataTable'
-import { SectionCard } from '../../components/ui/SectionCard'
-import { FolderFields, type Folder } from '../../components/operations/ScopeDirectory'
+import {
+  FolderFields,
+  ScopeDirectory,
+  useOperationsRegister,
+  type Folder,
+} from '../../components/operations/ScopeDirectory'
+import { StudyPanel } from '../../components/operations/StudyPanel'
 import { TimelineEditor } from '../../components/operations/TimelineEditor'
 import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
-import {
-  listPlans,
-  createPlan,
-  activatePlan,
-  opsScopeReference,
-  auditExport,
-  type OpsScopeReference,
-  type OpsPlan,
-} from '../../lib/operations'
+import { createPlan, activatePlan, auditExport, getOpsPlan, studyTimeline, type OpsPlan } from '../../lib/operations'
 
 export default function OperationsPlans() {
-  const { can } = useAuth(),
-    [plans, setPlans] = useState<OpsPlan[]>([]),
-    [ref, setRef] = useState<OpsScopeReference | null>(null),
-    [error, setError] = useState('')
-  const [well, setWell] = useState(''),
-    [scope, setScope] = useState(''),
-    [create, setCreate] = useState(false),
-    [folder, setFolder] = useState<Folder>({ well_id: '', scope: 'drilling' })
+  const { can } = useAuth()
+  const register = useOperationsRegister('plans')
+  const { reference, deleted, rows, refresh, location } = register
+  const [create, setCreate] = useState(false)
+  const [folder, setFolder] = useState<Folder>({ well_id: '', scope: 'drilling' })
   const [label, setLabel] = useState(''),
-    [start, setStart] = useState(''),
-    [busy, setBusy] = useState(false),
-    [formError, setFormError] = useState(''),
-    [edit, setEdit] = useState<OpsPlan | null>(null),
-    [activate, setActivate] = useState<OpsPlan | null>(null)
-  const [deleted, setDeleted] = useState(false),
-    [remove, setRemove] = useState<OpsPlan | null>(null),
-    [rig, setRig] = useState('')
-  const load = async () => {
-    setPlans(await listPlans(undefined, undefined, deleted))
-  }
-  useEffect(() => {
-    opsScopeReference()
-      .then(setRef)
-      .catch((e) => setError(e.message))
-  }, [])
-  useEffect(() => {
-    let current = true
-    setPlans([])
-    listPlans(undefined, undefined, deleted)
-      .then((ps) => {
-        if (current) setPlans(ps)
-      })
-      .catch((e) => {
-        if (current) setError(e.message)
-      })
-    return () => {
-      current = false
-    }
-  }, [deleted])
+    [start, setStart] = useState('')
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('')
+  const [formError, setFormError] = useState('')
+  const [editor, setEditor] = useState<{ plan: OpsPlan; edit: boolean } | null>(null)
+  const [action, setAction] = useState<{ plan: OpsPlan; kind: 'activate' | 'delete' | 'restore' } | null>(null)
   const save = async () => {
     setBusy(true)
     setFormError('')
     try {
       const plan = await createPlan({
         ...folder,
-        label,
+        label: label.trim(),
         planned_start_at: start ? new Date(`${start}Z`).toISOString() : null,
       })
-      setWell(folder.well_id)
-      setScope(folder.scope)
-      await load()
       setCreate(false)
-      if (can('ops-plan:update')) setEdit(plan)
+      register.change(register.formLocation(folder))
+      await refresh()
+      if (can('ops-plan:update')) setEditor({ plan, edit: true })
     } catch (e) {
       setFormError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const open = async (id: string, edit: boolean) => {
+    setBusy(true)
+    setError('')
+    try {
+      setEditor({ plan: await getOpsPlan(id), edit })
+    } catch (e) {
+      setError((e as Error).message)
     } finally {
       setBusy(false)
     }
@@ -82,20 +63,23 @@ export default function OperationsPlans() {
     <Box>
       <PageHeading
         eyebrow="Well Operations"
-        title="Plans & timeline"
-        subtitle="Set a programme for each well and scope. Operations planned days are the sum of reviewed activity hours divided by 24, independent of Well Configuration and costing."
+        title={deleted ? 'Deleted plan versions' : 'Plans & timeline'}
+        subtitle="Browse by rig and well, then open a version to view its programme. Operations planned days are independent of costing."
         action={
           <>
-            <Button variant="outlined" onClick={() => setDeleted(!deleted)}>
+            <Button component={RouterLink} to="/operations/guide">
+              Ask &amp; guide
+            </Button>
+            <Button variant="outlined" disabled={busy} onClick={() => register.change({ rig: '' }, !deleted)}>
               {deleted ? 'Active versions' : 'Deleted versions'}
             </Button>
             {!deleted && can('ops-plan:create') && (
               <Button
                 variant="contained"
                 startIcon={<AddOutlined />}
+                disabled={!reference || busy || register.loading}
                 onClick={() => {
-                  const w = ref?.wells.find((w) => w.id === well)
-                  setFolder({ well_id: well, scope: w && !w.drilling_available ? 'completion' : 'drilling' })
+                  setFolder(register.destination() ?? { well_id: '', scope: 'drilling' })
                   setLabel('')
                   setStart('')
                   setFormError('')
@@ -108,111 +92,77 @@ export default function OperationsPlans() {
           </>
         }
       />
-      {error && <ErrorMessage message={error} />}
-      <Box display="flex" gap={2} flexWrap="wrap" mb={2}>
-        <TextField
-          select
-          label="Rig"
-          sx={{ minWidth: 150 }}
-          value={rig}
-          onChange={(e) => {
-            setRig(e.target.value)
-            setWell('')
-          }}
-        >
-          <MenuItem value="">All rigs</MenuItem>
-          {ref?.rigs.map((r) => (
-            <MenuItem key={r.id} value={r.id}>
-              {r.rig_code}
-            </MenuItem>
-          ))}
-        </TextField>
-        <TextField select label="Well" value={well} onChange={(e) => setWell(e.target.value)} sx={{ minWidth: 200 }}>
-          <MenuItem value="">All wells</MenuItem>
-          {ref?.wells
-            .filter((w) => !rig || w.rig_id === rig)
-            .map((w) => (
-              <MenuItem key={w.id} value={w.id}>
-                {w.display_name}
-              </MenuItem>
-            ))}
-        </TextField>
-        <TextField select label="Scope" value={scope} onChange={(e) => setScope(e.target.value)} sx={{ minWidth: 150 }}>
-          <MenuItem value="">All scopes</MenuItem>
-          <MenuItem value="drilling">Drilling</MenuItem>
-          <MenuItem value="completion">Completion</MenuItem>
-        </TextField>
-      </Box>
-      {plans
-        .filter(
-          (p) =>
-            (!rig || ref?.wells.some((w) => w.id === p.well_id && w.rig_id === rig)) &&
-            (!well || p.well_id === well) &&
-            (!scope || p.scope === scope),
-        )
-        .map((p) => (
-          <SectionCard
-            key={p.id}
-            title={`${p.well_code} · ${p.scope} · ${p.label}`}
-            subtitle={`Version ${p.version_no} · ${p.status} · ${Number(p.planned_days ?? 0).toFixed(3)} planned days`}
-            action={
-              <Box display="flex" gap={1} flexWrap="wrap">
-                {!deleted && p.status === 'draft' && can('ops-plan:update') && (
-                  <Button onClick={() => setEdit(p)}>Edit timeline</Button>
-                )}
-                {((!deleted && p.status === 'draft' && can('ops-plan:delete')) || (deleted && can('ops-plan:restore'))) && (
-                  <Button
-                    color={deleted ? 'inherit' : 'error'}
-                    onClick={() => {
-                      setFormError('')
-                      setRemove(p)
-                    }}
-                  >
-                    {deleted ? 'Restore' : 'Delete'}
-                  </Button>
-                )}
-                {!deleted && p.status === 'draft' && can('ops-plan:activate') && (
-                  <Button
-                    variant="outlined"
-                    disabled={!Number(p.planned_days)}
-                    onClick={() => {
-                      setFormError('')
-                      setActivate(p)
-                    }}
-                  >
-                    Activate
-                  </Button>
-                )}
-              </Box>
-            }
-          >
-            <DataTable
-              rows={p.items}
-              exportName={`${p.well_code}-${p.scope}-timeline-v${p.version_no}`}
-              canExport={can('ops-plan:export')}
-              onExport={auditExport('plans')}
-              onImport={
-                !deleted && p.status === 'draft' && can('ops-plan:update') && can('ops-plan:import')
-                  ? () => setEdit(p)
-                  : undefined
-              }
-              columns={[
-                { field: 'sequence_no', headerName: 'Sequence' },
-                { field: 'description', headerName: 'Activity', minWidth: 260, flex: 3 },
-                { field: 'target_depth_m', headerName: 'Target depth (m)' },
-                { field: 'planned_hours', headerName: 'Planned hours' },
-                {
-                  field: 'cum_planned_days',
-                  headerName: 'Cumulative days',
-                  valueFormatter: (p) => Number(p.value).toFixed(3),
-                },
-              ]}
-            />
-          </SectionCard>
+      {(register.error || error) && <ErrorMessage message={register.error || error} />}
+      <ScopeDirectory {...register} resource="plans" />
+      {location.well &&
+        (register.loading ? (
+          <Typography role="status">Loading plan versions…</Typography>
+        ) : (
+          <DataTable
+            key={JSON.stringify(location)}
+            rows={rows}
+            fillHeight
+            exportName="operations-plan-versions"
+            canExport={can('ops-plan:export')}
+            onExport={auditExport('plans')}
+            searchPlaceholder="Search plan versions…"
+            columns={[
+              { field: 'label', headerName: 'Programme', minWidth: 225, flex: 2 },
+              { field: 'scope', headerName: 'Scope' },
+              { field: 'version_no', headerName: 'Version' },
+              {
+                field: 'status',
+                headerName: 'Status',
+                cellRenderer: ({ value }: { value: string }) => <Tag>{value}</Tag>,
+              },
+              { field: 'planned_days', headerName: 'Planned days' },
+              { field: 'planned_start_at', headerName: 'Start (UTC)' },
+              {
+                headerName: 'Actions',
+                width: 315,
+                sortable: false,
+                cellRenderer: ({ data: p }: { data: OpsPlan }) => (
+                  <>
+                    <Button size="small" disabled={busy} onClick={() => void open(p.id, false)}>
+                      View timeline
+                    </Button>
+                    {!deleted && p.status === 'draft' && can('ops-plan:update') && (
+                      <Button size="small" disabled={busy} onClick={() => void open(p.id, true)}>
+                        Edit
+                      </Button>
+                    )}
+                    {((deleted && can('ops-plan:restore')) ||
+                      (!deleted && p.status === 'draft' && can('ops-plan:delete'))) && (
+                      <Button
+                        size="small"
+                        color={deleted ? 'inherit' : 'error'}
+                        disabled={busy}
+                        onClick={() => {
+                          setFormError('')
+                          setAction({ plan: p, kind: deleted ? 'restore' : 'delete' })
+                        }}
+                      >
+                        {deleted ? 'Restore' : 'Delete'}
+                      </Button>
+                    )}
+                    {!deleted && p.status === 'draft' && can('ops-plan:activate') && (
+                      <Button
+                        size="small"
+                        disabled={busy || !Number(p.planned_days)}
+                        onClick={() => {
+                          setFormError('')
+                          setAction({ plan: p, kind: 'activate' })
+                        }}
+                      >
+                        Activate
+                      </Button>
+                    )}
+                  </>
+                ),
+              },
+            ]}
+          />
         ))}
-      {!plans.length && (
-        <Alert severity="info">Create a draft version to import the programme workbook or enter activities manually.</Alert>
-      )}
       <FormDialog
         open={create}
         title="New operations plan"
@@ -224,7 +174,7 @@ export default function OperationsPlans() {
         maxWidth="sm"
       >
         <Box display="grid" gap={2} pt={1}>
-          <FolderFields folder={folder} change={setFolder} reference={ref} />
+          <FolderFields folder={folder} change={setFolder} reference={reference} />
           <TextField required label="Programme label" value={label} onChange={(e) => setLabel(e.target.value)} />
           <TextField
             type="datetime-local"
@@ -232,26 +182,36 @@ export default function OperationsPlans() {
             slotProps={{ inputLabel: { shrink: true } }}
             value={start}
             onChange={(e) => setStart(e.target.value)}
-            helperText="Day zero for schedule variance. Without a start, drilling uses reported days from spud; completion cannot calculate lag."
+            helperText="Without a start, drilling needs reported days from spud. Completion needs a start for lead/lag."
           />
           {formError && <Alert severity="error">{formError}</Alert>}
         </Box>
       </FormDialog>
-      {edit && <TimelineEditor plan={edit} onClose={() => setEdit(null)} onSaved={load} />}
-      {remove && (
+      {editor &&
+        (editor.edit && !editor.plan.is_deleted && editor.plan.status === 'draft' ? (
+          <TimelineEditor plan={editor.plan} onClose={() => setEditor(null)} onSaved={refresh} />
+        ) : (
+          <PlanView plan={editor.plan} onClose={() => setEditor(null)} />
+        ))}
+      {action && (
         <FormDialog
           open
-          title={`${deleted ? 'Restore' : 'Delete'} ${remove.label}?`}
-          danger={!deleted}
-          onClose={() => setRemove(null)}
-          submitLabel={deleted ? 'Restore' : 'Delete'}
+          title={`${action.kind[0].toUpperCase()}${action.kind.slice(1)} ${action.plan.label}?`}
+          danger={action.kind === 'delete'}
           busy={busy}
+          onClose={() => setAction(null)}
+          submitLabel={action.kind[0].toUpperCase() + action.kind.slice(1)}
           onSubmit={async () => {
             setBusy(true)
+            setFormError('')
             try {
-              await api(`/operations/plans/${remove.id}${deleted ? '/restore' : ''}`, { method: deleted ? 'POST' : 'DELETE' })
-              await load()
-              setRemove(null)
+              if (action.kind === 'activate') await activatePlan(action.plan.id)
+              else
+                await api(`/operations/plans/${action.plan.id}${action.kind === 'restore' ? '/restore' : ''}`, {
+                  method: action.kind === 'restore' ? 'POST' : 'DELETE',
+                })
+              setAction(null)
+              await refresh()
             } catch (e) {
               setFormError((e as Error).message)
             } finally {
@@ -259,34 +219,45 @@ export default function OperationsPlans() {
             }
           }}
         >
-          {deleted ? 'Restore this version as a draft.' : 'This draft and its items can be restored from Deleted versions.'}
-          {formError && <Alert severity="error">{formError}</Alert>}
-        </FormDialog>
-      )}
-      {activate && (
-        <FormDialog
-          open
-          title={`Activate ${activate.label}?`}
-          subtitle="This makes the reviewed timeline the baseline for extraction and analytics. Any previously active version for this well scope is retained as superseded."
-          onClose={() => setActivate(null)}
-          onSubmit={async () => {
-            setBusy(true)
-            try {
-              await activatePlan(activate.id)
-              await load()
-              setActivate(null)
-            } catch (e) {
-              setFormError((e as Error).message)
-            } finally {
-              setBusy(false)
-            }
-          }}
-          busy={busy}
-          submitLabel="Activate"
-        >
+          {action.kind === 'activate'
+            ? 'This becomes the baseline for this well and scope. The previous version is retained as superseded.'
+            : action.kind === 'restore'
+              ? 'Restore this version as a draft.'
+              : 'This draft and its items can be restored from Deleted versions.'}
           {formError && <Alert severity="error">{formError}</Alert>}
         </FormDialog>
       )}
     </Box>
+  )
+}
+
+function PlanView({ plan, onClose }: { plan: OpsPlan; onClose: () => void }) {
+  const { can } = useAuth()
+  return (
+    <PanelDialog
+      open
+      title={`Timeline · ${plan.label}`}
+      maxWidth={false}
+      onClose={onClose}
+      subtitle={`${plan.well_code} · ${plan.scope} · Version ${plan.version_no} · ${plan.status}`}
+    >
+      <DataTable
+        rows={plan.items}
+        exportName={`${plan.well_code}-${plan.scope}-timeline-v${plan.version_no}`}
+        canExport={can('ops-plan:export')}
+        onExport={auditExport('plans')}
+        columns={[
+          { field: 'sequence_no', headerName: 'Sequence' },
+          { field: 'description', headerName: 'Activity', minWidth: 250, flex: 3, tooltipField: 'description' },
+          { field: 'target_depth_m', headerName: 'Target MD (m)' },
+          { field: 'planned_hours', headerName: 'Planned hours' },
+          { field: 'cum_planned_days', headerName: 'Cumulative days' },
+        ]}
+      />
+      <Box mt={2}>
+        <Typography variant="h6">Timeline study</Typography>
+        <StudyPanel runLabel="Study saved timeline" run={(useAi) => studyTimeline(plan.id, useAi)} />
+      </Box>
+    </PanelDialog>
   )
 }

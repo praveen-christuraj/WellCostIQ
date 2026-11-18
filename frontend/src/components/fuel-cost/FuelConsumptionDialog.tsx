@@ -1073,7 +1073,7 @@ export function FuelConsumptionDialog({
                             ? 'Carried (override restricted)'
                             : 'Carried closing stock')
                     }
-                    inputProps={{ min: 0, step: 'any' }}
+                    inputProps={{ min: 0, step: 0.001 }}
                     fullWidth
                   />
                   <TextField
@@ -1085,7 +1085,7 @@ export function FuelConsumptionDialog({
                     disabled={!canEdit || saving}
                     error={Boolean(errors.receipt)}
                     helperText={errors.receipt || 'Delivered to rig tanks'}
-                    inputProps={{ min: 0, step: 'any' }}
+                    inputProps={{ min: 0, step: 0.001 }}
                     fullWidth
                   />
                   <TextField
@@ -1097,7 +1097,7 @@ export function FuelConsumptionDialog({
                     disabled={!canEdit || saving}
                     error={Boolean(errors.engine)}
                     helperText={errors.engine || 'Counted in AGO balance'}
-                    inputProps={{ min: 0, step: 'any' }}
+                    inputProps={{ min: 0, step: 0.001 }}
                     fullWidth
                   />
                   <TextField
@@ -1110,7 +1110,7 @@ export function FuelConsumptionDialog({
                     disabled={!canEdit || saving}
                     error={Boolean(errors.closing)}
                     helperText={errors.closing || `Book: ${fuelLitres(preview.bookClosing)} L`}
-                    inputProps={{ min: 0, step: 'any' }}
+                    inputProps={{ min: 0, step: 0.001 }}
                     fullWidth
                   />
                   <TextField
@@ -1122,7 +1122,7 @@ export function FuelConsumptionDialog({
                     disabled={!canEdit || saving}
                     error={Boolean(errors.gas)}
                     helperText={errors.gas || 'AGO saved via gas (excluded from AGO)'}
-                    inputProps={{ min: 0, step: 'any' }}
+                    inputProps={{ min: 0, step: 0.001 }}
                     fullWidth
                   />
                 </Box>
@@ -1663,7 +1663,7 @@ export function FuelConsumptionDialog({
                                     disabled={!canEdit || saving}
                                     error={Boolean(lineError && line.company_id)}
                                     helperText={lineError && line.company_id ? lineError : undefined}
-                                    inputProps={{ min: 0, step: 'any' }}
+                                    inputProps={{ min: 0, step: 0.001 }}
                                     sx={{ '& input': { fontVariantNumeric: 'tabular-nums' } }}
                                     fullWidth
                                   />
@@ -1860,7 +1860,7 @@ export function FuelConsumptionDialog({
                                 error={Boolean(lineError)}
                                 inputProps={{
                                   min: 0,
-                                  step: 'any',
+                                  step: 0.001,
                                   'aria-label': `${company.company_name} litres (AGO)`,
                                 }}
                                 sx={{

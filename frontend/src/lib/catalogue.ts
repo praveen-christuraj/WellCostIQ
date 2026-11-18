@@ -436,13 +436,13 @@ export function formatMoney(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—'
   const n = Number(value)
   if (!Number.isFinite(n)) return String(value)
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+  return n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
 }
 
 export function formatPercent(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—'
   const n = Number(value)
-  return Number.isFinite(n) ? `${n.toLocaleString(undefined, { maximumFractionDigits: 4 })}%` : String(value)
+  return Number.isFinite(n) ? `${n.toLocaleString(undefined, { maximumFractionDigits: 3 })}%` : String(value)
 }
 
 export function formatDate(value: string | null | undefined): string {

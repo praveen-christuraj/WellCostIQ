@@ -34,7 +34,7 @@ export const newNdtLine = (): NdtLine => ({
   key: newClientKey(), description: '', quantity_received: '0', quantity_consumed: '0',
   quantity_backloaded_good: '0', quantity_backloaded_bad: '0', remarks: '',
 })
-export const quantity = (value: string | number) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 10 })
+export const quantity = (value: string | number) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 3 })
 export const importNdtRow = (row: ImportRow) => ({
   rig_code: row['Rig Code']?.trim(), well_code: row['Well Code']?.trim(), scope: row.Scope?.trim(),
   description: row.Description?.trim(), quantity_received: row['Quantity Received'] || 0,

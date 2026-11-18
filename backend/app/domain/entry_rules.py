@@ -30,6 +30,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Sequence
 
+from app.core.precision import rounded
 from app.domain import entry_statistics as stats
 
 # These Day Rate categories are priced once whatever quantity is recorded, so
@@ -312,16 +313,7 @@ def plain(value: Any) -> str:
 def number(value: Any) -> str:
     """A figure as it reads on a sheet: grouped thousands, no noise decimals."""
     amount = to_decimal(value)
-    magnitude = abs(amount)
-    if magnitude == 0:
-        return "0"
-    if magnitude >= 1000:
-        places = 2
-    elif magnitude >= 1:
-        places = 3
-    else:
-        places = max(4, 3 - magnitude.adjusted())
-    text = f"{amount.quantize(Decimal(1).scaleb(-places)):,f}"
+    text = f"{rounded(amount):,f}"
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text
@@ -346,7 +338,7 @@ def fx_text(value: Any, currency: str) -> str:
 
 
 def metres_text(value: Any) -> str:
-    return f"{number(to_decimal(value).quantize(Decimal('0.01')))} m"
+    return f"{number(value)} m"
 
 
 def listed(labels: Sequence[str]) -> str:
@@ -606,7 +598,7 @@ def check_quantities(
                 finding.suggested_value = other_unit
                 finding.suggested_display = quantity_text(target.quantity, other_unit)
             else:
-                finding.suggested_value = plain(slip.corrected)
+                finding.suggested_value = plain(rounded(slip.corrected))
                 finding.suggested_display = quantity_text(slip.corrected, target.unit)
             if len(lines) > 1:
                 corrected_quantity = target.quantity if finding.field_name == "quantity_unit" else slip.corrected
@@ -657,7 +649,7 @@ def _against_locked_rate(
             scope="baseline", usual_display=locked, history_count=1,
         )
         if slip is not None:
-            finding.suggested_value = plain(slip.corrected)
+            finding.suggested_value = plain(rounded(slip.corrected))
             finding.suggested_display = money_text(slip.corrected, line.currency)
             finding.apply_to = [line.ref]
             finding.message += f" This matches {slip.phrase}: {finding.suggested_display} would be close to it."
@@ -688,7 +680,7 @@ def _against_locked_rate(
         scope="baseline", usual_display=locked, history_count=1,
     )
     if slip is not None:
-        finding.suggested_value = plain(slip.corrected)
+        finding.suggested_value = plain(rounded(slip.corrected))
         finding.suggested_display = money_text(slip.corrected, line.currency)
         finding.apply_to = [line.ref]
         finding.message += f" This matches {slip.phrase}: {finding.suggested_display} would be close to it."
@@ -745,7 +737,7 @@ def check_rates(
             scope=scope, usual_display=usual, history_count=profile.count,
         )
         if slip is not None:
-            finding.suggested_value = plain(slip.corrected)
+            finding.suggested_value = plain(rounded(slip.corrected))
             finding.suggested_display = money_text(slip.corrected, line.currency)
             finding.apply_to = [line.ref]
             finding.message += f" This matches {slip.phrase}: {finding.suggested_display} would be usual."
@@ -858,9 +850,9 @@ def check_exchange_rates(
                 usual_display=verdict.usual, history_count=verdict.count,
                 fingerprint=make_fingerprint("fx", currency, plain(rate)),
             )
-            if verdict.slip is not None:
-                finding.suggested_value = plain(verdict.slip.corrected)
-                finding.suggested_display = fx_text(verdict.slip.corrected, currency)
+            if verdict.slip is not None and (corrected := rounded(verdict.slip.corrected)) > 0:
+                finding.suggested_value = plain(corrected)
+                finding.suggested_display = fx_text(corrected, currency)
                 finding.apply_to = refs
                 finding.message += f" This matches {verdict.slip.phrase}: {finding.suggested_display} would be usual."
             findings.append(finding)
@@ -1138,7 +1130,7 @@ def check_day_total(sheet: SheetFacts, history: History, findings: list[Finding]
     currency = sheet.standard_currency
 
     def money(value: Any) -> str:
-        return money_text(to_decimal(value).quantize(Decimal("0.01")), currency)
+        return money_text(rounded(to_decimal(value)), currency)
 
     usual = money(profile.median)
     finding = Finding(
@@ -1151,7 +1143,7 @@ def check_day_total(sheet: SheetFacts, history: History, findings: list[Finding]
             f"{_most_between(money(profile.low), money(profile.high))}."
         ),
         scope="afe", usual_display=usual, history_count=profile.count,
-        fingerprint=make_fingerprint("total", plain(sheet.total.quantize(Decimal("0.01")))),
+        fingerprint=make_fingerprint("total", plain(rounded(sheet.total))),
     )
     largest = max(sheet.lines, key=lambda line: line.amount, default=None)
     if largest is not None and largest.amount >= sheet.total * DAY_TOTAL_LINE_SHARE:

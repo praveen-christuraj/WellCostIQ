@@ -142,11 +142,11 @@ const serviceBodyRows = [...servicePanel.querySelectorAll('.dcr-cost-item-row')]
 assert.equal(serviceBodyRows[0].cells.length, 10, 'a service row prints all ten cost columns')
 const mudLoggingSplit = serviceBodyRows.find(row => row.cells[0].textContent === 'Mud logging')
 assert.deepEqual([...mudLoggingSplit.cells].map(cell => cell.textContent),
-  ['Mud logging', '€1,000', '€250', '€50', '€250', '€0', '€50', '€300', '€700', '30.00%'],
+  ['Mud logging', '€1,000', '€250', '€50', '€250', '€0', '€50', '€300', '€700', '30.000%'],
   'a service row prints planned, NPT and UPA activity costs beside its cumulative total')
 const serviceFooter = [...servicePanel.querySelectorAll('tfoot tr:last-child th')].map(cell => cell.textContent)
 assert.deepEqual(serviceFooter,
-  ['Services + consumables total', '€19,000', '€2,375', '€300', '€2,625', '€0', '€50', '€2,675', '€16,325', '14.08%'],
+  ['Services + consumables total', '€19,000', '€2,375', '€300', '€2,625', '€0', '€50', '€2,675', '€16,325', '14.079%'],
   'the merged footer totals every service and consumable value, including each cumulative classification')
 const fuelRow = combinedRows.find(row => row.cells[0].textContent === 'Fuel')
 assert.deepEqual([...fuelRow.cells].map(cell => cell.textContent).slice(2, 8), ['€0', '€100', '€100', '€0', '€0', '€100'],
@@ -221,7 +221,7 @@ for (const heading of ['Service-wise cumulative cost', 'Consumables cumulative c
   assert.ok(sheet.textContent.includes(heading), `cumulative pages print ${heading}`)
 }
 const matrix = sheet.querySelector('.dcr-mud-analysis')
-for (const text of ['Surface hole', 'OBM', 'Opening Stock', 'Receipt', 'Additions', 'Total Mud', 'Losses', 'Closing Stock', 'Meterage', 'bbl/m Consumed', 'Cost / BBL', 'Reconciled Cost', '20', '30', '60', '90', '15', '95', '1,234.57 m', '€13', '€188']) {
+for (const text of ['Surface hole', 'OBM', 'Opening Stock', 'Receipt', 'Additions', 'Total Mud', 'Losses', 'Closing Stock', 'Meterage', 'bbl/m Consumed', 'Cost / BBL', 'Reconciled Cost', '20', '30', '60', '90', '15', '95', '1,234.567 m', '€13', '€188']) {
   assert.ok(matrix.textContent.includes(text), `mud matrix prints ${text}`)
 }
 assert.equal(matrix.querySelector('thead th:nth-child(2)').textContent, 'Surface holeOBM', 'mud analysis header prints only section and mud type')
@@ -246,12 +246,12 @@ const afeSummaryRows = [...sheet.querySelectorAll('.dcr-overall tbody tr')].map(
 assert.deepEqual(afeSummaryRows[1], ['Consumables', '€16,000', '€100'],
   'without a well summary the bulk print keeps its own AFE-scoped consumables actual')
 const afeSummaryNote = sheet.querySelector('.dcr-overall p').textContent
-assert.equal(afeSummaryNote, 'AFE available = €6,900 · 1.43% used', 'AFE summary labels the final balance as the available amount')
+assert.equal(afeSummaryNote, 'AFE available = €6,900 · 1.429% used', 'AFE summary labels the final balance as the available amount')
 assert.ok(!afeSummaryNote.includes('after LIH') && !afeSummaryNote.includes('Balance'), 'AFE summary removes the old after-LIH and duplicate balance wording')
 for (const code of ['DC-1', 'DC-2', 'AFE-1', 'AFE-2', 'WELL-1', 'RIG-1', 'SVC', 'SURFACE', 'DRL', 'DRILL', 'SA1', 'V1', 'T1', 'BAR']) {
   assert.ok(!sheet.textContent.includes(code), `${code} is omitted in favour of its name`)
 }
-assert.ok(sheet.textContent.includes('1,234.57 m'), 'printed depth rounds to two decimals')
+assert.ok(sheet.textContent.includes('1,234.567 m'), 'printed depth retains three decimals')
 assert.ok(sheet.textContent.includes('Casing') && sheet.textContent.includes('€900'), 'tangible items and cumulative prices print')
 assert.equal(sheet.querySelector('script'), null, 'remarks remain escaped')
 
@@ -302,7 +302,7 @@ window.print = () => {
   assert.ok(printed.textContent.includes('Well one'), 'portal is mounted before window.print with the well name')
   assert.ok(printed.querySelector('.dcr-titlebar h1').textContent.endsWith('(LEAD/LAG: 0 days)'), 'no selection prints the zero lead/lag fallback')
   const timePosition = printed.querySelector('.dcr-time').textContent
-  for (const text of ['Planned', '10.13 days', 'Actual', '8.13 days', 'Actual against planned activities', '7.81 days', 'NPT', '0.31 days', 'UPA', '0.00 days']) {
+  for (const text of ['Planned', '10.126 days', 'Actual', '8.126 days', 'Actual against planned activities', '7.813 days', 'NPT', '0.313 days', 'UPA', '0.000 days']) {
     assert.ok(timePosition.includes(text), `time position prints ${text}; received ${timePosition}`)
   }
   assert.ok(!timePosition.includes('from spud') && !timePosition.includes('Variance') && !timePosition.includes('Sheets / status'), 'time position omits the spud suffix, variance and sheet status')
@@ -758,7 +758,7 @@ const rigWellDeletedPage = readFileSync('../frontend/src/pages/RigWellDeleted.ts
 for (const required of ['row => `${row.entity_type}:${row.id}:${row.scope ?? \'all\'}`', '? `?scope=${encodeURIComponent(target.scope)}`']) {
   assert.ok(rigWellDeletedPage.includes(required), `rig-well deleted page retains ${required}`)
 }
-console.log('Daily cost checks passed: merged group-ordered Services/Consumables cover schedule and totals, blank costing-set remarks, separate cumulative schedules, multi-activity and multi-charge entry, one-time charging, scoped depths, bulk rate upgrades, advanced selection, report-day columns, saved milestone/lead-lag, bulk first-page printing, mud/loss matrices, two-decimal presentation, print portal cleanup and register wiring.')
+console.log('Daily cost checks passed: merged group-ordered Services/Consumables cover schedule and totals, blank costing-set remarks, separate cumulative schedules, multi-activity and multi-charge entry, one-time charging, scoped depths, bulk rate upgrades, advanced selection, report-day columns, saved milestone/lead-lag, bulk first-page printing, mud/loss matrices, three-decimal presentation, print portal cleanup and register wiring.')
 
 dom.window.close()
 process.exit(0)

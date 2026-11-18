@@ -78,7 +78,7 @@ export function PricedItemFormDialog({ config, open, mode, title, form, setForm,
           multiline minRows={2} inputProps={{ maxLength: field.maxLength }} sx={wide} {...common}/>
       case 'number':
         return <TextField key={field.key} label={field.label} type="number" value={value} onChange={event => setField(field.key, event.target.value)}
-          inputProps={{ min: 0, step: 'any' }} sx={wide} {...common}/>
+          inputProps={{ min: 0, step: 0.001 }} sx={wide} {...common}/>
       case 'date':
         return <TextField key={field.key} label={field.label} type="date" value={value} onChange={event => setField(field.key, event.target.value)}
           InputLabelProps={{ shrink: true }} sx={wide} {...common}/>

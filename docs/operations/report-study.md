@@ -117,11 +117,7 @@ Reading it against the engineers' `Codes` sheet:
   distinct values; the operations workbooks instead key on **hole size** (`16"`, `12 ¼"`, `8 ½"`) and on a
   **phase code** (`DRILL`, `COMP`, `MOB`, `PREP`, `ABAN`, `W.O.`, `W.T.`, `SEC-WELL`, `RE-EN`, `PROD-MAN`).
   Three different "phase" vocabularies exist, so the module must own a mapping table, not a single field.
-- `Code` is the **activity code 1–37** (`02` = RIG MOVES, `03` = ROTATION HOURS AT BOTTOM, `05` =
-  INSTALLATION/DISASSEMBLY, `06` = WIPER TRIP AND REAMING, `07` = CIRCULATION, `25` = MAINTENANCE AND
-  REPAIR, `15` = THROUGH TUBING OPERATION, `19` = VARIOUS OPERATIONS IN WELL …). Crews apply it loosely:
-  in UTA-64 a POOH run is coded `06`, "changed TDS saver sub" is coded `07`. The code is a hint, never a
-  proof.
+- OpenWells prints a numeric `Code`, but the supplied PDFs do not define those numbers. The engineers’ `Codes` sheet defines its own activity numbers (`02` = RIG MOVES, `06` = WIPER TRIP AND REAMING, `07` = CIRCULATION). Do not assume they are equivalent: the PDFs use `02` on drill-ahead rows, `06` on several kinds of trips and `07` on top-drive service. The app displays workbook definitions and PDF observations as separate references; neither implies a universal OpenWells codebook.
 - `Sub/Class` behaves like the Excel `Plan` column (`P` planned, `U` unplanned) but also emits a third
   value `D` — present only on blocks whose narrative describes downtime (a dropped stabiliser sub, diesel
   engines tripping off). **`D` is almost certainly the crews' "down/NPT" mark.** 5.4 % of blocks carry no

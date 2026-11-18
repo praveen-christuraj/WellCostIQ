@@ -56,7 +56,7 @@ type Props = {
   initialSelectedIds?: string[]
 }
 
-const QUANTITY_PATTERN = /^\d+(?:\.\d{1,10})?$/
+const QUANTITY_PATTERN = /^\d+(?:\.\d{1,3})?$/
 /**
  * Rows rendered per window. The list scrolls inside a fixed-height viewport and
  * only this many rows exist in the DOM at any time, so a catalogue with
@@ -415,7 +415,7 @@ const SelectorRow = memo(function SelectorRow({
         required={!quantityEntryOnly && checked}
         invalid={invalid}
         helperText={invalid ? quantityHelper : quantityEntryOnly ? 'Leave empty to skip.' : ' '}
-        min={allowZeroQuantity ? 0 : 0.0000000001}
+        min={allowZeroQuantity ? 0 : 0.001}
         onChange={onQuantityChange}
       />
     </TableCell>}
@@ -470,7 +470,7 @@ function QuantityInput({ id, value, label, disabled, required, invalid, helperTe
     // The id belongs to the field, not the inner input, so the label stays bound
     // to it for screen readers and for the checks that drive this dialog.
     id={inputId}
-    inputProps={{ min, step: '0.0000000001' }}
+    inputProps={{ min, step: '0.001' }}
     helperText={helperText}
   />
 }

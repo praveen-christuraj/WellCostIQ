@@ -74,7 +74,7 @@ def test_recent_reports_have_public_block_lists():
                 "report": {},
                 "blocks": [
                     {
-                        "sequence_no": 201,
+                        "sequence_no": 2001,
                         "duration_minutes": 0,
                         "started_at": start.isoformat(),
                         "ended_at": start.isoformat(),

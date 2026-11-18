@@ -51,7 +51,7 @@ def ask(payload: AssistantAskIn, db: Db, user: Current, request: Request) -> Ass
         route=payload.route,
         use_ai=payload.use_ai,
     )
-    if payload.use_ai and answer.intent != "permission":
+    if payload.use_ai and answer.intent != "permission" and not answer.memory_key.startswith("operations-"):
         outcome = (
             f"answered by {answer.ai_model}"
             if answer.ai_used

@@ -49,6 +49,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.rig_well import now, uid
 
@@ -96,7 +97,7 @@ class LihCostEntry(Base):
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     remarks: Mapped[str] = mapped_column(String(1000), default="", server_default="", nullable=False)
     line_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    total_cost: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     # Bumped on every worksheet save; a stale client is rejected instead of
     # overwriting items somebody else has saved in the meantime.
     revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
@@ -163,17 +164,17 @@ class LihCostLine(Base):
         ForeignKey("lih_cost_entries.id", ondelete="CASCADE"), nullable=False, index=True
     )
     item_description: Mapped[str] = mapped_column(String(LIH_MAX_ITEM_DESCRIPTION), nullable=False)
-    od_size: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    id_size: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    fish_neck_od: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    fish_neck_length: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    od_size: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    id_size: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    fish_neck_od: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    fish_neck_length: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     serial_number: Mapped[str] = mapped_column(String(LIH_MAX_SERIAL_NUMBER), default="", server_default="", nullable=False)
     connection: Mapped[str] = mapped_column(String(LIH_MAX_CONNECTION), default="", server_default="", nullable=False)
-    length: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    no_of_units: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    length: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    no_of_units: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     unit: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
-    unit_cost: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    total_cost: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     remarks: Mapped[str] = mapped_column(String(LIH_MAX_REMARKS), default="", server_default="", nullable=False)
     # manual | duplicate | import — how this row was captured.
     source: Mapped[str] = mapped_column(String(20), default="manual", server_default="manual", nullable=False)

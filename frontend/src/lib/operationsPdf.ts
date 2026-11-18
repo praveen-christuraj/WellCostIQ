@@ -2,20 +2,20 @@ import { api } from './api'
 import type { OpsReport } from './operations'
 
 export async function printDailyReport(report: OpsReport, brief: string) {
-  await api(`/operations/reports/${report.id}/print-audit`, { method: 'POST' })
+  await api(`/operations/reports/${report.id}/print-audit${report.is_deleted ? '?include_deleted=true' : ''}`, { method: 'POST' })
   const { exportReportPdf } = await import('./reportPdf')
   await exportReportPdf({
     fileName: `${report.well_code_snapshot}-${report.report_type}-${report.report_date}`,
     title: `${report.report_type} ${report.report_no_text} · ${report.report_date}`,
     scope: `${report.rig_code_snapshot} / ${report.well_code_snapshot} / ${report.scope}`,
-    notices: [`Status: ${report.status}. Time log in UTC; depths in metres.`],
+    notices: [`Status: ${report.is_deleted ? 'Deleted · ' : ''}${report.status}. Time log in UTC; depths in metres.`],
     sections: [
       { title: 'Daily brief', notes: brief.split('\n').filter(Boolean) },
       {
         title: 'Activity log',
         tables: [
           {
-            head: ['From', 'To', 'Minutes', 'Class', 'Allocation', 'Vendor', 'Operation'],
+            head: ['From', 'To', 'Minutes', 'Class', 'Allocation', 'Vendor', 'Activity code', 'Operation'],
             body: report.blocks.map((b) => [
               b.started_at.replace('T', ' ').slice(0, 16),
               b.ended_at.replace('T', ' ').slice(0, 16),
@@ -23,9 +23,10 @@ export async function printDailyReport(report: OpsReport, brief: string) {
               b.classification,
               b.allocation,
               b.responsible_party,
+              b.source_activity_label || '—',
               b.narrative,
             ]),
-            wide: [6],
+            wide: [6, 7],
           },
         ],
       },

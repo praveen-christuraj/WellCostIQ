@@ -173,7 +173,7 @@ def _label(code: str, name: str) -> str:
 
 
 def _money_text(value: Decimal) -> str:
-    return f"{engine.money(value):,.2f}"
+    return f"{engine.money(value):,.3f}"
 
 
 def _actor_name(user: User) -> str:

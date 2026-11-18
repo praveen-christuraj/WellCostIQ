@@ -286,7 +286,7 @@ export type FuelMonthlyBalanceRow = {
 /** Litres with grouped thousands. Blank/invalid reads as zero. */
 export function fuelLitres(value: string | number | null | undefined, digits = 2): string {
   const number = Number(value ?? 0)
-  if (!Number.isFinite(number)) return (0).toFixed(2)
+  if (!Number.isFinite(number)) return (0).toFixed(3)
   return new Intl.NumberFormat(undefined, {
     minimumFractionDigits: Math.min(digits, 2),
     maximumFractionDigits: digits,

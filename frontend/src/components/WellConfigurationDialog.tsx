@@ -275,7 +275,7 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
     </TextField>
     {loading ? <Box py={8} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={26}/></Box> : <Box display="grid" gap={2} pt={.5}>
       {configuration && <Box display="flex" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap" sx={{ bgcolor: 'action.hover', borderRadius: 2, px: 2, py: 1.3 }}>
-        <Box><Typography fontSize={12} fontWeight={800}>{configuration.rig_code} / {configuration.well_code} — {configuration.well_name}</Typography><Typography fontSize={11} color="text.secondary" mt={.25}>Plan total · {sections.length} section(s) · {totalDays.toFixed(2)} days</Typography></Box>
+        <Box><Typography fontSize={12} fontWeight={800}>{configuration.rig_code} / {configuration.well_code} — {configuration.well_name}</Typography><Typography fontSize={11} color="text.secondary" mt={.25}>Plan total · {sections.length} section(s) · {totalDays.toFixed(3)} days</Typography></Box>
         <Box display="grid" gridTemplateColumns="max-content max-content" columnGap={1} rowGap={.5} alignItems="center">
           <Typography fontSize={11} fontWeight={700} color="text.secondary">Well status</Typography><WellStatusTag status={configuration.status} />
           <Typography fontSize={11} fontWeight={700} color="text.secondary">Plan status</Typography><PlanStatusTag status={configuration.config_status} />
@@ -323,7 +323,7 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
               : '—'}
           </Typography>
         </Box>
-        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1 }}><Typography fontSize={10} fontWeight={800} color="text.secondary" textTransform="uppercase">Planned duration</Typography><Typography fontSize={15} fontWeight={800} mt={.3}>{totalDays.toFixed(2)} days</Typography></Box>
+        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1 }}><Typography fontSize={10} fontWeight={800} color="text.secondary" textTransform="uppercase">Planned duration</Typography><Typography fontSize={15} fontWeight={800} mt={.3}>{totalDays.toFixed(3)} days</Typography></Box>
       </Box>
 
       {templateNotice && <Alert severity="info" onClose={() => setTemplateNotice('')} sx={{ mb: 1.5 }}>{templateNotice}</Alert>}
@@ -345,7 +345,7 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
         return <Card key={section.key} variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: '16px !important' }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" gap={1} mb={1.5}>
-              <Box display="flex" alignItems="center" gap={1}><Box className="table-icon" sx={{ width: 28, height: 28, fontSize: 11, fontWeight: 800 }}>{String(sectionIndex + 1).padStart(2, '0')}</Box><Typography fontWeight={800} fontSize={13}>Hole Section {sectionIndex + 1}{selectedSection ? ` · ${selectedSection.code}` : ''}</Typography><Tag>{phaseDays.toFixed(2)} days</Tag></Box>
+              <Box display="flex" alignItems="center" gap={1}><Box className="table-icon" sx={{ width: 28, height: 28, fontSize: 11, fontWeight: 800 }}>{String(sectionIndex + 1).padStart(2, '0')}</Box><Typography fontWeight={800} fontSize={13}>Hole Section {sectionIndex + 1}{selectedSection ? ` · ${selectedSection.code}` : ''}</Typography><Tag>{phaseDays.toFixed(3)} days</Tag></Box>
               {!readOnly && <Box display="flex" gap={.2}>
                 <Button size="small" aria-label="Move section up" disabled={sectionIndex === 0} onClick={() => moveSection(sectionIndex, -1)}><ArrowUpwardRounded fontSize="small"/></Button>
                 <Button size="small" aria-label="Move section down" disabled={sectionIndex === sections.length - 1} onClick={() => moveSection(sectionIndex, 1)}><ArrowDownwardRounded fontSize="small"/></Button>
@@ -357,8 +357,8 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
                 {section.hole_section_id && !selectedSection && <MenuItem value={section.hole_section_id} disabled>Deleted or unavailable section · choose another</MenuItem>}
                 {options.hole_sections.map(option => <MenuItem key={option.id} value={option.id}>{option.code} — {option.name}</MenuItem>)}
               </TextField>
-              <TextField type="number" label={`From (${depthUnit})`} required value={section.from_depth} disabled={readOnly} inputProps={{ min: 0, step: .0000000001 }} helperText={depthUnit === 'ft' && section.from_depth.trim() !== '' ? `= ${formatDepthMeters(section.from_depth, 'ft')}` : 'Up to 10 decimal places.'} onChange={event => updateSection(section.key, { from_depth: event.target.value })}/>
-              <TextField type="number" label={`To (${depthUnit})`} required value={section.to_depth} disabled={readOnly} inputProps={{ min: 0, step: .0000000001 }} helperText={depthUnit === 'ft' && section.to_depth.trim() !== '' ? `= ${formatDepthMeters(section.to_depth, 'ft')}` : 'Up to 10 decimal places.'} onChange={event => updateSection(section.key, { to_depth: event.target.value })}/>
+              <TextField type="number" label={`From (${depthUnit})`} required value={section.from_depth} disabled={readOnly} inputProps={{ min: 0, step: 0.001 }} helperText={depthUnit === 'ft' && section.from_depth.trim() !== '' ? `= ${formatDepthMeters(section.from_depth, 'ft')}` : 'Up to 3 decimal places.'} onChange={event => updateSection(section.key, { from_depth: event.target.value })}/>
+              <TextField type="number" label={`To (${depthUnit})`} required value={section.to_depth} disabled={readOnly} inputProps={{ min: 0, step: 0.001 }} helperText={depthUnit === 'ft' && section.to_depth.trim() !== '' ? `= ${formatDepthMeters(section.to_depth, 'ft')}` : 'Up to 3 decimal places.'} onChange={event => updateSection(section.key, { to_depth: event.target.value })}/>
               <TextField label="Section remarks" value={section.remarks} disabled={readOnly} inputProps={{ maxLength: 1000 }} onChange={event => updateSection(section.key, { remarks: event.target.value })}/>
             </Box>
             <Divider sx={{ my: 1.6 }}/>
@@ -375,7 +375,7 @@ export function WellConfigurationDialog({ open, well, initialScope, onClose, onS
                     {phase.phase_id && !selectedPhase && <MenuItem value={phase.phase_id} disabled>Deleted or unavailable phase · choose another</MenuItem>}
                     {options.phases.map(option => <MenuItem key={option.id} value={option.id}>{option.code} — {option.name}</MenuItem>)}
                   </TextField>
-                  <TextField type="number" label="Days" required value={phase.days} disabled={readOnly} inputProps={{ min: 0, step: .0000000001 }} helperText="Up to 10 decimal places." onChange={event => updatePhase(section.key, phase.key, { days: event.target.value })}/>
+                  <TextField type="number" label="Days" required value={phase.days} disabled={readOnly} inputProps={{ min: 0, step: 0.001 }} helperText="Up to 3 decimal places." onChange={event => updatePhase(section.key, phase.key, { days: event.target.value })}/>
                   <TextField label="Phase remarks" value={phase.remarks} disabled={readOnly} inputProps={{ maxLength: 1000 }} onChange={event => updatePhase(section.key, phase.key, { remarks: event.target.value })}/>
                   {!readOnly && <Button color="error" size="small" aria-label="Remove phase" onClick={() => removePhase(section.key, phase.key)}><DeleteOutlineRounded fontSize="small"/></Button>}
                 </Box>

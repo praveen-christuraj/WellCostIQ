@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.precision import Decimal10
+from app.core.precision import Decimal3
 from app.schemas.entry_check import DailyCostEntryCheck
 
 # Classification (Planned / UPA / NPT) is no longer entered on daily cost
@@ -72,7 +72,7 @@ class DailyCostEntryCreate(_Strict):
     afe_id: str = Field(min_length=1, max_length=36)
     cost_date: date
     remarks: str = Field(default="", max_length=1000)
-    usd_exchange_rate: Decimal10 | None = Field(default=None, gt=0, le=Decimal("999999"))
+    usd_exchange_rate: Decimal3 | None = Field(default=None, gt=0, le=Decimal("999999"))
 
     @field_validator("well_id", "afe_id", "remarks", mode="before")
     @classmethod
@@ -112,13 +112,13 @@ class DailyCostLineInput(_Strict):
     sub_activity_id: str | None = Field(default=None, max_length=36)
     vendor_id: str | None = Field(default=None, max_length=36)
     party_name: str = Field(default="", max_length=200)
-    quantity: Decimal10 = Field(gt=0, le=Decimal("1000000"))
+    quantity: Decimal3 = Field(gt=0, le=Decimal("1000000"))
     currency: str = Field(default="", max_length=10)
-    exchange_rate: Decimal10 | None = Field(default=None, gt=0, le=Decimal("999999"))
-    actual_depth: Decimal10 | None = Field(default=None, ge=0, le=Decimal("999999999"))
+    exchange_rate: Decimal3 | None = Field(default=None, gt=0, le=Decimal("999999"))
+    actual_depth: Decimal3 | None = Field(default=None, ge=0, le=Decimal("999999999"))
     actual_depth_unit: Literal["m", "ft"] = "m"
     depth_seq: int | None = None
-    override_rate: Decimal10 | None = Field(default=None, ge=0, le=MAX_RATE)
+    override_rate: Decimal3 | None = Field(default=None, ge=0, le=MAX_RATE)
     override_reason: str = Field(default="", max_length=500)
     remarks: str = Field(default="", max_length=500)
 
@@ -160,7 +160,7 @@ class DailyCostLineInput(_Strict):
 
 class ServiceCostItemIn(BaseModel):
     description: str = Field(min_length=1, max_length=500)
-    amount: Decimal = Field(ge=0, max_digits=24, decimal_places=6)
+    amount: Decimal3 = Field(ge=0)
 
     @field_validator("description")
     @classmethod
@@ -217,7 +217,7 @@ class DailyCostOtherExpenseLineIn(DailyCostLineInput):
     expense_type: OtherExpenseType
     expense_description: str = Field(default="", max_length=300)
     quantity_unit: OtherExpenseUnit = "unit"
-    unit_rate: Decimal10 = Field(gt=0, le=MAX_RATE)
+    unit_rate: Decimal3 = Field(gt=0, le=MAX_RATE)
 
     @field_validator("expense_description", mode="before")
     @classmethod
@@ -241,11 +241,11 @@ class DailyCostOtherExpenseLineIn(DailyCostLineInput):
 
 class DailyCostSaveIn(_Strict):
     remarks: str = Field(default="", max_length=1000)
-    usd_exchange_rate: Decimal10 | None = Field(default=None, gt=0, le=Decimal("999999"))
+    usd_exchange_rate: Decimal3 | None = Field(default=None, gt=0, le=Decimal("999999"))
     # Lead / lag for this day's printed cost report. Entered and saved with the
     # register so it never has to be retyped at print time.
     lead_lag_kind: LeadLagKind = ""
-    lead_lag_days: Decimal10 | None = Field(default=None, ge=0, le=Decimal("1000000"))
+    lead_lag_days: Decimal3 | None = Field(default=None, ge=0, le=Decimal("1000000"))
     services: list[DailyCostServiceLineIn] = Field(default_factory=list, max_length=DAILY_COST_MAX_LINES)
     consumables: list[DailyCostConsumableLineIn] = Field(default_factory=list, max_length=DAILY_COST_MAX_LINES)
     tangibles: list[DailyCostTangibleLineIn] = Field(default_factory=list, max_length=DAILY_COST_MAX_LINES)

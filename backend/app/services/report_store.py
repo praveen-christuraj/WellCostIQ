@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.precision import DECIMAL_PLACES
 from app.api.deps import granted, owner as is_owner
 from app.models import (
     ReportDefinition,
@@ -58,7 +59,7 @@ def _apply_children(db: Session, record: ReportDefinition, design: dict, organiz
             related_key_column=item.get("related_key_column", "")[:120],
             formula=item.get("formula", "")[:2000],
             data_type=item["data_type"],
-            decimals=int(item.get("decimals", 2)),
+            decimals=min(DECIMAL_PLACES, int(item.get("decimals", DECIMAL_PLACES))),
             prefix=item.get("prefix", "")[:20],
             suffix=item.get("suffix", "")[:20],
             aggregate=item.get("aggregate", "NONE"),

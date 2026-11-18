@@ -10,7 +10,7 @@ const rule = `1px solid ${idvsSheet.ink}`
 
 const cellText = (cell: SheetCell) => cell.amount !== undefined ? formatAmount(cell.amount) : cell.quantity !== undefined ? formatPrecise(cell.quantity) : cell.text ?? ''
 /** The blank signing row keeps the same millimetre height as the PDF and XLSX outputs. */
-const signingSpace = (row: SheetRow) => row.heightMm ? { height: `${(row.heightMm * idvsSheet.pdfScale).toFixed(2)}mm`, lineHeight: 0 } : {}
+const signingSpace = (row: SheetRow) => row.heightMm ? { height: `${(row.heightMm * idvsSheet.pdfScale).toFixed(3)}mm`, lineHeight: 0 } : {}
 
 export function IdvsSheet({ invoice }: { invoice: InvoiceDetail }) {
   const sheet = useMemo(() => buildIdvsSheet(invoice), [invoice])

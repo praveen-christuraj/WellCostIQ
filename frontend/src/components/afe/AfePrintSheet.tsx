@@ -1,3 +1,4 @@
+import { DECIMAL_PLACES, DECIMAL_SCALE } from '../../lib/precision'
 import { createPortal } from 'react-dom'
 import { depthToMeters } from '../../lib/units'
 import { type AfeEstimate, type AfeStatusEvent, type CurrencySetup, type ServiceLineOut } from '../../lib/afe'
@@ -28,14 +29,14 @@ const daysText = (value: string | number | null | undefined): string => {
   const parsed = Number(value)
   return value === null || value === undefined || value === '' || !Number.isFinite(parsed)
     ? '—'
-    : `${parsed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} d`
+    : `${parsed.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} d`
 }
 
 const depthText = (value: string | number | null | undefined, unit: string): string => {
   const meters = depthToMeters(value, unit)
   return meters === null
     ? '—'
-    : `${meters.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m`
+    : `${meters.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m`
 }
 
 /** Labels arrive as "CODE · Name"; printed reports intentionally keep only the name. */
@@ -94,13 +95,13 @@ function basisDetail(line: ServiceLineOut) {
   </>
 }
 
-// Report-only subtotals use the saved, non-negative ten-place amounts and FX rates.
+// Report-only subtotals use the saved, non-negative three-place amounts and FX rates.
 // Convert each priced component and round half-up, just like the existing AFE summary;
 // adding native-currency line amounts together would give incorrect mixed-currency totals.
-const AMOUNT_SCALE = 10_000_000_000n
 const amountUnits = (value: string): bigint => {
   const [whole, fraction = ''] = value.split('.')
-  return BigInt(whole || '0') * AMOUNT_SCALE + BigInt(fraction.padEnd(10, '0'))
+  return BigInt(whole || '0') * DECIMAL_SCALE + BigInt(fraction.padEnd(DECIMAL_PLACES, '0').slice(0, DECIMAL_PLACES))
+    + (fraction[DECIMAL_PLACES] >= '5' ? 1n : 0n)
 }
 
 function costGroupTotal(lines: { amount: string; currency: string; components: { amount: string }[] }[], currency: CurrencySetup): string | null {
@@ -108,14 +109,14 @@ function costGroupTotal(lines: { amount: string; currency: string; components: {
   const rates = new Map(currency.exchange_rates.map(rate => [rate.currency_code, amountUnits(rate.rate)]))
   let total = 0n
   for (const line of lines) {
-    const factor = line.currency === currency.standard_currency ? AMOUNT_SCALE : rates.get(line.currency)
+    const factor = line.currency === currency.standard_currency ? DECIMAL_SCALE : rates.get(line.currency)
     if (factor === undefined) return null
     // Older payloads may have only the already-priced line amount.
     for (const component of line.components.length ? line.components : [line]) {
-      total += (amountUnits(component.amount) * factor + AMOUNT_SCALE / 2n) / AMOUNT_SCALE
+      total += (amountUnits(component.amount) * factor + DECIMAL_SCALE / 2n) / DECIMAL_SCALE
     }
   }
-  return `${total / AMOUNT_SCALE}.${String(total % AMOUNT_SCALE).padStart(10, '0')}`
+  return `${total / DECIMAL_SCALE}.${String(total % DECIMAL_SCALE).padStart(DECIMAL_PLACES, '0')}`
 }
 
 /**

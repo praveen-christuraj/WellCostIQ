@@ -26,7 +26,7 @@ export function SourceDialog({
   extract?: boolean
   report?: OpsReport
   onClose: () => void
-  onSaved: (report?: OpsReport) => void
+  onSaved: (report?: OpsReport, document?: OpsDocument) => void
 }) {
   const { can } = useAuth()
   const [folder, setFolder] = useState<Folder>(initial ?? { well_id: '', scope: 'drilling' })
@@ -40,9 +40,15 @@ export function SourceDialog({
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false)
   useEffect(() => {
+    // A just-opened folder may finish navigating while the dialog mounts.
+    // Prefill once without replacing a destination the operator chose.
+    if (initial?.well_id) setFolder((current) => (current.well_id ? current : initial))
+  }, [initial?.well_id, initial?.scope])
+  useEffect(() => {
     let current = true
     setDocId('')
     setDocs([])
+    setLoading(false)
     if (extract && mode === 'vault' && folder.well_id) {
       setLoading(true)
       listDocuments({ ...folder })
@@ -64,12 +70,13 @@ export function SourceDialog({
     setBusy(true)
     setError('')
     try {
-      let id = docId
+      let uploaded: OpsDocument | undefined
       if (mode === 'upload') {
-        for (const file of files) id = (await uploadDocument(file, { ...folder, document_type: type, document_date: day })).id
+        for (const file of files)
+          uploaded = await uploadDocument(file, { ...folder, document_type: type, document_date: day })
       }
-      if (extract) onSaved(await extractReport(id, day, report?.id))
-      else onSaved()
+      if (extract) onSaved(await extractReport(uploaded?.id ?? docId, day, report?.id))
+      else onSaved(undefined, uploaded)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -85,14 +92,28 @@ export function SourceDialog({
           ? 'Review the extracted measurements and time log before submitting. Existing time blocks are never replaced.'
           : 'The original file stays in this well and scope folder. Uploading does not create a daily report.'
       }
-      maxWidth="sm"
+      maxWidth={extract ? false : 'sm'}
       onClose={onClose}
       onSubmit={save}
       busy={busy}
+      busyLabel={extract ? 'Extracting for review…' : 'Uploading…'}
       submitLabel={extract ? 'Extract for review' : 'Upload'}
       submitDisabled={!folder.well_id || (mode === 'upload' ? !files.length || !type : !docId)}
     >
-      <Box display="grid" gap={2} pt={1}>
+      <Box
+        component="fieldset"
+        disabled={busy}
+        sx={{
+          border: 0,
+          p: 0,
+          pt: 1,
+          m: 0,
+          minWidth: 0,
+          display: 'grid',
+          gap: 2,
+          gridTemplateColumns: extract ? { xs: '1fr', md: 'repeat(2,minmax(0,1fr))' } : '1fr',
+        }}
+      >
         {!report && <FolderFields reference={reference} folder={folder} change={setFolder} />}
         {extract && can('ops-doc:upload') && (
           <TextField select label="Source" value={mode} onChange={(e) => setMode(e.target.value)}>
@@ -132,7 +153,7 @@ export function SourceDialog({
                 </MenuItem>
               ))}
             </TextField>
-            <Button variant="outlined" component="label">
+            <Button variant="outlined" component="label" disabled={busy}>
               Choose {extract ? 'PDF or Excel' : 'file'}
               <input
                 hidden
@@ -158,6 +179,13 @@ export function SourceDialog({
               : undefined
           }
         />
+        {busy && (
+          <Typography role="status">
+            {extract
+              ? 'Reading the source. The editable daily draft opens when extraction completes.'
+              : 'Filing the original documents…'}
+          </Typography>
+        )}
         {error && <Alert severity="error">{error}</Alert>}
       </Box>
     </FormDialog>

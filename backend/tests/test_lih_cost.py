@@ -161,7 +161,7 @@ def setup_well(client, headers, *, with_daily_sheet: bool = True) -> dict:
 def _line(**overrides):
     payload = {
         "item_description": "6 5/8 in drill collar",
-        "od_size": "6.625", "id_size": "2.8125", "fish_neck_od": "4.5", "fish_neck_length": "24",
+        "od_size": "6.625", "id_size": "2.813", "fish_neck_od": "4.5", "fish_neck_length": "24",
         "serial_number": "DC-0091", "connection": "NC50", "length": "9.5",
         "no_of_units": "2", "unit": "EA", "unit_cost": "1250.50", "remarks": "Left in hole while reaming",
     }
@@ -547,7 +547,7 @@ def test_lih_import_saves_rows_per_date_and_reports_row_errors_beside_the_row():
         reference = client.get("/api/v1/lih-cost/reference", headers=headers).json()
         suggestions = {item["item_description"]: item for item in reference["previous_items"]}
         assert "Drill pipe" in suggestions and "Completion packer" in suggestions
-        assert suggestions["Drill pipe"]["unit_cost"] == "100.0000000000"
+        assert suggestions["Drill pipe"]["unit_cost"] == "100.000"
         assert "serial_number" not in suggestions["Drill pipe"]
         assert len(suggestions) == len(reference["previous_items"])
 

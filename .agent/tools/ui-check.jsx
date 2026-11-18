@@ -33,13 +33,24 @@ const { buildTheme } = await import('../../frontend/src/theme')
 const { chartPalette } = await import('../../frontend/src/designSystem')
 const { newNdtLine } = await import('../../frontend/src/lib/ndtInspection')
 const { parseImportFile } = await import('../../frontend/src/lib/export')
-const { subtotalDifference } = await import('../../frontend/src/lib/invoiceCalculations')
+const { subtotalDifference, resolveExchangeRate } = await import('../../frontend/src/lib/invoiceCalculations')
+const { formatBusinessDecimal } = await import('../../frontend/src/lib/precision')
 const { default: writeXlsxFile } = await import('write-excel-file/node')
 const { FormDialog, PanelDialog, Tag, ErrorMessage } = await import('../../frontend/src/components/Common')
 const { InteractiveChart } = await import('../../frontend/src/components/ui/InteractiveChart')
 
 const results = []
 const check = (label, pass, detail = '') => results.push({ label, pass, detail })
+
+const groupedIntegral = new Intl.NumberFormat().format(9999999999999999n)
+const decimalSeparator = new Intl.NumberFormat().formatToParts(0.1).find(part => part.type === 'decimal').value
+check('Decimal formatting preserves large ledger values and uses half-up at three places',
+  formatBusinessDecimal('9999999999999999.007') === `${groupedIntegral}${decimalSeparator}007`
+    && formatBusinessDecimal('-0.0005') === `−0${decimalSeparator}001`)
+const inverseRate = rate => resolveExchangeRate('USD', 'NGN', [
+  { base_currency: 'USD', quote_currency: 'NGN', is_active: true, rate },
+])
+check('Invoice payment splits do not suggest a zero inverse rate', inverseRate('2000') === 0.001 && inverseRate('2000.001') === null)
 
 // crypto.randomUUID is unavailable in non-secure HTTP/LAN browser contexts.
 // Exercise the exact environment that previously crashed the NDT register.

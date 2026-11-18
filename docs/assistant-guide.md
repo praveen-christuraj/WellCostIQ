@@ -28,6 +28,8 @@ immediately and still displays the verified local answer.
   opens the same service and passes the current route, so that page's memory entry
   ranks first.
 
+- **Well Operations → Ask & guide** (`/operations/guide`) — a manual for rig/well folders, timeline study, daily extraction and review, printed code meanings, ROP and lead/lag. The manual shows only topics your role can read; asking a question also needs `assistant:read`. On an Operations page, the drawer uses the same curated topics. For instance, ask “What does workbook activity code 06 mean?” or “How is rotating ROP calculated?” Workflows and code answers remain deterministic even when model assistance is enabled elsewhere.
+
 ## What an answer contains
 
 Every answer is four things, so a figure can always be traced:

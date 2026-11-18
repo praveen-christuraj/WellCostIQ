@@ -550,8 +550,8 @@ function ColumnCard({ column, index, options, taken, last, updateColumn, removeC
         helperText={column.aggregate === 'NONE' ? 'One value per row' : aggregateLabel(column.aggregate)}>
         {aggregateOptions.map(aggregate => <MenuItem key={aggregate} value={aggregate}>{aggregateLabel(aggregate)}</MenuItem>)}
       </TextField>
-      <TextField size="small" label="Decimals" type="number" value={column.decimals} inputProps={{ min: 0, max: 8 }}
-        onChange={event => updateColumn(index, { decimals: Number(event.target.value) })} disabled={column.data_type !== 'number'}/>
+      <TextField size="small" label="Decimals" type="number" value={Math.min(3, column.decimals)} inputProps={{ min: 0, max: 3 }}
+        onChange={event => updateColumn(index, { decimals: Math.max(0, Math.min(3, Number(event.target.value))) })} disabled={column.data_type !== 'number'}/>
       <TextField size="small" label="Prefix" value={column.prefix} inputProps={{ maxLength: 20 }}
         onChange={event => updateColumn(index, { prefix: event.target.value })} placeholder="$"/>
       <TextField size="small" label="Suffix" value={column.suffix} inputProps={{ maxLength: 20 }}

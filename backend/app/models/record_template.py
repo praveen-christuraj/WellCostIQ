@@ -19,6 +19,7 @@ from uuid import uuid4
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.entities import now
 
@@ -198,8 +199,8 @@ class TemplateWellSection(Base):
     hole_section_id: Mapped[str] = mapped_column(String(36), nullable=False)
     section_code: Mapped[str] = mapped_column(String(60), default="", server_default="", nullable=False)
     section_name: Mapped[str] = mapped_column(String(200), default="", server_default="", nullable=False)
-    from_depth: Mapped[float] = mapped_column(Numeric(28, 10), default=0, server_default="0", nullable=False)
-    to_depth: Mapped[float] = mapped_column(Numeric(28, 10), default=0, server_default="0", nullable=False)
+    from_depth: Mapped[float] = mapped_column(Numeric(28, DECIMAL_PLACES), default=0, server_default="0", nullable=False)
+    to_depth: Mapped[float] = mapped_column(Numeric(28, DECIMAL_PLACES), default=0, server_default="0", nullable=False)
     depth_unit: Mapped[str] = mapped_column(String(4), default="m", server_default="m", nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
@@ -227,7 +228,7 @@ class TemplateWellPhase(Base):
     phase_id: Mapped[str] = mapped_column(String(36), nullable=False)
     phase_code: Mapped[str] = mapped_column(String(60), default="", server_default="", nullable=False)
     phase_name: Mapped[str] = mapped_column(String(200), default="", server_default="", nullable=False)
-    days: Mapped[float] = mapped_column(Numeric(28, 10), default=0, server_default="0", nullable=False)
+    days: Mapped[float] = mapped_column(Numeric(28, DECIMAL_PLACES), default=0, server_default="0", nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 

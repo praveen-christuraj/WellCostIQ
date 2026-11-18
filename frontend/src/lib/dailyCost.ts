@@ -356,14 +356,14 @@ export const DAILY_ONE_TIME_CATEGORIES: ChargeCategory[] = ['Mobilization', 'Dem
 export function dailyMoney(value: string | number | null | undefined, currency = ''): string {
   const amount = Number(value ?? 0)
   if (!Number.isFinite(amount)) return '—'
-  const formatted = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
+  const formatted = new Intl.NumberFormat(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(amount)
   return currency ? `${currency} ${formatted}` : formatted
 }
 
 /** A saved lead / lag is valid when a kind has a non-negative decimal value. */
 export function validLeadLagDays(kind: DailyLeadLagKind, days: string | null | undefined): boolean {
   if (!kind) return true
-  return /^\d+(?:\.\d{1,10})?$/.test((days ?? '').trim())
+  return /^\d+(?:\.\d{1,3})?$/.test((days ?? '').trim())
 }
 
 /** Printed lead / lag wording, e.g. "LEAD: 2.75 days", or "LEAD/LAG: 0 days". */

@@ -271,7 +271,7 @@ export function adjustmentDeltaText(value: string | number | null | undefined, c
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return '—'
   const sign = parsed > 0 ? '+' : ''
-  const text = `${sign}${parsed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const text = `${sign}${parsed.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
   return currency ? `${currency} ${text}` : text
 }
 

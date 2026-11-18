@@ -1165,7 +1165,7 @@ class BulkRevisionResult(BaseModel):
 def price_text(value: Any) -> str:
     """A price as an operator reads it: four decimals, trailing zeros trimmed.
 
-    Decimal columns carry ten decimals, so printing them raw would fill the
+    Decimal columns keep three fractional places, so printing them raw would fill the
     revision template with ``1250.0000000000``. The trailing ``.0000`` goes too,
     leaving a plain ``1250`` that can be typed straight back.
     """

@@ -11,7 +11,9 @@ from zipfile import ZipFile
 
 from openpyxl import load_workbook
 
+from app.core.precision import rounded
 from app.core.units import depth_to_meters
+from app.domain.operations.normalise import parse_date_flexible
 
 MAX_ITEMS = 2000
 
@@ -20,12 +22,22 @@ def key(value):
     return " ".join(re.findall(r"[a-z0-9]+", str(value or "").lower()))
 
 
-def number(value):
+def printed_token(value):
+    return str(value).strip() if value is not None else ''
+
+
+def number(value, *, precision=True):
     try:
-        n = Decimal(str(value).strip().replace(",", ""))
-        return n.quantize(Decimal("0.0000000001")) if n.is_finite() and abs(n) < 10**16 else None
+        n = Decimal(str(value).strip().replace(',', ''))
+        if not n.is_finite() or abs(n) >= 10**16:
+            return None
+        return rounded(n) if precision else n
     except (InvalidOperation, ValueError):
         return None
+
+
+def measured_depth(value, unit='m'):
+    return depth_to_meters(number(value, precision=False), unit)
 
 
 @contextmanager
@@ -55,6 +67,8 @@ def timeline_columns(row):
         k = key(val)
         if k in (
             "well programme",
+            "well program",
+            "activity description",
             "activity",
             "operation",
             "description",
@@ -64,7 +78,7 @@ def timeline_columns(row):
             "input lookahead",
         ):
             cols.setdefault("description", i)
-        if k.startswith(("target depth", "depth m", "depth md", "depth ft")) or k == "depth":
+        if k.startswith(("target depth", "depth m", "depth md", "depth ft", "target md")) or k == "depth":
             cols.setdefault("depth", i)
         if k in (
             "planned hours",
@@ -75,11 +89,19 @@ def timeline_columns(row):
             "time taken hr",
             "calc time hr",
             "time hr",
+            "duration hours",
+            "planned duration h",
+            "planned duration hours",
+            "duration hrs",
         ):
             cols.setdefault("hours", i)
+        if k in ('planned minutes', 'duration minutes', 'planned duration min', 'planned duration minutes'):
+            cols.setdefault('minutes', i)
+        if k in ('planned days', 'duration days', 'planned duration days'):
+            cols.setdefault('days', i)
         if k == "time for operational tracking hr":
             cols["hours"] = i
-    return cols if "description" in cols and "hours" in cols else None
+    return cols if "description" in cols and {"hours", "minutes", "days"}.intersection(cols) else None
 
 
 def timeline_preview(filename, content, sheet=""):
@@ -88,6 +110,7 @@ def timeline_preview(filename, content, sheet=""):
     def decode(rows, header_at, mapping):
         items, warnings = [], []
         header = rows[header_at]
+        duration_key = next(k for k in ('hours', 'minutes', 'days') if k in mapping)
         for idx, row in enumerate(rows[header_at + 1 :], header_at + 2):
             if any(key(c) in ("timeline summary", "total days", "total hours") for c in row[:5]):
                 break
@@ -99,14 +122,20 @@ def timeline_preview(filename, content, sheet=""):
             desc = str(cell("description") or "").strip()
             if not desc or key(desc) in ("total", "activity", "description"):
                 continue
-            hrs, depth = number(cell("hours")), number(cell("depth"))
+            hrs = number(cell(duration_key), precision=False)
+            if hrs is not None:
+                hrs = hrs / 60 if duration_key == 'minutes' else hrs * 24 if duration_key == 'days' else hrs
+            depth_unit = 'ft' if 'depth' in mapping and {'ft', 'feet'}.intersection(key(header[mapping['depth']]).split()) else 'm'
+            depth = measured_depth(cell('depth'), depth_unit)
             if hrs is None or hrs < 0:
                 warnings.append(
                     f"Row {idx}: enter planned hours; the cell is missing, invalid or has no cached formula result."
                 )
                 hrs = None
-            if depth is not None and "ft" in key(header[mapping["depth"]]).split():
-                depth = depth_to_meters(depth, "ft")
+            if hrs is not None:
+                hrs = rounded(hrs)
+            if depth is not None and depth < 0:
+                warnings.append(f'Row {idx}: target measured depth cannot be negative.')
             if len(desc) > 500:
                 warnings.append(f"Row {idx}: shorten the activity description to 500 characters before saving.")
             items.append(
@@ -188,7 +217,7 @@ def daily_workbook(content, day, boundary=0):
             if not summary:
                 raise ValueError("The mud report header was not recognised.")
             return {
-                "report_date": date_val.date() if isinstance(date_val, datetime) else None,
+                "report_date": date_val.date() if isinstance(date_val, datetime) else parse_date_flexible(str(date_val or '')),
                 "report_type": "DMR",
                 "well_name": str(fields.get("well name no") or ""),
                 "site": str(fields.get("field") or ""),
@@ -232,11 +261,14 @@ def daily_workbook(content, day, boundary=0):
         well_name = rig_name = ""
         warnings = []
         depth_col = col("depth end")
+        depth_start_col = col("depth start")
         bit_col = col("bit depth")
+        act_code_col = col("activity code")
+        rotation_col = col("rotating hours")
 
         def depth_value(row, i):
             return (
-                depth_to_meters(number(row[i]), "ft" if "ft" in header[i].split() else "m")
+                measured_depth(row[i], "ft" if "ft" in header[i].split() else "m")
                 if i is not None
                 else None
             )
@@ -261,15 +293,13 @@ def daily_workbook(content, day, boundary=0):
             cause = str(cell("cause") or "").strip()
             # 'Plan' and the PT/NPT allocation are distinct in these workbooks. E.g. a U row
             # can carry NPT hours for an equipment failure. Keep both until reviewed.
-            alloc = (
-                cause.upper()
-                if cause.upper() in ("UPA", "SP")
-                else (
-                    "NPT"
-                    if (number(cell("npt hrs")) or 0) > Decimal("0.0001")
-                    else ("PT" if (number(cell("pt hrs")) or 0) > Decimal("0.0001") else "")
-                )
-            )
+            npt = number(cell('npt hrs'), precision=False) or 0
+            pt = number(cell('pt hrs'), precision=False) or 0
+            alloc = cause.upper() if cause.upper() in ('UPA', 'SP') else ''
+            if npt > 0 and pt > 0:
+                warnings.append(f'Row {idx}: mixed PT and NPT hours. Split or reallocate this block during review.')
+            elif not alloc:
+                alloc = 'NPT' if npt > 0 else 'PT' if pt > 0 else ''
             blocks.append(
                 {
                     "start": max(a, begin),
@@ -280,10 +310,12 @@ def daily_workbook(content, day, boundary=0):
                     "cause": cause,
                     "operation": str(cell("operation") or ""),
                     "depth_to_m": depth_value(row, depth_col) if b <= finish else None,
+                    "depth_from_m": depth_value(row, depth_start_col) if a >= begin else None,
+                    "rotating_hours": number(row[rotation_col]) if rotation_col is not None and a >= begin and b <= finish else None,
                     "bit_depth_m": depth_value(row, bit_col) if b <= finish else None,
                     "phase_raw": str(cell("phase") or "")[:20],
                     "party": str(cell("agency") or ""),
-                    "code": str(cell("activity") or ""),
+                    "code": printed_token(row[act_code_col] if act_code_col is not None else cell("activity")),
                     "source": f"Summary row {idx}",
                 }
             )
@@ -316,7 +348,12 @@ def tabular_day(sheet, day, boundary):
                 "description": ("operation", "activity", "description", "narrative"),
                 "date": ("date", "report date"),
                 "mark": ("class", "classification", "plan"),
-                "depth": ("depth m", "depth ft", "end md m", "closing md m"),
+                "depth": ("depth m", "depth ft", "end md m", "end md ft", "closing md m", "closing md ft"),
+                "start_depth": ("start md m", "start md ft", "from md m", "from md ft"),
+                "rotation": ("rotating hours", "rotation hours"),
+                "operation": ("operation code",),
+                "cause": ("cause", "cause code"),
+                "allocation": ("allocation", "pt npt allocation"),
                 "phase": ("phase", "phase code"),
                 "code": ("activity code", "code"),
             }.items()
@@ -373,19 +410,28 @@ def tabular_day(sheet, day, boundary):
             raise ValueError(f"Row {n}: the end time must follow the start time.")
         if a >= end or z <= start:
             continue
-        depth = depth_to_meters(
-            number(cell("depth")), "ft" if cols["depth"] is not None and "ft" in h[cols["depth"]] else "m"
-        )
+        def depth(k):
+            return measured_depth(cell(k), 'ft' if cols[k] is not None and 'ft' in h[cols[k]].split() else 'm')
+
+        allocation = str(cell('allocation') or '').strip().upper()
+        if allocation and allocation not in ('PT', 'UPA', 'NPT', 'SP'):
+            warnings.append(f'Row {n}: unrecognised allocation {allocation[:30]}; check the source.')
+            allocation = ''
         blocks.append(
             {
                 "start": max(a, start),
                 "end": min(z, end),
                 "phase_raw": str(cell("phase") or ""),
-                "code": str(cell("code") or ""),
+                "code": printed_token(cell("code")),
                 "mark": str(cell("mark") or ""),
                 "source": f"{sheet.title} row {n}",
                 "narrative": str(cell("description") or "")[:5000],
-                "depth_to_m": depth if z <= end else None,
+                "depth_to_m": depth('depth') if z <= end else None,
+                "depth_from_m": depth('start_depth') if a >= start else None,
+                "rotating_hours": number(cell('rotation')) if a >= start and z <= end else None,
+                "allocation": allocation,
+                "operation": printed_token(cell('operation')),
+                "cause": printed_token(cell('cause')),
             }
         )
     if not blocks:

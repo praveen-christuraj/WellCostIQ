@@ -76,7 +76,7 @@ function amountForRate(rate: string, quantity: string, unit: string, basis?: str
     ? 1
     : Number(quantity) / (basis === 'Day Rate' && unit === 'hours' ? 24 : 1)
   const amount = Number(rate) * billableQuantity
-  return Number.isFinite(amount) ? amount.toFixed(2) : '—'
+  return Number.isFinite(amount) ? amount.toFixed(3) : '—'
 }
 
 export default function DailyCostSheet() {
@@ -892,7 +892,7 @@ export default function DailyCostSheet() {
     const delta = hasPreviewForEdits
       ? (previewActualByBudget.get(line.budget_key) ?? 0) - (savedActualByBudget.get(line.budget_key) ?? 0) : 0
     const actual = Number(line.actual_to_date) + delta
-    return { ...line, actual_to_date: actual.toFixed(2), balance: (Number(line.planned) - actual).toFixed(2) }
+    return { ...line, actual_to_date: actual.toFixed(3), balance: (Number(line.planned) - actual).toFixed(3) }
   })
   if (hasPreviewForEdits && preview) {
     const knownKeys = new Set(comparisonRows.map(line => line.budget_key))
@@ -916,7 +916,7 @@ export default function DailyCostSheet() {
         comparisonRows.push({
           budget_key: budgetKey, cost_group: group, budget_kind: budgetKey.split(':')[0],
           item_code: item.code, item_name: item.name, planned: '0.00',
-          actual_to_date: item.amount.toFixed(2), balance: (-item.amount).toFixed(2), is_planned: false,
+          actual_to_date: item.amount.toFixed(3), balance: (-item.amount).toFixed(3), is_planned: false,
         })
       }
     }
@@ -1202,7 +1202,7 @@ export default function DailyCostSheet() {
     const previous = savedGroup.reduce((sum, line) => sum + Number(line.standard_amount), 0)
     const current = lineGroup.reduce((sum, line) => sum + Number(line.standard_amount), 0)
     const initial = Number(day.comparison.groups.find(item => item.cost_group === group)?.actual_to_date ?? 0)
-    return (initial + current - previous).toFixed(2)
+    return (initial + current - previous).toFixed(3)
   }
 
   /**
@@ -1373,7 +1373,7 @@ export default function DailyCostSheet() {
           disabled={!editable || !payload.lead_lag_kind}
           onChange={event => setPayload(current => ({ ...current, lead_lag_days: event.target.value === '' ? null : event.target.value }))}
           error={leadLagInvalid}
-          inputProps={{ min: 0, step: '0.0000000001' }}
+          inputProps={{ min: 0, step: '0.001' }}
           helperText={leadLagInvalid ? 'Enter a non-negative value.' : 'Decimals allowed.'}
         />
         <Box>
@@ -1436,7 +1436,7 @@ export default function DailyCostSheet() {
           label={`1 ${standard.toUpperCase()} = ? USD`}
           value={payload.usd_exchange_rate ?? entry.usd_exchange_rate ?? '1'}
           onChange={event => setPayload(current => ({ ...current, usd_exchange_rate: event.target.value }))}
-          inputProps={{ min: 0.000001, step: 'any' }}
+          inputProps={{ min: 0.001, step: 0.001 }}
           sx={{ width: 210 }}
         />
         <Typography fontSize={12} fontWeight={800} color="primary">

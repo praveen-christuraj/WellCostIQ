@@ -26,6 +26,7 @@ from decimal import Decimal
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.rig_well import now, uid
 
@@ -95,12 +96,12 @@ class DailyCostItemProfile(Base):
     # from being repeated until the profile goes stale.
     sample_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     well_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    median_value: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    median_value: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     # Robust standard deviation of ln(value).
-    spread: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    low_value: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    high_value: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    spread: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    low_value: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    high_value: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     # The value that keeps recurring, when there is one.
-    common_value: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    common_value: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     last_observed_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

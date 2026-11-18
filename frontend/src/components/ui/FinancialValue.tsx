@@ -1,4 +1,5 @@
 import { Box, Typography } from '@mui/material'
+import { DECIMAL_PLACES, formatBusinessDecimal } from '../../lib/precision'
 
 /**
  * Money rendered with a stable reading order: currency code, then a tabular
@@ -13,12 +14,11 @@ export function moneyText(value: string | number | null | undefined, currency = 
   if (value === null || value === undefined || value === '') return '—'
   const amount = Number(value)
   if (!Number.isFinite(amount)) return '—'
-  const digits = options.digits ?? 2
-  const formatted = Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })
-  return `${amount < 0 ? '−' : ''}${currency ? `${currency} ` : ''}${formatted}`
+  const formatted = formatBusinessDecimal(value, options.digits ?? DECIMAL_PLACES)
+  return `${formatted.startsWith('−') ? '−' : ''}${currency ? `${currency} ` : ''}${formatted.replace(/^−/, '')}`
 }
 
-export function FinancialValue({ value, currency = '', digits = 2, size = 13, align = 'right', strong = false, mutedZero = false, title }: {
+export function FinancialValue({ value, currency = '', digits = DECIMAL_PLACES, size = 13, align = 'right', strong = false, mutedZero = false, title }: {
   value: string | number | null | undefined
   currency?: string
   digits?: number

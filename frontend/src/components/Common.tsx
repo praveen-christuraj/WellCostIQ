@@ -73,7 +73,7 @@ export function FormDialog({ open, title, subtitle, onClose, onSubmit, busy, bus
   busyLabel?: string
   children: ReactNode
   submitLabel?: string
-  maxWidth?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+  maxWidth?: false | 'xs' | 'sm' | 'md' | 'lg' | 'xl'
   submitDisabled?: boolean
   danger?: boolean
   /** Precise unsaved-data flag from the page. When omitted, any user input inside the dialog marks it dirty. */
@@ -102,7 +102,8 @@ export function FormDialog({ open, title, subtitle, onClose, onSubmit, busy, bus
 
   // Cancel keeps the data: with input present it first asks whether to save it.
   const requestClose = () => {
-    if (isDirty && !busy) setConfirmOpen(true)
+    if (busy) return
+    if (isDirty) setConfirmOpen(true)
     else onClose()
   }
 
@@ -127,7 +128,7 @@ export function FormDialog({ open, title, subtitle, onClose, onSubmit, busy, bus
       </Box>
     </DialogContent>
     <DialogActions sx={{ px: 3, py: 1.75, gap: 1, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
-      <Button onClick={requestClose} color="inherit">Cancel</Button>
+      <Button onClick={requestClose} color="inherit" disabled={busy}>Cancel</Button>
       <Button
         onClick={onSubmit}
         variant="contained"
@@ -255,7 +256,7 @@ export function ErrorMessage({ message }: { message: string }) {
 
 // Same rule as FormDialog for panels that are not a single submit form (attachments,
 // revision history): no backdrop or Escape close, no close icon, footer button only.
-export function PanelDialog({ open, title, subtitle, onClose, footer, children, maxWidth = 'lg' }: { open: boolean; title: string; subtitle?: string; onClose: () => void; footer?: ReactNode; children: ReactNode; maxWidth?: 'sm' | 'md' | 'lg' }) {
+export function PanelDialog({ open, title, subtitle, onClose, footer, children, maxWidth = 'lg' }: { open: boolean; title: string; subtitle?: string; onClose: () => void; footer?: ReactNode; children: ReactNode; maxWidth?: false | 'sm' | 'md' | 'lg' }) {
   const titleId = useId()
   const subtitleId = useId()
   const theme = useTheme()

@@ -46,7 +46,7 @@ const WHITE = '#FFFFFF'
 const BAND = '#EDF3F4'
 const HAIRLINE = '#D6DEE2'
 
-const numeric = (value: string | number | null | undefined, format = '#,##0.00;-#,##0.00'): Cell => ({
+const numeric = (value: string | number | null | undefined, format = '#,##0.000;-#,##0.000'): Cell => ({
   value: value === null || value === undefined || value === '' ? null : Number(value),
   type: Number,
   format,
@@ -230,17 +230,17 @@ export function matrixSheet(matrix: MatrixWorkbook): WorkbookSheet {
     for (const well of matrix.wells) {
       for (const section of well.sections) {
         const cell = item.cells[well.wellId]?.[section.key]
-        if (matrix.withQuantity) row.push(numeric(cell?.quantity, '#,##0.####'))
+        if (matrix.withQuantity) row.push(numeric(cell?.quantity, '#,##0.###'))
         row.push(numeric(cell?.amount))
       }
       const totals = Object.values(item.cells[well.wellId] ?? {}).reduce(
         (sum, cell) => ({ quantity: sum.quantity + Number(cell.quantity || 0), amount: sum.amount + Number(cell.amount || 0) }),
         { quantity: 0, amount: 0 },
       )
-      if (matrix.withQuantity) row.push(numeric(totals.quantity, '#,##0.####'))
+      if (matrix.withQuantity) row.push(numeric(totals.quantity, '#,##0.###'))
       row.push(numeric(totals.amount))
     }
-    if (matrix.withQuantity) row.push(numeric(item.quantityTotal, '#,##0.####'))
+    if (matrix.withQuantity) row.push(numeric(item.quantityTotal, '#,##0.###'))
     row.push(numeric(item.amountTotal))
     rows.push(row)
   }
@@ -260,14 +260,14 @@ export function matrixSheet(matrix: MatrixWorkbook): WorkbookSheet {
         },
         { quantity: 0, amount: 0 },
       )
-      if (matrix.withQuantity) totalRow.push({ ...numeric(cellTotals.quantity, '#,##0.####'), fontWeight: 'bold', backgroundColor: BAND })
+      if (matrix.withQuantity) totalRow.push({ ...numeric(cellTotals.quantity, '#,##0.###'), fontWeight: 'bold', backgroundColor: BAND })
       totalRow.push({ ...numeric(cellTotals.amount), fontWeight: 'bold', backgroundColor: BAND })
     }
     const wellTotal = matrix.wellTotals[well.wellId]
-    if (matrix.withQuantity) totalRow.push({ ...numeric(wellTotal?.quantity ?? 0, '#,##0.####'), fontWeight: 'bold', backgroundColor: BAND })
+    if (matrix.withQuantity) totalRow.push({ ...numeric(wellTotal?.quantity ?? 0, '#,##0.###'), fontWeight: 'bold', backgroundColor: BAND })
     totalRow.push({ ...numeric(wellTotal?.amount ?? 0), fontWeight: 'bold', backgroundColor: BAND })
   }
-  if (matrix.withQuantity) totalRow.push({ ...numeric(matrix.grandQuantity, '#,##0.####'), fontWeight: 'bold', backgroundColor: BAND })
+  if (matrix.withQuantity) totalRow.push({ ...numeric(matrix.grandQuantity, '#,##0.###'), fontWeight: 'bold', backgroundColor: BAND })
   totalRow.push({ ...numeric(matrix.grandAmount), fontWeight: 'bold', backgroundColor: BAND })
   rows.push(totalRow)
 

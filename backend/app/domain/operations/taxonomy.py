@@ -5,6 +5,6 @@ import re
 
 def code_key(value):
     """Normalise e.g. '02' and '[2]' for lookup against the workspace's code library."""
-    text = str(value or "").strip().casefold()
-    match = re.fullmatch(r"[\[(]?0*(\d+)[\])]?", text)
-    return (match[1].lstrip("0") or "0") if match else text
+    text = " ".join(str(value if value is not None else "").strip().casefold().split())
+    match = re.fullmatch(r"(?:\[\s*(\d+)\s*\]|\(\s*(\d+)\s*\)|(\d+))", text)
+    return (next(g for g in match.groups() if g is not None).lstrip("0") or "0") if match else text

@@ -43,6 +43,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.precision import DECIMAL_QUANT
 from app.models import (
     FuelCompany,
     FuelCompanyCategory,
@@ -90,7 +91,6 @@ from app.schemas.fuel_cost import (
 )
 from app.services import audit
 
-TEN_PLACES = Decimal("0.0000000001")
 ZERO = Decimal("0")
 MAX_IMPORT_ERRORS = 200
 UNCATEGORISED_KEY = "__none__"
@@ -98,11 +98,11 @@ UNCATEGORISED_LABEL = "Uncategorised"
 
 
 def _quantity(value: Decimal | int | str | None) -> Decimal:
-    return Decimal(value or 0).quantize(TEN_PLACES, rounding=ROUND_HALF_UP)
+    return Decimal(value or 0).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
 
 
 def _litres_text(value: Decimal | int | str | None) -> str:
-    return f"{_quantity(value):,.2f}"
+    return f"{_quantity(value):,.3f}"
 
 
 def _actor_name(user: User) -> str:

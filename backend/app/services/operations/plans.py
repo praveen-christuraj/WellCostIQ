@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.core.precision import rounded
 from app.domain.operations.durations import utc
 from app.models import User
 from app.models.operations import OpsPlanItem, OpsPlanVersion
@@ -49,17 +50,20 @@ def list_plans(
     return rows
 
 
-def get_plan(db: Session, organization_id: str, plan_id: str, *, lock=False):
+def get_plan(db: Session, organization_id: str, plan_id: str, *, lock=False, include_deleted=False):
     q = select(OpsPlanVersion).where(
         OpsPlanVersion.id == plan_id,
         OpsPlanVersion.organization_id == organization_id,
-        OpsPlanVersion.is_deleted.is_(False),
     )
+    if not include_deleted:
+        q = q.where(OpsPlanVersion.is_deleted.is_(False))
     row = db.scalar(q.with_for_update() if lock else q)
     if not row:
         raise HTTPException(404, "Plan not found")
     items = db.scalars(
-        select(OpsPlanItem).where(OpsPlanItem.plan_version_id == row.id).order_by(OpsPlanItem.sequence_no)
+        select(OpsPlanItem)
+        .where(OpsPlanItem.organization_id == organization_id, OpsPlanItem.plan_version_id == row.id)
+        .order_by(OpsPlanItem.sequence_no)
     ).all()
     row._items = items  # type: ignore
     well = db.get(Well, row.well_id)
@@ -157,8 +161,8 @@ def _write_items(db, org, plan, items, existing, user, request):
     hours = Decimal(0)
     for it in sorted(existing, key=lambda i: i.sequence_no):
         hours += it.planned_hours
-        it.cum_planned_days = hours / 24
-    plan.planned_days = hours / 24
+        it.cum_planned_days = rounded(hours / 24)
+    plan.planned_days = rounded(hours / 24)
     plan.updated_by = user.email
     audit_record(
         db,

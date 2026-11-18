@@ -90,7 +90,7 @@ def _f(value) -> float | None:
     return float(value) if value is not None else None
 
 
-def _round(value: float | None, places: int = 2) -> float | None:
+def _round(value: float | None, places: int = 3) -> float | None:
     return round(value, places) if value is not None else None
 
 
@@ -376,7 +376,7 @@ def _build_breakdown(well: domain.WellInput, analysis: domain.WellAnalysis) -> I
     cost_groups: list[IntelligenceGroupBreakdown] = []
     for group in well.groups:
         planned = _round(group.planned)
-        actual = round(group.actual, 2)
+        actual = round(group.actual, 3)
         balance = _round(group.planned - group.actual) if group.planned is not None else None
         util = _round(group.actual / group.planned * 100, 1) if group.planned and group.planned > 0 else None
         share = _round(group.actual / total_actual * 100, 1) if total_actual > 0 else None
@@ -387,8 +387,8 @@ def _build_breakdown(well: domain.WellInput, analysis: domain.WellAnalysis) -> I
     sections = [
         IntelligenceSectionBreakdown(
             section_code=sec.section_code, section_name=sec.section_name, scope=sec.scope,
-            planned_days=_round(sec.planned_days, 2), active_days=sec.active_days,
-            amount=round(sec.amount, 2), share_percent=_round(sec.share_percent, 1),
+            planned_days=_round(sec.planned_days, 3), active_days=sec.active_days,
+            amount=round(sec.amount, 3), share_percent=_round(sec.share_percent, 1),
         )
         for sec in well.sections
         if sec.amount > 0 or sec.active_days > 0 or (sec.planned_days or 0) > 0
@@ -397,7 +397,7 @@ def _build_breakdown(well: domain.WellInput, analysis: domain.WellAnalysis) -> I
         IntelligenceActivityBreakdown(
             activity_code=act.activity_code, activity_name=act.activity_name,
             classification=act.classification, active_days=act.active_days,
-            amount=round(act.amount, 2), share_percent=_round(act.share_percent, 1),
+            amount=round(act.amount, 3), share_percent=_round(act.share_percent, 1),
         )
         for act in sorted(well.activities, key=lambda item: -item.amount)[:15]
     ]
@@ -427,8 +427,8 @@ def _build_breakdown(well: domain.WellInput, analysis: domain.WellAnalysis) -> I
         act_pct = f" ({act.share_percent:.1f}%)" if act.share_percent is not None else ""
         top_driver += f" · Top activity: {act.activity_name or act.activity_code} {domain.money(act.amount, well.currency)}{act_pct}"
     unit_economics = IntelligenceUnitEconomics(
-        operational_actual=round(operational_actual, 2),
-        tangible_actual=round(tangible_actual, 2),
+        operational_actual=round(operational_actual, 3),
+        tangible_actual=round(tangible_actual, 3),
         tangible_afe=_round(tangible_afe),
         tangible_utilisation_percent=_round(tangible_actual / tangible_afe * 100, 1) if tangible_afe else None,
         tangible_booking_dates=tangible_days,
@@ -438,11 +438,11 @@ def _build_breakdown(well: domain.WellInput, analysis: domain.WellAnalysis) -> I
         actual_depth=_round(well.actual_depth),
         planned_depth=_round(well.planned_depth),
         depth_progress_percent=_round(well.depth_progress_percent, 1),
-        burn_efficiency_index=_round(cpi, 2),
-        upa_amount=round(well.upa_amount or 0.0, 2),
+        burn_efficiency_index=_round(cpi, 3),
+        upa_amount=round(well.upa_amount or 0.0, 3),
         upa_share_percent=_round((well.upa_amount or 0.0) / total_actual * 100, 1) if total_actual > 0 and well.upa_amount else None,
-        npt_days=_round(well.npt_days, 2),
-        upa_days=_round(well.upa_days, 2),
+        npt_days=_round(well.npt_days, 3),
+        upa_days=_round(well.upa_days, 3),
         top_cost_driver=top_driver,
     )
     return IntelligenceWellBreakdown(
@@ -469,17 +469,17 @@ def well_detail(
         running += day.actual
         days.append(IntelligenceDay(
             cost_date=day.cost_date,
-            actual=round(day.actual, 2),
-            operational=round(day.operational, 2),
-            tangibles=round(day.tangibles, 2),
-            services=round(day.services, 2),
-            consumables=round(day.consumables, 2),
-            other_expenses=round(day.other_expenses, 2),
+            actual=round(day.actual, 3),
+            operational=round(day.operational, 3),
+            tangibles=round(day.tangibles, 3),
+            services=round(day.services, 3),
+            consumables=round(day.consumables, 3),
+            other_expenses=round(day.other_expenses, 3),
             tangible_booking_day=day.tangibles > 0,
-            cumulative=round(running, 2),
-            npt=round(day.npt, 2),
-            baseline=round(drift.baseline, 2) if drift.available else None,
-            planned_cumulative=round(min(planned_daily * (index + 1), well.afe_amount or 0), 2) if planned_daily else None,
+            cumulative=round(running, 3),
+            npt=round(day.npt, 3),
+            baseline=round(drift.baseline, 3) if drift.available else None,
+            planned_cumulative=round(min(planned_daily * (index + 1), well.afe_amount or 0), 3) if planned_daily else None,
             cusum_up=drift.upper[index] if drift.available else None,
             cusum_down=drift.lower[index] if drift.available else None,
             spike=index in spikes,
@@ -494,8 +494,8 @@ def well_detail(
             centre = spent + outlook.recent_daily * step + tangible_bump
             band = spread * (step ** 0.5)
             projection.append(IntelligenceProjection(
-                cost_date=well.days[-1].cost_date + timedelta(days=step), estimate=round(centre, 2),
-                low=round(max(spent, centre - band), 2), high=round(centre + band, 2),
+                cost_date=well.days[-1].cost_date + timedelta(days=step), estimate=round(centre, 3),
+                low=round(max(spent, centre - band), 3), high=round(centre + band, 3),
             ))
     breakdown = _build_breakdown(well, analysis)
     notes = list(detail.notes)
@@ -514,7 +514,7 @@ def well_detail(
     return IntelligenceWellDetail(
         well=_well_out(detail.well, analysis), findings=[_finding_out(item) for item in analysis.findings],
         days=days, projection=projection, missing_dates=analysis.missing_dates, cusum_limit=domain.CUSUM_LIMIT,
-        drift_baseline=round(drift.baseline, 2) if drift.available else None,
+        drift_baseline=round(drift.baseline, 3) if drift.available else None,
         drift_start=well.days[min(drift.start_index, len(well.days) - 1)].cost_date
         if drift.start_index is not None and well.days else None,
         drift_direction=drift.direction, breakdown=breakdown, notes=notes,

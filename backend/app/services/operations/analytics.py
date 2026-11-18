@@ -142,17 +142,17 @@ def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, da
             "submitted_reports": counts["submitted"],
             "approved_reports": counts["approved"],
             "reports_awaiting_review": sum(r.extraction_status == "needs_review" for r in reports),
-            "total_logged_hours": round(total / 60, 2),
-            "planned_hours": round(logged["Planned"] / 60, 2),
-            "npt_hours": round(logged["NPT"] / 60, 2),
-            "upa_hours": round(logged["UPA"] / 60, 2),
-            "unaccounted_hours": round(unaccounted / 60, 2),
-            "productive_hours": round(productive / 60, 2),
-            "nonproductive_hours": round((total - productive) / 60, 2),
-            "allocation_hours": {k: round(allocations[k] / 60, 2) for k in ("PT", "UPA", "NPT", "SP")},
+            "total_logged_hours": round(total / 60, 3),
+            "planned_hours": round(logged["Planned"] / 60, 3),
+            "npt_hours": round(logged["NPT"] / 60, 3),
+            "upa_hours": round(logged["UPA"] / 60, 3),
+            "unaccounted_hours": round(unaccounted / 60, 3),
+            "productive_hours": round(productive / 60, 3),
+            "nonproductive_hours": round((total - productive) / 60, 3),
+            "allocation_hours": {k: round(allocations[k] / 60, 3) for k in ("PT", "UPA", "NPT", "SP")},
             "productive_pct": round(100 * productive / total, 1) if total else 0,
             "npt_pct": round(100 * logged["NPT"] / total, 1) if total else 0,
-            "avg_rop": round(gain / hours, 2) if hours else None,
+            "avg_rop": round(gain / hours, 3) if hours else None,
             "lag_days": lag,
             "wells_covered": len({r.well_id for r in reports}),
             "wells_total": sum(
@@ -163,18 +163,18 @@ def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, da
         "recent_reports": reports[:10],
         "missing_reports": _gaps(db, organization_id, wells, reports, scope, date_from, date_to),
         "npt_by_code": [
-            {"code": k, "name": k, "minutes": v, "hours": round(v / 60, 2)} for k, v in by_code.most_common(10)
+            {"code": k, "name": k, "minutes": v, "hours": round(v / 60, 3)} for k, v in by_code.most_common(10)
         ],
         "npt_by_agency": [
-            {"agency": k, "minutes": v, "hours": round(v / 60, 2)} for k, v in by_agency.most_common(10)
+            {"agency": k, "minutes": v, "hours": round(v / 60, 3)} for k, v in by_agency.most_common(10)
         ],
         "daily_trend": [
             {
                 "date": d.isoformat(),
-                "logged_hours": round(sum(c.values()) / 60, 2),
-                "planned_hours": round(c["Planned"] / 60, 2),
-                "npt_hours": round(c["NPT"] / 60, 2),
-                "upa_hours": round(c["UPA"] / 60, 2),
+                "logged_hours": round(sum(c.values()) / 60, 3),
+                "planned_hours": round(c["Planned"] / 60, 3),
+                "npt_hours": round(c["NPT"] / 60, 3),
+                "upa_hours": round(c["UPA"] / 60, 3),
             }
             for d, c in sorted(trends.items())
         ],
@@ -272,7 +272,7 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
         rop = compute_rop(*penetration(r, blocks[r.id]))
         actual.append(
             {
-                "cum_days": elapsed,
+                "cum_days": round(elapsed, 3),
                 "depth_m": depth,
                 "report_date": str(r.report_date),
                 "label": r.report_no_text,
@@ -303,7 +303,7 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
             days = (target["depth_m"] - last["depth_m"]) / last["rop"] / 24
             projection = [
                 last,
-                {"cum_days": last["cum_days"] + days, "depth_m": target["depth_m"], "label": "Next deeper target"},
+                {"cum_days": round(last["cum_days"] + days, 3), "depth_m": target["depth_m"], "label": "Next deeper target"},
             ]
     return {
         "plan": plan,

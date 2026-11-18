@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.precision import Decimal10
+from app.core.precision import Decimal3
 from app.domain.mud_cost import (
     MUD_COST_LINE_BY_CODE,
     MUD_COST_LINE_CODES,
@@ -18,7 +18,7 @@ MudCostCategory = Literal[
 MudCostBalanceView = Literal["daily", "monthly", "section", "inception"]
 MudCostLossView = Literal["daily", "monthly", "section", "inception"]
 MudCostMudType = Literal["WBM", "OBM", "SOBM", "OTHERS"]
-MAX_QUANTITY = Decimal("999999999999999.9999999999")
+MAX_QUANTITY = Decimal("999999999999999.999")
 
 
 def _trim(value: Any) -> Any:
@@ -31,7 +31,7 @@ class _Strict(BaseModel):
 
 class MudCostLineIn(_Strict):
     line_code: str = Field(min_length=1, max_length=50)
-    amount: Decimal10 | None = Field(default=None, ge=0, le=MAX_QUANTITY)
+    amount: Decimal3 | None = Field(default=None, ge=0, le=MAX_QUANTITY)
     remarks: str = Field(default="", max_length=500)
 
     @field_validator("line_code", "remarks", mode="before")
@@ -55,7 +55,7 @@ class MudCostLineIn(_Strict):
 
 
 class MudCostOpeningStockIn(_Strict):
-    amount: Decimal10 = Field(ge=0, le=MAX_QUANTITY)
+    amount: Decimal3 = Field(ge=0, le=MAX_QUANTITY)
     remarks: str = Field(default="", max_length=500)
 
 
@@ -302,7 +302,7 @@ class MudCostSectionSettingIn(_Strict):
     section_id: str = Field(min_length=1, max_length=36)
     mud_type: MudCostMudType
     remarks: str = Field(default="", max_length=500)
-    base_rate: Decimal10 | None = Field(default=None, ge=0, le=MAX_QUANTITY)
+    base_rate: Decimal3 | None = Field(default=None, ge=0, le=MAX_QUANTITY)
 
     @field_validator("rig_id", "well_id", "section_id", "remarks", mode="before")
     @classmethod

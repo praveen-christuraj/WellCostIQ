@@ -315,7 +315,7 @@ export function formatMoney(value: string | number | null | undefined, currency 
   if (value === null || value === undefined || value === '') return '—'
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return '—'
-  const text = parsed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const text = parsed.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
   return currency ? `${text} ${currency}` : text
 }
 
@@ -324,7 +324,7 @@ export function formatQuantity(value: string | number | null | undefined): strin
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return '—'
   if (parsed === 0) return '0'
-  return parsed.toLocaleString(undefined, { maximumFractionDigits: 4 })
+  return parsed.toLocaleString(undefined, { maximumFractionDigits: 3 })
 }
 
 export function formatDateText(value: string | null): string {
@@ -446,7 +446,7 @@ export function detailWorkbook(report: UsageMatrix): import('./matrixWorkbook').
         if (column.numeric) {
           return {
             value: value === null || value === undefined || value === '' ? null : Number(value),
-            type: Number, format: column.key === 'quantity' ? '#,##0.####' : '#,##0.00;-#,##0.00',
+            type: Number, format: column.key === 'quantity' ? '#,##0.###' : '#,##0.000;-#,##0.000',
             align: 'right' as const, borderStyle: 'thin' as const, borderColor: '#D6DEE2',
           }
         }
