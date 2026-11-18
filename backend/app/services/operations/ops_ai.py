@@ -32,6 +32,7 @@ from app.core.precision import rounded
 from app.core.time import WAT_LABEL, format_wat, wat_now
 from app.domain.operations.default_codes import describe_code, find_code
 from app.domain.operations.dnc_knowledge import DNC_CORE_PRIMER, format_dnc_context
+from app.domain.operations.reference_knowledge import format_reference_context
 from app.domain.operations.metrics import compute_rop, penetration
 from app.domain.operations.taxonomy import code_key
 from app.models import User
@@ -171,6 +172,20 @@ def _match_wells_in_question(db: Session, org_id: str, question: str) -> list[We
     return unique
 
 
+def schedule_label(days: Any) -> str:
+    """One phrase for schedule position: positive is a lead, negative a lag."""
+    if days is None or days == "":
+        return "schedule position unavailable"
+    value = float(days)
+    if value == 0:
+        return "on baseline"
+    return f"{abs(value):,.3f} d {'lead' if value > 0 else 'lag'}"
+
+
+def schedule_sentence(days: Any) -> str:
+    return f"schedule position {schedule_label(days)} versus the active timeline."
+
+
 def _fmt_num(val: Any, suffix: str = "") -> str:
     if val is None or val == "":
         return "—"
@@ -289,7 +304,7 @@ def answer_ops_database(
                     _fmt_num(k["total_logged_hours"], " h"),
                     f"{_fmt_num(k['npt_hours'], ' h')} ({k['npt_pct']}%)",
                     _fmt_num(k["avg_rop_m_per_hr"], " m/h"),
-                    _fmt_num(k["lag_days"], " d"),
+                    schedule_label(k["lag_days"]),
                 ]
             )
             facts.append(
@@ -409,7 +424,7 @@ def answer_ops_database(
             AssistantFact(
                 label="NPT",
                 value=f"{_fmt_num(k['npt_hours'], ' h')} ({k['npt_pct']}%)",
-                hint=f"SP {_fmt_num(k['sp_hours'], ' h')} · Schedule lag {_fmt_num(k['lag_days'], ' d')}",
+                hint=f"SP {_fmt_num(k['sp_hours'], ' h')} · {schedule_label(k['lag_days'])}",
                 route=f"/operations/summary?well_id={well.id}",
                 permission="ops-report:read",
             ),
@@ -503,7 +518,7 @@ def answer_ops_database(
             f"Logged time totals {_fmt_num(k['total_logged_hours'], ' h')} ({_fmt_num(k['cum_logged_days'], ' days')}): "
             f"Planned {_fmt_num(k['planned_hours'], ' h')}, UPA {_fmt_num(k['upa_hours'], ' h')}, "
             f"NPT {_fmt_num(k['npt_hours'], ' h')} ({k['npt_pct']}%), Productive {k['productive_pct']}%"
-            + (f", schedule lag {_fmt_num(k['lag_days'], ' days')}." if k.get("lag_days") is not None else ".")
+            + (f", {schedule_sentence(k['lag_days'])}" if k.get("lag_days") is not None else ".")
             + (" " + " · ".join(extra_bits) + "." if extra_bits else "")
         )
         return AssistantAnswer(
@@ -606,7 +621,7 @@ def answer_ops_database(
         AssistantFact(
             label="Avg ROP & Lag",
             value=f"{_fmt_num(k['avg_rop'], ' m/h')}",
-            hint=f"Lag {_fmt_num(k['lag_days'], ' d')} · Wells covered {k['wells_covered']}/{k['wells_total']}",
+            hint=f"{schedule_label(k['lag_days'])} · Wells covered {k['wells_covered']}/{k['wells_total']}",
             route="/operations/analytics",
             permission="ops-report:read",
         ),
@@ -688,6 +703,10 @@ def build_ops_context_block(
     sections: list[str] = []
     if include_dnc_primer:
         sections.append(format_dnc_context(question, max_entries=2))
+        # The supplied glossary and abbreviation study material, matched to what was
+        # actually asked. It names the family of a printed code so "06" is never
+        # silently read as the activity code when the question meant the operation code.
+        sections.append(format_reference_context(question))
 
     can_reports = _can(permissions, "ops-report:read")
     can_plans = _can(permissions, "ops-plan:read")
@@ -702,7 +721,7 @@ def build_ops_context_block(
             f"draft={k['draft_reports']}, awaiting_review={k['reports_awaiting_review']}), wells_covered={k['wells_covered']}/{k['wells_total']}",
             f"- Verified hours: logged={k['total_logged_hours']}h, planned={k['planned_hours']}h, upa={k['upa_hours']}h, "
             f"npt={k['npt_hours']}h ({k['npt_pct']}%), productive={k['productive_pct']}%, SP={k['allocation_hours'].get('SP', 0)}h, "
-            f"avg_ROP={_fmt_num(k['avg_rop'], ' m/h')}, lag={_fmt_num(k['lag_days'], ' d')}",
+            f"avg_ROP={_fmt_num(k['avg_rop'], ' m/h')}, {schedule_label(k['lag_days'])}",
         ]
         npt_total_h = float(k["npt_hours"] or 0)
         if dash["npt_by_code"]:
@@ -758,7 +777,7 @@ def build_ops_context_block(
                 f"RotHrs={_fmt_num(wk['total_rotating_hours'], 'h')}, AvgROP={_fmt_num(wk['avg_rop_m_per_hr'], 'm/h')}",
                 f"- Time: Logged={wk['total_logged_hours']}h ({wk['cum_logged_days']}d), Planned={wk['planned_hours']}h, "
                 f"UPA={wk['upa_hours']}h, NPT={wk['npt_hours']}h ({wk['npt_pct']}%), SP={wk['sp_hours']}h, "
-                f"Productive={wk['productive_pct']}%, PlannedDays={_fmt_num(wk['planned_days'], 'd')}, Lag={_fmt_num(wk['lag_days'], 'd')}",
+                f"Productive={wk['productive_pct']}%, PlannedDays={_fmt_num(wk['planned_days'], 'd')}, {schedule_label(wk['lag_days'])}",
                 f"- Wellbore: Section={d['latest_hole_section'] or '—'}, Casing={d['last_casing'] or '—'}, "
                 f"Fluid={d['latest_mud'] or '—'}, BHA={d['latest_bha'] or '—'}, POB={wk['latest_pob'] or '—'}",
             ]
@@ -809,7 +828,7 @@ def build_ops_context_block(
         )
         sections.append(f"FILED OPERATION DOCUMENTS: {doc_count} active file(s).")
 
-    return "\n\n".join(sections)[:5600]
+    return "\n\n".join(sections)[:7000]
 
 
 def enrich_operations_answer(
@@ -1099,12 +1118,16 @@ def generate_report_narratives(
         )
     if focus:
         lines.append(f"ENGINEER FOCUS NOTE: {focus[:300]}")
+    # Keep the professional vocabulary of the supplied glossary in view while the
+    # narrative is written, so "wiper trip" and "bridge plug" are used precisely.
+    reference_context = format_reference_context("\n".join(lines)[-2000:])
 
     db.rollback()
     system_prompt = (
         "You are a senior Drilling & Completion Operations Engineer drafting daily report narratives from verified "
         "OpenWells / DMR / Operations Summary extractions.\n"
         f"{DNC_CORE_PRIMER}\n"
+        f"{reference_context[:1800]}\n"
         "STRICT RULES:\n"
         "1. Use ONLY the facts, clocks (WAT), depths (m MD and m TVD), drilling/completion parameters, fluid properties, "
         "surveys, HSE stats, and NPT/UPA events in the input. NEVER invent numbers, incidents, depths, or operations.\n"
@@ -1371,6 +1394,12 @@ def refine_report_prefill(
             )
     if source_text:
         prompt_lines.append(f"SOURCE DOCUMENT EXCERPT:\n{source_text[:2400]}")
+    # The daily report is dense with abbreviations and printed codes. The study
+    # material is matched against the document itself so the model reads "MW",
+    # "TOC" and a bare "06" the way this crew wrote them.
+    reference_context = format_reference_context(source_text[:2000] if source_text else "")
+    if reference_context:
+        prompt_lines.append(reference_context[:2200])
 
     db.rollback()
     system_prompt = (
@@ -1642,7 +1671,7 @@ def run_ai_review(
     if k.get("avg_rop") is not None:
         highlights.append(f"Weighted rotating ROP across verified drilling intervals: {_fmt_num(k['avg_rop'], ' m/h')}.")
     if k.get("lag_days") is not None:
-        state = "behind" if k["lag_days"] > 0 else ("ahead of" if k["lag_days"] < 0 else "on")
+        state = "behind" if k["lag_days"] < 0 else ("ahead of" if k["lag_days"] > 0 else "on")
         highlights.append(f"Schedule position vs active timeline: {abs(k['lag_days']):.3f} day(s) {state} baseline.")
 
     # Rule 1: High NPT concentration.
@@ -1681,12 +1710,12 @@ def run_ai_review(
         )
 
     # Rule 2: Schedule lag behind baseline.
-    if k.get("lag_days") is not None and k["lag_days"] >= 2.0:
+    if k.get("lag_days") is not None and k["lag_days"] <= -2.0:
         anomalies.append(
             {
-                "severity": "high" if k["lag_days"] >= 5.0 else "medium",
+                "severity": "high" if k["lag_days"] <= -5.0 else "medium",
                 "category": "Schedule lag",
-                "title": f"{k['lag_days']:.3f} days behind active baseline timeline",
+                "title": f"{abs(k['lag_days']):.3f} days behind active baseline timeline",
                 "detail": "Compare Time vs Depth curve, NPT bands, and slow-progress (SP) intervals against planned activity hours.",
                 "well_code": "",
                 "report_date": "",
@@ -1880,6 +1909,7 @@ def run_ai_review(
     system_prompt = (
         "You are WellCostIQ's senior Drilling & Completion Performance Analyst AI.\n"
         f"{DNC_CORE_PRIMER}\n"
+        f"{format_reference_context(' '.join(prompt_parts)[:2000])}\n"
         "Analyze ONLY the verified workspace operational data provided. Do NOT fabricate numbers, depths, incidents, or costs. "
         "Return ONLY valid JSON with exact keys:\n"
         '{"executive_summary": "3-5 sentence engineering performance & NPT synthesis", '

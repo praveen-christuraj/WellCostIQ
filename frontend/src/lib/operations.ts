@@ -178,6 +178,17 @@ export type OpsBlock = {
   narrative: string
   confidence: string
   review_state: string
+  // The system-generated comparison is visible and reviewable: it is suggested
+  // until an engineer accepts, edits or rejects it with a note.
+  timeline_comparison?: 'ahead' | 'behind' | 'on'
+  timeline_review_state?: 'suggested' | 'accepted' | 'edited' | 'rejected'
+  timeline_note?: string
+  timeline_variance_days?: string | null
+  timeline_planned_days?: string | null
+  timeline_actual_days?: string | null
+  timeline_basis?: string
+  timeline_reviewed_by?: string
+  timeline_reviewed_at?: string | null
   is_deleted: boolean
   created_at: string
   updated_at: string
@@ -216,14 +227,24 @@ export type OpsDashboard = {
 }
 
 export type OpsTimeDepth = {
-  plan: { cum_days: number; depth_m: number | null; label: string; report_date?: string }[]
-  projection: { cum_days: number; depth_m: number }[]
+  /** Completed timelines have no depth axis: progress is measured by activity number. */
+  mode: 'depth' | 'activity'
+  plan: {
+    cum_days: number
+    depth_m: number | null
+    activity_no?: number | null
+    activity_id?: string | null
+    label: string
+    report_date?: string
+  }[]
+  projection: { cum_days: number; depth_m: number | null; label?: string }[]
   actual: {
     report_id: string
     rop: number | null
     basis: string
     cum_days: number
     depth_m: number | null
+    activity_no?: number | null
     label: string
     report_date?: string
   }[]
@@ -278,6 +299,66 @@ export type OpsReference = OpsScopeReference & {
     sort_order: number
   }[]
   causes: { id: string; cause_code: string; cause_name: string; sort_order: number }[]
+  agencies: { id: string; agency_code: string; agency_name: string; category: string; sort_order: number }[]
+  /** Which code fields each classification makes mandatory, in display order. */
+  classification_rules: Record<string, string[]>
+}
+
+export type OpsBulkAssignInput = {
+  report_ids?: string[]
+  block_ids?: string[]
+  block_kind?: '' | 'drilling' | 'completion'
+  operation_code_id?: string | null
+  activity_code_id?: string | null
+  npt_code_id?: string | null
+  cause_code?: string | null
+  cause_id?: string | null
+  agency_id?: string | null
+  vendor_id?: string | null
+  classification?: 'Planned' | 'UPA' | 'NPT' | null
+}
+
+export type OpsBulkAssignPreview = {
+  changes: {
+    block_id: string
+    sequence_no: number
+    report_id: string
+    before: Record<string, unknown>
+    after: Record<string, unknown>
+  }[]
+  skipped: { block_id: string; sequence_no: number; report_id: string; reason: string }[]
+  summary: string
+  assigned_fields: string[]
+}
+
+export type OpsBulkAssignResult = {
+  changed_count: number
+  skipped: { block_id: string; sequence_no: number; report_id: string; reason: string }[]
+  remaining_mandatory: string[]
+  summary: string
+}
+
+export type OpsCorrelation = {
+  id: string
+  kind: 'operation' | 'activity' | 'npt' | 'cause' | 'phase' | 'agency'
+  source_family: string
+  source_code: string
+  source_label: string
+  target_label: string
+  target_id: string | null
+  note: string
+  is_active: boolean
+  is_deleted: boolean
+  created_by: string
+  updated_by: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+export type OpsCorrelationReference = {
+  kinds: string[]
+  printed: { family: string; code: string; description: string; classification: string }[]
+  library: Record<string, { id: string; code: string; name: string }[]>
 }
 
 export type OpsSettings = {
@@ -350,6 +431,90 @@ export function opsTimeDepth(wellId: string, scope: string) {
     `/operations/analytics/time-depth?well_id=${encodeURIComponent(wellId)}&scope=${encodeURIComponent(scope)}`,
     { action: 'Load time-depth curve' },
   )
+}
+
+/** Preview a bulk assignment. Nothing is written; the dialog shows before/after. */
+export function opsBulkAssignPreview(data: OpsBulkAssignInput) {
+  return api<OpsBulkAssignPreview>('/operations/reports/bulk-assign/preview', {
+    method: 'POST',
+    body: body(data),
+    action: 'Preview bulk code assignment',
+  })
+}
+
+export function opsBulkAssign(data: OpsBulkAssignInput) {
+  return api<OpsBulkAssignResult>('/operations/reports/bulk-assign', {
+    method: 'POST',
+    body: body(data),
+    action: 'Assign codes in bulk',
+  })
+}
+
+/** Accept, edit or reject the system's suggested lead/lag comparison. */
+export function opsReviewTimeline(
+  reportId: string,
+  data: { review_state: 'accepted' | 'edited' | 'rejected'; comparison?: 'ahead' | 'behind' | 'on'; note?: string; block_ids?: string[] },
+) {
+  return api<{ review_state: string; updated_count: number; comparison: string; summary: string }>(
+    `/operations/reports/${reportId}/timeline-review`,
+    { method: 'POST', body: body(data), action: 'Review timeline comparison' },
+  )
+}
+
+export function opsCorrelations(params: { kind?: string; deleted?: boolean } = {}) {
+  const q = new URLSearchParams()
+  if (params.kind) q.set('kind', params.kind)
+  if (params.deleted) q.set('deleted', 'true')
+  const suffix = q.toString() ? `?${q.toString()}` : ''
+  return api<OpsCorrelation[]>(`/operations/correlations${suffix}`, { action: 'Load code correlations' })
+}
+
+export function opsCorrelationReference() {
+  return api<OpsCorrelationReference>('/operations/correlations/reference', {
+    action: 'Load correlation reference',
+  })
+}
+
+export function opsCreateCorrelation(data: {
+  kind: string
+  source_family?: string
+  source_code: string
+  source_label?: string
+  target_id: string
+  note?: string
+}) {
+  return api<OpsCorrelation>('/operations/correlations', {
+    method: 'POST',
+    body: body(data),
+    action: 'Correlate printed code',
+  })
+}
+
+export function opsUpdateCorrelation(
+  id: string,
+  data: { target_id: string; is_active?: boolean; note?: string },
+) {
+  return api<OpsCorrelation>(`/operations/correlations/${id}`, {
+    method: 'PUT',
+    body: body(data),
+    action: 'Update code correlation',
+  })
+}
+
+export function opsDeleteCorrelations(ids: string[]) {
+  return api<{ affected_count: number }>('/operations/correlations/bulk-delete', {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Delete code correlations',
+  })
+}
+
+export function opsRestoreCorrelations(ids: string[]) {
+  return api<{ affected_count: number }>('/operations/correlations/bulk-restore', {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Restore code correlations',
+  })
 }
 
 export function opsSettingsGet() {

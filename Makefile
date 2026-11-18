@@ -1,4 +1,4 @@
-.PHONY: test build graph up up-ai seed-admin check-admin ui-check ui-rollback daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check cost-intelligence-check ollama-ai-check
+.PHONY: test build graph up up-ai seed-admin check-admin ui-check ui-rollback operations-codes-check daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check cost-intelligence-check ollama-ai-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -129,6 +129,16 @@ chart-drill-check:
 		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
 		--outfile=node_modules/.cache/chart-drill-check.mjs --loader:.jsx=jsx --external:jsdom && \
 		node node_modules/.cache/chart-drill-check.mjs
+
+# Operations code correlations, the 300 m depth axis / completion ordinal axis, the
+# lead(+)/lag(-) convention and the permanent delete on Deleted timelines.
+.PHONY: operations-codes-check
+operations-codes-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/operations-codes-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/operations-codes-check.mjs --loader:.jsx=jsx --external:jsdom && \
+		node node_modules/.cache/operations-codes-check.mjs
 
 .PHONY: operations-overview-check
 operations-overview-check:

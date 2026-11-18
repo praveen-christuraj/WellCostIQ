@@ -209,6 +209,33 @@ def test_reopen_submitted_and_approved_reports_30day_guard_and_summary(fresh_dat
             )
         )
         npt_code_id = npt_code["id"]
+        # Every block now needs the codes its classification makes mandatory.
+        operation = good(
+            client.post(
+                OPS + "/masters/operation-codes",
+                headers=headers,
+                json={"operation_code": "DRL", "operation_name": "Drilling"},
+            )
+        )
+        activity = good(
+            client.post(
+                OPS + "/masters/activity-codes",
+                headers=headers,
+                json={"activity_code": "ROT", "activity_name": "Rotating"},
+            )
+        )
+        cause = good(
+            client.post(
+                OPS + "/masters/causes",
+                headers=headers,
+                json={"cause_code": "EQP", "cause_name": "Equipment failure"},
+            )
+        )
+        code_ids = {
+            "operation_code_id": operation["id"],
+            "activity_code_id": activity["id"],
+            "cause_code": cause["cause_code"],
+        }
         recent_day = (wat_today() - timedelta(days=5)).isoformat()
         next_day = (wat_today() - timedelta(days=4)).isoformat()
         old_day = (wat_today() - timedelta(days=45)).isoformat()
@@ -270,6 +297,7 @@ def test_reopen_submitted_and_approved_reports_30day_guard_and_summary(fresh_dat
                             "rotating_hours": "14.500",
                             "narrative": "Drill 12.25in hole with RSS from 1200m to 1450.5m MD.",
                             "review_state": "edited",
+                            **code_ids,
                         },
                         {
                             "sequence_no": 2,
@@ -289,6 +317,7 @@ def test_reopen_submitted_and_approved_reports_30day_guard_and_summary(fresh_dat
                             "reason": "Top drive washpipe packing leak",
                             "narrative": "Replace top drive washpipe packing and pressure test.",
                             "review_state": "edited",
+                            **code_ids,
                         },
                     ],
                     "surveys": [
@@ -394,6 +423,7 @@ def test_reopen_submitted_and_approved_reports_30day_guard_and_summary(fresh_dat
                             "is_productive": True,
                             "narrative": "Spud and drill 26in hole.",
                             "review_state": "edited",
+                            **code_ids,
                         }
                     ],
                 },
@@ -532,6 +562,24 @@ def test_offline_ai_qwen3_1_7b_narratives_prefill_review_and_guides(fresh_databa
         target = configured_well(client, headers, "AI-WELL-01")
         day = wat_today().isoformat()
         next_day = (wat_today() + timedelta(days=1)).isoformat()
+        operation = good(
+            client.post(
+                OPS + "/masters/operation-codes",
+                headers=headers,
+                json={"operation_code": "DRL", "operation_name": "Drilling"},
+            )
+        )
+        activity = good(
+            client.post(
+                OPS + "/masters/activity-codes",
+                headers=headers,
+                json={"activity_code": "DRL", "activity_name": "Drill ahead"},
+            )
+        )
+        typed_code_ids = {
+            "operation_code_id": operation["id"],
+            "activity_code_id": activity["id"],
+        }
 
         r = good(
             client.post(
@@ -564,6 +612,7 @@ def test_offline_ai_qwen3_1_7b_narratives_prefill_review_and_guides(fresh_databa
                             "is_productive": True,
                             "classification_source": "default",
                             "narrative": "Drilled 8.5in production section from 2000m to 2180m MD with 11.2 ppg OBM; circulated hole clean.",
+                            **typed_code_ids,
                         }
                     ],
                 },
@@ -659,6 +708,8 @@ def test_offline_ai_qwen3_1_7b_narratives_prefill_review_and_guides(fresh_databa
                             "phase_raw": b0["phase_raw"],
                             "narrative": b0["narrative"],
                             "review_state": "accepted",
+                            "operation_code_id": b0.get("operation_code_id") or typed_code_ids["operation_code_id"],
+                            "activity_code_id": b0.get("activity_code_id") or typed_code_ids["activity_code_id"],
                         }
                     ],
                 },

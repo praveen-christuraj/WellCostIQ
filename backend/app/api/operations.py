@@ -21,11 +21,13 @@ from sqlalchemy.orm import defer
 
 from app.api.deps import Current, Db, granted, owner, require, require_any
 from app.domain.operations.default_codes import catalogue_rows, describe_code
+from app.domain.operations.requirements import MANDATORY as MANDATORY_FIELDS
 from app.domain.operations.study import timeline_study
 from app.schemas.ai import AiConnectionStatus
 from app.services import ollama
 from app.models.vendor_master import Vendor
 from app.schemas.operations import (
+    CORRELATION_KINDS,
     OpsActivityCodeIn,
     OpsAgencyIn,
     OpsAiPrefillOut,
@@ -33,8 +35,14 @@ from app.schemas.operations import (
     OpsAiReviewRequest,
     OpsBriefRequest,
     OpsBulkActionOut,
+    OpsBulkAssign,
+    OpsBulkAssignOut,
+    OpsBulkAssignPreviewOut,
     OpsBulkEdit,
     OpsCauseIn,
+    OpsCorrelationIn,
+    OpsCorrelationOut,
+    OpsCorrelationUpdate,
     OpsDashboardOut,
     OpsDefaultCodeOut,
     OpsDocumentEdit,
@@ -66,10 +74,15 @@ from app.schemas.operations import (
     OpsSettingsIn,
     OpsSettingsOut,
     OpsStudyOut,
+    OpsTimeDepthOut,
+    OpsTimelineReviewIn,
+    OpsTimelineReviewOut,
     OpsWellSummaryOut,
 )
 from app.services.audit import record as audit_record
 from app.services.operations import analytics as analytics_svc
+from app.services.operations import bulk_assign as bulk_svc
+from app.services.operations import correlations as correlation_svc
 from app.services.operations import documents as docs_svc
 from app.services.operations import extraction as extract_svc
 from app.services.operations import guide as guide_svc
@@ -482,6 +495,16 @@ def _to_report_out(report):
                 "source_bbox": b.source_bbox or "",
                 "confidence": b.confidence,
                 "review_state": b.review_state or "suggested",
+                # The generated comparison is part of the block the user reviews.
+                "timeline_comparison": getattr(b, "timeline_comparison", "on") or "on",
+                "timeline_review_state": getattr(b, "timeline_review_state", "suggested") or "suggested",
+                "timeline_note": getattr(b, "timeline_note", "") or "",
+                "timeline_variance_days": getattr(b, "timeline_variance_days", None),
+                "timeline_planned_days": getattr(b, "timeline_planned_days", None),
+                "timeline_actual_days": getattr(b, "timeline_actual_days", None),
+                "timeline_basis": getattr(b, "timeline_basis", "") or "",
+                "timeline_reviewed_by": getattr(b, "timeline_reviewed_by", "") or "",
+                "timeline_reviewed_at": getattr(b, "timeline_reviewed_at", None),
                 "reviewer_user_id": b.reviewer_user_id,
                 "reviewed_at": b.reviewed_at,
                 "is_deleted": b.is_deleted,
@@ -739,6 +762,37 @@ def review_brief(report_id: str, data: OpsBriefRequest, request: Request, db: Db
 
 
 @router.post(
+    "/reports/{report_id}/timeline-review",
+    response_model=OpsTimelineReviewOut,
+    dependencies=[Depends(require("ops-report:update"))],
+)
+def review_timeline(report_id: str, data: OpsTimelineReviewIn, request: Request, db: Db, user: Current):
+    """Accept, edit or reject the system's suggested lead/lag comparison."""
+    if data.review_state in ("accepted", "edited") and not owner(user) and "ops-report:review" not in granted(user):
+        raise HTTPException(403, "Permission denied. Confirming the comparison needs ops-report:review.")
+    return reports_svc.review_timeline(db, user.organization_id, report_id, data, user, request)
+
+
+@router.post(
+    "/reports/bulk-assign/preview",
+    response_model=OpsBulkAssignPreviewOut,
+    dependencies=[Depends(require("ops-report:update"))],
+)
+def bulk_assign_preview(data: OpsBulkAssign, db: Db, user: Current):
+    """Show what a bulk assignment would change, without writing anything."""
+    return bulk_svc.preview(db, user.organization_id, data)
+
+
+@router.post(
+    "/reports/bulk-assign",
+    response_model=OpsBulkAssignOut,
+    dependencies=[Depends(require("ops-report:update"))],
+)
+def bulk_assign(data: OpsBulkAssign, request: Request, db: Db, user: Current):
+    return bulk_svc.apply(db, user.organization_id, data, user, request)
+
+
+@router.post(
     "/reports/bulk-delete", response_model=OpsBulkActionOut, dependencies=[Depends(require("ops-report:delete"))]
 )
 def bulk_delete(data: OpsIDs, request: Request, db: Db, user: Current):
@@ -854,6 +908,7 @@ def scope_reference(db: Db, user: Current):
 def reference(db: Db, user: Current):
     from app.models.operations import (
         OpsActivityCode,
+        OpsAgency,
         OpsCause,
         OpsNptCode,
         OpsOperationCode,
@@ -892,7 +947,116 @@ def reference(db: Db, user: Current):
         "operation_codes": active(OpsOperationCode),
         "npt_codes": active(OpsNptCode),
         "causes": active(OpsCause),
+        # The block editor and the bulk dialog both need the same three lists;
+        # sending them here keeps one payload instead of four round trips.
+        "agencies": active(OpsAgency),
+        "classification_rules": {
+            classification: list(fields) for classification, fields in MANDATORY_FIELDS.items()
+        },
     }
+
+
+# ---------------------------------------------------------------------------
+# Code Library correlations: printed default codes -> workspace codes
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/correlations",
+    response_model=list[OpsCorrelationOut],
+    dependencies=[Depends(require("ops-master:read"))],
+)
+def list_correlations(
+    db: Db,
+    user: Current,
+    kind: Literal["operation", "activity", "npt", "cause", "phase", "agency"] | None = None,
+    deleted: bool = False,
+):
+    """Correlations that let extraction pre-select this workspace's own codes."""
+    return correlation_svc.list_correlations(db, user.organization_id, kind=kind or "", include_deleted=deleted)
+
+
+@router.get(
+    "/correlations/reference",
+    dependencies=[Depends(require("ops-master:read"))],
+)
+def correlation_reference(db: Db, user: Current):
+    """The two sides of a correlation: the printed dictionary and our library."""
+    from app.models.operations import (
+        OpsActivityCode,
+        OpsAgency,
+        OpsCause,
+        OpsNptCode,
+        OpsOperationCode,
+        OpsPhaseCode,
+    )
+
+    def library(model, code_field, name_field):
+        return [
+            {"id": row.id, "code": getattr(row, code_field), "name": getattr(row, name_field)}
+            for row in db.scalars(
+                select(model)
+                .where(
+                    model.organization_id == user.organization_id,
+                    model.is_deleted.is_(False),
+                )
+                .order_by(getattr(model, code_field))
+            )
+            if getattr(row, "is_active", True)
+        ]
+
+    return {
+        "kinds": list(CORRELATION_KINDS),
+        "printed": [
+            {
+                "family": row["family"],
+                "code": row["code"],
+                "description": row["description"],
+                "classification": row.get("classification", ""),
+            }
+            for row in catalogue_rows()
+        ],
+        "library": {
+            "operation": library(OpsOperationCode, "operation_code", "operation_name"),
+            "activity": library(OpsActivityCode, "activity_code", "activity_name"),
+            "npt": library(OpsNptCode, "npt_code", "npt_name"),
+            "cause": library(OpsCause, "cause_code", "cause_name"),
+            "phase": library(OpsPhaseCode, "phase_code", "phase_name"),
+            "agency": library(OpsAgency, "agency_code", "agency_name"),
+        },
+    }
+
+
+@router.post("/correlations", response_model=OpsCorrelationOut, dependencies=[Depends(require("ops-master:correlate"))])
+def create_correlation(data: OpsCorrelationIn, request: Request, db: Db, user: Current):
+    return correlation_svc.create_correlation(db, user.organization_id, data, user, request)
+
+
+@router.put(
+    "/correlations/{correlation_id}",
+    response_model=OpsCorrelationOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def update_correlation(correlation_id: str, data: OpsCorrelationUpdate, request: Request, db: Db, user: Current):
+    return correlation_svc.update_correlation(db, user.organization_id, correlation_id, data, user, request)
+
+
+@router.post(
+    "/correlations/bulk-delete",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def delete_correlations(data: OpsIDs, request: Request, db: Db, user: Current):
+    return correlation_svc.delete_correlations(db, user.organization_id, data.ids, user, request)
+
+
+@router.post(
+    "/correlations/bulk-restore",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def restore_correlations(data: OpsIDs, request: Request, db: Db, user: Current):
+    return correlation_svc.restore_correlations(db, user.organization_id, data.ids, user, request)
 
 
 # ---------------------------------------------------------------------------
@@ -988,7 +1152,11 @@ def dashboard(
     return result
 
 
-@router.get("/analytics/time-depth", dependencies=[Depends(require("ops-analytics:read"))])
+@router.get(
+    "/analytics/time-depth",
+    response_model=OpsTimeDepthOut,
+    dependencies=[Depends(require("ops-analytics:read"))],
+)
 def time_depth(
     db: Db,
     user: Current,
@@ -1235,6 +1403,16 @@ def delete_plan(plan_id: str, request: Request, db: Db, user: Current):
 )
 def restore_plan(plan_id: str, db: Db, user: Current, request: Request):
     return plans_svc.restore_plan(db, user.organization_id, plan_id, user, request)
+
+
+@router.post(
+    "/plans/bulk-permanent-delete",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-plan:permanent-delete"))],
+)
+def purge_plans(data: OpsIDs, request: Request, db: Db, user: Current):
+    """Permanently remove timelines already in Deleted entries."""
+    return plans_svc.purge_plans(db, user.organization_id, data.ids, user, request)
 
 
 @router.post(

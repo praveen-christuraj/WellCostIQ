@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.precision import rounded
 from app.domain.operations.durations import utc
 from app.models import User
-from app.models.operations import OpsPlanItem, OpsPlanVersion
+from app.models.operations import OpsDailyReport, OpsPlanItem, OpsPlanVersion
 from app.models.rig_well import Well
 from app.services.audit import record as audit_record
 from app.services.operations.scope import resolve
@@ -307,6 +307,64 @@ def delete_plan(db: Session, organization_id: str, plan_id: str, user: User, req
     )
     db.commit()
     return {"affected_count": 1}
+
+
+def purge_plans(db: Session, organization_id: str, ids: list[str], user: User, request=None):
+    """Permanently remove deleted draft timelines.
+
+    A permanent delete is the only operation in the module that destroys data, so
+    it refuses rather than cascades:
+
+    * only a soft-deleted version may be purged (a live version is never one click
+      away from disappearing);
+    * a version a daily report names as its baseline is refused, because purging
+      it would silently strip the plan reference from an approved report;
+    * items are removed with the version, which is what "delete this timeline"
+      means once the version itself is gone.
+    """
+    rows = db.scalars(
+        select(OpsPlanVersion)
+        .where(OpsPlanVersion.organization_id == organization_id, OpsPlanVersion.id.in_(ids))
+        .with_for_update()
+    ).all()
+    if len(rows) != len(set(ids)):
+        raise HTTPException(404, "One or more plans not found")
+    referenced = {
+        row.baseline_plan_id
+        for row in db.scalars(
+            select(OpsDailyReport).where(
+                OpsDailyReport.organization_id == organization_id,
+                OpsDailyReport.baseline_plan_id.in_([row.id for row in rows]),
+            )
+        ).all()
+        if row.baseline_plan_id
+    }
+    blocked = [row for row in rows if not row.is_deleted]
+    if blocked:
+        raise HTTPException(409, "Only deleted timelines can be permanently removed.")
+    blocked = [row for row in rows if row.id in referenced]
+    if blocked:
+        raise HTTPException(
+            409,
+            "A daily report still uses this timeline as its baseline. Keep it, or remove the reference first: "
+            + ", ".join(sorted(row.label or row.id for row in blocked)),
+        )
+    for row in rows:
+        db.execute(delete(OpsPlanItem).where(OpsPlanItem.plan_version_id == row.id))
+        db.delete(row)
+    audit_record(
+        db,
+        organization_id=organization_id,
+        actor=user,
+        action="permanent-delete",
+        entity_type="ops_plan",
+        entity_id=None,
+        entity_label=f"{len(rows)} timeline(s)",
+        summary=f"Permanently removed {len(rows)} deleted timeline(s) and their programme rows",
+        request=request,
+    )
+    db.commit()
+    return {"affected_count": len(rows)}
 
 
 def restore_plan(db, org, plan_id, user, request):

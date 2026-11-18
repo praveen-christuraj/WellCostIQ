@@ -153,6 +153,22 @@ def test_real_programme_to_reviewed_daily_kpis():
         blocks = [{k: b[k] for k in OpsActivityBlockIn.model_fields} for b in draft["blocks"]]
         for b, source_block in zip(blocks, draft["blocks"]):
             b.update(review_state="accepted", block_id=source_block["id"])
+        # A Planned block cannot be accepted without its operation and activity code.
+        refused = c.put(
+            OPS + address,
+            headers=h,
+            json={
+                "confirm_review": False,
+                "report": {"operation_summary": draft["operation_summary"]},
+                "blocks": blocks,
+                "surveys": draft["surveys"],
+            },
+        )
+        assert refused.status_code == 422 and "operation code" in refused.json()["detail"]
+        operation = post("/masters/operation-codes", json={"operation_code": "DRILL", "operation_name": "Drilling"})
+        activity = post("/masters/activity-codes", json={"activity_code": "ROT", "activity_name": "Rotating"})
+        for b in blocks:
+            b.update(operation_code_id=operation["id"], activity_code_id=activity["id"])
         code = post("/masters/npt-codes", json={"npt_code": "ENGINE", "npt_name": "Engine shutdown"})
         with SessionLocal() as db:
             org = db.scalar(select(Organization.id).where(Organization.slug == "north"))
@@ -160,8 +176,9 @@ def test_real_programme_to_reviewed_daily_kpis():
             db.commit()
         vendor = get("/reference")["vendors"][0]
         assert vendor["vendor_name"] == "Rig contractor"
+        cause = post("/masters/causes", json={"cause_code": "EQP", "cause_name": "Equipment failure"})
         block = blocks[1]
-        block.update(npt_code_id=code["id"], reason="Engine shutdown", review_state="edited")
+        block.update(npt_code_id=code["id"], cause_code="EQP", reason="Engine shutdown", review_state="edited")
         checkpoint = active["items"][30]
         edited = {
             "confirm_review": True,
@@ -172,8 +189,10 @@ def test_real_programme_to_reviewed_daily_kpis():
             "blocks": blocks,
             "surveys": draft["surveys"],
         }
-        put(address, json=edited)
-        assert "vendor" in c.post(OPS + address + "/submit", headers=h).json()["detail"].lower()
+        # An NPT block without an agency is refused before it ever reaches submit.
+        blocked = c.put(OPS + address, headers=h, json=edited)
+        assert blocked.status_code == 422 and "agency" in blocked.json()["detail"]
+        assert c.post(OPS + address + "/submit", headers=h).status_code == 422
         block.update(vendor_id=vendor["id"], responsible_party="Untrusted client label")
         reviewed = put(address, json=edited)
         assert (
@@ -195,7 +214,8 @@ def test_real_programme_to_reviewed_daily_kpis():
         assert k["avg_rop"] == round(135 / 13.42, 3) and dash["npt_by_agency"][0]["agency"] == "Rig contractor"
         curve = get("/analytics/time-depth", params=folder)
         assert curve["actual"][0]["cum_days"] == 54 and curve["actual"][0]["depth_m"] == 4127
-        assert curve["lag_series"][0]["lag_days"] == round(54 - float(checkpoint["cum_planned_days"]), 3)
+        # Lead is positive, lag negative: the curve reports planned minus actual.
+        assert curve["lag_series"][0]["lag_days"] == round(float(checkpoint["cum_planned_days"]) - 54, 3)
         replacement = post("/plans", json=dict(**folder, label="Programme B"))
         path = "/plans/" + replacement["id"]
         put(
@@ -470,6 +490,14 @@ def test_dated_checkpoint_without_depth_and_closed_day_gaps():
         active = good(c.post(base + "/activate", headers=h))
         draft = good(c.post(OPS + "/reports", headers=h, json=dict(**folder, report_date="2020-01-02")))
         url = OPS + "/reports/" + draft["id"]
+        operation = good(
+            c.post(OPS + "/masters/operation-codes", headers=h,
+                   json={"operation_code": "MOB", "operation_name": "Mobilisation"})
+        )
+        activity = good(
+            c.post(OPS + "/masters/activity-codes", headers=h,
+                   json={"activity_code": "MOB", "activity_name": "Move in"})
+        )
         b = {
             "sequence_no": 1,
             "started_at": draft["period_start_at"],
@@ -477,6 +505,8 @@ def test_dated_checkpoint_without_depth_and_closed_day_gaps():
             "duration_minutes": 1440,
             "review_state": "accepted",
             "narrative": "Mobilisation complete",
+            "operation_code_id": operation["id"],
+            "activity_code_id": activity["id"],
         }
         good(
             c.put(
@@ -486,8 +516,10 @@ def test_dated_checkpoint_without_depth_and_closed_day_gaps():
         good(c.post(url + "/submit", headers=h))
         curve = good(c.get(OPS + "/analytics/time-depth", headers=h, params=folder))
         assert curve["actual"][0]["depth_m"] is None and curve["actual"][0]["cum_days"] == 2
+        # Two days elapsed against a three-day programme item is one day ahead:
+        # lead positive, lag negative, so +1.
         assert (
-            curve["lag_series"][0]["lag_days"] == -1
+            curve["lag_series"][0]["lag_days"] == 1
             and curve["lag_series"][0]["basis"] == "confirmed programme activity"
         )
         dash = good(

@@ -215,6 +215,63 @@ class OpsPhaseCode(OpsCodeRecord):
     phase_name: Mapped[str] = mapped_column(String(150), nullable=False)
 
 
+class OpsCodeCorrelation(Base):
+    """Map one printed default-code token to one workspace code.
+
+    A correlation is a *pre-selection*, never a saved value: extraction writes
+    the workspace code onto the block as a suggestion the engineer still has to
+    accept. A token may only map once per workspace and code family, and a
+    correlation always points at a workspace code in the same family, so a
+    summary can never claim an operation is an activity code.
+    """
+
+    __tablename__ = "ops_code_correlations"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "kind", "source_code", name="uq_ops_correlation_org_kind_source"
+        ),
+        Index("ix_ops_code_correlations_org_deleted", "organization_id", "is_deleted"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 'operation' | 'activity' | 'npt' | 'cause' | 'phase' | 'agency'
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_family: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    source_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    # Exactly one target column is set, decided by ``kind``.
+    target_operation_code_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_operation_codes.id", ondelete="CASCADE"), nullable=True
+    )
+    target_activity_code_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_activity_codes.id", ondelete="CASCADE"), nullable=True
+    )
+    target_npt_code_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_npt_codes.id", ondelete="CASCADE"), nullable=True
+    )
+    target_cause_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_causes.id", ondelete="CASCADE"), nullable=True
+    )
+    target_phase_code_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_phase_codes.id", ondelete="CASCADE"), nullable=True
+    )
+    target_agency_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_agencies.id", ondelete="CASCADE"), nullable=True
+    )
+    target_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    note: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+
+
 class OpsMarkRule(OpsCodeRecord):
     __tablename__ = "ops_mark_rules"
     __table_args__ = (UniqueConstraint("organization_id", "mark_code", name="uq_ops_mark_code"),)
@@ -436,6 +493,19 @@ class OpsActivityBlock(Base):
     classification: Mapped[str] = mapped_column(String(10), default="Planned", nullable=False)
     allocation: Mapped[str] = mapped_column(String(10), default="PT", nullable=False)
     is_productive: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Engineer-facing mark: the system's own comparison of the block with the
+    # saved baseline, still under review until the engineer confirms it, then
+    # editable by hand with a recorded reason.
+    # "on" is the honest default: no comparison exists until a baseline does.
+    timeline_comparison: Mapped[str] = mapped_column(String(12), default="on", server_default="on", nullable=False)
+    timeline_variance_days: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    timeline_planned_days: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    timeline_actual_days: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    timeline_basis: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
+    timeline_review_state: Mapped[str] = mapped_column(String(20), default="suggested", server_default="suggested", nullable=False)
+    timeline_note: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
+    timeline_reviewed_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    timeline_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     classification_evidence: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     classification_source: Mapped[str] = mapped_column(String(20), default="keyword", nullable=False)
     npt_code_id: Mapped[str | None] = mapped_column(ForeignKey("ops_npt_codes.id", ondelete="SET NULL"), nullable=True)

@@ -27,7 +27,9 @@ from app.models.operations import (
 )
 from app.models.rig_well import Well
 from app.services.audit import record
+from app.services.operations import correlations as correlation_svc
 from app.services.operations import documents, scope, settings
+from app.services.operations import reports as reports_svc
 from app.services.operations.openwells import parse_pdf
 from app.services.operations.plans import active_plan
 from app.services.operations.workbooks import daily_workbook
@@ -374,6 +376,9 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
     causes = lookup(OpsCause, "cause_code", "cause_name")
     trouble = lookup(OpsNptCode, "npt_code", "npt_name")
     mark_rules = lookup(OpsMarkRule, "mark_code")
+    # Workspace correlations pre-select the organisation's own codes. They never
+    # override a code the source printed and never approve the block.
+    correlation_map = correlation_svc.correlation_map(db, org)
     active_vendors = db.scalars(
         select(Vendor).where(
             Vendor.organization_id == org,
@@ -445,6 +450,7 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
 
     zone = ZoneInfo(cfg.operating_timezone)
     unmapped_codes = set()
+    new_blocks: list[OpsActivityBlock] = []
     for seq, b in enumerate(parsed["blocks"], 1):
         a = b["start"].replace(tzinfo=zone).astimezone(UTC)
         z = b["end"].replace(tzinfo=zone).astimezone(UTC)
@@ -521,45 +527,62 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             first_sentence = re.split(r"(?<=[.;])\s+", b["narrative"].strip(), maxsplit=1)[0]
             reason_txt = first_sentence[:240]
 
-        db.add(
-            OpsActivityBlock(
-                organization_id=org,
-                report_id=report.id,
-                sequence_no=seq,
-                started_at=a,
-                ended_at=z,
-                duration_minutes=round((z - a).total_seconds() / 60),
-                phase_raw=b["phase_raw"][:20],
-                source_activity_code=raw_activity[:100],
-                source_operation_code=raw_operation[:100],
-                source_cause_code=raw_cause[:50],
-                source_mark=raw_mark[:30],
-                activity_code_id=code.id if code else None,
-                operation_code_id=operation.id if operation else None,
-                cause_code=cause.cause_code if cause else raw_cause[:50],
-                npt_code_id=npt.id if npt else None,
-                npt_code_snapshot=npt.npt_code if npt else (default_trouble.code if default_trouble else ""),
-                hole_section_id=report.hole_section_id,
-                phase_id=report.phase_id,
-                vendor_id=matched_vendor.id if matched_vendor else None,
-                responsible_party=matched_vendor.vendor_name if matched_vendor else (party[:200] if party else ""),
-                reason=reason_txt,
-                bit_depth_m=b.get("bit_depth_m"),
-                mud_weight_ppg=b.get("mud_weight_ppg") if b.get("mud_weight_ppg") is not None else report.mud_weight_ppg,
-                rotating_hours=rot_b,
-                footage_m=footage,
-                rop_m_per_hr=rop_b,
-                depth_from_m=d_from,
-                depth_to_m=d_to,
-                tvd_from_m=tvd_from,
-                tvd_to_m=tvd_to,
-                source_page=b.get("source_page", 0),
-                source_bbox=b["source"],
-                narrative=b["narrative"],
-                review_state="suggested",
-                **classification,
-            )
+        block = OpsActivityBlock(
+            organization_id=org,
+            report_id=report.id,
+            sequence_no=seq,
+            started_at=a,
+            ended_at=z,
+            duration_minutes=round((z - a).total_seconds() / 60),
+            phase_raw=b["phase_raw"][:20],
+            source_activity_code=raw_activity[:100],
+            source_operation_code=raw_operation[:100],
+            source_cause_code=raw_cause[:50],
+            source_mark=raw_mark[:30],
+            activity_code_id=code.id if code else None,
+            operation_code_id=operation.id if operation else None,
+            cause_code=cause.cause_code if cause else raw_cause[:50],
+            npt_code_id=npt.id if npt else None,
+            npt_code_snapshot=npt.npt_code if npt else (default_trouble.code if default_trouble else ""),
+            hole_section_id=report.hole_section_id,
+            phase_id=report.phase_id,
+            vendor_id=matched_vendor.id if matched_vendor else None,
+            responsible_party=matched_vendor.vendor_name if matched_vendor else (party[:200] if party else ""),
+            reason=reason_txt,
+            bit_depth_m=b.get("bit_depth_m"),
+            mud_weight_ppg=b.get("mud_weight_ppg") if b.get("mud_weight_ppg") is not None else report.mud_weight_ppg,
+            rotating_hours=rot_b,
+            footage_m=footage,
+            rop_m_per_hr=rop_b,
+            depth_from_m=d_from,
+            depth_to_m=d_to,
+            tvd_from_m=tvd_from,
+            tvd_to_m=tvd_to,
+            source_page=b.get("source_page", 0),
+            source_bbox=b["source"],
+            narrative=b["narrative"],
+            review_state="suggested",
+            **classification,
         )
+        # Workspace correlations fill only what the source left empty. The
+        # evidence names the correlation so the engineer can tell a pre-selection
+        # from a printed code, and the block stays a suggestion.
+        correlation_tokens = {
+            "operation": (raw_operation,),
+            "activity": (raw_activity,),
+            "cause": (raw_cause, raw_mark),
+            "phase": (b.get("phase_raw", ""),),
+            "npt": (raw_cause, raw_mark),
+            "agency": (party,),
+        }
+        correlation_evidence = correlation_svc.apply_to_block(
+            block, correlation_map, **{f"{kind}_tokens": tokens for kind, tokens in correlation_tokens.items()}
+        )
+        if correlation_evidence:
+            note = block.classification_evidence or ""
+            block.classification_evidence = " · ".join(filter(None, [note, *correlation_evidence]))[:500]
+        db.add(block)
+        new_blocks.append(block)
     if unmapped_codes:
         warnings.append('Unmapped numeric activity codes: ' + ', '.join(sorted(unmapped_codes)[:20])
                         + '. Compare with the source or configure a workspace code.')
@@ -579,6 +602,10 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
                 organization_id=org, report_id=report.id, well_id=well.id, scope=doc.scope, station_no=idx, **survey
             )
         )
+    # The visible comparison is generated as soon as the draft exists, so the
+    # engineer reviews the suggested lead/lag with the same pass that reviews the codes.
+    db.flush()
+    reports_svc._suggest_comparison(db, report, new_blocks)
     doc.status = "extracted"
     doc.extraction_job_id = job.id
     record(

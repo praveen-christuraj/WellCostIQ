@@ -22,6 +22,7 @@ import {
 import { AiStatusAlert } from '../../components/assistant/AiStatusAlert'
 import { ErrorMessage, FormDialog, PanelDialog, useFormDirty, useUnsavedChangesGuard } from '../../components/Common'
 import { DataTable } from '../../components/DataTable'
+import { BulkAssignDialog } from '../../components/operations/BulkAssignDialog'
 import { SourceDialog } from '../../components/operations/SourceDialog'
 import { StudyPanel } from '../../components/operations/StudyPanel'
 import { SectionCard } from '../../components/ui/SectionCard'
@@ -35,6 +36,7 @@ import {
   getBrief,
   getReport,
   opsReference,
+  opsReviewTimeline,
   rejectReport,
   reopenReport,
   reviewBrief,
@@ -94,6 +96,11 @@ const editFields = [
   'narrative',
   'confidence',
   'review_state',
+  // The visible comparison travels with the block so a save does not silently
+  // reset an engineer's accept/edit decision back to "suggested".
+  'timeline_comparison',
+  'timeline_review_state',
+  'timeline_note',
 ] as const
 
 type Block = Pick<
@@ -105,6 +112,12 @@ type Block = Pick<
   | 'source_phase_label'
   | 'source_mark_label'
   | 'source_cause_label'
+  | 'timeline_variance_days'
+  | 'timeline_planned_days'
+  | 'timeline_actual_days'
+  | 'timeline_basis'
+  | 'timeline_reviewed_by'
+  | 'timeline_reviewed_at'
 > & { id: string }
 
 const surveyFields = {
@@ -169,6 +182,15 @@ export default function OperationsReportDetail({
   const [reopenOpen, setReopenOpen] = useState(false)
   const [reopenRemarks, setReopenRemarks] = useState('')
   const [confirmed, setConfirmed] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [selected, setSelected] = useState<Block[]>([])
+  // Bumped on every load so a stale selection never carries onto a new report.
+  const [selectionKey, setSelectionKey] = useState(0)
+  const [timelineReview, setTimelineReview] = useState<{
+    open: boolean
+    state: 'accepted' | 'edited' | 'rejected'
+  }>({ open: false, state: 'accepted' })
+  const [timelineNote, setTimelineNote] = useState('')
 
   // Offline AI narrative generator & AI extraction prefill state
   const [narUseAi, setNarUseAi] = useState(true)
@@ -186,6 +208,8 @@ export default function OperationsReportDetail({
     setHeader({})
     setBlocks(r.blocks)
     setSurveys(r.surveys)
+    setSelected([])
+    setSelectionKey((n) => n + 1)
     setDirty(false)
   }
 
@@ -219,6 +243,12 @@ export default function OperationsReportDetail({
       current = false
     }
   }, [id, includeDeleted])
+
+  /** Re-read the report after a bulk or review action, keeping the current tab. */
+  const load = () =>
+    getReport(id, includeDeleted)
+      .then((r) => reset(r))
+      .catch((e) => setError((e as Error).message))
 
   const refreshBrief = () => {
     setBriefError('')
@@ -662,6 +692,25 @@ export default function OperationsReportDetail({
                       {prefillBusy ? 'Refining…' : 'AI Prefill Gaps'}
                     </Button>
                   )}
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={!blocks.length}
+                    onClick={() => setBulkOpen(true)}
+                  >
+                    Assign codes in bulk{selected.length ? ` (${selected.length})` : ''}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={!blocks.length}
+                    onClick={() => {
+                      setTimelineNote('')
+                      setTimelineReview({ open: true, state: 'accepted' })
+                    }}
+                  >
+                    Review lead / lag
+                  </Button>
                   <Button variant="contained" size="small" onClick={addBlock}>
                     Add block
                   </Button>
@@ -689,6 +738,9 @@ export default function OperationsReportDetail({
             </Box>
             <DataTable
               rows={blocks}
+              selectable={editable}
+              selectionResetKey={selectionKey}
+              onSelectionChange={setSelected}
               canExport={can('ops-report:export')}
               exportName={`${report.well_code_snapshot}-${report.report_date}-activities`}
               onExport={auditExport('reports')}
@@ -736,6 +788,19 @@ export default function OperationsReportDetail({
                 { field: 'classification', headerName: 'Class', minWidth: 98 },
                 { field: 'allocation', headerName: 'Alloc', minWidth: 90 },
                 { field: 'responsible_party', headerName: 'Agency', minWidth: 135 },
+                {
+                  field: 'timeline_comparison',
+                  headerName: 'Lead (+/−)',
+                  minWidth: 150,
+                  valueGetter: ({ data }) => {
+                    const variance = data?.timeline_variance_days
+                    const mark = data?.timeline_comparison
+                    if (!mark) return ''
+                    const label = mark === 'ahead' ? 'Lead' : mark === 'behind' ? 'Lag' : 'On plan'
+                    const days = variance === null || variance === undefined ? '' : ` ${Math.abs(Number(variance)).toFixed(3)} d`
+                    return `${label}${days} · ${data?.timeline_review_state ?? 'suggested'}`
+                  },
+                },
                 {
                   field: 'classification_evidence',
                   headerName: 'Evidence',
@@ -1160,6 +1225,78 @@ export default function OperationsReportDetail({
             }}
           />
         )}
+
+        <BulkAssignDialog
+          open={bulkOpen}
+          reference={ref}
+          reportIds={report ? [report.id] : []}
+          blocks={(selected.length ? selected : blocks) as unknown as OpsBlock[]}
+          onClose={() => setBulkOpen(false)}
+          onApplied={() => {
+            void load()
+            void onChanged()
+          }}
+        />
+
+        <FormDialog
+          open={timelineReview.open}
+          title="Review the timeline comparison"
+          subtitle="The system compares this day with the active programme. Accept it, or mark your own lead or lag with a note. A reviewed comparison is kept through later recalculations."
+          onClose={() => setTimelineReview({ ...timelineReview, open: false })}
+          onSubmit={async () => {
+            if (!report) return
+            setBusy(true)
+            setError('')
+            try {
+              await opsReviewTimeline(report.id, {
+                review_state: timelineReview.state,
+                note: timelineNote.trim(),
+                block_ids: (selected.length ? selected : blocks).map((b) => b.id),
+              })
+              setTimelineReview({ ...timelineReview, open: false })
+              await load()
+              setNotice('Timeline comparison reviewed.')
+            } catch (e) {
+              setError((e as Error).message)
+            } finally {
+              setBusy(false)
+            }
+          }}
+          submitLabel="Save review"
+          busy={busy}
+          submitDisabled={timelineReview.state === 'edited' && !timelineNote.trim()}
+          maxWidth="sm"
+        >
+          <Stack spacing={2} pt={0.5}>
+            {error && <Alert severity="error">{error}</Alert>}
+            <TextField
+              select
+              label="Decision"
+              value={timelineReview.state}
+              onChange={(e) =>
+                setTimelineReview({ ...timelineReview, state: e.target.value as typeof timelineReview.state })
+              }
+            >
+              <MenuItem value="accepted">Accept the system comparison</MenuItem>
+              <MenuItem value="edited">Edit the comparison myself</MenuItem>
+              <MenuItem value="rejected">Reject the comparison</MenuItem>
+            </TextField>
+            <TextField
+              label="Note"
+              value={timelineNote}
+              onChange={(e) => setTimelineNote(e.target.value)}
+              multiline
+              minRows={2}
+              required={timelineReview.state === 'edited'}
+              helperText="Required when you edit the comparison; recorded in the Audit Log."
+            />
+            <Typography variant="caption" color="text.secondary">
+              {(selected.length ? selected : blocks).length} block(s) will be marked{' '}
+              {timelineReview.state}. A positive number is a lead ahead of plan; a negative number is a lag
+              behind it.
+            </Typography>
+          </Stack>
+        </FormDialog>
 
         {editor && (
           <FormDialog

@@ -55,7 +55,10 @@ export default function OperationsPlans() {
   const [metaEdit, setMetaEdit] = useState<OpsPlan | null>(null)
   const [reopenTarget, setReopenTarget] = useState<OpsPlan | null>(null)
   const [reopenRemarks, setReopenRemarks] = useState('')
-  const [action, setAction] = useState<{ plan: OpsPlan; kind: 'activate' | 'delete' | 'restore' } | null>(null)
+  const [action, setAction] = useState<{
+    plan: OpsPlan
+    kind: 'activate' | 'delete' | 'restore' | 'permanent-delete'
+  } | null>(null)
 
   const save = async () => {
     setBusy(true)
@@ -264,6 +267,19 @@ export default function OperationsPlans() {
                         {deleted ? 'Restore' : 'Delete'}
                       </Button>
                     )}
+                    {deleted && can('ops-plan:permanent-delete') && (
+                      <Button
+                        size="small"
+                        color="error"
+                        disabled={busy}
+                        onClick={() => {
+                          setFormError('')
+                          setAction({ plan: p, kind: 'permanent-delete' })
+                        }}
+                      >
+                        Delete permanently
+                      </Button>
+                    )}
                     {!deleted && p.status === 'draft' && can('ops-plan:activate') && (
                       <Button
                         size="small"
@@ -394,17 +410,32 @@ export default function OperationsPlans() {
       {action && (
         <FormDialog
           open
-          title={`${action.kind[0].toUpperCase()}${action.kind.slice(1)} ${action.plan.label}?`}
-          danger={action.kind === 'delete'}
+          title={`${
+            action.kind === 'permanent-delete'
+              ? 'Delete permanently'
+              : action.kind[0].toUpperCase() + action.kind.slice(1)
+          } ${action.plan.label}?`}
+          danger={action.kind === 'delete' || action.kind === 'permanent-delete'}
           busy={busy}
           onClose={() => setAction(null)}
-          submitLabel={action.kind[0].toUpperCase() + action.kind.slice(1)}
+          submitLabel={
+            action.kind === 'permanent-delete'
+              ? 'Delete permanently'
+              : action.kind[0].toUpperCase() + action.kind.slice(1)
+          }
           onSubmit={async () => {
             setBusy(true)
             setFormError('')
             try {
               if (action.kind === 'activate') await activatePlan(action.plan.id)
-              else
+              else if (action.kind === 'permanent-delete') {
+                // Permanent is its own route so a mis-clicked Delete never destroys
+                // programme rows: the version must already be in Deleted versions.
+                await api('/operations/plans/bulk-permanent-delete', {
+                  method: 'POST',
+                  body: JSON.stringify({ ids: [action.plan.id] }),
+                })
+              } else
                 await api(`/operations/plans/${action.plan.id}${action.kind === 'restore' ? '/restore' : ''}`, {
                   method: action.kind === 'restore' ? 'POST' : 'DELETE',
                 })
@@ -421,7 +452,9 @@ export default function OperationsPlans() {
             ? 'This becomes the active baseline for this well and scope. Any prior active version is retained as superseded.'
             : action.kind === 'restore'
               ? 'Restore this version as an editable draft.'
-              : 'This draft and its items can be restored from Deleted versions.'}
+              : action.kind === 'permanent-delete'
+                ? 'This permanently removes the timeline and its programme rows. It cannot be undone, and it is refused while a daily report still uses this version as its baseline.'
+                : 'This draft and its items can be restored from Deleted versions.'}
           {formError && <Alert severity="error">{formError}</Alert>}
         </FormDialog>
       )}

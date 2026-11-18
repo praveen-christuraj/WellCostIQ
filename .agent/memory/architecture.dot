@@ -58,12 +58,17 @@ digraph WellCostIQ {
   "backend/app/domain/mud_cost.py";
   "backend/app/domain/operations/__init__.py";
   "backend/app/domain/operations/classify.py";
+  "backend/app/domain/operations/data/__init__.py";
+  "backend/app/domain/operations/data/abbreviations.py";
+  "backend/app/domain/operations/data/glossary.py";
   "backend/app/domain/operations/default_codes.py";
   "backend/app/domain/operations/dnc_knowledge.py";
   "backend/app/domain/operations/drilling.py";
   "backend/app/domain/operations/durations.py";
   "backend/app/domain/operations/metrics.py";
   "backend/app/domain/operations/normalise.py";
+  "backend/app/domain/operations/reference_knowledge.py";
+  "backend/app/domain/operations/requirements.py";
   "backend/app/domain/operations/study.py";
   "backend/app/domain/operations/taxonomy.py";
   "backend/app/domain/service_groups.py";
@@ -147,6 +152,8 @@ digraph WellCostIQ {
   "backend/app/services/operational_time.py";
   "backend/app/services/operations/__init__.py";
   "backend/app/services/operations/analytics.py";
+  "backend/app/services/operations/bulk_assign.py";
+  "backend/app/services/operations/correlations.py";
   "backend/app/services/operations/documents.py";
   "backend/app/services/operations/extraction.py";
   "backend/app/services/operations/guide.py";
@@ -239,6 +246,7 @@ digraph WellCostIQ {
   "frontend/src/components/mud-cost/MudCostOpeningStockDialog.tsx";
   "frontend/src/components/mud-cost/MudCostPrintSheet.tsx";
   "frontend/src/components/mud-cost/MudCostSectionSettingsDialog.tsx";
+  "frontend/src/components/operations/BulkAssignDialog.tsx";
   "frontend/src/components/operations/OpsAiReviewPanel.tsx";
   "frontend/src/components/operations/RegisterActions.tsx";
   "frontend/src/components/operations/ScopeDirectory.tsx";
@@ -473,6 +481,7 @@ digraph WellCostIQ {
   "backend/app/api/ndt_inspection.py" -> "backend/app/services/__init__.py";
   "backend/app/api/operations.py" -> "backend/app/api/deps.py";
   "backend/app/api/operations.py" -> "backend/app/domain/operations/default_codes.py";
+  "backend/app/api/operations.py" -> "backend/app/domain/operations/requirements.py";
   "backend/app/api/operations.py" -> "backend/app/domain/operations/study.py";
   "backend/app/api/operations.py" -> "backend/app/models/operations.py";
   "backend/app/api/operations.py" -> "backend/app/models/rig_well.py";
@@ -563,6 +572,10 @@ digraph WellCostIQ {
   "backend/app/domain/operations/classify.py" -> "backend/app/domain/operations/drilling.py";
   "backend/app/domain/operations/default_codes.py" -> "backend/app/domain/operations/taxonomy.py";
   "backend/app/domain/operations/metrics.py" -> "backend/app/core/precision.py";
+  "backend/app/domain/operations/reference_knowledge.py" -> "backend/app/domain/operations/data/abbreviations.py";
+  "backend/app/domain/operations/reference_knowledge.py" -> "backend/app/domain/operations/data/glossary.py";
+  "backend/app/domain/operations/reference_knowledge.py" -> "backend/app/domain/operations/default_codes.py";
+  "backend/app/domain/operations/requirements.py" -> "backend/app/models/operations.py";
   "backend/app/domain/operations/study.py" -> "backend/app/core/precision.py";
   "backend/app/domain/operations/study.py" -> "backend/app/domain/operations/drilling.py";
   "backend/app/main.py" -> "backend/app/api/__init__.py";
@@ -816,6 +829,17 @@ digraph WellCostIQ {
   "backend/app/services/operations/analytics.py" -> "backend/app/models/rig_well.py";
   "backend/app/services/operations/analytics.py" -> "backend/app/services/operations/plans.py";
   "backend/app/services/operations/analytics.py" -> "backend/app/services/operations/scope.py";
+  "backend/app/services/operations/bulk_assign.py" -> "backend/app/domain/operations/requirements.py";
+  "backend/app/services/operations/bulk_assign.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/operations/bulk_assign.py" -> "backend/app/models/master_data.py";
+  "backend/app/services/operations/bulk_assign.py" -> "backend/app/models/operations.py";
+  "backend/app/services/operations/bulk_assign.py" -> "backend/app/models/vendor_master.py";
+  "backend/app/services/operations/bulk_assign.py" -> "backend/app/services/audit.py";
+  "backend/app/services/operations/correlations.py" -> "backend/app/domain/operations/default_codes.py";
+  "backend/app/services/operations/correlations.py" -> "backend/app/domain/operations/taxonomy.py";
+  "backend/app/services/operations/correlations.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/operations/correlations.py" -> "backend/app/models/operations.py";
+  "backend/app/services/operations/correlations.py" -> "backend/app/services/audit.py";
   "backend/app/services/operations/documents.py" -> "backend/app/models/__init__.py";
   "backend/app/services/operations/documents.py" -> "backend/app/models/operations.py";
   "backend/app/services/operations/documents.py" -> "backend/app/services/audit.py";
@@ -838,6 +862,7 @@ digraph WellCostIQ {
   "backend/app/services/operations/extraction.py" -> "backend/app/services/operations/workbooks.py";
   "backend/app/services/operations/guide.py" -> "backend/app/domain/operations/default_codes.py";
   "backend/app/services/operations/guide.py" -> "backend/app/domain/operations/dnc_knowledge.py";
+  "backend/app/services/operations/guide.py" -> "backend/app/domain/operations/reference_knowledge.py";
   "backend/app/services/operations/guide.py" -> "backend/app/schemas/assistant.py";
   "backend/app/services/operations/guide.py" -> "backend/app/services/operations/ops_ai.py";
   "backend/app/services/operations/masters.py" -> "backend/app/models/__init__.py";
@@ -852,6 +877,7 @@ digraph WellCostIQ {
   "backend/app/services/operations/ops_ai.py" -> "backend/app/domain/operations/default_codes.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/domain/operations/dnc_knowledge.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/domain/operations/metrics.py";
+  "backend/app/services/operations/ops_ai.py" -> "backend/app/domain/operations/reference_knowledge.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/domain/operations/taxonomy.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/models/__init__.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/models/operations.py";
@@ -875,6 +901,7 @@ digraph WellCostIQ {
   "backend/app/services/operations/reports.py" -> "backend/app/core/time.py";
   "backend/app/services/operations/reports.py" -> "backend/app/domain/operations/durations.py";
   "backend/app/services/operations/reports.py" -> "backend/app/domain/operations/metrics.py";
+  "backend/app/services/operations/reports.py" -> "backend/app/domain/operations/requirements.py";
   "backend/app/services/operations/reports.py" -> "backend/app/domain/operations/study.py";
   "backend/app/services/operations/reports.py" -> "backend/app/models/__init__.py";
   "backend/app/services/operations/reports.py" -> "backend/app/models/master_data.py";
@@ -1295,6 +1322,8 @@ digraph WellCostIQ {
   "frontend/src/components/mud-cost/MudCostPrintSheet.tsx" -> "frontend/src/lib/time.ts";
   "frontend/src/components/mud-cost/MudCostSectionSettingsDialog.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/mud-cost/MudCostSectionSettingsDialog.tsx" -> "frontend/src/lib/mudCost.ts";
+  "frontend/src/components/operations/BulkAssignDialog.tsx" -> "frontend/src/components/Common.tsx";
+  "frontend/src/components/operations/BulkAssignDialog.tsx" -> "frontend/src/lib/operations.ts";
   "frontend/src/components/operations/OpsAiReviewPanel.tsx" -> "frontend/src/components/assistant/AiStatusAlert.tsx";
   "frontend/src/components/operations/OpsAiReviewPanel.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
   "frontend/src/components/operations/OpsAiReviewPanel.tsx" -> "frontend/src/lib/ai.ts";
@@ -1980,6 +2009,7 @@ digraph WellCostIQ {
   "frontend/src/pages/operations/ReportDetail.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/pages/operations/ReportDetail.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/pages/operations/ReportDetail.tsx" -> "frontend/src/components/assistant/AiStatusAlert.tsx";
+  "frontend/src/pages/operations/ReportDetail.tsx" -> "frontend/src/components/operations/BulkAssignDialog.tsx";
   "frontend/src/pages/operations/ReportDetail.tsx" -> "frontend/src/components/operations/SourceDialog.tsx";
   "frontend/src/pages/operations/ReportDetail.tsx" -> "frontend/src/components/operations/StudyPanel.tsx";
   "frontend/src/pages/operations/ReportDetail.tsx" -> "frontend/src/components/ui/SectionCard.tsx";
