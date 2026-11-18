@@ -353,6 +353,11 @@ class OpsActivityBlockIn(_Strict):
     narrative: str = Field(default="", max_length=5000)
     confidence: Decimal3 = Field(default=Decimal("0.500"), ge=0, le=1)
     review_state: Literal["suggested", "accepted", "edited", "rejected"] = "suggested"
+    # The timeline comparison stays visible and reviewable. The system fills it;
+    # the engineer accepts, edits or rejects it with a note.
+    timeline_comparison: Literal["ahead", "behind", "on"] = "on"
+    timeline_review_state: Literal["suggested", "accepted", "edited", "rejected"] = "suggested"
+    timeline_note: str = Field(default="", max_length=500)
 
 
 class OpsActivityBlockOut(OpsActivityBlockIn):
@@ -384,6 +389,12 @@ class OpsActivityBlockOut(OpsActivityBlockIn):
     activity_name: str | None = None
     npt_code: str | None = None
     npt_name: str | None = None
+    timeline_variance_days: Decimal | None = None
+    timeline_planned_days: Decimal | None = None
+    timeline_actual_days: Decimal | None = None
+    timeline_basis: str = ""
+    timeline_reviewed_by: str = ""
+    timeline_reviewed_at: datetime | None = None
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
@@ -612,6 +623,88 @@ class OpsIDs(_Strict):
     ids: list[str] = Field(min_length=1, max_length=500)
 
 
+class OpsBulkAssign(_Strict):
+    """One explicit instruction, applied to the selected blocks."""
+
+    report_ids: list[str] = Field(default_factory=list, max_length=100)
+    block_ids: list[str] = Field(default_factory=list, max_length=2000)
+    block_kind: Literal["", "drilling", "completion"] = ""
+    operation_code_id: str | None = None
+    activity_code_id: str | None = None
+    npt_code_id: str | None = None
+    cause_id: str | None = None
+    cause_code: str | None = Field(default=None, max_length=50)
+    agency_id: str | None = None
+    vendor_id: str | None = None
+    classification: Classification | None = None
+
+
+class OpsBulkAssignOut(_Strict):
+    changed_count: int = 0
+    skipped: list[dict] = []
+    remaining_mandatory: list[str] = []
+    summary: str = ""
+
+
+class OpsBulkAssignPreviewOut(_Strict):
+    changes: list[dict] = []
+    skipped: list[dict] = []
+    summary: str = ""
+    assigned_fields: list[str] = []
+
+
+class OpsTimelineReviewIn(_Strict):
+    """Confirm or override the system's lead/lag suggestion for a whole report."""
+
+    review_state: Literal["accepted", "edited", "rejected"] = "accepted"
+    comparison: Literal["ahead", "behind", "on"] | None = None
+    note: str = Field(default="", max_length=500)
+    block_ids: list[str] = Field(default_factory=list, max_length=2000)
+
+
+class OpsTimelineReviewOut(_Strict):
+    review_state: str
+    updated_count: int = 0
+    comparison: str = "on"
+    summary: str = ""
+
+
+CORRELATION_KINDS = ("operation", "activity", "npt", "cause", "phase", "agency")
+
+
+class OpsCorrelationIn(_Strict):
+    kind: Literal["operation", "activity", "npt", "cause", "phase", "agency"]
+    source_family: str = Field(default="", max_length=60)
+    source_code: str = Field(min_length=1, max_length=60)
+    source_label: str = Field(default="", max_length=200)
+    target_id: str
+    note: str = Field(default="", max_length=500)
+
+
+class OpsCorrelationUpdate(_Strict):
+    target_id: str
+    is_active: bool = True
+    note: str = Field(default="", max_length=500)
+
+
+class OpsCorrelationOut(_Strict):
+    id: str
+    kind: str
+    source_family: str = ""
+    source_code: str
+    source_label: str = ""
+    target_label: str = ""
+    target_id: str | None = None
+    note: str = ""
+    is_active: bool = True
+    is_deleted: bool = False
+    created_by: str = ""
+    updated_by: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+
 class OpsBulkEdit(OpsIDs):
     remarks: str = Field(min_length=1, max_length=1000)
 
@@ -688,18 +781,31 @@ class OpsDashboardOut(_Strict):
 
 
 class OpsTimeDepthPoint(_Strict):
+    """One point on the time-vs-progress curve.
+
+    ``depth_m`` is null for completions, where there is no meaningful depth axis;
+    ``activity_no`` then carries the programme activity number (1..n) instead.
+    """
+
     cum_days: float
-    depth_m: float
+    depth_m: float | None = None
+    activity_no: int | None = None
+    activity_id: str | None = None
     report_date: date | None = None
+    report_id: str | None = None
     label: str = ""
+    rop: float | None = None
+    basis: str = ""
 
 
 class OpsTimeDepthOut(_Strict):
+    mode: Literal["depth", "activity"] = "depth"
     plan: list[OpsTimeDepthPoint]
     actual: list[OpsTimeDepthPoint]
     npt_bands: list[dict[str, Any]]
     milestones: list[dict[str, Any]]
     lag_series: list[dict[str, Any]]
+    projection: list[dict[str, Any]] = []
 
 
 class OpsNptParetoItem(_Strict):
@@ -743,6 +849,8 @@ class OpsReferenceOut(_Strict):
     operation_codes: list[OpsOperationCodeOut]
     npt_codes: list[OpsNptCodeOut]
     causes: list[OpsCauseOut]
+    agencies: list[OpsAgencyOut] = []
+    classification_rules: dict[str, list[str]] = {}
 
 
 # ---------------------------------------------------------------------------

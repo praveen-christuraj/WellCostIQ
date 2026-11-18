@@ -232,16 +232,35 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
     ):
         days = float(item.cum_planned_days or 0)
         checkpoints[item.id] = days
+        # Completions have no meaningful depth axis: the same programme measured in
+        # activity numbers (1..n) is what the engineer can read against days.
+        sequence = len(timelines[item.plan_version_id]) + 1
         timelines[item.plan_version_id].append(
             {
                 "cum_days": days,
                 "depth_m": float(item.target_depth_m) if item.target_depth_m is not None else None,
                 "label": item.description,
+                "activity_no": sequence,
+                "activity_id": item.id,
             }
         )
     plan = timelines[version.id] if version else []
     actual = []
     lag = []
+    activity_numbers = {
+        item.id: index
+        for index, item in enumerate(
+            db.scalars(
+                select(OpsPlanItem)
+                .where(
+                    OpsPlanItem.organization_id == organization_id,
+                    OpsPlanItem.plan_version_id.in_(versions),
+                )
+                .order_by(OpsPlanItem.sequence_no)
+            ),
+            1,
+        )
+    }
     npt = []
     projection = []
     blocks = _blocks(db, organization_id, reports)
@@ -283,6 +302,8 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
             }
         )
         planned = checkpoints.get(r.completed_plan_item_id)
+        activity_no = activity_numbers.get(r.completed_plan_item_id) if r.completed_plan_item_id else None
+        actual[-1]["activity_no"] = activity_no
         comparison = "confirmed programme activity" if planned is not None else "at measured depth"
         if planned is None and baseline and depth is not None:
             planned = planned_at_depth(timelines[baseline.id], depth)
@@ -291,7 +312,8 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
                 {
                     "report_date": str(r.report_date),
                     "report_id": r.id,
-                    "lag_days": round(elapsed - planned, 3),
+                    # Lead positive, lag negative — the same sign the UI and guide use.
+                    "lag_days": round(planned - elapsed, 3),
                     "depth_m": depth,
                     "basis": comparison,
                     "baseline": f"{baseline.label} v{baseline.version_no}",
@@ -306,7 +328,14 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
                 last,
                 {"cum_days": round(last["cum_days"] + days, 3), "depth_m": target["depth_m"], "label": "Next deeper target"},
             ]
+    # A completion has no depth to plot: report the ordinal basis explicitly so the
+    # chart labels activity numbers rather than inventing a depth column.
+    if scope == "completion":
+        mode = "activity"
+    else:
+        mode = "depth" if any(row["depth_m"] is not None for row in plan + actual) else "activity"
     return {
+        "mode": mode,
         "plan": plan,
         "actual": actual,
         "npt_bands": npt,

@@ -67,23 +67,52 @@ export default function OperationsAnalytics() {
   const actual = data?.actual ?? [],
     lag = data?.lag_series ?? [],
     rop = actual.filter((a) => a.rop !== null)
+  // A completion has no depth to plot. The same programme is plotted against
+  // activity numbers (1..n) instead, so days still read against progress.
+  const ordinal = data?.mode === 'activity'
+  const plannedY = (p: { depth_m: number | null; activity_no?: number | null; cum_days: number }) =>
+    ordinal ? p.activity_no ?? null : p.depth_m
+  // The depth axis runs 0, 300, 600 … so a section boundary is always readable;
+  // an interval chosen per well would make two charts incomparable.
+  const deepest = Math.max(
+    0,
+    ...(data?.plan ?? []).map((p) => Number(p.depth_m ?? 0)),
+    ...actual.map((p) => Number(p.depth_m ?? 0)),
+  )
+  const depthAxis = {
+    type: 'value',
+    name: 'MD (m)',
+    inverse: true,
+    min: 0,
+    interval: 300,
+    max: Math.max(300, Math.ceil((deepest + 1) / 300) * 300),
+  }
   const depth = {
     ...base,
     xAxis: days,
-    yAxis: { type: 'value', name: 'MD (m)', inverse: true },
+    yAxis: ordinal
+      ? {
+          type: 'value',
+          name: 'Activity no.',
+          inverse: true,
+          min: 0,
+          interval: 1,
+          max: Math.max(1, ...(data?.plan ?? []).map((p) => Number(p.activity_no ?? 0)), ...actual.map((p) => Number(p.activity_no ?? 0))),
+        }
+      : depthAxis,
     series: [
       {
         name: 'Active plan',
         type: 'line',
         connectNulls: false,
         color: colors.planned,
-        data: data?.plan.map((p) => [p.cum_days, p.depth_m]) ?? [],
+        data: data?.plan.map((p) => [p.cum_days, plannedY(p)]) ?? [],
       },
       {
         name: 'Actual',
         type: 'line',
         color: colors.actual,
-        data: actual.map((p) => ({ value: [p.cum_days, p.depth_m], chartRowId: p.report_id })),
+        data: actual.map((p) => ({ value: [p.cum_days, plannedY(p)], chartRowId: p.report_id })),
       },
       {
         name: 'ROP projection',
@@ -141,18 +170,28 @@ export default function OperationsAnalytics() {
       </Box>
       <Box display="grid" gap={2} gridTemplateColumns="minmax(0,1fr)">
         <ChartPanel
-          title="Time vs measured depth"
-          caption="Elapsed days from programme start, or reported drilling DFS for an undated drilling plan. Otherwise days are relative to the first submitted period, without a lag estimate. The dashed projection to the next deeper target assumes continuous rotation at the latest measured ROP, not a completion forecast."
-          height={350}
-          empty={!actual.some((p) => p.depth_m !== null) && !data?.plan.some((p) => p.depth_m !== null)}
-          emptyMessage="Activate a timeline or submit a report with measured depth."
+          title={ordinal ? 'Time vs completion progress' : 'Time vs measured depth'}
+          figureKey="time-depth"
+          caption={
+            ordinal
+              ? 'A completion job has no meaningful depth axis, so the programme is numbered by activity (1 to n) and elapsed days are read against that progress. The same lead/lag comparison decides whether work is ahead or behind.'
+              : 'Elapsed days from programme start, or reported drilling DFS for an undated drilling plan. Otherwise days are relative to the first submitted period. The depth axis runs in 300 m steps from surface; the dashed projection assumes continuous rotation at the latest measured ROP.'
+          }
+          height={560}
+          empty={
+            ordinal
+              ? !actual.length && !data?.plan.length
+              : !actual.some((p) => p.depth_m !== null) && !data?.plan.some((p) => p.depth_m !== null)
+          }
+          emptyMessage={ordinal ? 'Activate a completion timeline or submit a report.' : 'Activate a timeline or submit a report with measured depth.'}
         >
           <InteractiveChart option={depth} onEvents={events} style={{ height: '100%' }} />
         </ChartPanel>
         <Box display="grid" gap={2} gridTemplateColumns={{ xs: 'minmax(0,1fr)', lg: 'repeat(2,minmax(0,1fr))' }}>
           <ChartPanel
-            title="Lead / lag (days)"
-            caption="Actual days minus the saved baseline days at the confirmed activity or, otherwise, interpolated at the same depth. Positive is behind. Ambiguous depths have no depth-based lag."
+            title="Lead (+) / lag (−) in days"
+            figureKey="lead-lag"
+            caption="Saved baseline days at the confirmed activity, or interpolated at the same measured depth, minus actual elapsed days. A positive bar is a lead ahead of plan; a negative bar is a lag behind it. Ambiguous depths have no depth-based comparison."
             empty={!lag.length}
             emptyMessage="No uniquely comparable depth and elapsed-day pair."
           >
@@ -212,7 +251,9 @@ export default function OperationsAnalytics() {
             { field: 'report_date', headerName: 'Report date' },
             { field: 'cum_days', headerName: 'Elapsed days' },
             { field: 'basis', headerName: 'Time basis' },
-            { field: 'depth_m', headerName: 'MD (m)' },
+            ...(ordinal
+              ? [{ field: 'activity_no' as const, headerName: 'Activity no.' }]
+              : [{ field: 'depth_m' as const, headerName: 'MD (m)' }]),
             { field: 'rop', headerName: 'ROP (m/h)' },
             { field: 'lag_days', headerName: 'Lag (days)' },
             { field: 'baseline', headerName: 'Baseline version' },

@@ -7,7 +7,19 @@ import { DataTable } from '../../components/DataTable'
 import { ImportDialog } from '../../components/ImportDialog'
 import { useAuth } from '../../context/AuthContext'
 import { api, body } from '../../lib/api'
-import { auditExport, defaultOpsCodes, type OpsDefaultCode } from '../../lib/operations'
+import {
+  auditExport,
+  defaultOpsCodes,
+  opsCorrelationReference,
+  opsCorrelations,
+  opsCreateCorrelation,
+  opsDeleteCorrelations,
+  opsRestoreCorrelations,
+  opsUpdateCorrelation,
+  type OpsCorrelation,
+  type OpsCorrelationReference,
+  type OpsDefaultCode,
+} from '../../lib/operations'
 
 const kinds = {
   'operation-codes': {
@@ -116,10 +128,285 @@ function DefaultCodes() {
   )
 }
 
+const CORRELATION_KINDS = [
+  { key: 'operation', label: 'Operation code' },
+  { key: 'activity', label: 'Activity code' },
+  { key: 'npt', label: 'NPT code' },
+  { key: 'cause', label: 'Cause code' },
+  { key: 'phase', label: 'Phase (and programme phase)' },
+  { key: 'agency', label: 'Agency' },
+] as const
+
+/**
+ * Correlate the printed default codes with this workspace's own library.
+ *
+ * Extraction reads a printed token such as 19-D from the source. Without a
+ * correlation it leaves the dropdown empty — it never guesses which workspace
+ * code the token "probably" means. This tab is where that mapping is decided.
+ */
+function Correlations() {
+  const { can } = useAuth()
+  const [ref, setRef] = useState<OpsCorrelationReference | null>(null)
+  const [rows, setRows] = useState<OpsCorrelation[]>([])
+  const [deleted, setDeleted] = useState(false)
+  const [kind, setKind] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [form, setForm] = useState<{
+    rowId: string
+    kind: string
+    source_code: string
+    target_id: string
+    note: string
+  } | null>(null)
+
+  const load = async (showDeleted = deleted) => {
+    const [r, c] = await Promise.all([
+      opsCorrelationReference(),
+      opsCorrelations({ kind: kind || undefined, deleted: showDeleted }),
+    ])
+    setRef(r)
+    setRows(c)
+  }
+  useEffect(() => {
+    let current = true
+    setError('')
+    Promise.all([
+      opsCorrelationReference(),
+      opsCorrelations({ kind: kind || undefined, deleted }),
+    ])
+      .then(([r, c]) => {
+        if (current) {
+          setRef(r)
+          setRows(c)
+        }
+      })
+      .catch((e) => {
+        if (current) setError((e as Error).message)
+      })
+    return () => {
+      current = false
+    }
+  }, [kind, deleted])
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true)
+    setError('')
+    try {
+      await fn()
+      await load()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = async () => {
+    if (!form) return
+    await run(async () => {
+      if (form.rowId) {
+        await opsUpdateCorrelation(form.rowId, {
+          target_id: form.target_id,
+          is_active: true,
+          note: form.note,
+        })
+      } else {
+        const printed = ref?.printed.find((p) => p.code === form.source_code)
+        await opsCreateCorrelation({
+          kind: form.kind,
+          source_family: printed?.family ?? '',
+          source_code: form.source_code,
+          source_label: printed?.description ?? '',
+          target_id: form.target_id,
+          note: form.note,
+        })
+      }
+      setForm(null)
+    })
+  }
+
+  const libraryFor = (k: string) => ref?.library[k] ?? []
+
+  return (
+    <Box mt={1.5}>
+      <Alert severity="info" sx={{ mb: 1.5 }}>
+        Extraction pre-selects a dropdown only when a correlation exists. No correlation leaves the field empty
+        so the engineer chooses from this workspace's own library. Correlating a code never approves a block and
+        never changes an already saved report.
+      </Alert>
+      {error && <Alert severity="error">{error}</Alert>}
+      <Box display="flex" gap={1.5} flexWrap="wrap" alignItems="center" mb={1.5}>
+        <TextField
+          select
+          label="Code kind"
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          sx={{ minWidth: 210 }}
+        >
+          <MenuItem value="">All kinds</MenuItem>
+          {CORRELATION_KINDS.map((k) => (
+            <MenuItem key={k.key} value={k.key}>
+              {k.label}
+            </MenuItem>
+          ))}
+        </TextField>
+        <Button variant="outlined" onClick={() => setDeleted(!deleted)}>
+          {deleted ? 'Active correlations' : 'Deleted correlations'}
+        </Button>
+        {!deleted && can('ops-master:correlate') && (
+          <Button
+            variant="contained"
+            startIcon={<AddRounded />}
+            onClick={() => {
+              setError('')
+              setForm({
+                rowId: '',
+                kind: kind || 'operation',
+                source_code: '',
+                target_id: '',
+                note: '',
+              })
+            }}
+          >
+            New correlation
+          </Button>
+        )}
+      </Box>
+      <DataTable
+        key={`${kind}/${deleted}`}
+        rows={rows as unknown as Record<string, unknown>[]}
+        fillHeight
+        searchPlaceholder="Search printed code, meaning or library code…"
+        canExport={can('ops-master:export')}
+        onExport={auditExport('library')}
+        exportName="operations-correlations"
+        columns={[
+          { field: 'kind', headerName: 'Kind', minWidth: 110 },
+          { field: 'source_family', headerName: 'Printed family', minWidth: 190 },
+          { field: 'source_code', headerName: 'Printed code', minWidth: 120 },
+          { field: 'source_label', headerName: 'Printed meaning', minWidth: 240, tooltipField: 'source_label' },
+          { field: 'target_label', headerName: 'Workspace code', minWidth: 240, tooltipField: 'target_label' },
+          { field: 'note', headerName: 'Note', minWidth: 180, tooltipField: 'note' },
+          {
+            headerName: 'Actions',
+            width: 210,
+            minWidth: 190,
+            sortable: false,
+            cellRenderer: ({ data: row }: { data: OpsCorrelation }) => (
+              <>
+                {!deleted && can('ops-master:correlate') && (
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      setForm({
+                        rowId: row.id,
+                        kind: row.kind,
+                        source_code: row.source_code,
+                        target_id: row.target_id ?? '',
+                        note: row.note,
+                      })
+                    }
+                  >
+                    Edit
+                  </Button>
+                )}
+                {can('ops-master:correlate') && (
+                  <Button
+                    size="small"
+                    color={deleted ? 'inherit' : 'error'}
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() =>
+                        deleted ? opsRestoreCorrelations([row.id]) : opsDeleteCorrelations([row.id]),
+                      )
+                    }
+                  >
+                    {deleted ? 'Restore' : 'Delete'}
+                  </Button>
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
+      {form && (
+        <FormDialog
+          open
+          title={form.rowId ? 'Edit a correlation' : 'Correlate a printed code'}
+          subtitle="The printed left-hand code is read from the source document. The right-hand value is what this workspace wants the dropdown to show."
+          onClose={() => setForm(null)}
+          onSubmit={() => void save()}
+          busy={busy}
+          submitDisabled={!form.kind || !form.source_code || !form.target_id}
+        >
+          <Box display="grid" gap={2} pt={0.5}>
+            {error && <Alert severity="error">{error}</Alert>}
+            <TextField
+              select
+              label="Code kind"
+              value={form.kind}
+              onChange={(e) => setForm({ ...form, kind: e.target.value, target_id: '' })}
+              disabled={Boolean(form.rowId)}
+            >
+              {CORRELATION_KINDS.map((k) => (
+                <MenuItem key={k.key} value={k.key}>
+                  {k.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Printed default code"
+              value={form.source_code}
+              onChange={(e) => setForm({ ...form, source_code: e.target.value })}
+              disabled={Boolean(form.rowId)}
+              helperText="Only codes in the built-in reference can be correlated."
+            >
+              {(ref?.printed ?? [])
+                .filter((p) => (form.kind === 'operation' ? p.family === 'OpenWells operation code' || p.family === 'Operation' : true))
+                .filter((p) => (form.kind === 'activity' ? p.family === 'Activity' || p.family === 'OpenWells code token' : true))
+                .filter((p) => (form.kind === 'npt' ? p.family === 'Trouble / NPT' : true))
+                .filter((p) => (form.kind === 'cause' ? ['Cause', 'Trouble / NPT'].includes(p.family) : true))
+                .filter((p) => (form.kind === 'phase' ? ['OpenWells phase', 'Programme phase'].includes(p.family) : true))
+                .map((p) => (
+                  <MenuItem key={`${p.family}/${p.code}`} value={p.code}>
+                    {p.code} — {p.description || p.family}
+                  </MenuItem>
+                ))}
+            </TextField>
+            <TextField
+              select
+              label="Workspace code"
+              value={form.target_id}
+              onChange={(e) => setForm({ ...form, target_id: e.target.value })}
+            >
+              {libraryFor(form.kind).map((c) => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.code} — {c.name}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="Note"
+              value={form.note}
+              onChange={(e) => setForm({ ...form, note: e.target.value })}
+              multiline
+              minRows={2}
+              helperText="Optional. Record why this printed code maps to that workspace code."
+            />
+          </Box>
+        </FormDialog>
+      )}
+    </Box>
+  )
+}
+
 export default function OperationsLibrary() {
   const [params, setParams] = useSearchParams()
   const tab = params.get('tab')
-  const isDefault = !tab || !Object.hasOwn(kinds, tab) || tab === 'default-codes'
+  const isCorrelations = tab === 'correlations'
+  const isDefault = !isCorrelations && (!tab || !Object.hasOwn(kinds, tab) || tab === 'default-codes')
   const kind: Kind = isDefault ? 'operation-codes' : (tab as Kind)
   const { can } = useAuth(),
     [deleted, setDeleted] = useState(false),
@@ -144,7 +431,7 @@ export default function OperationsLibrary() {
     setRows([])
     setSelected([])
     setError('')
-    if (isDefault) return
+    if (isDefault || isCorrelations) return
     getRows()
       .then((rs) => {
         if (current) setRows(rs)
@@ -155,7 +442,7 @@ export default function OperationsLibrary() {
     return () => {
       current = false
     }
-  }, [kind, deleted, isDefault])
+  }, [kind, deleted, isDefault, isCorrelations])
   const edit = (row?: Row) => {
     const defaults = { [spec.code]: '', [spec.name]: '', ...spec.defaults, description: '' }
     setId(row?.id ?? '')
@@ -182,12 +469,12 @@ export default function OperationsLibrary() {
         subtitle="Define this workspace’s activity, operation and reason codes. Codes are displayed alongside their names. Responsible parties for new NPT / UPA entries come from active Master Data vendors."
         action={
           <>
-            {!isDefault && !deleted && can('ops-master:create') && (
+            {!isDefault && !isCorrelations && !deleted && can('ops-master:create') && (
               <Button variant="contained" startIcon={<AddRounded />} onClick={() => edit()}>
                 New code
               </Button>
             )}
-            {!isDefault && (
+            {!isDefault && !isCorrelations && (
               <Button variant="outlined" startIcon={<RestoreRounded />} onClick={() => setDeleted(!deleted)}>
                 {deleted ? 'Active entries' : 'Deleted entries'}
               </Button>
@@ -195,13 +482,20 @@ export default function OperationsLibrary() {
           </>
         }
       />
-      <Tabs variant="scrollable" value={isDefault ? 'default-codes' : kind} onChange={(_, v) => setParams({ tab: v })}>
+      <Tabs
+        variant="scrollable"
+        value={isCorrelations ? 'correlations' : isDefault ? 'default-codes' : kind}
+        onChange={(_, v) => setParams({ tab: v })}
+      >
         <Tab value="default-codes" label="Default Codes" />
+        <Tab value="correlations" label="Correlations" />
         {(Object.keys(kinds) as Kind[]).map((k) => (
           <Tab key={k} value={k} label={kinds[k].label} />
         ))}
       </Tabs>
-      {isDefault ? (
+      {isCorrelations ? (
+        <Correlations />
+      ) : isDefault ? (
         <DefaultCodes />
       ) : (
         <>

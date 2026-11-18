@@ -1,8 +1,17 @@
-"""Read-only reference from the supplied engineering code sheet and observed OpenWells layouts.
+"""Read-only reference from the supplied engineering code sheets and OpenWells layouts.
 
 This is not a vendor-wide official catalogue. These lists must not contain master data
 such as wells, rigs, blocks, fields, or agencies. The extraction engine and Code Library
 share them, so the same token always gets the same definition.
+
+Two printed reference families are kept apart on purpose:
+
+* ``ACTIVITY``/``OPERATION``/``PHASE``/``CAUSE``/``NPT`` come from the engineers'
+  Operations Summary *Codes* sheet (``docs/operations/activity-taxonomy-extracted.csv``).
+* ``OPENWELLS_OPERATION_CODES`` (01–26 with A/B/C sub-codes), ``OPENWELLS_OPERATE2``
+  (D/P/U/S time marks) and ``OPENWELLS_PHASES`` come from the master data sheets filed in
+  ``MODEL REPORTS/OpenWellsCodes``. They describe the OpenWells pick-list, so the same
+  number (for example 06) means different work in each family.
 """
 
 from dataclasses import asdict, dataclass
@@ -163,12 +172,161 @@ OPENWELLS_PHASES = (
     ('CSGDRV', 'Drive casing'),
     ('CSGCON', 'Conductor casing'),
     ('CSGSUR', 'Surface casing'),
+    ('CSGIN1', 'First intermediate casing'),
     ('CSGIN2', 'Second intermediate casing'),
+    ('CSGIN3', 'Third intermediate casing'),
     ('CSGPRO', 'Production casing'),
-    ('EVAL', 'Formation evaluation / logging'),
     ('EVAL 1', 'Formation evaluation / logging (stage 1)'),
+    ('EVAL 2', 'Formation evaluation / logging (stage 2)'),
+    ('EVAL 3', 'Formation evaluation / logging (stage 3)'),
+    ('EVAL', 'Formation evaluation / logging'),
     ('EVALPR', 'Production-hole evaluation / logging'),
+    ('MIRU', 'Move in / rig up'),
+    ('RDMO', 'Rig down / move out'),
+    ('SUSPEN', 'Suspend / re-enter operations'),
+    ('ALL', 'All unplanned operations'),
     ('COMPLETION', 'Completion operations'),
+)
+
+# ``MODEL REPORTS/OpenWellsCodes/PK_OPCODE_from_images.xlsx``. The pick-list has a
+# top-level operation number and optional A/B/C sub-codes; both are kept verbatim
+# ("19" and "19-D") so a printed sub-code keeps its own meaning.
+OPENWELLS_OPERATION_CODES = (
+    ('01', 'Rig up / tear down'),
+    ('01-A', 'Rig up'),
+    ('01-B', 'Tear down'),
+    ('02', 'Drill'),
+    ('02-A', 'New hole'),
+    ('02-B', 'Opening'),
+    ('02-C', 'Underreaming'),
+    ('02-D', 'Drill out casing'),
+    ('02-E', 'Sidetracking'),
+    ('03', 'Reaming'),
+    ('03-A', 'Drill'),
+    ('03-B', 'Coring'),
+    ('03-C', 'Logging'),
+    ('04', 'Coring'),
+    ('04-A', 'Conventional'),
+    ('04-B', 'Plastic sleeve'),
+    ('04-C', 'Sponge'),
+    ('04-D', 'Oriented'),
+    ('04-E', 'Rig up core barrel'),
+    ('04-F', 'Laydown barrel'),
+    ('05', 'Condition mud and circulate'),
+    ('05-A', 'Drilling'),
+    ('05-B', 'Well control'),
+    ('05-C', 'Loss circulation'),
+    ('05-D', 'Logging'),
+    ('05-E', 'Coring'),
+    ('05-F', 'Casing'),
+    ('05-G', 'Fishing'),
+    ('05-H', 'Cementing'),
+    ('05-I', 'Circulate samples'),
+    ('05-J', 'Boulders / gravel'),
+    ('06', 'Tripping'),
+    ('06-A', 'Bit'),
+    ('06-B', 'Fishing'),
+    ('06-C', 'Logging'),
+    ('06-D', 'Core'),
+    ('06-E', 'DST'),
+    ('06-F', 'Cement plug'),
+    ('06-G', 'Casing'),
+    ('06-H', 'Wiper'),
+    ('06-I', 'Well control'),
+    ('06-J', 'BHA'),
+    ('06-K', 'DST / washout'),  # printed twice in the sheet with these two descriptions
+    ('07', 'Rig service'),
+    ('08', 'Rig repairs'),
+    ('08-A', 'Mud system'),
+    ('08-B', 'Rotary'),
+    ('08-C', 'Drawworks'),
+    ('08-D', 'Well control equipment'),
+    ('08-E', 'Other'),
+    ('09', 'Slip and cut drill line'),
+    ('10', 'Survey'),
+    ('10-A', 'Drift'),
+    ('10-B', 'Directional single shot'),
+    ('10-C', 'Directional multi shot'),
+    ('10-D', 'Gyro'),
+    ('10-E', 'MWD'),
+    ('11', 'Wireline'),
+    ('11-A', 'Evaluation'),
+    ('11-B', 'Abandonment'),
+    ('11-C', 'Formation tester'),
+    ('11-D', 'Sidewall cores'),
+    ('11-E', 'Velocity'),
+    ('11-F', 'Other'),
+    ('12', 'Casing and cement'),
+    ('12-A', 'Rig up and run casing'),
+    ('12-B', 'Rig up and run liner'),
+    ('12-C', 'Circulate and cement'),
+    ('12-D', 'Other'),
+    ('13', 'Wait on cement'),
+    ('14', 'Nipple up BOP'),
+    ('14-A', 'Diverter'),
+    ('14-B', 'Stack'),
+    ('14-C', 'Manifold'),
+    ('14-D', 'PVT system'),
+    ('14-E', 'Other'),
+    ('15', 'Pressure test BOP'),
+    ('15-A', 'Stack'),
+    ('15-B', 'Manifold'),
+    ('15-C', 'FLOT'),
+    ('16', 'Drill stem test'),
+    ('16-A', 'Open hole'),
+    ('16-B', 'Open hole closed chamber'),
+    ('16-C', 'Cased hole'),
+    ('16-D', 'Rig up tools'),
+    ('16-E', 'Lay down tools'),
+    ('17', 'Plug back'),
+    ('17-A', 'Abandonment'),
+    ('17-B', 'Kick off plug'),
+    ('17-C', 'WOC'),
+    ('17-D', 'Loss circulation'),
+    ('17-E', 'Well control'),
+    ('18', 'Squeeze cement'),
+    ('18-A', 'Casing shoe'),
+    ('18-B', 'Parted casing'),
+    ('18-C', 'Perforations DST'),
+    ('19', 'Fishing'),
+    ('19-A', 'Cones'),
+    ('19-B', 'Wireline tools'),
+    ('19-C', 'BHA'),
+    ('19-D', 'Stuck'),
+    ('19-E', 'Other'),
+    ('20', 'Directional work'),
+    ('20-A', 'Motor drilling'),
+    ('20-B', 'Rotary drilling'),
+    ('20-C', 'Horizontal drilling'),
+    ('20-D', 'Slant drilling'),
+    ('20-E', 'Orient'),
+    ('21', 'Waiting on orders'),
+    ('21-A', 'Cut casing'),
+    ('21-B', 'Set bridge plugs'),
+    ('21-C', 'Pull casing'),
+    ('22', 'Rig release'),
+    ('22-A', 'Cut casing'),
+    ('22-B', 'Install capping assembly'),
+    ('23', 'Rig move'),
+    ('23-A', 'Inter-pad move'),
+    ('23-B', 'Inter-well move'),
+    ('23-C', 'Skid rig'),
+    ('23-D', 'Other'),
+    ('24', 'Abandonment'),
+    ('24-A', 'Run plugs'),
+    ('24-B', 'Log plugs'),
+    ('24-C', 'WOC'),
+    ('25', 'Other'),
+    ('26', 'Slot recovery / enhancement'),
+)
+
+# ``PK_OPERATE2_from_image.xlsx``: the printed time mark that sits beside each
+# operation row. It is an allocation suggestion only; the narrative still decides.
+OPENWELLS_OPERATE2 = (
+    ('D', 'Downtime'),
+    ('P', 'Planned'),
+    ('U', 'Unplanned'),
+    ('S', 'Skipped'),
 )
 
 # These are descriptions of use in the supplied exports, not vendor definitions.
@@ -219,7 +377,15 @@ DEFAULT_CODES = (
     *(DefaultCode('OpenWells code token', code, name, 'Observed OpenWells narrative',
                   'Observed use in the supplied PDFs, not a vendor definition. Check the row narrative; the same token can cover different work.')
       for code, name in OPENWELLS_CODES),
-    *(DefaultCode('OpenWells phase', code, name, 'Observed OpenWells layout') for code, name in OPENWELLS_PHASES),
+    *(DefaultCode('OpenWells operation code', code, name, 'MODEL REPORTS/OpenWellsCodes · PK_OPCODE',
+                  'Printed OpenWells pick-list entry. The number alone is not an operation; read the sub-code and the row narrative.')
+      for code, name in OPENWELLS_OPERATION_CODES),
+    *(DefaultCode('OpenWells time mark', code, name, 'MODEL REPORTS/OpenWellsCodes · PK_OPERATE2',
+                  'The printed time mark beside an OpenWells row. It suggests Planned, Unplanned, Downtime or Skipped; verify against the narrative.',
+                  {'P': 'Planned', 'U': 'UPA', 'D': 'NPT', 'S': 'Planned'}.get(code, ''),
+                  {'P': 'PT', 'U': 'UPA', 'D': 'NPT', 'S': 'PT'}.get(code, ''))
+      for code, name in OPENWELLS_OPERATE2),
+    *(DefaultCode('OpenWells phase', code, name, 'MODEL REPORTS/OpenWellsCodes · PK_PHASE') for code, name in OPENWELLS_PHASES),
     *(DefaultCode('Operation', code, name) for code, name in OPERATION),
     *(DefaultCode('Programme phase', code, name) for code, name in PHASE),
     *(DefaultCode('Source mark', code, name, 'Report convention',

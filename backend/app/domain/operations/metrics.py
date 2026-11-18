@@ -35,6 +35,12 @@ def compute_rop(footage_m, rotating_hours):
 
 
 def lag_days(actual_cum_days, planned_cum_days):
+    """Schedule position as the organisation states it: lead is positive, lag negative.
+
+    Ahead of the programme returns a positive number (a lead); behind it returns a
+    negative number (a lag). ``actual`` minus ``planned`` is the raw difference, so
+    the sign is inverted here, once, and every reader inherits the same convention.
+    """
     if actual_cum_days is None or planned_cum_days is None:
         return None
-    return (actual_cum_days - planned_cum_days).quantize(QUANTUM, rounding=ROUND_HALF_UP)
+    return (planned_cum_days - actual_cum_days).quantize(QUANTUM, rounding=ROUND_HALF_UP)
