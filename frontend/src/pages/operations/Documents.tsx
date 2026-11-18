@@ -1,208 +1,218 @@
 import { useEffect, useState } from 'react'
-import { CloudUploadOutlined, DeleteOutlineRounded } from '@mui/icons-material'
-import { Alert, Box, Button, Chip, FormControl, InputLabel, MenuItem, Select, TextField, Typography } from '@mui/material'
+import { CloudUploadOutlined, DownloadOutlined, RestoreRounded } from '@mui/icons-material'
+import { Alert, Box, Button, MenuItem, TextField } from '@mui/material'
 import { DataTable } from '../../components/DataTable'
-import { ErrorMessage, PageHeading } from '../../components/Common'
-import { SectionCard } from '../../components/ui/SectionCard'
-import { listDocuments, opsReference, type OpsDocument, type OpsReference } from '../../lib/operations'
-import { api } from '../../lib/api'
+import { ErrorMessage, FormDialog, PageHeading } from '../../components/Common'
+import { ScopeDirectory, type Folder } from '../../components/operations/ScopeDirectory'
+import { SourceDialog } from '../../components/operations/SourceDialog'
+import { useRegisterActions } from '../../components/operations/RegisterActions'
+import { useAuth } from '../../context/AuthContext'
+import { api, body, downloadFile } from '../../lib/api'
+import {
+  auditExport,
+  listDeletedDocuments,
+  listDocuments,
+  opsScopeReference,
+  type OpsDocument,
+  type OpsScopeReference,
+} from '../../lib/operations'
 
 export default function OperationsDocuments() {
-  const [docs, setDocs] = useState<OpsDocument[]>([])
-  const [ref, setRef] = useState<OpsReference | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [filterWell, setFilterWell] = useState('')
-  const [filterType, setFilterType] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  const [uploadWell, setUploadWell] = useState('')
-  const [uploadScope, setUploadScope] = useState('drilling')
-  const [uploadType, setUploadType] = useState('DDR')
-  const [uploadDate, setUploadDate] = useState('')
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [selected, setSelected] = useState<string[]>([])
-
-  const load = async () => {
-    setLoading(true); setError('')
-    try {
-      const [d, r] = await Promise.all([
-        listDocuments({ well_id: filterWell || undefined, document_type: filterType || undefined, status: filterStatus || undefined }),
-        ref ? Promise.resolve(ref) : opsReference(),
-      ])
-      setDocs(d)
-      setRef(r)
-    } catch (e) { setError((e as Error).message) } finally { setLoading(false) }
+  const { can } = useAuth()
+  const [rows, setRows] = useState<OpsDocument[]>([]),
+    [ref, setRef] = useState<OpsScopeReference | null>(null),
+    [deleted, setDeleted] = useState(false),
+    [upload, setUpload] = useState(false)
+  const [folder, setFolder] = useState<Folder | null>(null),
+    [error, setError] = useState(''),
+    [editing, setEditing] = useState<OpsDocument | null>(null),
+    [busy, setBusy] = useState(false),
+    [saveError, setSaveError] = useState('')
+  const getRows = () => (deleted ? listDeletedDocuments() : listDocuments({}))
+  const refresh = async () => {
+    setRows(await getRows())
   }
-  useEffect(() => { load() }, [])
-  useEffect(() => { load() }, [filterWell, filterType, filterStatus])
-
-  const doUpload = async () => {
-    if (!uploadFile) return
-    setUploading(true); setError('')
-    try {
-      const form = new FormData()
-      form.append('file', uploadFile)
-      form.append('well_id', uploadWell)
-      form.append('scope', uploadScope)
-      form.append('document_type', uploadType)
-      if (uploadDate) form.append('document_date', uploadDate)
-      // Use fetch with auth header from api helper's token (we add Bearer manually)
-      // The api() helper stores token in memory; we can read from context but simpler: rely on cookie + Bearer via api helper's header simulation
-      // Do raw fetch via the same origin — the backend reads Authorization header if present; we include it by calling api's internal token getter workaround:
-      // Instead, use the backend's generic upload via fetch that reuses current access token from context if available.
-      // We'll read token from localStorage fallback that AuthContext writes.
-      const token = (localStorage.getItem('wcp_token') || sessionStorage.getItem('wcp_token') || '') // best-effort
-      const headers: Record<string, string> = {}
-      if (token) headers['Authorization'] = `Bearer ${token}`
-      const res = await fetch('/api/v1/operations/documents/upload', { method: 'POST', body: form, credentials: 'include', headers })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail || `Upload failed (${res.status})`)
-      }
-      setUploadFile(null)
-      await load()
-    } catch (e) { setError((e as Error).message) } finally { setUploading(false) }
-  }
-
-  // Extraction is ONLY for Daily Reports (Task 1 & 10). Documents page has no extraction logic.
-  // const doExtract = async (id: string) => { ... }
-
-  const doDownload = async (doc: OpsDocument) => {
-    try {
-      const token = localStorage.getItem('wcp_token') || sessionStorage.getItem('wcp_token') || ''
-      const headers: Record<string, string> = {}
-      if (token) headers['Authorization'] = `Bearer ${token}`
-      const res = await fetch(`/api/v1/operations/documents/${doc.id}/download`, { credentials: 'include', headers })
-      if (!res.ok) throw new Error('Download failed')
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = doc.file_name; a.click(); URL.revokeObjectURL(url)
-    } catch (e) { setError((e as Error).message) }
-  }
-
-  const doDelete = async () => {
-    if (!selected.length) return
+  const controls = useRegisterActions<OpsDocument>('documents', deleted, refresh)
+  useEffect(() => {
+    let current = true
+    setRows([])
     setError('')
-    try { await api('/operations/documents/bulk-delete', { method: 'POST', body: JSON.stringify({ ids: selected }) }); setSelected([]); await load() } catch (e) { setError((e as Error).message) }
-  }
-
+    getRows()
+      .then((d) => {
+        if (current) setRows(d)
+      })
+      .catch((e) => {
+        if (current) setError(e.message)
+      })
+    return () => {
+      current = false
+    }
+  }, [deleted])
+  useEffect(() => {
+    opsScopeReference()
+      .then(setRef)
+      .catch((e) => setError(e.message))
+  }, [])
   return (
     <Box>
-      <PageHeading eyebrow="Well Operations" title="Document vault" subtitle="Directory per well and per scope (drilling/completion) → upload DDR/DCR/DMR/RMR PDFs or Excel. Engine extracts 24h log, classification and ROP; deduplicates by SHA-256; versions on replace. (Grouped by Rig → Well; 6th in operations order: Plans/Timeline → Daily Reports → Analytics → Library/Settings → Documents → Settings)" />
-
-      {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
-
-      <SectionCard title="Upload">
-        <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr 1fr 1fr' }}>
-          <FormControl size="small" fullWidth>
-            <InputLabel>Well *</InputLabel>
-            <Select value={uploadWell} label="Well *" onChange={e => setUploadWell(e.target.value)}>
-              <MenuItem value=""><em>Select well</em></MenuItem>
-              {ref?.wells.map(w => <MenuItem key={w.id} value={w.id}>{w.display_name}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" fullWidth>
-            <InputLabel>Scope</InputLabel>
-            <Select value={uploadScope} label="Scope" onChange={e => setUploadScope(e.target.value)}>
-              <MenuItem value="drilling">Drilling</MenuItem>
-              <MenuItem value="completion">Completion</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" fullWidth>
-            <InputLabel>Type</InputLabel>
-            <Select value={uploadType} label="Type" onChange={e => setUploadType(e.target.value)}>
-              <MenuItem value="DDR">DDR</MenuItem>
-              <MenuItem value="DCR">DCR</MenuItem>
-              <MenuItem value="DMR">DMR</MenuItem>
-              <MenuItem value="RMR">RMR</MenuItem>
-              <MenuItem value="other">Other</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField size="small" type="date" label="Document date" value={uploadDate} onChange={e => setUploadDate(e.target.value)} InputLabelProps={{ shrink: true }} />
-        </Box>
-        <Box mt={2} display="flex" gap={2} alignItems="center" flexWrap="wrap">
-          <Button variant="outlined" component="label">
-            Choose file (PDF/Excel)
-            <input type="file" hidden accept=".pdf,.xlsx,.xls,.csv,.docx" onChange={e => setUploadFile(e.target.files?.[0] || null)} />
-          </Button>
-          <Typography fontSize={13} color="text.secondary">{uploadFile ? `${uploadFile.name} (${(uploadFile.size / 1024).toFixed(0)} KB)` : 'No file chosen — PDF or Excel (≤25 MB), protected sheets read, file-password shows “password required”)'}</Typography>
-          <Button variant="contained" startIcon={<CloudUploadOutlined />} disabled={!uploadFile || !uploadWell || uploading} onClick={doUpload}>{ uploadFile && !uploadWell ? 'Select a well first' : uploading ? 'Uploading…' : 'Upload & extract'}</Button>
-        </Box>
-        <Alert severity="info" sx={{ mt: 2 }}>Re-uploading the same file (SHA-256) returns the existing document — view / re-extract / replace, never a duplicate. Extraction runs with a timeout, page/word caps and no network access; failures remain readable with a retry.</Alert>
-      </SectionCard>
-
-      <SectionCard title="Filters">
-        <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr 1fr auto' }}>
-          <FormControl size="small" fullWidth>
-            <InputLabel>Well</InputLabel>
-            <Select value={filterWell} label="Well" onChange={e => setFilterWell(e.target.value)}>
-              <MenuItem value="">All wells</MenuItem>
-              {ref?.wells.map(w => <MenuItem key={w.id} value={w.id}>{w.display_name}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" fullWidth>
-            <InputLabel>Type</InputLabel>
-            <Select value={filterType} label="Type" onChange={e => setFilterType(e.target.value)}>
-              <MenuItem value="">All types</MenuItem>
-              <MenuItem value="DDR">DDR</MenuItem>
-              <MenuItem value="DCR">DCR</MenuItem>
-              <MenuItem value="DMR">DMR</MenuItem>
-              <MenuItem value="RMR">RMR</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" fullWidth>
-            <InputLabel>Status</InputLabel>
-            <Select value={filterStatus} label="Status" onChange={e => setFilterStatus(e.target.value)}>
-              <MenuItem value="">All</MenuItem>
-              <MenuItem value="uploaded">Uploaded</MenuItem>
-              <MenuItem value="extracting">Extracting</MenuItem>
-              <MenuItem value="extracted">Extracted</MenuItem>
-              <MenuItem value="extraction_failed">Failed</MenuItem>
-              <MenuItem value="reviewed">Reviewed</MenuItem>
-            </Select>
-          </FormControl>
-          <Box display="flex" gap={1} alignItems="center">
-            <Button variant="outlined" onClick={load}>Refresh</Button>
-            <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} disabled={!selected.length} onClick={doDelete}>Delete selected</Button>
+      <PageHeading
+        eyebrow="Well Operations"
+        title={deleted ? 'Deleted documents' : 'Documents'}
+        subtitle="Original reports filed by rig, well and scope. Use Daily reports to extract a draft from a filed document."
+        action={
+          <Box display="flex" gap={1} flexWrap="wrap">
+            {!deleted && can('ops-doc:upload') && (
+              <Button variant="contained" startIcon={<CloudUploadOutlined />} disabled={!ref} onClick={() => setUpload(true)}>
+                Upload documents
+              </Button>
+            )}
+            <Button
+              variant="outlined"
+              startIcon={<RestoreRounded />}
+              onClick={() => {
+                controls.clear()
+                setFolder(null)
+                setDeleted(!deleted)
+              }}
+            >
+              {deleted ? 'Active documents' : 'Deleted entries'}
+            </Button>
           </Box>
-        </Box>
-      </SectionCard>
-
-      <SectionCard title={`Documents — ${docs.length} file(s)`} >
-        <DataTable
-          rows={docs}
-          rowKey='id'
-          onSelectionChange={rows => setSelected(rows.map((r: { id: string }) => r.id))}
-          columns={[
-            { field: 'file_name', headerName: 'File', flex: 1.6, minWidth: 200 },
-            { field: 'document_type', headerName: 'Type', width: 80, valueFormatter: p => p.value || '—' },
-            { field: 'scope', headerName: 'Scope', width: 110 },
-            { field: 'well_code_snapshot', headerName: 'Well', width: 140, valueGetter: p => p.data?.well_code_snapshot || '—' },
-            { field: 'document_date', headerName: 'Date', width: 120, valueFormatter: p => p.value ? String(p.value) : '—' },
-            { field: 'report_no_text', headerName: 'Report no.', width: 110, valueFormatter: p => p.value || '—' },
-            {
-              field: 'status', headerName: 'Status', width: 140,
-              cellRenderer: (p: { value: string }) => {
-                const v = p.value || 'uploaded'
-                const color: 'success' | 'warning' | 'error' | 'info' | 'default' = v === 'extracted' ? 'success' : v === 'extraction_failed' ? 'error' : v === 'extracting' ? 'info' : v === 'uploaded' ? 'warning' : 'default'
-                return <Chip size="small" label={v} color={color} />
-              },
-            },
-            {
-              field: 'id', headerName: 'Actions', width: 150, sortable: false,
-              cellRenderer: (p: { data: OpsDocument }) => (
-                <Box display="flex" gap={0.5}>
-                  <Button size="small" onClick={() => doDownload(p.data)}>Download</Button>
-                </Box>
-              ),
-            },
-          ]}
+        }
+      />
+      {error && <ErrorMessage message={error} />}
+      <ScopeDirectory
+        rows={rows}
+        reference={ref}
+        folder={folder}
+        change={(f) => {
+          controls.clear()
+          setFolder(f)
+        }}
+      />
+      {controls.bar}
+      <DataTable
+        rows={folder ? rows.filter((r) => (r.well_id ?? '') === folder.well_id && r.scope === folder.scope) : rows}
+        selectable
+        exportSelected
+        onSelectionChange={controls.setSelected}
+        selectionResetKey={controls.resetKey}
+        fillHeight
+        exportName="operations-document-index"
+        canExport={can('ops-doc:export')}
+        onExport={auditExport('documents')}
+        columns={[
+          { field: 'file_name', headerName: 'File name', minWidth: 230 },
+          { field: 'document_type', headerName: 'Type' },
+          { field: 'document_date', headerName: 'Document date' },
+          { field: 'rig_code_snapshot', headerName: 'Rig' },
+          { field: 'well_code_snapshot', headerName: 'Well' },
+          { field: 'scope', headerName: 'Scope' },
+          { field: 'uploaded_by_name', headerName: 'Filed by' },
+          { field: 'notes', headerName: 'Notes' },
+          {
+            headerName: 'Actions',
+            width: 260,
+            minWidth: 245,
+            sortable: false,
+            cellRenderer: ({ data: r }: { data: OpsDocument }) => (
+              <Box display="flex" alignItems="center" height="100%">
+                {!deleted && can('ops-doc:download') && (
+                  <Button
+                    size="small"
+                    aria-label={`Download ${r.file_name}`}
+                    onClick={() =>
+                      downloadFile(`/operations/documents/${r.id}/download`, r.file_name).catch((e) => setError(e.message))
+                    }
+                  >
+                    <DownloadOutlined />
+                  </Button>
+                )}
+                {!deleted && can('ops-doc:update') && (
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setEditing(r)
+                      setSaveError('')
+                    }}
+                  >
+                    Edit
+                  </Button>
+                )}
+                {controls.actions([r])}
+              </Box>
+            ),
+          },
+        ]}
+      />
+      {controls.dialog}
+      {upload && ref && (
+        <SourceDialog
+          reference={ref}
+          initial={folder}
+          onClose={() => setUpload(false)}
+          onSaved={() => {
+            setUpload(false)
+            refresh().catch((e) => setError(e.message))
+          }}
         />
-        {!docs.length && !loading && <Alert severity="info" sx={{ mt: 2 }}>No documents yet for this filter. Upload a DDR/DCR PDF or the Operations Summary workbook — DMR and RMR share the same vault and extraction.</Alert>}
-      </SectionCard>
-
-      <Alert severity="success" sx={{ mt: 2 }}>Each well × scope (drilling/completion) is a directory; inside it the vault is Year → Month → documents with counts and status, report-date and report-no columns, and view/download/re-extract/replace/delete. The same tree is printable and exportable.</Alert>
+      )}
+      {editing && (
+        <FormDialog
+          open
+          title="Edit document details"
+          onClose={() => setEditing(null)}
+          onSubmit={async () => {
+            setBusy(true)
+            try {
+              await api(`/operations/documents/${editing.id}`, {
+                method: 'PUT',
+                body: body({
+                  document_type: editing.document_type,
+                  document_date: editing.document_date,
+                  notes: editing.notes,
+                }),
+              })
+              await refresh()
+              setEditing(null)
+            } catch (e) {
+              setSaveError((e as Error).message)
+            } finally {
+              setBusy(false)
+            }
+          }}
+          busy={busy}
+        >
+          <Box display="grid" gap={2} pt={1}>
+            <TextField
+              label="Type"
+              select
+              value={editing.document_type}
+              onChange={(e) => setEditing({ ...editing, document_type: e.target.value })}
+            >
+              {[...new Set([editing.document_type, ...(ref?.document_types ?? [])])].map((t) => (
+                <MenuItem key={t} value={t}>
+                  {t}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              type="date"
+              label="Document date"
+              value={editing.document_date ?? ''}
+              onChange={(e) => setEditing({ ...editing, document_date: e.target.value || null })}
+              slotProps={{ inputLabel: { shrink: true } }}
+            />
+            <TextField
+              label="Notes"
+              multiline
+              value={editing.notes}
+              onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
+            />
+            {saveError && <Alert severity="error">{saveError}</Alert>}
+          </Box>
+        </FormDialog>
+      )}
     </Box>
   )
 }

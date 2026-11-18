@@ -1,209 +1,315 @@
-"""Dashboard and analytics service."""
+"""Operations-only metrics. Register counts include drafts; performance requires submission."""
 
-from datetime import date, datetime, timezone, timedelta
-from decimal import Decimal
+import itertools
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, func
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
-from app.models.operations import OpsActivityBlock, OpsDailyMetric, OpsDailyReport, OpsPlanVersion, OpsPlanItem
+from app.domain.operations.durations import utc
+from app.domain.operations.metrics import compute_rop, penetration, period_balance
+from app.models.operations import (
+    OpsActivityBlock,
+    OpsDailyReport,
+    OpsPlanItem,
+    OpsPlanVersion,
+    OpsSettings,
+)
 from app.models.rig_well import Well
+from app.services.operations.plans import active_plan
+from app.services.operations.scope import available
+
+VERIFIED = ("submitted", "approved")
 
 
-def dashboard(db: Session, organization_id: str, well_id: str | None = None, rig_id: str | None = None, date_from: date | None = None, date_to: date | None = None):
-    # Reports query
-    q = select(OpsDailyReport).where(OpsDailyReport.organization_id == organization_id, OpsDailyReport.is_deleted.is_(False))
+def _blocks(db, org, reports):
+    by_report = defaultdict(list)
+    for b in db.scalars(
+        select(OpsActivityBlock)
+        .where(
+            OpsActivityBlock.organization_id == org,
+            OpsActivityBlock.report_id.in_([r.id for r in reports]),
+            OpsActivityBlock.is_deleted.is_(False),
+        )
+        .order_by(OpsActivityBlock.sequence_no)
+    ):
+        by_report[b.report_id].append(b)
+    return by_report
+
+
+def _gaps(db, org, wells, reports, scope, date_from, date_to):
+    """Only expect time logs during dated active programmes, not every configured well's lifetime."""
+    cfg = db.scalar(select(OpsSettings).where(OpsSettings.organization_id == org))
+    zone = ZoneInfo(cfg.operating_timezone if cfg else "Africa/Lagos")
+    boundary = timedelta(hours=cfg.day_boundary_hour if cfg else 0)
+    last = min(date_to or datetime.now(zone).date(), (datetime.now(zone) - boundary).date() - timedelta(days=1))
+    first = max(date_from or last - timedelta(days=6), last - timedelta(days=30))
+    seen = {(r.well_id, r.scope, r.report_date) for r in reports if r.report_type != "DMR"}
+    lookup = {w.id: w for w in wells}
+    gaps = []
+    plans = db.scalars(
+        select(OpsPlanVersion).where(
+            OpsPlanVersion.organization_id == org,
+            OpsPlanVersion.well_id.in_(lookup),
+            OpsPlanVersion.is_deleted.is_(False),
+            OpsPlanVersion.status == "active",
+            OpsPlanVersion.planned_start_at.is_not(None),
+        )
+    )
+    for p in plans:
+        if (scope and p.scope != scope) or not available(lookup[p.well_id], p.scope) or not p.planned_days:
+            continue
+        a = utc(p.planned_start_at).astimezone(zone) - boundary
+        current = max(first, a.date())
+        while current <= last and (current - a.date()).days < float(p.planned_days):
+            if (p.well_id, p.scope, current) not in seen:
+                gaps.append(
+                    {
+                        "well_code": lookup[p.well_id].well_code,
+                        "scope": p.scope,
+                        "date": str(current),
+                        "reason": "No daily log in active programme",
+                    }
+                )
+            current += timedelta(days=1)
+    return sorted(gaps, key=lambda g: (g["date"], g["well_code"]), reverse=True)[:100]
+
+
+def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, date_to=None, scope=None):
+    q = select(OpsDailyReport).where(
+        OpsDailyReport.organization_id == organization_id,
+        OpsDailyReport.is_deleted.is_(False),
+        OpsDailyReport.is_current.is_(True),
+    )
+    well_q = select(Well).where(Well.organization_id == organization_id, Well.is_deleted.is_(False))
     if well_id:
         q = q.where(OpsDailyReport.well_id == well_id)
+        well_q = well_q.where(Well.id == well_id)
     if rig_id:
         q = q.where(OpsDailyReport.rig_id == rig_id)
+        well_q = well_q.where(Well.rig_id == rig_id)
+    if scope:
+        q = q.where(OpsDailyReport.scope == scope)
     if date_from:
         q = q.where(OpsDailyReport.report_date >= date_from)
     if date_to:
         q = q.where(OpsDailyReport.report_date <= date_to)
-    reports = db.scalars(q).all()
-
-    total_reports = len(reports)
-    draft_reports = sum(1 for r in reports if r.status == "draft")
-    submitted_reports = sum(1 for r in reports if r.status == "submitted")
-    approved_reports = sum(1 for r in reports if r.status == "approved")
-    awaiting_review = sum(1 for r in reports if r.extraction_status == "needs_review")
-
-    # Aggregate blocks
-    block_q = select(OpsActivityBlock).where(OpsActivityBlock.organization_id == organization_id, OpsActivityBlock.is_deleted.is_(False))
-    if well_id:
-        block_q = block_q.join(OpsDailyReport, OpsActivityBlock.report_id == OpsDailyReport.id).where(OpsDailyReport.well_id == well_id)
-    if date_from:
-        block_q = block_q.where(OpsActivityBlock.started_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc))
-    if date_to:
-        block_q = block_q.where(OpsActivityBlock.started_at <= datetime.combine(date_to, datetime.max.time(), tzinfo=timezone.utc))
-    blocks = db.scalars(block_q).all()
-
-    total_min = sum(b.duration_minutes for b in blocks)
-    planned_min = sum(b.duration_minutes for b in blocks if b.classification == "Planned")
-    npt_min = sum(b.duration_minutes for b in blocks if b.classification == "NPT")
-    upa_min = sum(b.duration_minutes for b in blocks if b.classification == "UPA")
-    productive_min = sum(b.duration_minutes for b in blocks if b.is_productive)
-
-    productive_pct = (productive_min / total_min * 100) if total_min else 0
-    npt_pct = (npt_min / total_min * 100) if total_min else 0
-
-    # NPT by code
-    from collections import Counter
-    npt_by_code_counter = Counter()
-    npt_hours_by_code = {}
-    for b in blocks:
-        if b.classification == "NPT":
-            key = b.npt_code_snapshot or "UNCODED"
-            npt_by_code_counter[key] += b.duration_minutes
-    npt_by_code = [{"code": k, "minutes": v, "hours": round(v/60, 2), "name": k} for k, v in npt_by_code_counter.most_common(10)]
-
-    npt_by_agency_counter = Counter()
-    for b in blocks:
-        if b.classification == "NPT":
-            key = b.responsible_party or "Unknown"
-            npt_by_agency_counter[key] += b.duration_minutes
-    npt_by_agency = [{"agency": k, "minutes": v, "hours": round(v/60, 2)} for k, v in npt_by_agency_counter.most_common(10)]
-
-    # Daily trend from metrics
-    metric_q = select(OpsDailyMetric).where(OpsDailyMetric.organization_id == organization_id)
-    if well_id:
-        metric_q = metric_q.where(OpsDailyMetric.well_id == well_id)
-    if date_from:
-        metric_q = metric_q.where(OpsDailyMetric.report_date >= date_from)
-    if date_to:
-        metric_q = metric_q.where(OpsDailyMetric.report_date <= date_to)
-    metrics = db.scalars(metric_q.order_by(OpsDailyMetric.report_date)).all()
-    daily_trend = [{"date": str(m.report_date), "logged_hours": round(m.logged_minutes/60, 2), "npt_hours": round(m.npt_minutes/60, 2), "planned_hours": round(m.planned_minutes/60, 2), "depth_end_m": float(m.depth_end_m) if m.depth_end_m else None} for m in metrics]
-
-    # Recent reports
-    recent = sorted(reports, key=lambda r: r.report_date, reverse=True)[:10]
-    # Enrich recent with blocks
-    for r in recent:
-        blks = db.scalars(select(OpsActivityBlock).where(OpsActivityBlock.report_id == r.id, OpsActivityBlock.is_deleted.is_(False))).all()
-        r._blocks = blks  # type: ignore
-        r._unaccounted_minutes = 0
-        r._total_block_minutes = sum(b.duration_minutes for b in blks)
-
-    # Missing reports - naive: days without report for active wells
-    missing = []
-    wells = db.scalars(select(Well).where(Well.organization_id == organization_id, Well.is_deleted.is_(False))).all()
-    wells_total = len(wells)
-    wells_covered = len(set(r.well_id for r in reports))
-
-    # Average ROP
-    avg_rop = None
-    if blocks:
-        # Compute ROP where available
-        rops = [float(b.rop_m_per_hr) for b in blocks if b.rop_m_per_hr is not None and b.rop_m_per_hr > 0]
-        if rops:
-            avg_rop = sum(rops) / len(rops)
-
-    # Data quality
-    data_quality = 100.0
-    if awaiting_review:
-        data_quality -= min(20, awaiting_review * 2)
-    if npt_min and any(b.classification == "NPT" and not b.npt_code_id for b in blocks):
-        data_quality -= 10
-    if total_min:
-        # penalize unaccounted
-        unaccounted_total = sum(0 for r in reports)  # simplified
-        data_quality = max(0, data_quality)
-
-    kpis = {
-        "total_reports": total_reports,
-        "draft_reports": draft_reports,
-        "submitted_reports": submitted_reports,
-        "approved_reports": approved_reports,
-        "reports_awaiting_review": awaiting_review,
-        "total_logged_hours": round(total_min/60, 2),
-        "planned_hours": round(planned_min/60, 2),
-        "npt_hours": round(npt_min/60, 2),
-        "upa_hours": round(upa_min/60, 2),
-        "productive_pct": round(productive_pct, 1),
-        "npt_pct": round(npt_pct, 1),
-        "unaccounted_hours": 0,
-        "avg_rop": round(avg_rop, 2) if avg_rop else None,
-        "lag_days": None,
-        "wells_covered": wells_covered,
-        "wells_total": wells_total,
-        "data_quality_score": round(data_quality, 1),
-    }
-
+    reports = db.scalars(q.order_by(OpsDailyReport.report_date.desc(), OpsDailyReport.created_at.desc())).all()
+    allocations = Counter()
+    logged = Counter()
+    by_code = Counter()
+    by_agency = Counter()
+    trends = defaultdict(Counter)
+    periods = unaccounted = productive = gain = hours = 0
+    blocks = _blocks(db, organization_id, reports)
+    for report in reports:
+        rows = blocks[report.id]
+        minutes = sum(b.duration_minutes for b in rows)
+        report._blocks = rows
+        report._total_block_minutes = minutes
+        report._unaccounted_minutes = period_balance(report.report_type, report.period_minutes, minutes)
+        if report.status not in VERIFIED or (report.report_type == "DMR" and not rows):
+            continue
+        periods += report.period_minutes
+        unaccounted += report._unaccounted_minutes
+        g, h = penetration(report, rows)
+        if h:
+            gain += g
+            hours += h
+        for b in rows:
+            logged[b.classification] += b.duration_minutes
+            trends[report.report_date][b.classification] += b.duration_minutes
+            allocations[b.allocation] += b.duration_minutes
+            if b.is_productive:
+                productive += b.duration_minutes
+            if b.allocation == "NPT":
+                by_code[b.npt_code_snapshot or "Uncoded"] += b.duration_minutes
+                by_agency[b.responsible_party or "Not assigned"] += b.duration_minutes
+    total = sum(logged.values())
+    counts = Counter(r.status for r in reports)
+    lag = None
+    if well_id and scope:
+        series = time_depth(db, organization_id, well_id, scope)["lag_series"]
+        included = {r.id for r in reports}
+        series = [p for p in series if p["report_id"] in included]
+        lag = series[-1]["lag_days"] if series else None
+    wells = db.scalars(well_q).all()
     return {
-        "kpis": kpis,
-        "npt_by_code": npt_by_code,
-        "npt_by_agency": npt_by_agency,
-        "daily_trend": daily_trend,
-        "recent_reports": recent,
-        "missing_reports": missing,
+        "kpis": {
+            "total_reports": len(reports),
+            "draft_reports": counts["draft"],
+            "submitted_reports": counts["submitted"],
+            "approved_reports": counts["approved"],
+            "reports_awaiting_review": sum(r.extraction_status == "needs_review" for r in reports),
+            "total_logged_hours": round(total / 60, 2),
+            "planned_hours": round(logged["Planned"] / 60, 2),
+            "npt_hours": round(logged["NPT"] / 60, 2),
+            "upa_hours": round(logged["UPA"] / 60, 2),
+            "unaccounted_hours": round(unaccounted / 60, 2),
+            "productive_hours": round(productive / 60, 2),
+            "nonproductive_hours": round((total - productive) / 60, 2),
+            "allocation_hours": {k: round(allocations[k] / 60, 2) for k in ("PT", "UPA", "NPT", "SP")},
+            "productive_pct": round(100 * productive / total, 1) if total else 0,
+            "npt_pct": round(100 * logged["NPT"] / total, 1) if total else 0,
+            "avg_rop": round(gain / hours, 2) if hours else None,
+            "lag_days": lag,
+            "wells_covered": len({r.well_id for r in reports}),
+            "wells_total": sum(
+                any(available(w, s) for s in ((scope,) if scope else ("drilling", "completion"))) for w in wells
+            ),
+            "data_quality_score": round(100 * (periods - unaccounted) / periods, 1) if periods else 0,
+        },
+        "recent_reports": reports[:10],
+        "missing_reports": _gaps(db, organization_id, wells, reports, scope, date_from, date_to),
+        "npt_by_code": [
+            {"code": k, "name": k, "minutes": v, "hours": round(v / 60, 2)} for k, v in by_code.most_common(10)
+        ],
+        "npt_by_agency": [
+            {"agency": k, "minutes": v, "hours": round(v / 60, 2)} for k, v in by_agency.most_common(10)
+        ],
+        "daily_trend": [
+            {
+                "date": d.isoformat(),
+                "logged_hours": round(sum(c.values()) / 60, 2),
+                "planned_hours": round(c["Planned"] / 60, 2),
+                "npt_hours": round(c["NPT"] / 60, 2),
+                "upa_hours": round(c["UPA"] / 60, 2),
+            }
+            for d, c in sorted(trends.items())
+        ],
     }
 
 
-def time_depth(db: Session, organization_id: str, well_id: str, scope: str = "drilling"):
-    reports = db.scalars(select(OpsDailyReport).where(OpsDailyReport.organization_id == organization_id, OpsDailyReport.well_id == well_id, OpsDailyReport.scope == scope, OpsDailyReport.is_deleted.is_(False)).order_by(OpsDailyReport.report_date)).all()
-    if not reports:
-        return {"plan": [], "actual": [], "npt_bands": [], "milestones": [], "lag_series": []}
+def planned_at_depth(points, depth):
+    """Interpolate between measured targets. A plateau has no unique inverse."""
+    candidates = set()
+    for point in points:
+        if point["depth_m"] == depth:
+            candidates.add(point["cum_days"])
+    for a, b in itertools.pairwise(points):
+        lo, hi = a["depth_m"], b["depth_m"]
+        if lo is not None and hi is not None and min(lo, hi) < depth < max(lo, hi):
+            candidates.add(a["cum_days"] + (b["cum_days"] - a["cum_days"]) * (depth - lo) / (hi - lo))
+    return next(iter(candidates)) if len(candidates) == 1 else None
 
-    # Actual curve: cumulative days vs depth
+
+def time_depth(db, organization_id, well_id, scope="drilling"):
+    reports = db.scalars(
+        select(OpsDailyReport)
+        .where(
+            OpsDailyReport.organization_id == organization_id,
+            OpsDailyReport.well_id == well_id,
+            OpsDailyReport.scope == scope,
+            OpsDailyReport.is_deleted.is_(False),
+            OpsDailyReport.is_current.is_(True),
+            OpsDailyReport.status.in_(VERIFIED),
+        )
+        .order_by(OpsDailyReport.report_date)
+    ).all()
+    version = active_plan(db, organization_id, well_id, scope)
+    baseline_ids = {r.baseline_plan_id for r in reports if r.baseline_plan_id}
+    if version:
+        baseline_ids.add(version.id)
+    versions = {
+        v.id: v
+        for v in db.scalars(
+            select(OpsPlanVersion).where(
+                OpsPlanVersion.id.in_(baseline_ids),
+                OpsPlanVersion.organization_id == organization_id,
+                OpsPlanVersion.well_id == well_id,
+                OpsPlanVersion.scope == scope,
+            )
+        )
+    }
+    timelines = defaultdict(list)
+    checkpoints = {}
+    for item in db.scalars(
+        select(OpsPlanItem)
+        .where(OpsPlanItem.organization_id == organization_id, OpsPlanItem.plan_version_id.in_(versions))
+        .order_by(OpsPlanItem.sequence_no)
+    ):
+        days = float(item.cum_planned_days or 0)
+        checkpoints[item.id] = days
+        timelines[item.plan_version_id].append(
+            {
+                "cum_days": days,
+                "depth_m": float(item.target_depth_m) if item.target_depth_m is not None else None,
+                "label": item.description,
+            }
+        )
+    plan = timelines[version.id] if version else []
     actual = []
-    cum_days = 0
-    cum_depth = None
+    lag = []
+    npt = []
+    projection = []
+    blocks = _blocks(db, organization_id, reports)
     for r in reports:
-        blocks = db.scalars(select(OpsActivityBlock).where(OpsActivityBlock.report_id == r.id, OpsActivityBlock.is_deleted.is_(False)).order_by(OpsActivityBlock.sequence_no)).all()
-        day_hours = sum(b.duration_minutes for b in blocks) / 60
-        # Use report depth_end_m as depth at end of day
-        depth_m = float(r.depth_end_m) if r.depth_end_m else (float(cum_depth) if cum_depth else 0)
-        cum_days += day_hours / 24 if day_hours else 0
-        # If no depth, keep last
-        if r.depth_end_m:
-            cum_depth = r.depth_end_m
-        actual.append({"cum_days": round(cum_days, 2), "depth_m": depth_m, "report_date": r.report_date.isoformat(), "label": f"{r.report_date} ({r.report_no_text})"})
-
-    # Plan curve from active plan version
-    plan = []
-    plan_version = db.scalar(select(OpsPlanVersion).where(OpsPlanVersion.organization_id == organization_id, OpsPlanVersion.well_id == well_id, OpsPlanVersion.scope == scope, OpsPlanVersion.status == "active", OpsPlanVersion.is_deleted.is_(False)))
-    if not plan_version:
-        plan_version = db.scalar(select(OpsPlanVersion).where(OpsPlanVersion.organization_id == organization_id, OpsPlanVersion.well_id == well_id, OpsPlanVersion.scope == scope, OpsPlanVersion.is_deleted.is_(False)).order_by(OpsPlanVersion.version_no.desc()))
-    if plan_version:
-        items = db.scalars(select(OpsPlanItem).where(OpsPlanItem.organization_id == organization_id, OpsPlanItem.plan_version_id == plan_version.id).order_by(OpsPlanItem.sequence_no)).all()
-        cum = 0
-        for it in items:
-            hrs = float(it.planned_hours) if it.planned_hours else 0
-            cum += hrs / 24
-            it.cum_planned_days = Decimal(str(round(cum, 2)))  # type: ignore
-            plan.append({"cum_days": round(cum, 2), "depth_m": float(it.target_depth_m) if it.target_depth_m else 0, "label": it.description[:60]})
-
-    # NPT bands: intervals where NPT
-    npt_bands = []
-    for r in reports:
-        blocks = db.scalars(select(OpsActivityBlock).where(OpsActivityBlock.report_id == r.id, OpsActivityBlock.classification == "NPT", OpsActivityBlock.is_deleted.is_(False))).all()
-        for b in blocks:
-            npt_bands.append({"from": b.started_at.isoformat(), "to": b.ended_at.isoformat(), "well_id": well_id, "reason": b.reason or b.narrative[:100]})
-
-    # Milestones: spud, section TDs
-    well = db.get(Well, well_id)
-    milestones = []
-    if well:
-        # Add dummy milestones from reports depth jumps
-        pass
-
-    # Lag series: actual cumulative days - plan cumulative days at same depth (simplified: compare at each actual point)
-    lag_series = []
-    if plan and actual:
-        # For each actual point, find plan days at that depth via interpolation
-        for a in actual:
-            depth = a["depth_m"]
-            # find plan segment containing depth
-            plan_days_at_depth = None
-            for i, p in enumerate(plan):
-                if p["depth_m"] >= depth:
-                    plan_days_at_depth = p["cum_days"]
-                    break
-            if plan_days_at_depth is None and plan:
-                plan_days_at_depth = plan[-1]["cum_days"]
-            if plan_days_at_depth is not None:
-                lag = round(a["cum_days"] - plan_days_at_depth, 2)
-                lag_series.append({"report_date": a["report_date"], "lag_days": lag, "depth_m": depth})
-
-    return {"plan": plan, "actual": actual, "npt_bands": npt_bands, "milestones": milestones, "lag_series": lag_series}
+        for b in blocks[r.id]:
+            if b.allocation == "NPT":
+                npt.append(
+                    {
+                        "from": b.started_at.isoformat(),
+                        "to": b.ended_at.isoformat(),
+                        "reason": b.reason or b.narrative[:100],
+                    }
+                )
+        baseline = versions.get(r.baseline_plan_id)
+        origin = baseline.planned_start_at if baseline else None
+        # Campaign days are never the sum of the reported time blocks.
+        if origin and r.period_end_at:
+            elapsed = (utc(r.period_end_at) - utc(origin)).total_seconds() / 86400
+            basis = "programme start"
+        elif r.scope == "drilling" and r.dfs_days is not None:
+            elapsed = float(r.dfs_days)
+            basis = "reported DFS"
+        elif r.period_end_at and reports[0].period_start_at:
+            elapsed = (utc(r.period_end_at) - utc(reports[0].period_start_at)).total_seconds() / 86400
+            basis = "first submitted period"
+        else:
+            continue
+        depth = float(r.depth_end_m) if r.depth_end_m is not None else None
+        rop = compute_rop(*penetration(r, blocks[r.id]))
+        actual.append(
+            {
+                "cum_days": elapsed,
+                "depth_m": depth,
+                "report_date": str(r.report_date),
+                "label": r.report_no_text,
+                "report_id": r.id,
+                "rop": float(rop) if rop is not None else None,
+                "basis": basis,
+            }
+        )
+        planned = checkpoints.get(r.completed_plan_item_id)
+        comparison = "confirmed programme activity" if planned is not None else "at measured depth"
+        if planned is None and baseline and depth is not None:
+            planned = planned_at_depth(timelines[baseline.id], depth)
+        if planned is not None and baseline and basis != "first submitted period":
+            lag.append(
+                {
+                    "report_date": str(r.report_date),
+                    "report_id": r.id,
+                    "lag_days": round(elapsed - planned, 3),
+                    "depth_m": depth,
+                    "basis": comparison,
+                    "baseline": f"{baseline.label} v{baseline.version_no}",
+                }
+            )
+    if actual and actual[-1]["depth_m"] is not None and actual[-1]["rop"] and actual[-1]["rop"] > 0:
+        last = actual[-1]
+        target = next((p for p in plan if p["depth_m"] is not None and p["depth_m"] > last["depth_m"]), None)
+        if target:
+            days = (target["depth_m"] - last["depth_m"]) / last["rop"] / 24
+            projection = [
+                last,
+                {"cum_days": last["cum_days"] + days, "depth_m": target["depth_m"], "label": "Next deeper target"},
+            ]
+    return {
+        "plan": plan,
+        "actual": actual,
+        "npt_bands": npt,
+        "milestones": [],
+        "lag_series": lag,
+        "projection": projection,
+    }

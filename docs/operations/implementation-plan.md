@@ -1,6 +1,6 @@
 # Well Operations module — implementation plan v2
 
-**Status:** plan only. No code, schema, migration or configuration changed.
+**Status:** historical design proposal. For the implemented workflow, permissions, calculation bases and limits, see [Well Operations: daily workflow](daily-workflow.md). The sections below describe the proposal, not a release checklist with every item completed.
 **Date:** 2026-11-17
 **Branch:** `arena/10241b7b-wellcostiq`
 **Supersedes:** `docs/operations-implementation-plan.md` (v1) — v1 covered only the DDR spine.

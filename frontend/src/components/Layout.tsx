@@ -80,11 +80,11 @@ const modules: NavModule[] = [
     { label: 'Well Cost Analysis', path: '/daily-cost/analysis', icon: InsightsOutlined, permission: 'daily-cost:read' },
   ] },
   { label: 'Well Operations', icon: InsightsOutlined, items: [
-    { label: 'Overview', path: '/operations', icon: DashboardOutlined, permission: 'ops-report:read' },
-    { label: 'Documents', path: '/operations/documents', icon: DescriptionOutlined, permission: 'ops-doc:read' },
+    { label: 'Operations Dashboard', path: '/operations', icon: DashboardOutlined, permission: 'ops-dashboard:read' },
+    { label: 'Plans & timeline', path: '/operations/plans', icon: AssessmentOutlined, permission: 'ops-plan:read' },
     { label: 'Daily reports', path: '/operations/reports', icon: ScheduleRounded, permission: 'ops-report:read' },
     { label: 'Analytics', path: '/operations/analytics', icon: InsightsOutlined, permission: 'ops-analytics:read' },
-    { label: 'Plans & timeline', path: '/operations/plans', icon: AssessmentOutlined, permission: 'ops-plan:read' },
+    { label: 'Documents', path: '/operations/documents', icon: DescriptionOutlined, permission: 'ops-doc:read' },
     { label: 'Code library', path: '/operations/library', icon: ListAltOutlined, permission: 'ops-master:read' },
     { label: 'Settings', path: '/operations/settings', icon: SettingsOutlined, permission: 'ops-settings:read' },
   ] },
@@ -187,7 +187,7 @@ export default function Layout() {
     .filter(item => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0]
   const detailLabel = DETAIL_LABELS.find(entry => location.pathname.startsWith(entry.prefix))?.label
-  const pageLabel = detailLabel ?? currentItem?.label ?? (businessDashboardActive ? 'Operations dashboard' : location.pathname === '/' ? 'Home' : 'Workspace')
+  const pageLabel = detailLabel ?? currentItem?.label ?? (businessDashboardActive ? 'Costing Dashboard' : location.pathname === '/' ? 'Home' : 'Workspace')
   const sectionLabel = currentModule?.label ?? (businessDashboardActive ? 'Home' : location.pathname === '/' ? 'Workspace' : 'Workspace')
 
   useEffect(() => { localStorage.setItem('wcp-nav-expanded', String(navExpanded)) }, [navExpanded])
@@ -214,7 +214,7 @@ export default function Layout() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
   useEffect(() => {
-    document.title = pageTitle(detailLabel ?? (businessDashboardActive ? 'Operations dashboard' : currentItem?.label ?? (location.pathname === '/' ? 'Home' : undefined)))
+    document.title = pageTitle(detailLabel ?? (businessDashboardActive ? 'Costing Dashboard' : currentItem?.label ?? (location.pathname === '/' ? 'Home' : undefined)))
   }, [detailLabel, businessDashboardActive, currentItem?.label, location.pathname])
 
   const toggleModule = (label: string) => setOpenModules(values => values.includes(label) ? values.filter(value => value !== label) : [...values, label])
@@ -250,10 +250,10 @@ export default function Layout() {
       <Box className="rail-scroll" sx={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', py: .5 }}>
         <Box className="rail-nav">
           {showText && <Typography component="div" className="rail-section-label">Workspace</Typography>}
-          {showBusinessDashboard && <Tooltip title={!showText ? 'Operations dashboard' : ''} placement="right">
+          {showBusinessDashboard && <Tooltip title={!showText ? 'Costing Dashboard' : ''} placement="right">
             <RouterLink to="/business-dashboard" onClick={() => setMobileOpen(false)} className={`rail-item${businessDashboardActive ? ' rail-item--active' : ''}`} aria-current={businessDashboardActive ? 'page' : undefined} style={{ justifyContent: showText ? 'flex-start' : 'center', textDecoration: 'none' }}>
               <span className="rail-item__icon"><HomeOutlined sx={{ fontSize: 19 }}/></span>
-              {showText && <span className="rail-item__label">Operations dashboard</span>}
+              {showText && <span className="rail-item__label">Costing Dashboard</span>}
             </RouterLink>
           </Tooltip>}
 

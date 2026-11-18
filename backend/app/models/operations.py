@@ -4,7 +4,7 @@ Isolated from costing: no FK to any afe* or daily_cost* table, and vice versa.
 Every business table is organization_id-scoped, soft-deletable and auditable.
 """
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -32,7 +32,7 @@ def uid() -> str:
 
 
 def now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -52,9 +52,9 @@ class OpsSettings(Base):
     operating_timezone: Mapped[str] = mapped_column(String(64), default="Africa/Lagos", nullable=False)
     tour_pattern: Mapped[str] = mapped_column(String(20), default="single_24h", nullable=False)
     require_review_before_submit: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    auto_extract_on_upload: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    classification_confidence_high: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.85"), nullable=False)
-    classification_confidence_low: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.60"), nullable=False)
+    auto_extract_on_upload: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    classification_confidence_high: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0.85"), nullable=False)
+    classification_confidence_low: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0.60"), nullable=False)
     require_npt_code: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     require_npt_agency: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     require_npt_reason: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -192,6 +192,46 @@ class OpsCause(Base):
 # ---------------------------------------------------------------------------
 # Document vault
 # ---------------------------------------------------------------------------
+class OpsCodeRecord(Base):
+    __abstract__ = True
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    description: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+
+
+class OpsPhaseCode(OpsCodeRecord):
+    __tablename__ = "ops_phase_codes"
+    __table_args__ = (UniqueConstraint("organization_id", "phase_code", name="uq_ops_phase_code"),)
+    phase_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    phase_name: Mapped[str] = mapped_column(String(150), nullable=False)
+
+
+class OpsMarkRule(OpsCodeRecord):
+    __tablename__ = "ops_mark_rules"
+    __table_args__ = (UniqueConstraint("organization_id", "mark_code", name="uq_ops_mark_code"),)
+    mark_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    mark_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    default_classification: Mapped[str] = mapped_column(String(12), nullable=False)
+    default_allocation: Mapped[str] = mapped_column(String(8), nullable=False)
+
+
+class OpsDocumentType(Base):
+    __tablename__ = "ops_document_types"
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
+    )
+    code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class OpsDocument(Base):
     __tablename__ = "ops_documents"
     __table_args__ = (
@@ -202,8 +242,12 @@ class OpsDocument(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    well_id: Mapped[str | None] = mapped_column(ForeignKey("wells.id", ondelete="RESTRICT"), nullable=True, index=True)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    well_id: Mapped[str | None] = mapped_column(
+        ForeignKey("wells.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     rig_id: Mapped[str | None] = mapped_column(ForeignKey("rigs.id", ondelete="RESTRICT"), nullable=True)
     scope: Mapped[str] = mapped_column(String(20), default="drilling", nullable=False)
     folder_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -213,7 +257,7 @@ class OpsDocument(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     checksum_sha256: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     storage: Mapped[str] = mapped_column(String(20), default="database", nullable=False)
-    content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     external_ref: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     document_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     report_no_text: Mapped[str] = mapped_column(String(50), default="", nullable=False)
@@ -247,10 +291,11 @@ class OpsExtractionJob(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    report_id: Mapped[str | None] = mapped_column(ForeignKey("ops_daily_reports.id", ondelete="SET NULL"), index=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("ops_documents.id", ondelete="CASCADE"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="queued", nullable=False)
     report_type: Mapped[str] = mapped_column(String(20), default="", nullable=False)
-    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0"), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal(0), nullable=False)
     findings: Mapped[str] = mapped_column(Text, default="[]", nullable=False)  # JSON array as text
     payload_summary: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     error_message: Mapped[str] = mapped_column(String(2000), default="", nullable=False)
@@ -285,6 +330,8 @@ class OpsDailyReport(Base):
     well_code_snapshot: Mapped[str] = mapped_column(String(50), default="", nullable=False)
     well_name_snapshot: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     scope: Mapped[str] = mapped_column(String(20), default="drilling", nullable=False)
+    baseline_plan_id: Mapped[str | None] = mapped_column(ForeignKey("ops_plan_versions.id", ondelete="SET NULL"))
+    completed_plan_item_id: Mapped[str | None] = mapped_column(ForeignKey("ops_plan_items.id", ondelete="SET NULL"))
     report_type: Mapped[str] = mapped_column(String(10), default="DDR", nullable=False)
     report_date: Mapped[date] = mapped_column(Date, nullable=False)
     report_no_text: Mapped[str] = mapped_column(String(50), default="", nullable=False)
@@ -366,6 +413,7 @@ class OpsActivityBlock(Base):
     classification: Mapped[str] = mapped_column(String(10), default="Planned", nullable=False)
     allocation: Mapped[str] = mapped_column(String(10), default="PT", nullable=False)
     is_productive: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    classification_evidence: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     classification_source: Mapped[str] = mapped_column(String(20), default="keyword", nullable=False)
     npt_code_id: Mapped[str | None] = mapped_column(ForeignKey("ops_npt_codes.id", ondelete="SET NULL"), nullable=True)
     npt_code_snapshot: Mapped[str] = mapped_column(String(50), default="", nullable=False)
@@ -387,7 +435,7 @@ class OpsActivityBlock(Base):
     narrative: Mapped[str] = mapped_column(Text, default="", nullable=False)
     source_page: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     source_bbox: Mapped[str] = mapped_column(String(200), default="", nullable=False)
-    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.50"), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0.50"), nullable=False)
     review_state: Mapped[str] = mapped_column(String(20), default="suggested", nullable=False)
     reviewer_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -445,7 +493,7 @@ class OpsDailyMetric(Base):
     lag_days: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
     lag_basis: Mapped[str] = mapped_column(String(50), default="", nullable=False)
     npt_block_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    avg_confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0"), nullable=False)
+    avg_confidence: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal(0), nullable=False)
     review_state: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
@@ -498,7 +546,7 @@ class OpsPlanItem(Base):
     description: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     target_depth_m: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
     delta_depth_m: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    planned_hours: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    planned_hours: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal(0), nullable=False)
     planned_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     planned_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cum_planned_days: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
@@ -506,7 +554,7 @@ class OpsPlanItem(Base):
     rate_basis: Mapped[str] = mapped_column(String(20), default="rop", nullable=False)
     rop_assumption_m_per_hr: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
     trip_speed_m_per_hr: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    contingency_hours: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), nullable=False)
+    contingency_hours: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal(0), nullable=False)
     is_critical_path: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notes: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
@@ -539,7 +587,7 @@ class OpsSurvey(Base):
     dls_deg_per_30m: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
     tool: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     source: Mapped[str] = mapped_column(String(20), default="manual", nullable=False)
-    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.50"), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0.50"), nullable=False)
     survey_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)

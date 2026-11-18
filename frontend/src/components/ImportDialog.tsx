@@ -5,13 +5,15 @@ import { FormDialog } from './Common'
 import { downloadTemplate, parseImportFile, type ImportRow } from '../lib/export'
 
 // Standard import flow for list pages: xlsx/csv file, row preview, row-level errors near the source.
-export function ImportDialog({ open, onClose, title, subtitle, headers, optionalHeaders = [], sample, templateName, onRows }: {
+export function ImportDialog({ open, onClose, title, subtitle, headers, optionalHeaders = [], headerAliases, sample, templateName, onRows }: {
   open: boolean
   onClose: () => void
   title: string
   subtitle?: string
   headers: string[]
   optionalHeaders?: string[]
+  /** Optional display header → template key map for reimporting register exports. */
+  headerAliases?: Record<string,string>
   sample?: ImportRow
   templateName: string
   onRows: (rows: ImportRow[]) => Promise<string[]>
@@ -30,12 +32,15 @@ export function ImportDialog({ open, onClose, title, subtitle, headers, optional
     setParsing(true); setErrors([]); setFileName(file.name)
     try {
       const parsed = await parseImportFile(file)
-      const missing = headers.filter(h => !parsed.headers.includes(h))
+      const key = (h: string) => headerAliases?.[h] ?? h
+      const available = parsed.headers.map(key)
+      const data = headerAliases ? parsed.rows.map(row=>Object.fromEntries(Object.entries(row).map(([h,v])=>[key(h),v]).filter(([h])=>displayHeaders.includes(h)))) : parsed.rows
+      const missing = headers.filter(h => !available.includes(h))
       if (missing.length) {
         setRows([])
         setErrors([`Missing required columns: ${missing.join(', ')}. Download the template for the expected format.`])
       } else {
-        setRows(parsed.rows)
+        setRows(data)
         if (!parsed.rows.length) setErrors(['The file contains no data rows.'])
       }
     } catch {

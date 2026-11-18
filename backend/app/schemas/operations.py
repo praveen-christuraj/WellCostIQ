@@ -2,7 +2,8 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -42,6 +43,29 @@ class OpsSettingsIn(_Strict):
     default_rop_basis: str = Field(min_length=1, max_length=20)
     document_max_mb: int = Field(ge=1, le=100)
 
+    document_types: list[Annotated[str, Field(min_length=1, max_length=20)]] | None = Field(
+        default=None, min_length=1, max_length=80
+    )
+
+    @field_validator("document_types")
+    @classmethod
+    def distinct_types(cls, values):
+        if values is None:
+            return None
+        values = [v.strip() for v in values]
+        if not all(values) or len({v.casefold() for v in values}) != len(values):
+            raise ValueError("Document types must be nonempty and unique.")
+        return values
+
+    @field_validator("operating_timezone")
+    @classmethod
+    def valid_timezone(cls, value):
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("Unknown operating timezone") from exc
+        return value
+
     @field_validator("operating_timezone", "tour_pattern", "default_depth_unit", "default_rop_basis", mode="before")
     @classmethod
     def trim_text(cls, value: Any) -> Any:
@@ -60,11 +84,29 @@ class OpsSettingsOut(OpsSettingsIn):
 # ---------------------------------------------------------------------------
 # Code library
 # ---------------------------------------------------------------------------
+class OpsPhaseCodeIn(_Strict):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    phase_code: str = Field(min_length=1, max_length=20)
+    phase_name: str = Field(min_length=1, max_length=150)
+    description: str = Field(default="", max_length=500)
+    is_active: bool = True
+
+
+class OpsMarkRuleIn(_Strict):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    mark_code: str = Field(min_length=1, max_length=20)
+    mark_name: str = Field(min_length=1, max_length=150)
+    default_classification: Classification = "Planned"
+    default_allocation: Allocation = "PT"
+    description: str = Field(default="", max_length=500)
+    is_active: bool = True
+
+
 class OpsOperationCodeIn(_Strict):
     operation_code: str = Field(min_length=1, max_length=50)
     operation_name: str = Field(min_length=1, max_length=150)
     category: str = Field(default="other", max_length=50)
-    default_classification: str = Field(default="Planned", max_length=10)
+    default_classification: Classification = "Planned"
     is_productive_default: bool = True
     counts_as_on_bottom: bool = False
     requires_npt_code: bool = False
@@ -96,7 +138,7 @@ class OpsOperationCodeOut(OpsOperationCodeIn):
 class OpsActivityCodeIn(_Strict):
     activity_code: str = Field(min_length=1, max_length=50)
     activity_name: str = Field(min_length=1, max_length=150)
-    default_allocation: str = Field(default="PT", max_length=10)
+    default_allocation: Allocation = "PT"
     description: str = Field(default="", max_length=500)
     sort_order: int = Field(default=0)
     is_active: bool = True
@@ -240,6 +282,12 @@ class OpsDocumentOut(_Strict):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
+class OpsDocumentEdit(_Strict):
+    document_type: str = Field(min_length=1, max_length=20)
+    document_date: date | None = None
+    notes: str = Field(default="", max_length=1000)
+
+
 class OpsDocumentUploadResponse(_Strict):
     document: OpsDocumentOut
     deduped: bool
@@ -266,6 +314,7 @@ class OpsExtractionJobOut(_Strict):
 # Reports + blocks
 # ---------------------------------------------------------------------------
 class OpsActivityBlockIn(_Strict):
+    block_id: str | None = Field(default=None, max_length=36)
     sequence_no: int = Field(ge=1, le=200)
     started_at: datetime
     ended_at: datetime
@@ -277,6 +326,9 @@ class OpsActivityBlockIn(_Strict):
     classification: Classification = "Planned"
     allocation: Allocation = "PT"
     is_productive: bool = True
+    classification_evidence: str = Field(default="", max_length=500)
+    source_page: int = Field(default=0, ge=0)
+    source_bbox: str = Field(default="", max_length=200)
     classification_source: str = Field(default="keyword", max_length=20)
     npt_code_id: str | None = None
     agency_id: str | None = None
@@ -296,7 +348,7 @@ class OpsActivityBlockIn(_Strict):
     reason: str = Field(default="", max_length=500)
     narrative: str = Field(default="", max_length=5000)
     confidence: Decimal = Field(default=Decimal("0.50"), ge=0, le=1)
-    review_state: str = Field(default="suggested", max_length=20)
+    review_state: Literal["suggested", "accepted", "edited", "rejected"] = "suggested"
 
 
 class OpsActivityBlockOut(OpsActivityBlockIn):
@@ -356,6 +408,8 @@ class OpsReportCreate(_Strict):
 
 
 class OpsReportUpdate(_Strict):
+    completed_plan_item_id: str | None = None
+    site: str | None = Field(default=None, max_length=200)
     rig_id: str | None = None
     report_no_text: str | None = Field(default=None, max_length=50)
     day_number: int | None = Field(default=None, ge=1)
@@ -379,6 +433,14 @@ class OpsReportUpdate(_Strict):
 
 
 class OpsReportOut(_Strict):
+    completed_plan_item_id: str | None = None
+    plan_checkpoints: list[dict[str, str]] = []
+    rejection_reason: str = ""
+    baseline_plan_id: str | None = None
+    site: str = ""
+    surveys: list["OpsSurveyIn"] = []
+    extraction_notes: str = ""
+    sources: list[dict[str, str]] = []
     id: str
     organization_id: str
     well_id: str
@@ -432,13 +494,39 @@ class OpsReportOut(_Strict):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
+class OpsSurveyIn(_Strict):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+    md_m: Decimal10 | None = None
+    tvd_m: Decimal10 | None = None
+    inc_deg: Decimal10 | None = Field(default=None, ge=0, le=180)
+    azi_deg: Decimal10 | None = Field(default=None, ge=0, le=360)
+    ns_m: Decimal10 | None = None
+    ew_m: Decimal10 | None = None
+    vsec_m: Decimal10 | None = None
+    dls_deg_per_30m: Decimal10 | None = None
+    tool: str = Field(default="", max_length=100)
+    source: str = Field(default="manual", max_length=20)
+
+
 class OpsReportSaveIn(_Strict):
+    expected_updated_at: datetime | None = None
+    confirm_review: bool = False
     report: OpsReportUpdate
-    blocks: list[OpsActivityBlockIn] = Field(default_factory=list)
+    blocks: list[OpsActivityBlockIn] | None = Field(default=None, max_length=200)
+    surveys: list[OpsSurveyIn] | None = Field(default=None, max_length=200)
 
 
 class OpsIDs(_Strict):
     ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class OpsBulkEdit(OpsIDs):
+    remarks: str = Field(min_length=1, max_length=1000)
+
+
+class OpsExtractIn(_Strict):
+    document_id: str = Field(min_length=1, max_length=36)
+    report_date: date | None = None
 
 
 class OpsBulkActionOut(_Strict):
@@ -475,6 +563,9 @@ class OpsKpiOut(_Strict):
     planned_hours: float
     npt_hours: float
     upa_hours: float
+    productive_hours: float
+    nonproductive_hours: float
+    allocation_hours: dict[str, float]
     productive_pct: float
     npt_pct: float
     unaccounted_hours: float
@@ -518,15 +609,15 @@ class OpsNptParetoItem(_Strict):
 
 
 class OpsReferenceOut(_Strict):
+    document_types: list[str]
+    vendors: list[dict[str, str]]
     rigs: list[dict[str, Any]]
     wells: list[dict[str, Any]]
-    hole_sections: list[dict[str, Any]]
-    phases: list[dict[str, Any]]
+    phase_codes: list[dict[str, str]]
+    activity_codes: list[OpsActivityCodeOut]
     operation_codes: list[OpsOperationCodeOut]
     npt_codes: list[OpsNptCodeOut]
-    agencies: list[OpsAgencyOut]
     causes: list[OpsCauseOut]
-    activities: list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -548,13 +639,13 @@ class OpsPlanItemIn(_Strict):
     phase_id: str | None = None
     operation_code_id: str | None = None
     description: str = Field(min_length=1, max_length=500)
-    target_depth_m: Decimal10 | None = None
+    target_depth_m: Decimal10 | None = Field(default=None, ge=0)
     delta_depth_m: Decimal10 | None = None
-    planned_hours: Decimal10 = Field(default=Decimal("0"))
+    planned_hours: Decimal10 = Field(ge=0)
     cum_planned_days: Decimal10 | None = None
     rop_assumption_m_per_hr: Decimal10 | None = None
     trip_speed_m_per_hr: Decimal10 | None = None
-    contingency_hours: Decimal10 = Field(default=Decimal("0"))
+    contingency_hours: Decimal10 = Field(default=Decimal(0))
     is_critical_path: bool = True
     notes: str = Field(default="", max_length=500)
 
@@ -589,10 +680,10 @@ class OpsImportRow(_Strict):
     report_date: date
     report_no_text: str = Field(default="", max_length=50)
     rig_code: str = Field(default="", max_length=50)
-    depth_start_m: Any = None
-    depth_end_m: Any = None
+    depth_start_m: Decimal10 | None = None
+    depth_end_m: Decimal10 | None = None
     operation_summary: str = Field(default="", max_length=5000)
-    blocks: list[dict[str, Any]] | None = None
+    report_type: str = Field(default="DDR", max_length=10)
 
     @field_validator("well_code", "scope", "report_no_text", "rig_code", mode="before")
     @classmethod

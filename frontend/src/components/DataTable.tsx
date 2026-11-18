@@ -43,7 +43,7 @@ function fieldDefs<T extends object>(columns: ColDef<T>[]): FieldDef[] {
     })
 }
 
-export function DataTable<T extends object>({ rows, columns, rowKey = 'id', searchPlaceholder = 'Search records...', exportName = 'export', onImport, canExport = true, selectable = false, onSelectionChange, onExport, selectionResetKey, fillHeight = false, fillReserve = 0 }: {
+export function DataTable<T extends object>({ rows, columns, rowKey = 'id', searchPlaceholder = 'Search records...', exportName = 'export', onImport, canExport = true, selectable = false, onSelectionChange, onExport, selectionResetKey, exportSelected = false, fillHeight = false, fillReserve = 0 }: {
   rows: T[]
   columns: ColDef<T>[]
   // Field that uniquely identifies a row, or a function that builds one from a row record.
@@ -57,6 +57,8 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
   onExport?: (kind: 'csv' | 'xlsx' | 'pdf', recordCount: number) => Promise<void> | void
   /** Change this value to clear any current row selection in the grid. */
   selectionResetKey?: number | string
+  /** Optionally export checked rows rather than the whole filtered view. */
+  exportSelected?: boolean
   /**
    * Stretch the grid so its bottom edge meets the bottom of the page instead of
    * sizing to the row count. Use on pages whose only (or last) content is this
@@ -197,10 +199,12 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
     const stamp = new Date().toISOString().slice(0, 10)
     const name = `${exportName}-${stamp}`
     try {
-      if (onExport) await onExport(kind, visible.length)
-      if (kind === 'csv') exportCsv(`${name}.csv`, visible, exportCols)
-      if (kind === 'xlsx') await exportXlsx(`${name}.xlsx`, visible, exportCols)
-      if (kind === 'pdf') await exportPdf(`${name}.pdf`, exportName, visible, exportCols)
+      const checked = exportSelected ? new Set(gridApi.current?.getSelectedRows()) : null
+      const output = checked?.size ? visible.filter(row => checked.has(row)) : visible
+      if (onExport) await onExport(kind, output.length)
+      if (kind === 'csv') exportCsv(`${name}.csv`, output, exportCols)
+      if (kind === 'xlsx') await exportXlsx(`${name}.xlsx`, output, exportCols)
+      if (kind === 'pdf') await exportPdf(`${name}.pdf`, exportName, output, exportCols)
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'Export could not be completed')
     }
