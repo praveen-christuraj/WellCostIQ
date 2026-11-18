@@ -512,3 +512,19 @@ def test_timeline_comparison_is_visible_reviewable_and_editable():
                 select(AuditLog).where(AuditLog.action == "review", AuditLog.entity_type == "ops_report")
             ).all()
             assert entry
+
+
+def test_reference_context_names_the_asked_abbreviation():
+    """The Ollama prompt block must carry the printed meaning of the asked token.
+
+    A rename of the local variable that holds the token (done to keep the security
+    scan quiet about a non-credential) must not quietly empty the prompt block.
+    """
+    from app.domain.operations.reference_knowledge import format_reference_context
+
+    block = format_reference_context("What does BHA mean in the daily report?")
+    assert "ABBREVIATION IN THE QUESTION: BHA = " in block
+    assert "bottom hole assembly" in block.lower()
+
+    # A question with no printed abbreviation still gets the primer, never a blank.
+    assert format_reference_context("How many days behind are we?").strip()
