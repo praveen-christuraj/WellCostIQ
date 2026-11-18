@@ -492,17 +492,20 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
    reads as a second page instead of a continuation. */
 .wcp-report-preview .afe-print-sheet .ps-page + .ps-page { margin-top: 24px; padding-top: 18px; border-top: 2px dashed #B9CCE0; }
 .wcp-report-preview .afe-print-sheet .ps-page::after { display: none; }
+.wcp-report-preview .afe-print-sheet.afe-cost-print-sheet > .ps-page { border: 3px solid #123A63; padding: 12px 14px; }
+.wcp-report-preview .afe-print-sheet.afe-cost-print-sheet > .ps-page + .ps-page { margin-top: 20px; padding-top: 12px; border-top: 3px solid #123A63; }
 .wcp-report-preview .afe-print-sheet .ps-warnings ul { margin: 2px 0 4px; padding-left: 18px; }
 /* The daily report's cover page is sized for A4 in print; on screen it is a
    normal block so the viewer scrolls instead of clipping. */
 .wcp-report-preview .daily-cost-print-sheet .daily-report-cover { height: auto; overflow: visible; break-after: auto; }
 .wcp-report-preview .daily-cost-print-sheet .daily-report-details { break-before: auto; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-report-unit + .dcr-report-unit { margin-top: 24px; padding-top: 18px; border-top: 2px dashed #B9CCE0; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-eyebrow { color: #4A6F96; font-size: 9px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; margin-bottom: 2px; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-layout { display: grid; grid-template-columns: minmax(0, 2.58fr) minmax(0, 1fr); grid-template-areas: "left mud" "left loss" "lower lower"; gap: 8px; }
-.wcp-report-preview .daily-cost-print-sheet .dcr-left { grid-area: left; display: grid; gap: 8px; grid-template-rows: max-content minmax(0, 1fr) max-content; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-left { grid-area: left; display: grid; gap: 8px; grid-template-rows: max-content minmax(0, 1fr); }
 .wcp-report-preview .daily-cost-print-sheet .dcr-mud-stack { grid-area: mud; display: grid; gap: 8px; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-layout > .dcr-loss { grid-area: loss; }
-.wcp-report-preview .daily-cost-print-sheet .dcr-bottomline { grid-area: lower; display: grid; grid-template-columns: minmax(0, .61fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-bottomline { grid-area: lower; display: grid; grid-template-columns: minmax(0, 1.29fr) minmax(0, 1.29fr) minmax(0, 1fr); gap: 8px; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-panel { border: 1px solid #B9CCE0; border-radius: 4px; overflow: hidden; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-panel h2 { margin: 0; padding: 3px 6px; border: 0; border-bottom: 1px solid #B9CCE0; font-size: 9px; background: #E8EEF6; text-transform: uppercase; letter-spacing: .2px; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-panel table { margin: 0; font-size: 8.5px; }
@@ -512,11 +515,10 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-cost-panel th,
 .wcp-report-preview .daily-cost-print-sheet .dcr-cost-panel td { padding: 3px 4px; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-cost-group-row th { background: #E8EEF6; color: #123A63; font-size: 8px; font-weight: 800; text-align: left; text-transform: uppercase; }
-.wcp-report-preview .daily-cost-print-sheet .dcr-stack { display: grid; gap: 8px; grid-template-rows: max-content minmax(0, 1fr); }
-.wcp-report-preview .daily-cost-print-sheet .dcr-stack--ndt { grid-template-rows: max-content max-content minmax(0, 1fr); gap: 6px; }
+.wcp-report-preview .daily-cost-print-sheet .dcr-stack { display: grid; gap: 8px; grid-template-rows: minmax(0, 1fr); }
+.wcp-report-preview .daily-cost-print-sheet .dcr-stack--ndt { grid-template-rows: max-content minmax(0, 1fr); gap: 6px; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-ndt table { font-size: 8px; }
 .wcp-report-preview .daily-cost-print-sheet .dcr-unbudgeted-note { color: #52667A; font-weight: 400; font-size: 0.92em; }
-.wcp-report-preview .daily-cost-print-sheet .dcr-tangibles-unbudgeted { margin: 0; padding: 3px 6px; border-top: 1px solid #D9E0E8; color: #334E68; font-size: 8px; }
 .wcp-report-preview .mud-cost-print-sheet { font-size: 9px; }
 .wcp-report-preview .mud-cost-print-sheet .ps-sub,
 .wcp-report-preview .mud-cost-print-sheet .ps-note { font-size: 8.5px; }
@@ -526,6 +528,7 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
    shown in its fixed two-page format - summary and sign-off on page 1, the consumable and
    tangible line detail on page 2. Daily Cost printing reuses these rules and the .ps-* classes. */
 .afe-print-sheet { display: none; }
+.afe-cost-print-sheet > .ps-page-border { display: none; }
 @media print {
   @page {
     size: A4 portrait;
@@ -578,9 +581,31 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   .afe-print-sheet .ps-sign td { height: 16mm; }
   .afe-print-sheet .ps-keep { break-inside: avoid; }
 
-  /* AFE-only density and wrapping. Daily Cost shares the base .ps-* rules above, so these
-     overrides must stay under .afe-cost-print-sheet. */
-  .afe-cost-print-sheet { font-size: 9pt; line-height: 1.18; }
+  /* AFE-only density, page frame and wrapping. Daily Cost shares the base .ps-* rules above,
+     so these overrides must stay under .afe-cost-print-sheet and @page afe-cost-report. */
+  @page afe-cost-report {
+    size: A4 portrait;
+    margin: 4mm 4mm 5.5mm;
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-family: Arial, Helvetica, sans-serif; font-size: 6.5pt; color: #4A6F96; }
+  }
+  .afe-cost-print-sheet { page: afe-cost-report; padding: 0 3.5mm; font-size: 9pt; line-height: 1.18; }
+  .afe-cost-print-sheet > .ps-page-border {
+    display: block;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    border: 2.5pt solid #123A63;
+    box-sizing: border-box;
+    pointer-events: none;
+    z-index: 20;
+  }
+  .afe-cost-print-sheet > .ps-page {
+    padding: 3.5mm 0;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
   .afe-cost-print-sheet h1 { font-size: 14.5pt; line-height: 1.12; overflow-wrap: anywhere; }
   .afe-cost-print-sheet h2 { font-size: 10.5pt; margin: 2.2mm 0 1mm; padding-bottom: .5mm; }
   .afe-cost-print-sheet table { margin-bottom: .9mm; }
@@ -670,18 +695,20 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   .daily-cost-print-sheet .dcr-eyebrow { color: #4A6F96; font-size: 7.2pt; font-weight: 700; letter-spacing: .65pt; text-transform: uppercase; margin-bottom: .6mm; }
   .daily-cost-print-sheet .dcr-report-meta { display: grid; justify-items: end; gap: .35mm; text-align: right; white-space: nowrap; }
   .daily-cost-print-sheet .dcr-report-meta strong { color: #0B2A47; font-size: 9pt; }
-  /* Page one follows MODEL REPORTS/REVISED DAILY REPORT TABLE PLACEMENTS.jpg:
-     three bands over the model's two columns (737 : 286 px, i.e. 72 / 28).
-       left   - milestone / depth / time strip at top, merged Services +
-                Consumables schedule in the middle, and Tangibles anchored at
-                the bottom on the Consumption / losses baseline
+  /* Page one placement:
+       left   - milestone / depth / time strip at top, with merged Services +
+                Consumables schedule spanning all the way down to the
+                Consumption / losses baseline
        mud    - Mud cost analysis over Mud chemical cost (upper right)
        loss   - Consumption / losses cumulative matrix (middle right)
-       lower  - full width: LIH / AFE vs actual / NDT stack, UPA, NPT
+       lower  - full width: UPA summary | NPT summary on the left under
+                Services + Consumables, and AFE vs actual summary (+ conditional
+                NDT Inspection Details beneath it) on the right under Consumption
+                / losses.
      Spanning the left column across rows 1-2 with min-height: 0 confines all
-     Services + Consumables and Tangibles adjustments strictly to their combined
-     left-side space, so right-hand and bottom tables keep their exact positions
-     and heights regardless of how many cost rows print. */
+     Services + Consumables adjustments strictly to its allocated left-side
+     space, so right-hand and bottom tables keep their exact positions and
+     heights regardless of how many cost rows print. */
   .daily-cost-print-sheet .dcr-layout {
     flex: 1;
     min-height: 0;
@@ -696,10 +723,9 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   }
   .daily-cost-print-sheet .dcr-left,
   .daily-cost-print-sheet .dcr-mud-stack { min-width: 0; min-height: 0; display: grid; gap: 1.05mm; }
-  /* The strip keeps its content height at the top, Tangibles keeps its content
-     height at the bottom on the losses baseline, and the merged cost schedule
-     owns the space between them. */
-  .daily-cost-print-sheet .dcr-left { grid-area: left; grid-template-rows: max-content minmax(0, 1fr) max-content; }
+  /* The strip keeps its content height at the top, and the merged cost schedule
+     spans down to meet the Consumption / losses baseline. */
+  .daily-cost-print-sheet .dcr-left { grid-area: left; grid-template-rows: max-content minmax(0, 1fr); }
   /* Mud cost analysis over Mud chemical cost in the model's 163 : 139 px, never
      below content. */
   .daily-cost-print-sheet .dcr-mud-stack { grid-area: mud; grid-template-rows: minmax(max-content, 1.17fr) minmax(max-content, 1fr); }
@@ -722,18 +748,16 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
      position keeps about 49 mm so "Actual against planned activities" stays on
      one line and the strip stays at its original height. */
   .daily-cost-print-sheet .dcr-topline { display: grid; grid-template-columns: 1.28fr 1.88fr 1fr; gap: 1.05mm; }
-  /* Full-width lower band: the LIH / AFE vs actual / NDT stack, UPA summary and
-     NPT summary in the model's 237 : 390 : 390 px. All three end together. */
-  .daily-cost-print-sheet .dcr-bottomline { grid-area: lower; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, .61fr) minmax(0, 1fr) minmax(0, 1fr); gap: 1.05mm; }
-  /* The LIH register keeps its content height and the AFE vs actual summary
-     fills the rest, so the stack ends level with UPA / NPT. One flexible track
-     keeps the stack's intrinsic height exact: two fractional tracks would either
-     inflate it (factors above 1) or under-fill the band (factors summing to 1). */
-  .daily-cost-print-sheet .dcr-stack { min-width: 0; min-height: 0; display: grid; grid-template-rows: max-content minmax(0, 1fr); gap: 1.05mm; }
-  /* NDT is conditional. With records, the LIH register and the AFE vs actual
-     summary keep their content height and NDT Inspection Details, pulled up
-     directly beneath them, fills the rest of the band. */
-  .daily-cost-print-sheet .dcr-stack--ndt { grid-template-rows: max-content max-content minmax(0, 1fr); }
+  /* Full-width lower band: UPA summary and NPT summary on the left under
+     Services + Consumables, and the AFE vs actual / NDT stack on the right
+     aligned under Consumption / losses. All three end together. */
+  .daily-cost-print-sheet .dcr-bottomline { grid-area: lower; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.29fr) minmax(0, 1.29fr) minmax(0, 1fr); gap: 1.05mm; }
+  /* AFE vs actual summary fills the right lower slot level with UPA / NPT. */
+  .daily-cost-print-sheet .dcr-stack { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); gap: 1.05mm; }
+  /* NDT is conditional. With records, AFE vs actual summary keeps its content
+     height and NDT Inspection Details, pulled up directly beneath it, fills the
+     rest of the band. */
+  .daily-cost-print-sheet .dcr-stack--ndt { grid-template-rows: max-content minmax(0, 1fr); }
   .daily-cost-print-sheet .dcr-panel table { table-layout: fixed; margin: 0; font-size: 6.7pt; line-height: 1.08; }
   .daily-cost-print-sheet .dcr-panel th,
   .daily-cost-print-sheet .dcr-panel td { padding: .42mm .55mm; border-color: #B9CCE0; }
@@ -797,9 +821,9 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 .dcr-cost-group-row th { padding: .16mm .15mm; font-size: 5.2pt; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 .dcr-cost-item-row td:first-child { padding-left: .85mm; }
   .daily-cost-print-sheet .dcr-cost-panel.dcr-cost-density-5 thead th { font-size: 5.1pt; padding-top: .15mm; padding-bottom: .15mm; }
-  /* A dense schedule also compresses the LIH / AFE / NDT stack, the section mud
-     cost and the loss matrix so the page still fits. These are named panels, not
-     a page position, so moving a panel never changes its printed type size
+  /* A dense schedule also compresses the AFE / NDT stack, the section mud cost
+     and the loss matrix so the page still fits. These are named panels, not a
+     page position, so moving a panel never changes its printed type size
      (UPA / NPT keep their own 4.7pt). */
   .daily-cost-print-sheet .dcr-density-3 .dcr-stack .dcr-panel table,
   .daily-cost-print-sheet .dcr-density-3 .dcr-panel.dcr-mud-cost table,
@@ -816,27 +840,11 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   .daily-cost-print-sheet .dcr-well-objective strong { color: #123A63; margin-right: .8mm; }
   .daily-cost-print-sheet .dcr-depth th,
   .daily-cost-print-sheet .dcr-depth td { padding: .2mm .4mm; }
-  .daily-cost-print-sheet .dcr-tangibles span { font-size: 6.2pt; }
   .daily-cost-print-sheet .dcr-milestone dt,
   .daily-cost-print-sheet .dcr-time dt { color: #4A6F96; font-weight: 700; }
   .daily-cost-print-sheet .dcr-milestone dd,
   .daily-cost-print-sheet .dcr-time dd { margin: 0; font-weight: 700; text-align: right; }
-  .daily-cost-print-sheet .dcr-tangibles div { min-height: 5mm; display: grid; grid-template-columns: repeat(6, 1fr); align-items: center; }
-  .daily-cost-print-sheet .dcr-tangibles strong { font-size: 7.2pt; margin-top: .2mm; }
-  .daily-cost-print-sheet .dcr-lih div { display: grid; grid-template-columns: repeat(4, 1fr); align-items: center; }
-  .daily-cost-print-sheet .dcr-lih span { padding: .8mm 1.2mm; border-right: .5pt solid #B9CCE0; color: #4A6F96; }
-  .daily-cost-print-sheet .dcr-lih span:last-child { border-right: 0; }
-  .daily-cost-print-sheet .dcr-lih strong { display: block; margin-top: .35mm; color: #0B2A47; font-size: 7.6pt; }
-  .daily-cost-print-sheet .dcr-lih .dcr-lih-deduct { color: #9B2C2C; }
-  .daily-cost-print-sheet .dcr-lih .dcr-lih-deduct strong { color: #9B2C2C; }
-  .daily-cost-print-sheet .dcr-lih-note { margin: 0; padding: .45mm 1mm; border-top: .5pt solid #B9CCE0; color: #4A6F96; font-size: 6pt; }
-  .daily-cost-print-sheet .dcr-lih span { padding: .45mm 1mm; font-size: 6.2pt; }
-  .daily-cost-print-sheet .dcr-lih strong { font-size: 6.9pt; margin-top: .2mm; }
-  .daily-cost-print-sheet .dcr-tangibles span { padding: 0 1.5mm; border-right: .5pt solid #B9CCE0; color: #4A6F96; }
-  .daily-cost-print-sheet .dcr-tangibles span:last-child { border-right: 0; }
-  .daily-cost-print-sheet .dcr-tangibles strong { display: block; margin-top: .6mm; color: #0B2A47; font-size: 8pt; }
   .daily-cost-print-sheet .dcr-unbudgeted-note { color: #52667A; font-weight: 400; font-size: 0.9em; }
-  .daily-cost-print-sheet .dcr-tangibles-unbudgeted { margin: 0; padding: .35mm 1mm; border-top: .35pt solid #D9E0E8; color: #334E68; font-size: 5.5pt; line-height: 1.12; }
   .daily-cost-print-sheet .dcr-overall p { margin: .5mm .8mm; font-weight: 800; text-align: right; color: #0B2A47; font-size: 6.4pt; }
   .daily-cost-print-sheet .dcr-overall table { font-size: 6.3pt; }
   .daily-cost-print-sheet .dcr-overall th,
@@ -847,9 +855,6 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
      no adjacent table (UPA, NPT, Services/Consumables, Mud, Losses) shifts. */
   .daily-cost-print-sheet .dcr-has-ndt .dcr-stack--ndt { gap: .65mm; }
   .daily-cost-print-sheet .dcr-has-ndt .dcr-stack--ndt .dcr-panel h2 { padding: .25mm .65mm; font-size: 5.4pt; }
-  .daily-cost-print-sheet .dcr-has-ndt .dcr-stack--ndt .dcr-lih span { padding: .25mm .65mm; font-size: 5.4pt; }
-  .daily-cost-print-sheet .dcr-has-ndt .dcr-stack--ndt .dcr-lih strong { font-size: 6pt; margin-top: .1mm; }
-  .daily-cost-print-sheet .dcr-has-ndt .dcr-stack--ndt .dcr-lih-note { padding: .22mm .65mm; font-size: 5.2pt; }
   .daily-cost-print-sheet .dcr-has-ndt .dcr-stack--ndt .dcr-overall table { font-size: 5.6pt; }
   .daily-cost-print-sheet .dcr-has-ndt .dcr-stack--ndt .dcr-overall th,
   .daily-cost-print-sheet .dcr-has-ndt .dcr-stack--ndt .dcr-overall td { padding: .14mm .35mm; }
@@ -898,12 +903,12 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
   .afe-cost-print-sheet .ps-component td { font-size: 9.5pt; }
   .afe-cost-print-sheet .ps-grand th, .afe-cost-print-sheet .ps-grand td { font-size: 11pt; }
   .afe-cost-print-sheet .ps-pagefoot { font-size: 8.5pt; }
-  /* Center column and group headings, while leaving row labels and values intact. */
+  /* Center column and matrix group headings, while leaving row labels,
+     cost-group headings, and values intact. */
   .afe-cost-print-sheet thead th, .afe-cost-print-sheet thead th.num,
   .afe-cost-print-sheet th[scope="rowgroup"],
   .daily-cost-print-sheet thead th, .daily-cost-print-sheet thead th.num,
   .daily-cost-print-sheet .dcr-ndt thead tr:first-child th:first-child,
-  .daily-cost-print-sheet .dcr-cost-group-row th,
   .daily-cost-print-sheet .dcr-matrix-group th { text-align: center; }
   .daily-cost-print-sheet .dcr-incident th:nth-child(1) { width: 24%; }
   .daily-cost-print-sheet .dcr-incident th:nth-child(2) { width: 10%; }

@@ -320,6 +320,36 @@ longSchedule.services = Array.from({ length: 8 }, (_, index) => ({ ...sectionEst
 await act(async () => root.render(<AfePrintSheet estimate={longSchedule}/>))
 assert.ok(document.querySelector('.ps-afe-summary.ps-afe-dense'), 'multiple section rates trigger compact layout before service count alone would')
 
+// Backend labels arrive as "CODE — Name"; Basis / entered rates and consumables keep only the names.
+const emDashEstimate = structuredClone(estimate)
+emDashEstimate.services = [
+  { ...estimate.services[0], id: 'em-per-service', charging_basis: 'Per Service Rate',
+    section_label: '8-1/2" HOLE — 8-1/2" HOLE', phase_label: 'COMPLETION — COMPLETION' },
+  { ...estimate.services[0], id: 'em-per-section', charging_basis: 'Per Section Rate', currency: 'USD', service_amount: '0', amount: '200',
+    section_rates: [
+      { hole_section_id: 's1', section_label: 'SEC-A — 8-1/2" HOLE', phase_id: 'p1', phase_label: 'COMP — COMPLETION', amount: '200' },
+    ] },
+  { ...estimate.services[0], id: 'em-day-rate', charging_basis: 'Day Rate', currency: 'USD', service_amount: '0', amount: '500',
+    rates: [], charges: [], scope_rates: [
+      { hole_section_id: 's1', section_label: 'SEC-A — 8-1/2" HOLE', phase_id: 'p1', phase_label: 'COMP — COMPLETION', category: 'Operation', unit_rate: '500' },
+    ] },
+]
+emDashEstimate.consumables = [
+  { ...estimate.consumables[0], section_label: 'SEC-A — 8-1/2" HOLE', phase_label: 'COMP — COMPLETION' },
+]
+await act(async () => root.render(<AfePrintSheet estimate={emDashEstimate}/>))
+const emDashRows = document.querySelectorAll('.ps-afe-summary .ps-service-group-block tr.ps-line')
+for (const row of emDashRows) {
+  const basisText = row.cells[2].textContent
+  assert.ok(!basisText.includes(' — '), `em-dash code prefix is omitted in Basis/entered rates: ${basisText}`)
+  assert.ok(!basisText.includes('SEC-A') && !basisText.includes('COMP —'), `section/phase codes are removed: ${basisText}`)
+  assert.ok(basisText.includes('8-1/2" HOLE · COMPLETION'), `only section and phase names remain in Basis/entered rates: ${basisText}`)
+}
+const emDashConsumableRow = [...document.querySelectorAll('.afe-cost-print-sheet > .ps-page')[1].querySelectorAll('table')][0].querySelector('tbody tr.ps-line')
+assert.equal(emDashConsumableRow.cells[1].textContent, '8-1/2" HOLE', 'consumables section column drops em-dash code prefix')
+assert.equal(emDashConsumableRow.cells[2].textContent, 'COMPLETION', 'consumables phase column drops em-dash code prefix')
+assert.ok(document.querySelector('.afe-cost-print-sheet > .ps-page-border'), 'AFE sheet renders its printable page-border frame')
+
 const styles = readFileSync('../frontend/src/styles.css', 'utf8')
 assert.ok(styles.includes('.afe-cost-print-sheet th,') && styles.includes('overflow-wrap: anywhere'), 'AFE cells have scoped wrapping rules')
 assert.ok(styles.includes('.afe-cost-print-sheet .ps-afe-dense'), 'large service schedules receive the compact density step')
@@ -327,6 +357,14 @@ assert.ok(styles.includes('.afe-cost-print-sheet .ps-service-group-heading { fon
   'AFE-only group headings stay with the following service when printing')
 assert.ok(styles.includes('.afe-cost-print-sheet .ps-service-group-total { break-before: avoid; }'),
   'AFE-only group subtotals stay with their preceding service when printing')
+assert.ok(styles.includes('@page afe-cost-report') && styles.includes('margin: 4mm 4mm 5.5mm;'),
+  'AFE print uses its own minimal-margin page box')
+assert.ok(styles.includes('.afe-cost-print-sheet > .ps-page-border') && styles.includes('border: 2.5pt solid #123A63;'),
+  'AFE print draws a thick page border frame')
+assert.ok(styles.includes('padding: 0 3.5mm;') && styles.includes('padding: 3.5mm 0;'),
+  'AFE print pads inside the page border so content never overlaps it')
+assert.ok(styles.includes('.wcp-report-preview .afe-print-sheet.afe-cost-print-sheet > .ps-page { border: 3px solid #123A63; padding: 12px 14px; }'),
+  'on-screen AFE viewer mirrors the thick non-overlapping page border')
 
 // The viewer's preview stays inline on its paper surface; only the print copy is portalled.
 const previewHost = document.createElement('div')
