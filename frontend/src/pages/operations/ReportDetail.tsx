@@ -1,159 +1,216 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
-  CheckCircleOutline,  SaveOutlined, SendOutlined, ThumbUpOutlined, BlockOutlined,
-   TerrainOutlined, ScheduleOutlined, SpeedOutlined,
-} from '@mui/icons-material'
-import {
-  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, InputLabel, MenuItem, Select, TextField, Typography, Divider,
+  Alert,
+  Autocomplete,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  FormControlLabel,
+  MenuItem,
+  TextField,
+  Typography,
 } from '@mui/material'
-import { ErrorMessage, PageHeading } from '../../components/Common'
+import { ErrorMessage, FormDialog, PageHeading, useUnsavedChangesGuard } from '../../components/Common'
 import { DataTable } from '../../components/DataTable'
-// ChartPanel reserved
 import { SectionCard } from '../../components/ui/SectionCard'
-import { StatCard } from '../../components/ui/StatCard'
-import { getReport, saveReport, submitReport, approveReport, rejectReport, getBrief, opsReference, type OpsReport, type OpsBlock, type OpsReference } from '../../lib/operations'
-// api via operations lib
+import { printDailyReport } from '../../lib/operationsPdf'
+import { SourceDialog } from '../../components/operations/SourceDialog'
+import { useAuth } from '../../context/AuthContext'
+import { downloadFile } from '../../lib/api'
+import {
+  approveReport,
+  auditExport,
+  getBrief,
+  getReport,
+  opsReference,
+  rejectReport,
+  saveReport,
+  submitReport,
+  type OpsBlock,
+  type OpsReference,
+  type OpsReport,
+  type OpsSurvey,
+} from '../../lib/operations'
 
-function clsColor(cls: string) {
-  if (cls === 'NPT') return 'error' as const
-  if (cls === 'UPA') return 'warning' as const
-  return 'success' as const
+const editFields = [
+  'sequence_no',
+  'started_at',
+  'ended_at',
+  'duration_minutes',
+  'phase_raw',
+  'operation_code_id',
+  'activity_code_id',
+  'activity_id',
+  'classification',
+  'allocation',
+  'is_productive',
+  'classification_source',
+  'classification_evidence',
+  'source_page',
+  'source_bbox',
+  'npt_code_id',
+  'agency_id',
+  'cause_code',
+  'hole_section_id',
+  'phase_id',
+  'depth_from_m',
+  'depth_to_m',
+  'bit_depth_m',
+  'rotating_hours',
+  'rop_basis',
+  'vendor_id',
+  'responsible_party',
+  'reason',
+  'narrative',
+  'confidence',
+  'review_state',
+] as const
+type Block = Pick<OpsBlock, (typeof editFields)[number]> & { id: string }
+const utc = (s: string) => (/[Zz]|[+-]\d\d:\d\d$/.test(s) ? s : `${s}Z`)
+const dateInput = (s: string | null | undefined) => (s ? new Date(utc(s)).toISOString().slice(0, 16) : '')
+const surveyFields = {
+  md_m: 'MD (m)',
+  tvd_m: 'TVD (m)',
+  inc_deg: 'Inclination (°)',
+  azi_deg: 'Azimuth (°)',
+  ns_m: 'N/S (m)',
+  ew_m: 'E/W (m)',
+  vsec_m: 'Vertical section (m)',
+  dls_deg_per_30m: 'Dogleg (°/30 m)',
 }
+const newSurvey = (): OpsSurvey => ({
+  md_m: null,
+  tvd_m: null,
+  vsec_m: null,
+  dls_deg_per_30m: null,
+  inc_deg: null,
+  azi_deg: null,
+  ns_m: null,
+  ew_m: null,
+  source: 'manual',
+  tool: '',
+})
 
 export default function OperationsReportDetail() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const [report, setReport] = useState<OpsReport | null>(null)
-  const [ref, setRef] = useState<OpsReference | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [brief, setBrief] = useState<{ summary: string; time_split: Record<string, unknown>; npt_items: unknown[]; depth_progress: Record<string, unknown>; data_quality: Record<string, unknown> } | null>(null)
-  const [editOpen, setEditOpen] = useState(false)
-  const [editBlock, setEditBlock] = useState<OpsBlock | null>(null)
-  const [editForm, setEditForm] = useState<Partial<OpsBlock>>({})
-  const [blockDrafts, setBlockDrafts] = useState<OpsBlock[]>([])
-  const [headerDraft, setHeaderDraft] = useState<Partial<OpsReport>>({})
-  const [rejectOpen, setRejectOpen] = useState(false)
-  const [rejectReason, setRejectReason] = useState('')
-  const [agencyDropdown, setAgencyDropdown] = useState<{ id: string; agency_code: string; agency_name: string; category: string }[]>([])
-
-  const load = async () => {
-    if (!id) return
-    setLoading(true); setError('')
-    try {
-      const [r, reference] = await Promise.all([getReport(id), ref ? Promise.resolve(ref) : opsReference()])
-      setReport(r); setBlockDrafts(r.blocks || []); setRef(reference)
-      // Populate agency dropdown from Master Data vendors
-      const agencies = reference?.agencies || []
-      setAgencyDropdown(agencies.map(a => ({ id: a.id, agency_code: a.agency_code, agency_name: a.agency_name, category: a.category || '' })))
-      try { const b = await getBrief(r.id); setBrief(b) } catch { /* ignore */ }
-    } catch (e) { setError((e as Error).message) } finally { setLoading(false) }
+  const { id } = useParams(),
+    go = useNavigate(),
+    { can } = useAuth()
+  const [report, setReport] = useState<OpsReport | null>(null),
+    [ref, setRef] = useState<OpsReference | null>(null),
+    [brief, setBrief] = useState('')
+  const [header, setHeader] = useState<Partial<OpsReport>>({}),
+    [blocks, setBlocks] = useState<Block[]>([]),
+    [surveys, setSurveys] = useState<OpsSurvey[]>([])
+  const [dirty, setDirty] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState('')
+  const [editor, setEditor] = useState<Block | null>(null),
+    [remove, setRemove] = useState<Block | null>(null),
+    [source, setSource] = useState(false),
+    [reject, setReject] = useState(false),
+    [reason, setReason] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const reset = (r: OpsReport) => {
+    setConfirmed(false)
+    setReport(r)
+    setHeader({})
+    setBlocks(r.blocks)
+    setSurveys(r.surveys)
+    setDirty(false)
   }
-  useEffect(() => { load() }, [id])
-
-  const totalMin = blockDrafts.reduce((s, b) => s + (b.duration_minutes || 0), 0)
-  const plannedMin = blockDrafts.filter(b => b.classification === 'Planned').reduce((s, b) => s + b.duration_minutes, 0)
-  const upaMin = blockDrafts.filter(b => b.classification === 'UPA').reduce((s, b) => s + b.duration_minutes, 0)
-  const nptMin = blockDrafts.filter(b => b.classification === 'NPT').reduce((s, b) => s + b.duration_minutes, 0)
-  const unacc = report ? (report.period_minutes || 1440) - totalMin : 0
-  const footage = report?.depth_start_m && report?.depth_end_m ? (Number(report.depth_end_m) - Number(report.depth_start_m)) : null
-
-  const canEdit = report?.status === 'draft' || report?.status === 'in_review' || report?.status === 'rejected'
-  const findings: string[] = []
-  if (Math.abs(unacc) > 2) findings.push(`Unaccounted ${unacc} min — logged ${totalMin} vs period ${report?.period_minutes || 1440}`)
-  blockDrafts.forEach(b => {
-    if (b.classification === 'NPT' && !b.npt_code_id) findings.push(`Block ${b.sequence_no} NPT missing code`)
-    if (b.classification === 'NPT' && b.is_productive) findings.push(`Block ${b.sequence_no} NPT cannot be productive`)
-    if (b.classification === 'NPT' && !b.reason) findings.push(`Block ${b.sequence_no} NPT missing reason`)
-  })
-  // Overlap check
-  const sorted = [...blockDrafts].sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
-  for (let i = 0; i < sorted.length - 1; i++) {
-    if (new Date(sorted[i + 1].started_at) < new Date(sorted[i].ended_at)) findings.push(`Block ${sorted[i].sequence_no} overlaps ${sorted[i + 1].sequence_no}`)
-  }
-
-  const doSave = async () => {
-    if (!report) return
-    setSaving(true); setError('')
-    try {
-      // Build blocks payload: recompute durations from timestamps if edited
-      const payloadBlocks = blockDrafts.map(b => ({
-        sequence_no: b.sequence_no,
-        started_at: b.started_at,
-        ended_at: b.ended_at,
-        duration_minutes: b.duration_minutes,
-        phase_raw: b.phase_raw,
-        operation_code_id: b.operation_code_id,
-        activity_code_id: b.activity_code_id,
-        activity_id: b.activity_id,
-        classification: b.classification,
-        allocation: b.allocation,
-        is_productive: b.is_productive,
-        classification_source: b.classification_source || 'reviewer',
-        npt_code_id: b.npt_code_id,
-        agency_id: b.agency_id,
-        cause_code: b.cause_code,
-        hole_section_id: b.hole_section_id,
-        phase_id: b.phase_id,
-        depth_from_m: b.depth_from_m,
-        depth_to_m: b.depth_to_m,
-        depth_unit: b.depth_unit,
-        footage_m: b.footage_m,
-        rotating_hours: b.rotating_hours,
-        rop_m_per_hr: b.rop_m_per_hr,
-        responsible_party: b.responsible_party,
-        reason: b.reason,
-        narrative: b.narrative,
-        confidence: b.confidence,
-        review_state: (b.review_state === 'suggested' ? 'accepted' : b.review_state),
-      }))
-      const headerPayload: Record<string, unknown> = {}
-      ;['report_no_text','day_number','event_code','depth_start_m','depth_end_m','depth_unit','operation_summary','forward_plan','hse_summary','remarks','hole_section_id','phase_id'].forEach(k => {
-        const v = (headerDraft as Record<string, unknown>)[k]
-        if (v !== undefined) headerPayload[k] = v
-      })
-      const saved = await saveReport(report.id, { report: headerPayload, blocks: payloadBlocks })
-      setReport(saved); setBlockDrafts(saved.blocks || []); setHeaderDraft({})
-    } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
-  }
-
-  const doSubmit = async () => {
-    if (!report) return
+  useEffect(() => {
+    let current = true
     setError('')
-    try { await doSave(); const r = await submitReport(report.id); setReport(r); setBlockDrafts(r.blocks || []) } catch (e) { setError((e as Error).message) }
+    setReport(null)
+    if (id)
+      Promise.all([getReport(id), opsReference(), getBrief(id)])
+        .then(([r, refs, b]) => {
+          if (current) {
+            reset(r)
+            setRef(refs)
+            setBrief(b.summary)
+          }
+        })
+        .catch((e) => {
+          if (current) setError(e.message)
+        })
+    return () => {
+      current = false
+    }
+  }, [id])
+  const editable = !!report && ['draft', 'in_review', 'rejected'].includes(report.status) && can('ops-report:update')
+  const updateHeader = (patch: Partial<OpsReport>) => {
+    setDirty(true)
+    setHeader({ ...header, ...patch })
   }
-  const doApprove = async () => {
-    if (!report) return
-    try { const r = await approveReport(report.id); setReport(r) } catch (e) { setError((e as Error).message) }
+  const save = async () => {
+    if (!report || !editable) return false
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const payload = blocks.map((b, i) => ({
+        ...Object.fromEntries(editFields.map((k) => [k, b[k]])),
+        block_id: b.id.startsWith('new-') ? null : b.id,
+        sequence_no: i + 1,
+        review_state: b.review_state === 'suggested' && confirmed ? 'accepted' : b.review_state,
+      }))
+      const r = await saveReport(report.id, {
+        expected_updated_at: report.updated_at,
+        confirm_review: confirmed,
+        report: header,
+        blocks: payload,
+        surveys,
+      })
+      reset(r)
+      setBrief((await getBrief(r.id)).summary)
+      setNotice(
+        r.extraction_status === 'needs_review'
+          ? 'Draft saved. Source review is still required.'
+          : 'Draft saved. Submit when ready.',
+      )
+      return true
+    } catch (e) {
+      setError((e as Error).message)
+      return false
+    } finally {
+      setBusy(false)
+    }
   }
-  const doReject = async () => {
-    if (!report) return
-    try { const r = await rejectReport(report.id, rejectReason); setReport(r); setRejectOpen(false); setRejectReason('') } catch (e) { setError((e as Error).message) }
+  const guard = useUnsavedChangesGuard({ when: dirty, onSave: save })
+  const transition = async (action: 'submit' | 'approve' | 'reject') => {
+    if (!report || dirty) return
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const r =
+        action === 'submit'
+          ? await submitReport(report.id)
+          : action === 'approve'
+            ? await approveReport(report.id)
+            : await rejectReport(report.id, reason)
+      reset(r)
+      setReject(false)
+      setNotice(`Report ${r.status}.`)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
   }
-
-  const openEdit = (b: OpsBlock) => {
-    setEditBlock(b); setEditForm({ ...b }); setEditOpen(true)
-  }
-  const applyEdit = () => {
-    if (!editBlock) return
-    setBlockDrafts(prev => prev.map(x => x.id === editBlock.id ? { ...x, ...editForm } as OpsBlock : x))
-    setEditOpen(false); setEditBlock(null)
-  }
-
+  const h = (field: keyof OpsReport) => (field in header ? header[field] : report?.[field])
   const addBlock = () => {
-    const last = blockDrafts[blockDrafts.length - 1]
-    const start = last ? new Date(new Date(last.ended_at).getTime()) : new Date(report?.period_start_at || new Date().toISOString())
-    const end = new Date(start.getTime() + 60 * 60000)
-    const nb: OpsBlock = {
+    const start = blocks.at(-1)?.ended_at ?? report?.period_start_at
+    if (!start) return
+    setEditor({
       id: `new-${Date.now()}`,
-      organization_id: report?.organization_id || '',
-      report_id: report?.id || '',
-      sequence_no: blockDrafts.length + 1,
-      started_at: start.toISOString(),
-      ended_at: end.toISOString(),
+      sequence_no: blocks.length + 1,
+      started_at: utc(start),
+      ended_at: new Date(Date.parse(utc(start)) + 3600000).toISOString(),
       duration_minutes: 60,
       phase_raw: '',
       operation_code_id: null,
@@ -164,182 +221,605 @@ export default function OperationsReportDetail() {
       is_productive: true,
       classification_source: 'reviewer',
       npt_code_id: null,
-      npt_code_snapshot: '',
       agency_id: null,
       cause_code: '',
       hole_section_id: null,
       phase_id: null,
       depth_from_m: null,
       depth_to_m: null,
-      depth_unit: 'm',
-      footage_m: null,
+      bit_depth_m: null,
       rotating_hours: null,
-      rop_m_per_hr: null,
       rop_basis: 'rotating',
-      responsible_party: '',
       vendor_id: null,
+      responsible_party: '',
       reason: '',
       narrative: '',
-      confidence: '1.00',
+      confidence: '1',
       review_state: 'edited',
-      is_deleted: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    setBlockDrafts([...blockDrafts, nb])
+    })
   }
-
-  if (loading) return <Box p={3}><Typography>Loading report…</Typography></Box>
-  if (!report) return <Box p={3}><ErrorMessage message={error || 'Report not found'} /></Box>
-
+  const duration = editor ? Math.round((Date.parse(utc(editor.ended_at)) - Date.parse(utc(editor.started_at))) / 60000) : 0
+  const apply = () => {
+    if (!editor || !duration || duration <= 0) return
+    const b = { ...editor, review_state: 'edited', duration_minutes: duration }
+    setBlocks((prev) => (prev.some((x) => x.id === b.id) ? prev.map((x) => (x.id === b.id ? b : x)) : [...prev, b]))
+    setEditor(null)
+    setDirty(true)
+  }
+  if (!report)
+    return (
+      <>
+        {error ? <ErrorMessage message={error} /> : <Typography>Loading daily report…</Typography>}
+        {guard}
+      </>
+    )
+  const print = async () => {
+    setBusy(true)
+    try {
+      await printDailyReport(report, brief)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const totals = { Planned: 0, UPA: 0, NPT: 0 }
+  for (const b of blocks) totals[b.classification] += b.duration_minutes
+  const gap = report.period_minutes - totals.Planned - totals.UPA - totals.NPT
   return (
     <Box>
+      {guard}
       <PageHeading
-        eyebrow="Well Operations" title={`${report.well_code_snapshot} — ${report.report_date} — ${report.report_type} ${report.report_no_text || ''}`}
-        subtitle={`${report.rig_name_snapshot || 'No rig'} · ${report.scope} · ${report.event_code || ''} · Day ${report.day_number ?? '—'} · DFS ${report.dfs_days ?? '—'} · Status: ${report.status}`}
+        eyebrow="Well Operations / Daily reports"
+        title={`${report.well_code_snapshot} · ${report.report_date}`}
+        subtitle={`${report.rig_code_snapshot} / ${report.scope} · ${report.report_type} ${report.report_no_text} · ${report.status}`}
+        action={
+          <>
+            <Button onClick={() => go('/operations/reports')}>Back to register</Button>
+            {can('ops-report:print') && (
+              <Button onClick={print} disabled={busy || dirty}>
+                Report PDF
+              </Button>
+            )}
+            {editable && (
+              <Button variant="contained" disabled={busy} onClick={save}>
+                {confirmed ? 'Save reviewed draft' : 'Save draft'}
+              </Button>
+            )}
+            {can('ops-report:submit') && ['draft', 'in_review', 'rejected'].includes(report.status) && (
+              <Button
+                variant="outlined"
+                disabled={busy || dirty || report.extraction_status === 'needs_review'}
+                onClick={() => transition('submit')}
+              >
+                Submit
+              </Button>
+            )}
+            {report.status === 'submitted' && can('ops-report:approve') && (
+              <>
+                <Button variant="contained" disabled={busy} onClick={() => transition('approve')}>
+                  Approve
+                </Button>
+                <Button
+                  variant="outlined"
+                  disabled={busy}
+                  onClick={() => {
+                    setReason('')
+                    setReject(true)
+                  }}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+          </>
+        }
       />
-      {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
-
-      <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', lg: 'repeat(4, 1fr)' }}>
-        <StatCard label="Depth" value={report.depth_end_m ? `${Number(report.depth_end_m).toFixed(0)} m` : '—'} hint={`Start ${report.depth_start_m ? Number(report.depth_start_m).toFixed(0) : '—'} → End ${report.depth_end_m ? Number(report.depth_end_m).toFixed(0) : '—'} · Footage ${footage !== null ? footage.toFixed(1) + ' m' : '—'}`} icon={<TerrainOutlined />} />
-        <StatCard label="Time" value={`${(totalMin / 60).toFixed(2)} h`} hint={`Planned ${(plannedMin / 60).toFixed(2)}h · UPA ${(upaMin / 60).toFixed(2)}h · NPT ${(nptMin / 60).toFixed(2)}h · Unacc. ${(unacc / 60).toFixed(2)}h`} icon={<ScheduleOutlined />} tone={Math.abs(unacc) > 2 ? 'warning' : undefined} />
-        <StatCard label="ROP" value={report.rotating_hours ? `${(footage !== null && report.rotating_hours ? (footage / Number(report.rotating_hours)).toFixed(2) : '—')} m/hr` : '—'} hint={`Rotating ${report.rotating_hours ?? '—'} h · Basis: ${blockDrafts[0]?.rop_basis || 'rotating'} · Productive ${(blockDrafts.filter(b => b.is_productive).reduce((s, b) => s + b.duration_minutes, 0) / 60).toFixed(2)}h`} icon={<SpeedOutlined />} />
-        <StatCard label="Status & extraction" value={report.status} hint={`Extraction: ${report.extraction_status} · Blocks: ${blockDrafts.length} · Avg conf: ${blockDrafts.length ? (blockDrafts.reduce((s, b) => s + Number(b.confidence), 0) / blockDrafts.length).toFixed(2) : '—'}`} icon={<CheckCircleOutline />} tone={report.extraction_status === 'needs_review' ? 'warning' : report.status === 'approved' ? 'info' : undefined} />
-      </Box>
-
-      {findings.length > 0 && (
-        <Alert severity="warning" sx={{ mt: 2 }}>
-          <Typography fontWeight={700}>Findings to fix before submit:</Typography>
-          <ul style={{ margin: '6px 0 0 18px' }}>{findings.map((f, i) => <li key={i}><Typography fontSize={13}>{f}</Typography></li>)}</ul>
+      {error && <ErrorMessage message={error} />}
+      {notice && <Alert severity="success">{notice}</Alert>}
+      {report.status === 'rejected' && <Alert severity="warning">Returned for correction: {report.rejection_reason}</Alert>}
+      {report.extraction_status === 'needs_review' && (
+        <Alert severity="info">
+          These are suggestions. Check the dates, measurements and time classifications, then save the reviewed draft.
         </Alert>
       )}
-      {findings.length === 0 && report.extraction_status === 'needs_review' && (
-        <Alert severity="info" sx={{ mt: 2 }}>Review each block (provenance chips show extracted/confidence). Accept or edit, then Save — findings clear. Nothing submits automatically.</Alert>
+      {editable && report.current_extraction_id && can('ops-report:review') && (
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={confirmed}
+              onChange={(e) => {
+                setConfirmed(e.target.checked)
+                setDirty(true)
+              }}
+            />
+          }
+          label="I checked the source, scope, measurements and time allocations. Accept the remaining suggestions when I save."
+        />
       )}
-
-      <Box mt={2} display="flex" gap={1} flexWrap="wrap" alignItems="center">
-        <Button variant="outlined" onClick={() => navigate('/operations/reports')}>Back to list</Button>
-        {canEdit && <Button variant="contained" startIcon={<SaveOutlined />} disabled={saving} onClick={doSave}>{saving ? 'Saving…' : 'Save draft'}</Button>}
-        {canEdit && <Button variant="outlined" onClick={addBlock}>Add block</Button>}
-        {report.status === 'draft' && <Button variant="contained" color="success" startIcon={<SendOutlined />} onClick={doSubmit}>Submit</Button>}
-        {report.status === 'submitted' && <Button variant="contained" color="success" startIcon={<ThumbUpOutlined />} onClick={doApprove}>Approve</Button>}
-        {report.status === 'submitted' && <Button variant="outlined" color="error" startIcon={<BlockOutlined />} onClick={() => setRejectOpen(true)}>Reject</Button>}
-        <Chip label={`${report.period_minutes} min period`} size="small" />
-        <Chip label={unacc === 0 ? 'Complete (≤2 min tol.)' : `Unaccounted ${unacc} min`} size="small" color={Math.abs(unacc) > 2 ? 'warning' : 'success'} />
-      </Box>
-
-      <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', lg: '2fr 1fr' }} mt={2}>
-        <SectionCard title="24h time log — one row per activity block">
-          <Box mb={1} display="flex" gap={1} alignItems="center">
-            <Box flex={1} height={18} display="flex" border={`1px solid`} sx={{ borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
-              {blockDrafts.map(b => (
-                <Box key={b.id} flex={b.duration_minutes} bgcolor={b.classification === 'NPT' ? 'error.main' : b.classification === 'UPA' ? 'warning.main' : 'success.main'} title={`${b.classification} ${b.duration_minutes} min: ${b.narrative.slice(0, 80)}`} />
-              ))}
-              {unacc > 0 && <Box flex={unacc} bgcolor="grey.300" title={`Unaccounted ${unacc} min`} />}
-            </Box>
-            <Typography fontSize={11} color="text.secondary">Planned green · UPA amber · NPT red · unaccounted grey</Typography>
-          </Box>
-          <DataTable
-            rows={blockDrafts}
-            rowKey='id'
-            columns={[
-              { field: 'sequence_no', headerName: '#', width: 50 },
-              { field: 'started_at', headerName: 'From', width: 140, valueFormatter: p => p.value ? new Date(p.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '—' },
-              { field: 'ended_at', headerName: 'To', width: 140, valueFormatter: p => p.value ? new Date(p.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '—' },
-              { field: 'duration_minutes', headerName: 'Min', width: 70 },
-              { field: 'phase_raw', headerName: 'Phase', width: 90, valueFormatter: p => p.value || '—' },
-              { field: 'classification', headerName: 'Class', width: 100, cellRenderer: (p: { value: string }) => <Chip size="small" label={p.value} color={clsColor(p.value)} /> },
-              { field: 'allocation', headerName: 'Alloc', width: 80 },
-              { field: 'npt_code_snapshot', headerName: 'NPT code', width: 100, valueFormatter: p => p.value || '—' },
-              { field: 'confidence', headerName: 'Conf', width: 70, valueFormatter: p => p.value ? Number(p.value).toFixed(2) : '—' },
-              { field: 'review_state', headerName: 'Review', width: 100, valueFormatter: p => p.value || '—' },
-              { field: 'narrative', headerName: 'Operation (narrative)', flex: 1.5, minWidth: 260, tooltipField: 'narrative' },
-              { field: 'id', headerName: '', width: 90, sortable: false, cellRenderer: (p: { data: OpsBlock }) => <Button size="small" onClick={() => openEdit(p.data)} disabled={!canEdit}>Edit</Button> },
-            ]}
-          />
-          <Typography fontSize={11} color="text.secondary" mt={1}>Each block stores started_at/ended_at/duration_minutes (recomputed on save), classification+allocation+is_productive, NPT code/agency/cause, responsible party, footage/ROP with basis, narrative and provenance (explicit/code/keyword/timeline/reviewer + confidence). Low-confidence fields are flagged; findings above list every conflict.</Typography>
-        </SectionCard>
-
-        <Box display="grid" gap={2}>
-          <SectionCard title="Brief — the day in one paragraph">
-            {brief ? (
-              <Box>
-                <Typography fontSize={13} whiteSpace="pre-wrap">{brief.summary}</Typography>
-                <Divider sx={{ my: 1.5 }} />
-                <Typography fontSize={12} fontWeight={700}>Time split (min):</Typography>
-                <Typography fontSize={12} color="text.secondary">{JSON.stringify(brief.time_split, null, 1).slice(2, -1)}</Typography>
-                <Typography fontSize={12} fontWeight={700} mt={1}>Depth progress:</Typography>
-                <Typography fontSize={12} color="text.secondary">{JSON.stringify(brief.depth_progress, null, 1).slice(2, -1)}</Typography>
-                <Typography fontSize={11} color="text.secondary" mt={1}>Deterministic — server recomputes every figure; numbers never added by AI. Optional offline-AI polish (workspace toggle, default off) may rewrite for readability but never changes a figure.</Typography>
-              </Box>
+      <SectionCard
+        title="Source documents"
+        action={
+          editable &&
+          report.status === 'draft' &&
+          can('ops-doc:read') &&
+          can('ops-doc:extract') && (
+            <Button disabled={dirty || busy} onClick={() => setSource(true)}>
+              Extract PDF / Excel
+            </Button>
+          )
+        }
+      >
+        {report.sources.length ? (
+          report.sources.map((s) =>
+            can('ops-doc:download') ? (
+              <Button
+                key={s.id}
+                onClick={() =>
+                  downloadFile(`/operations/documents/${s.id}/download`, s.file_name).catch((e) => setError(e.message))
+                }
+              >
+                {s.file_name}
+              </Button>
             ) : (
-              <Typography fontSize={13} color="text.secondary">Brief will appear after saving — it composes identity, top blocks, time split, NPT list, depth/ROP, forward plan and data-quality.</Typography>
-            )}
-          </SectionCard>
-          <SectionCard title="Header — well, rig, scope, depth, depths & remarks">
-            <Box display="grid" gap={1.5}>
-              <TextField size="small" label="Report no." value={(headerDraft.report_no_text ?? report.report_no_text) || ''} onChange={e => setHeaderDraft(h => ({ ...h, report_no_text: e.target.value }))} disabled={!canEdit} />
-              <TextField size="small" label="Day number" type="number" value={(headerDraft.day_number ?? report.day_number) ?? ''} onChange={e => setHeaderDraft(h => ({ ...h, day_number: Number(e.target.value) || undefined }))} disabled={!canEdit} helperText="Campaign day from spud (or manual when spud is future/absent)" />
-              <Box display="grid" gridTemplateColumns="1fr 1fr" gap={1}>
-                <TextField size="small" label="Depth start (m)" value={(headerDraft.depth_start_m ?? report.depth_start_m) ?? ''} onChange={e => setHeaderDraft(h => ({ ...h, depth_start_m: e.target.value as unknown as string }))} disabled={!canEdit} />
-                <TextField size="small" label="Depth end (m)" value={(headerDraft.depth_end_m ?? report.depth_end_m) ?? ''} onChange={e => setHeaderDraft(h => ({ ...h, depth_end_m: e.target.value as unknown as string }))} disabled={!canEdit} />
-              </Box>
-              <TextField size="small" label="Operation summary (24h summary)" multiline minRows={3} value={(headerDraft.operation_summary ?? report.operation_summary) ?? ''} onChange={e => setHeaderDraft(h => ({ ...h, operation_summary: e.target.value }))} disabled={!canEdit} />
-              <TextField size="small" label="Forward plan (next 24h)" multiline minRows={2} value={(headerDraft.forward_plan ?? report.forward_plan) ?? ''} onChange={e => setHeaderDraft(h => ({ ...h, forward_plan: e.target.value }))} disabled={!canEdit} />
-              <TextField size="small" label="HSE summary" multiline minRows={2} value={(headerDraft.hse_summary ?? report.hse_summary) ?? ''} onChange={e => setHeaderDraft(h => ({ ...h, hse_summary: e.target.value }))} disabled={!canEdit} />
-              <Typography fontSize={11} color="text.secondary">Well position & direction (MD/TVD, inclination/azimuth, DLS) come from section 7.1 + narrative MWD/gyro surveys — shown in the survey panel of the analytics page; missing values are flagged, never fabricated.</Typography>
-            </Box>
-          </SectionCard>
+              <Typography key={s.id}>{s.file_name}</Typography>
+            ),
+          )
+        ) : (
+          <Typography variant="body2">
+            {report.source_document_id ? 'Previously filed source' : 'Manual entry · no source attached'}
+          </Typography>
+        )}
+        {report.extraction_notes && (
+          <Typography whiteSpace="pre-line" variant="body2" color="text.secondary">
+            {report.extraction_notes}
+          </Typography>
+        )}
+      </SectionCard>
+      <SectionCard
+        title="Activity log"
+        subtitle="Times are UTC. Durations are calculated from the entered times."
+        action={editable && <Button onClick={addBlock}>Add block</Button>}
+      >
+        <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" mb={1.5}>
+          {Object.entries(totals).map(([k, v]) => (
+            <Chip key={k} label={`${k}: ${(v / 60).toFixed(2)} h · ${(v / 1440).toFixed(3)} d`} />
+          ))}
+          <Chip
+            label={`Productive ${(blocks.reduce((n, b) => n + (b.is_productive ? b.duration_minutes : 0), 0) / 60).toFixed(2)} h · Nonproductive ${(blocks.reduce((n, b) => n + (b.is_productive ? 0 : b.duration_minutes), 0) / 60).toFixed(2)} h`}
+          />
+          <Chip label={`Period balance: ${gap} min`} />
         </Box>
-      </Box>
-
-      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Edit block {editBlock?.sequence_no}</DialogTitle>
-        <DialogContent>
-          <Box display="grid" gap={2} mt={1} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }}>
-            <TextField size="small" label="Started at" type="datetime-local" value={editForm.started_at ? new Date(editForm.started_at as string).toISOString().slice(0, 16) : ''} onChange={e => setEditForm(f => ({ ...f, started_at: new Date(e.target.value).toISOString() }))} InputLabelProps={{ shrink: true }} />
-            <TextField size="small" label="Ended at" type="datetime-local" value={editForm.ended_at ? new Date(editForm.ended_at as string).toISOString().slice(0, 16) : ''} onChange={e => setEditForm(f => ({ ...f, ended_at: new Date(e.target.value).toISOString() }))} InputLabelProps={{ shrink: true }} />
-            <FormControl size="small"><InputLabel>Classification</InputLabel><Select value={editForm.classification || 'Planned'} label="Classification" onChange={e => setEditForm(f => ({ ...f, classification: e.target.value as never }))}><MenuItem value="Planned">Planned</MenuItem><MenuItem value="UPA">UPA</MenuItem><MenuItem value="NPT">NPT</MenuItem></Select></FormControl>
-            <FormControl size="small"><InputLabel>Allocation</InputLabel><Select value={editForm.allocation || 'PT'} label="Allocation" onChange={e => setEditForm(f => ({ ...f, allocation: e.target.value as never }))}><MenuItem value="PT">PT</MenuItem><MenuItem value="NPT">NPT</MenuItem><MenuItem value="UPA">UPA</MenuItem><MenuItem value="SP">SP</MenuItem></Select></FormControl>
-            <TextField size="small" label="Phase raw (DRLPRO…)" value={editForm.phase_raw || ''} onChange={e => setEditForm(f => ({ ...f, phase_raw: e.target.value }))} />
-            <FormControl size="small">
-              <InputLabel>NPT code</InputLabel>
-              <Select value={editForm.npt_code_id || ''} label="NPT code" onChange={e => setEditForm(f => ({ ...f, npt_code_id: e.target.value || null }))}>
-                <MenuItem value="">None</MenuItem>
-                {ref?.npt_codes.map(n => <MenuItem key={n.id} value={n.id}>{n.npt_code} — {n.npt_name}</MenuItem>)}
-              </Select>
-            </FormControl>
-            <FormControl size="small">
-              <InputLabel>Agency (Vendor master)</InputLabel>
-              <Select value={editForm.agency_id || ''} label="Agency" onChange={e => setEditForm(f => ({ ...f, agency_id: e.target.value || null }))}>
-                <MenuItem value="">None</MenuItem>
-                {agencyDropdown.map(a => <MenuItem key={a.id} value={a.id}>{a.agency_code} — {a.agency_name} ({a.category})</MenuItem>)}
-              </Select>
-            </FormControl>
-            <TextField size="small" label="Responsible party" value={editForm.responsible_party || ''} onChange={e => setEditForm(f => ({ ...f, responsible_party: e.target.value }))} />
-            <TextField size="small" label="Reason (mandatory for NPT/UPA)" value={editForm.reason || ''} onChange={e => setEditForm(f => ({ ...f, reason: e.target.value }))} />
-            <Box gridColumn={{ xs: '1', md: '1 / span 2' }}>
-              <TextField size="small" label="Narrative / operation" fullWidth multiline minRows={3} value={editForm.narrative || ''} onChange={e => setEditForm(f => ({ ...f, narrative: e.target.value }))} />
-            </Box>
-            <TextField size="small" label="Depth from (m)" value={editForm.depth_from_m || ''} onChange={e => setEditForm(f => ({ ...f, depth_from_m: e.target.value as unknown as never }))} />
-            <TextField size="small" label="Depth to (m)" value={editForm.depth_to_m || ''} onChange={e => setEditForm(f => ({ ...f, depth_to_m: e.target.value as unknown as never }))} />
-            <TextField size="small" label="Rotating hours" value={editForm.rotating_hours || ''} onChange={e => setEditForm(f => ({ ...f, rotating_hours: e.target.value as unknown as never }))} helperText="ROP = footage ÷ rotating_hours; only on-bottom blocks count" />
-            <Box display="flex" gap={1} alignItems="center">
-              <Typography fontSize={13}>Productive</Typography>
-              <input type="checkbox" checked={!!editForm.is_productive} onChange={e => setEditForm(f => ({ ...f, is_productive: e.target.checked }))} />
-              <Typography fontSize={11} color="text.secondary">NPT can never be productive (DB check).</Typography>
-            </Box>
+        <DataTable
+          rows={blocks}
+          canExport={can('ops-report:export')}
+          exportName={`${report.well_code_snapshot}-${report.report_date}-activities`}
+          onExport={auditExport('reports')}
+          columns={[
+            { field: 'started_at', headerName: 'From (UTC)', valueFormatter: (p) => dateInput(p.value).replace('T', ' ') },
+            { field: 'ended_at', headerName: 'To (UTC)', valueFormatter: (p) => dateInput(p.value).replace('T', ' ') },
+            { field: 'duration_minutes', headerName: 'Minutes' },
+            { field: 'narrative', headerName: 'Operation', minWidth: 260, tooltipField: 'narrative' },
+            { field: 'phase_raw', headerName: 'Phase' },
+            { field: 'classification', headerName: 'Class' },
+            { field: 'allocation', headerName: 'Allocation' },
+            { field: 'responsible_party', headerName: 'Agency' },
+            {
+              field: 'classification_evidence',
+              headerName: 'Evidence',
+              minWidth: 240,
+              tooltipField: 'classification_evidence',
+            },
+            { field: 'review_state', headerName: 'Review' },
+            {
+              headerName: 'Actions',
+              minWidth: 150,
+              width: 160,
+              sortable: false,
+              cellRenderer: ({ data: b }: { data: Block }) => (
+                <>
+                  <Button size="small" onClick={() => setEditor({ ...b })}>
+                    {editable ? 'Edit' : 'Inspect'}
+                  </Button>
+                  {editable && (
+                    <Button size="small" color="error" onClick={() => setRemove(b)}>
+                      Remove
+                    </Button>
+                  )}
+                </>
+              ),
+            },
+          ]}
+        />
+      </SectionCard>
+      <Box display="grid" gap={2} gridTemplateColumns={{ xs: 'minmax(0,1fr)', lg: 'minmax(0,3fr) minmax(0,2fr)' }}>
+        <SectionCard title="Daily measurements & narrative">
+          <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={2}>
+            {(
+              [
+                ['report_no_text', 'Report no.'],
+                ['site', 'Site / well position'],
+                ['depth_start_m', 'Starting MD (m)'],
+                ['depth_end_m', 'Closing MD (m)'],
+                ['tvd_m', 'TVD (m)'],
+                ['rotating_hours', 'Rotating hours'],
+                ['dfs_days', 'Days from spud'],
+                ['day_number', 'Day number'],
+              ] as const
+            ).map(([k, label]) => (
+              <TextField
+                key={k}
+                size="small"
+                label={label}
+                disabled={!editable}
+                value={h(k) ?? ''}
+                onChange={(e) =>
+                  updateHeader({
+                    [k]:
+                      k === 'day_number'
+                        ? e.target.value
+                          ? Number(e.target.value)
+                          : null
+                        : e.target.value || (k === 'site' || k === 'report_no_text' ? '' : null),
+                  })
+                }
+              />
+            ))}
+            {report.plan_checkpoints.length > 0 && (
+              <TextField
+                sx={{ gridColumn: '1 / -1' }}
+                select
+                label="Last completed programme activity"
+                value={h('completed_plan_item_id') ?? ''}
+                disabled={!editable}
+                onChange={(e) => updateHeader({ completed_plan_item_id: e.target.value || null })}
+                helperText="Confirm a checkpoint for lead/lag when depth stays constant (e.g. completion work)."
+              >
+                <MenuItem value="">Compare at measured depth</MenuItem>
+                {report.plan_checkpoints.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.description}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+            {(['period_start_at', 'period_end_at'] as const).map((k) => (
+              <TextField
+                key={k}
+                label={k === 'period_start_at' ? 'Period start (UTC)' : 'Period end (UTC)'}
+                type="datetime-local"
+                size="small"
+                disabled={!editable}
+                value={dateInput(h(k) as string)}
+                onChange={(e) => {
+                  if (e.target.value) updateHeader({ [k]: `${e.target.value}:00Z` })
+                }}
+              />
+            ))}
+            {(
+              [
+                ['operation_summary', '24-hour summary'],
+                ['forward_plan', 'Forward plan'],
+                ['hse_summary', 'HSE summary'],
+                ['remarks', 'Remarks'],
+              ] as const
+            ).map(([k, l]) => (
+              <TextField
+                key={k}
+                label={l}
+                multiline
+                minRows={2}
+                disabled={!editable}
+                value={h(k) ?? ''}
+                onChange={(e) => updateHeader({ [k]: e.target.value })}
+              />
+            ))}
           </Box>
-          <Alert severity="info" sx={{ mt: 2 }}>NPT requires a code, agency (optional) and ≥10-char reason — enforced in schema + service + DB. Corrections are stored as overrides and learned for next extraction (inspectable, revocable).</Alert>
-        </DialogContent>
-        <DialogActions><Button onClick={() => setEditOpen(false)}>Cancel</Button><Button variant="contained" onClick={applyEdit}>Apply</Button></DialogActions>
-      </Dialog>
-
-      <Dialog open={rejectOpen} onClose={() => setRejectOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Reject report</DialogTitle>
-        <DialogContent><TextField autoFocus size="small" label="Reason" fullWidth multiline minRows={2} value={rejectReason} onChange={e => setRejectReason(e.target.value)} /></DialogContent>
-        <DialogActions><Button onClick={() => setRejectOpen(false)}>Cancel</Button><Button variant="contained" color="error" disabled={!rejectReason.trim()} onClick={doReject}>Reject</Button></DialogActions>
-      </Dialog>
+        </SectionCard>
+        <SectionCard title="Daily brief" subtitle={dirty ? 'Based on the last saved draft.' : 'Based on the saved report.'}>
+          <Typography whiteSpace="pre-line" variant="body2">
+            {brief}
+          </Typography>
+        </SectionCard>
+      </Box>
+      <SectionCard
+        title="Survey stations"
+        subtitle="Reported offsets are relative to the survey datum. A blank value is unknown, not zero."
+        action={
+          editable && (
+            <Button
+              onClick={() => {
+                setSurveys([...surveys, newSurvey()])
+                setDirty(true)
+              }}
+            >
+              Add station
+            </Button>
+          )
+        }
+      >
+        {!surveys.length && <Typography variant="body2">No survey measurements reported.</Typography>}
+        {surveys.map((s, i) => (
+          <Box key={i} display="flex" gap={1} flexWrap="wrap" mb={1}>
+            <Typography variant="body2">
+              Station {i + 1} · {s.tool || s.source}
+            </Typography>
+            {(Object.keys(surveyFields) as (keyof typeof surveyFields)[]).map((k) => (
+              <TextField
+                size="small"
+                key={k}
+                sx={{ width: 130 }}
+                label={surveyFields[k]}
+                value={s[k] ?? ''}
+                disabled={!editable}
+                onChange={(e) => {
+                  setDirty(true)
+                  setSurveys(surveys.map((x, j) => (j === i ? { ...x, [k]: e.target.value || null } : x)))
+                }}
+              />
+            ))}
+            {editable && (
+              <Button
+                color="error"
+                onClick={() => {
+                  setSurveys(surveys.filter((_, j) => i !== j))
+                  setDirty(true)
+                }}
+              >
+                Remove
+              </Button>
+            )}
+          </Box>
+        ))}
+      </SectionCard>
+      {source && ref && (
+        <SourceDialog
+          extract
+          reference={ref}
+          report={report}
+          initial={{ well_id: report.well_id, scope: report.scope }}
+          onClose={() => setSource(false)}
+          onSaved={(r) => {
+            if (r) {
+              reset(r)
+              getBrief(r.id)
+                .then((b) => setBrief(b.summary))
+                .catch((e) => setError(e.message))
+            }
+            setSource(false)
+          }}
+        />
+      )}
+      {editor && (
+        <FormDialog
+          open
+          title={`Activity block ${editor.sequence_no}`}
+          maxWidth="md"
+          onClose={() => setEditor(null)}
+          onSubmit={editable ? apply : () => setEditor(null)}
+          submitLabel={editable ? 'Apply to draft' : 'Done'}
+          submitDisabled={editable && !(duration > 0 && duration <= 1440)}
+        >
+          <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={2} pt={1}>
+            {(['started_at', 'ended_at'] as const).map((k) => (
+              <TextField
+                key={k}
+                type="datetime-local"
+                label={k === 'started_at' ? 'From (UTC)' : 'To (UTC)'}
+                disabled={!editable}
+                value={dateInput(editor[k])}
+                onChange={(e) => setEditor({ ...editor, [k]: e.target.value ? `${e.target.value}:00Z` : '' })}
+              />
+            ))}
+            <TextField
+              select
+              label="Classification"
+              disabled={!editable}
+              value={editor.classification}
+              onChange={(e) => {
+                const c = e.target.value as Block['classification']
+                setEditor({
+                  ...editor,
+                  classification: c,
+                  classification_source: 'reviewer',
+                  allocation: c === 'Planned' ? 'PT' : c,
+                  is_productive: c !== 'NPT',
+                })
+              }}
+            >
+              {['Planned', 'UPA', 'NPT'].map((c) => (
+                <MenuItem key={c} value={c}>
+                  {c}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Allocation"
+              disabled={!editable}
+              value={editor.allocation}
+              onChange={(e) =>
+                setEditor({
+                  ...editor,
+                  allocation: e.target.value as Block['allocation'],
+                  is_productive: e.target.value === 'NPT' ? false : editor.is_productive,
+                })
+              }
+            >
+              {['PT', 'NPT', 'UPA', 'SP'].map((c) => (
+                <MenuItem key={c} value={c}>
+                  {c}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="NPT code"
+              disabled={!editable}
+              value={editor.npt_code_id ?? ''}
+              onChange={(e) => setEditor({ ...editor, npt_code_id: e.target.value || null })}
+            >
+              <MenuItem value="">Not assigned</MenuItem>
+              {ref?.npt_codes.map((n) => (
+                <MenuItem key={n.id} value={n.id}>
+                  {n.npt_name} ({n.npt_code})
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="NPT / UPA agency (vendor)"
+              disabled={!editable || (editor.classification === 'Planned' && !['UPA', 'NPT'].includes(editor.allocation))}
+              value={editor.vendor_id ?? ''}
+              onChange={(e) => {
+                const v = ref?.vendors.find((v) => v.id === e.target.value)
+                setEditor({ ...editor, vendor_id: v?.id ?? null, responsible_party: v?.vendor_name ?? '', agency_id: null })
+              }}
+            >
+              <MenuItem value="">Not assigned</MenuItem>
+              {ref?.vendors.map((v) => (
+                <MenuItem key={v.id} value={v.id}>
+                  {v.vendor_name} ({v.vendor_code})
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Operation code"
+              value={editor.operation_code_id ?? ''}
+              disabled={!editable}
+              onChange={(e) => setEditor({ ...editor, operation_code_id: e.target.value || null })}
+            >
+              <MenuItem value="">Not assigned</MenuItem>
+              {ref?.operation_codes.map((c) => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.operation_name} ({c.operation_code})
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Activity code"
+              value={editor.activity_code_id ?? ''}
+              disabled={!editable}
+              onChange={(e) => setEditor({ ...editor, activity_code_id: e.target.value || null })}
+            >
+              <MenuItem value="">Not assigned</MenuItem>
+              {ref?.activity_codes.map((c) => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.activity_name} ({c.activity_code})
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Cause"
+              value={editor.cause_code}
+              disabled={!editable}
+              onChange={(e) => setEditor({ ...editor, cause_code: e.target.value })}
+            >
+              <MenuItem value="">Not assigned</MenuItem>
+              {editor.cause_code && !ref?.causes.some((c) => c.cause_code === editor.cause_code) && (
+                <MenuItem value={editor.cause_code}>{editor.cause_code} (source)</MenuItem>
+              )}
+              {ref?.causes.map((c) => (
+                <MenuItem key={c.id} value={c.cause_code}>
+                  {c.cause_name} ({c.cause_code})
+                </MenuItem>
+              ))}
+            </TextField>
+            <Autocomplete
+              freeSolo
+              disabled={!editable}
+              options={(ref?.phase_codes ?? []).map((c) => c.phase_code)}
+              value={editor.phase_raw}
+              onInputChange={(_, val) => setEditor((b) => (b ? { ...b, phase_raw: val } : b))}
+              renderOption={(props, val) => (
+                <li {...props} key={val}>
+                  {ref?.phase_codes.find((c) => c.phase_code === val)?.phase_name} ({val})
+                </li>
+              )}
+              renderInput={(params) => <TextField {...params} label="Source phase" />}
+            />
+            <FormControlLabel
+              label="Productive time"
+              control={
+                <Checkbox
+                  disabled={!editable || editor.classification === 'NPT' || editor.allocation === 'NPT'}
+                  checked={editor.is_productive}
+                  onChange={(e) => setEditor({ ...editor, is_productive: e.target.checked })}
+                />
+              }
+            />
+            {(
+              [
+                ['depth_from_m', 'From MD (m)'],
+                ['depth_to_m', 'To MD (m)'],
+                ['bit_depth_m', 'Bit depth (m)'],
+                ['rotating_hours', 'Rotating hours'],
+              ] as const
+            ).map(([k, l]) => (
+              <TextField
+                key={k}
+                label={l}
+                disabled={!editable}
+                value={editor[k] ?? ''}
+                onChange={(e) => setEditor({ ...editor, [k]: e.target.value || null })}
+              />
+            ))}
+            <TextField
+              label="Reason"
+              disabled={!editable}
+              value={editor.reason}
+              onChange={(e) => setEditor({ ...editor, reason: e.target.value })}
+            />
+            <TextField
+              label="Activity narrative"
+              multiline
+              minRows={3}
+              sx={{ gridColumn: '1 / -1' }}
+              disabled={!editable}
+              value={editor.narrative}
+              onChange={(e) => setEditor({ ...editor, narrative: e.target.value })}
+            />
+            <Typography variant="body2" sx={{ gridColumn: '1 / -1' }}>
+              Source: {editor.source_bbox || 'Manual entry'} ·{' '}
+              {editor.classification_evidence || editor.classification_source} · Confidence{' '}
+              {Number(editor.confidence).toFixed(2)}
+            </Typography>
+          </Box>
+        </FormDialog>
+      )}
+      {remove && (
+        <FormDialog
+          open
+          danger
+          title={`Remove block ${remove.sequence_no} from this draft?`}
+          onClose={() => setRemove(null)}
+          submitLabel="Remove"
+          onSubmit={() => {
+            setBlocks(blocks.filter((b) => b.id !== remove.id).map((b, i) => ({ ...b, sequence_no: i + 1 })))
+            setRemove(null)
+            setDirty(true)
+          }}
+        >
+          The stored log will change only when you save.
+        </FormDialog>
+      )}
+      {reject && (
+        <FormDialog
+          open
+          title="Return report for correction"
+          onClose={() => setReject(false)}
+          submitLabel="Reject"
+          busy={busy}
+          submitDisabled={!reason.trim()}
+          onSubmit={() => transition('reject')}
+        >
+          <TextField fullWidth label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+          {error && <ErrorMessage message={error} />}
+        </FormDialog>
+      )}
     </Box>
   )
 }

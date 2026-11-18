@@ -3,8 +3,8 @@
 Two exports are described here. Both answer the same question the screen already
 answers; neither introduces a second way of computing a figure.
 
-1. **Figure report (PDF)** — the numbers *and* the pictures, from the Operations
-   dashboard, the Drill-In (drill-through) page and the Well Cost Analysis page.
+1. **Figure report (PDF)** — the numbers *and* the pictures, from the Costing
+   Dashboard, the Drill-In (drill-through) page and the Well Cost Analysis page.
 2. **Matrix workbook (Excel)** — the well-wise usage and cost matrices as a real
    spreadsheet, keeping the header bands, sections, totals and grand total.
 
@@ -16,8 +16,8 @@ no new persistence and no new dependency is introduced.
 
 ## 1. Figure report (PDF)
 
-**Where.** An **Export PDF** action sits in the page heading of the Operations
-dashboard, in the footer of the drill-through dialog and beside *Print well
+**Where.** An **Export PDF** action sits in the page heading of the Costing
+Dashboard, in the footer of the drill-through dialog and beside *Print well
 costing sheet* on the Well Cost Analysis page. It opens one dialog
 (`components/ui/ExportReportDialog.tsx`) shared by all three, so the choices
 cannot drift apart.
@@ -41,7 +41,7 @@ whether a missing picture is missing content or missing rendering.
 
 | Page | Figures | Tables |
 | --- | --- | --- |
-| Operations dashboard | AFE vs actual, cost mix, cumulative cost, depth progress, planned vs actual days | KPI tiles, cost-group and time-classification reconciliation, wells, AFE register, rig register, alerts |
+| Costing Dashboard | AFE vs actual, cost mix, cumulative cost, depth progress, planned vs actual days | KPI tiles, cost-group and time-classification reconciliation, wells, AFE register, rig register, alerts |
 | Drill-in (drill-through) | Daily cost by day, time classification | Well KPIs, cost groups, sections/depth, activities, AFE positions, daily sheets, notes |
 | Well Cost Analysis | Daily vs AFE, cost by group and day | AFE position KPIs, per-AFE table, daily run sheet, budget reconciliation, warnings |
 

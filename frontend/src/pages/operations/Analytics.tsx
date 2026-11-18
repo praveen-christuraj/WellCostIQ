@@ -1,137 +1,213 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Alert, Box, Button, FormControl, InputLabel, MenuItem, Select, Typography } from '@mui/material'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Box, MenuItem, TextField } from '@mui/material'
 import { ErrorMessage, PageHeading } from '../../components/Common'
 import { ChartPanel } from '../../components/ui/ChartPanel'
-import { InteractiveChart } from '../../components/ui/InteractiveChart'
-import { SectionCard } from '../../components/ui/SectionCard'
+import { InteractiveChart, type ChartClickEvent } from '../../components/ui/InteractiveChart'
+import { DataTable } from '../../components/DataTable'
+import { useAuth } from '../../context/AuthContext'
 import { useColorMode } from '../../context/ThemeContext'
 import { chartPalette } from '../../designSystem'
-import { opsTimeDepth, opsReference,  type OpsReference, type OpsTimeDepth } from '../../lib/operations'
+import { auditExport, opsTimeDepth, opsScopeReference, type OpsScopeReference, type OpsTimeDepth } from '../../lib/operations'
 
 export default function OperationsAnalytics() {
-  const { mode } = useColorMode()
-  const palette = useMemo(() => chartPalette(mode), [mode])
-  const [ref, setRef] = useState<OpsReference | null>(null)
-  const [wellId, setWellId] = useState('')
-  const [scope, setScope] = useState('drilling')
-  const [data, setData] = useState<OpsTimeDepth | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  const loadRef = async () => {
-    try { const r = await opsReference(); setRef(r); if (r.wells[0]) setWellId(r.wells[0].id) } catch (e) { setError((e as Error).message) }
-  }
-  useEffect(() => { loadRef() }, [])
-
-  const load = async () => {
-    if (!wellId) return
-    setLoading(true); setError('')
-    try { const d = await opsTimeDepth(wellId, scope); setData(d) } catch (e) { setError((e as Error).message) } finally { setLoading(false) }
-  }
-  useEffect(() => { if (wellId) load() }, [wellId, scope])
-
-  const timeDepthOption = useMemo(() => {
-    if (!data || !data.actual.length) return null
-    const planSeries = data.plan.map(p => [p.cum_days, p.depth_m])
-    const actualSeries = data.actual.map(a => [a.cum_days, a.depth_m])
-    return {
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['Plan', 'Actual'], bottom: 10, left: 'center' },
-      grid: { left: 80, right: 40, top: 40, bottom: 60 },
-      xAxis: { type: 'value', name: 'Cumulative days', nameLocation: 'middle', nameGap: 30 },
-      yAxis: { type: 'value', name: 'Depth (m)', inverse: true },
-      series: [
-        { name: 'Plan', type: 'line', data: planSeries, smooth: true, lineStyle: { color: "#15515B", width: 2, type: 'dashed' }, itemStyle: { color: "#15515B" }, symbolSize: 6 },
-        { name: 'Actual', type: 'line', data: actualSeries, smooth: false, step: 'end', lineStyle: { color: "#2E7D32", width: 2 }, itemStyle: { color: "#2E7D32" }, symbolSize: 6 },
-      ],
+  const { can } = useAuth(),
+    go = useNavigate(),
+    { mode } = useColorMode(),
+    colors = chartPalette(mode)
+  const [ref, setRef] = useState<OpsScopeReference | null>(null),
+    [well, setWell] = useState(''),
+    [scope, setScope] = useState('drilling'),
+    [data, setData] = useState<OpsTimeDepth | null>(null),
+    [error, setError] = useState('')
+  useEffect(() => {
+    opsScopeReference()
+      .then((r) => {
+        setRef(r)
+        if (r.wells[0]) {
+          setWell(r.wells[0].id)
+          setScope(r.wells[0].drilling_available ? 'drilling' : 'completion')
+        }
+      })
+      .catch((e) => setError(e.message))
+  }, [])
+  useEffect(() => {
+    let current = true
+    setData(null)
+    if (well) {
+      setError('')
+      opsTimeDepth(well, scope)
+        .then((d) => {
+          if (current) setData(d)
+        })
+        .catch((e) => {
+          if (current) setError(e.message)
+        })
     }
-  }, [data, palette])
-
-  const lagOption = useMemo(() => {
-    if (!data?.lag_series?.length) return null
-    return {
-      tooltip: { trigger: 'axis' },
-      grid: { left: 80, right: 40, top: 40, bottom: 60 },
-      legend: { data: ['Lag days'], bottom: 10, left: 'center' },
-      xAxis: { type: 'category', data: data.lag_series.map(l => l.report_date), axisLabel: { rotate: 15, fontSize: 10 } },
-      yAxis: { type: 'value', name: 'Lag (days) — positive = behind' },
-      series: [
-        {
-          name: 'Lag days', type: 'bar', data: data.lag_series.map(l => l.lag_days),
-          itemStyle: { color: (params: { value: number }) => params.value > 0 ? "#C62828" : "#2E7D32" },
+    return () => {
+      current = false
+    }
+  }, [well, scope])
+  const events = can('ops-report:read')
+    ? {
+        click: (event: ChartClickEvent) => {
+          if (event.chartRowId) go(`/operations/reports/${event.chartRowId}`)
         },
-      ],
-    }
-  }, [data, palette])
-
-  const ropOption = useMemo(() => {
-    if (!data?.actual.length) return null
-    // Derive ROP-ish as depth delta / time delta between actual points
-    const points: [number, number][] = []
-    for (let i = 1; i < data.actual.length; i++) {
-      const prev = data.actual[i - 1]
-      const cur = data.actual[i]
-      const dDepth = cur.depth_m - prev.depth_m
-      const dDays = cur.cum_days - prev.cum_days
-      if (dDays > 0 && dDepth > 0) points.push([cur.cum_days, dDepth / (dDays * 24)])
-    }
-    if (!points.length) return null
-    return {
-      tooltip: { trigger: 'axis' },
-      grid: { left: 60, right: 20, top: 20, bottom: 40 },
-      xAxis: { type: 'value', name: 'Cumulative days' },
-      yAxis: { type: 'value', name: 'ROP (m/hr)' },
-      series: [{ name: 'ROP', type: 'line', data: points, smooth: true, lineStyle: { color: "#ED6C02", width: 2 } }],
-    }
-  }, [data, palette])
-
+      }
+    : undefined
+  const base = {
+    animation: false,
+    tooltip: { trigger: 'axis', confine: true },
+    textStyle: { color: colors.axis },
+    grid: { left: 20, right: 28, top: 48, bottom: 52, containLabel: true },
+    legend: { top: 2, type: 'scroll', textStyle: { color: colors.axis } },
+  }
+  const days = { type: 'value', name: 'Elapsed days', nameLocation: 'middle', nameGap: 30, axisLabel: { hideOverlap: true } }
+  const actual = data?.actual ?? [],
+    lag = data?.lag_series ?? [],
+    rop = actual.filter((a) => a.rop !== null)
+  const depth = {
+    ...base,
+    xAxis: days,
+    yAxis: { type: 'value', name: 'MD (m)', inverse: true },
+    series: [
+      {
+        name: 'Active plan',
+        type: 'line',
+        connectNulls: false,
+        color: colors.planned,
+        data: data?.plan.map((p) => [p.cum_days, p.depth_m]) ?? [],
+      },
+      {
+        name: 'Actual',
+        type: 'line',
+        color: colors.actual,
+        data: actual.map((p) => ({ value: [p.cum_days, p.depth_m], chartRowId: p.report_id })),
+      },
+      {
+        name: 'ROP projection',
+        type: 'line',
+        color: colors.adjusted,
+        lineStyle: { type: 'dashed' },
+        data: data?.projection.map((p) => [p.cum_days, p.depth_m]) ?? [],
+      },
+    ],
+  }
   return (
     <Box>
-      <PageHeading eyebrow="Well Operations" title="Analytics — Time vs Depth" subtitle="Actual (staircase from blocks) vs planned (rate-based plan builder). Lead = actual − planned: positive = behind (lag), negative = ahead. ROP = footage ÷ rotating hours (on-bottom only). Every point drills through to its blocks. (3rd in operations order: Plans/Timeline → Daily Reports → Analytics → Library/Settings)" />
-      {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
-
-      <SectionCard title="Filters">
-        <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr 1fr auto' }}>
-          <FormControl size="small" fullWidth>
-            <InputLabel>Well</InputLabel>
-            <Select value={wellId} label="Well" onChange={e => setWellId(e.target.value)}>
-              {ref?.wells.map(w => <MenuItem key={w.id} value={w.id}>{w.display_name}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" fullWidth>
-            <InputLabel>Scope</InputLabel>
-            <Select value={scope} label="Scope" onChange={e => setScope(e.target.value)}>
-              <MenuItem value="drilling">Drilling</MenuItem>
-              <MenuItem value="completion">Completion</MenuItem>
-            </Select>
-          </FormControl>
-          <Button variant="outlined" onClick={load} disabled={!wellId || loading}>{loading ? 'Loading…' : 'Reload'}</Button>
+      <PageHeading
+        eyebrow="Well Operations"
+        title="Operations analytics"
+        subtitle="Compare submitted or approved measurements with the active programme. Select an actual point to inspect its report."
+      />
+      {error && <ErrorMessage message={error} />}
+      <Box display="flex" gap={2} flexWrap="wrap" mb={2}>
+        <TextField
+          sx={{ minWidth: 220 }}
+          select
+          label="Well"
+          value={well}
+          onChange={(e) => {
+            setWell(e.target.value)
+            setScope(ref?.wells.find((w) => w.id === e.target.value)?.drilling_available ? 'drilling' : 'completion')
+          }}
+        >
+          {ref?.wells.map((w) => (
+            <MenuItem key={w.id} value={w.id}>
+              {w.display_name}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField select label="Scope" value={scope} onChange={(e) => setScope(e.target.value)} sx={{ minWidth: 160 }}>
+          <MenuItem value="drilling" disabled={!ref?.wells.find((w) => w.id === well)?.drilling_available}>
+            Drilling
+          </MenuItem>
+          <MenuItem value="completion" disabled={!ref?.wells.find((w) => w.id === well)?.completion_available}>
+            Completion
+          </MenuItem>
+        </TextField>
+      </Box>
+      <Box display="grid" gap={2} gridTemplateColumns="minmax(0,1fr)">
+        <ChartPanel
+          title="Time vs measured depth"
+          caption="Elapsed days from programme start, or reported drilling DFS for an undated drilling plan. Otherwise days are relative to the first submitted period, without a lag estimate. The dashed projection to the next deeper target assumes continuous rotation at the latest measured ROP, not a completion forecast."
+          height={350}
+          empty={!actual.some((p) => p.depth_m !== null) && !data?.plan.some((p) => p.depth_m !== null)}
+          emptyMessage="Activate a timeline or submit a report with measured depth."
+        >
+          <InteractiveChart option={depth} onEvents={events} style={{ height: '100%' }} />
+        </ChartPanel>
+        <Box display="grid" gap={2} gridTemplateColumns={{ xs: 'minmax(0,1fr)', lg: 'repeat(2,minmax(0,1fr))' }}>
+          <ChartPanel
+            title="Lead / lag (days)"
+            caption="Actual days minus the saved baseline days at the confirmed activity or, otherwise, interpolated at the same depth. Positive is behind. Ambiguous depths have no depth-based lag."
+            empty={!lag.length}
+            emptyMessage="No uniquely comparable depth and elapsed-day pair."
+          >
+            <InteractiveChart
+              onEvents={events}
+              style={{ height: '100%' }}
+              option={{
+                ...base,
+                xAxis: { type: 'category', data: lag.map((a) => a.report_date), axisLabel: { hideOverlap: true } },
+                yAxis: { type: 'value', name: 'Days' },
+                series: [
+                  {
+                    type: 'bar',
+                    color: colors.actual,
+                    data: lag.map((a) => ({ value: a.lag_days, chartRowId: a.report_id })),
+                  },
+                ],
+              }}
+            />
+          </ChartPanel>
+          <ChartPanel
+            title="Rate of penetration"
+            caption="Metres gained ÷ measured rotating hours. Missing denominators are not estimated from shift length."
+            empty={!rop.length}
+            emptyMessage="No report has both footage and rotating hours."
+          >
+            <InteractiveChart
+              onEvents={events}
+              style={{ height: '100%' }}
+              option={{
+                ...base,
+                xAxis: days,
+                yAxis: { type: 'value', name: 'm/h' },
+                series: [
+                  {
+                    type: 'line',
+                    color: colors.actual,
+                    data: rop.map((a) => ({ value: [a.cum_days, a.rop], chartRowId: a.report_id })),
+                  },
+                ],
+              }}
+            />
+          </ChartPanel>
         </Box>
-        <Typography fontSize={11} color="text.secondary" mt={1}>Plan is versioned; activating a new version keeps the old for comparison. Actual maps blocks → plan items by activity/depth/window (reviewer can drag to fix). Timeline resolver keeps expected state per well/scope for dashboard, brief and “missing report” check — persisted, not cache.</Typography>
-      </SectionCard>
-
-      <Box mt={2}>
-        <ChartPanel title="Time vs Depth — Plan vs Actual (depth inverted, time on X)" height={420} empty={!timeDepthOption} emptyMessage="No curve — need at least one approved report with depth and (optionally) a plan for this well/scope. Add a plan in the Plans tab or under Rig/Well → Plans.">
-          {timeDepthOption && <InteractiveChart option={timeDepthOption as never} style={{ height: 380 }} />}
-        </ChartPanel>
-        {!timeDepthOption && data && <Alert severity="info" sx={{ mt: 1 }}>Plan is empty — create one: pick hole section + activity, give target depth; planned hours are generated from ROP/trip-speed/contingency assumptions (matching the engineers’ workbook formulas, but explicit: drilling = ROUNDUP((depth−prev)/ROP)+2, trip = ROUNDUP(depth/28.5/10)+2, cum days = prev + hrs/24).</Alert>}
+        <DataTable
+          rows={actual.map((a) => ({
+            ...a,
+            lag_days: lag.find((l) => l.report_id === a.report_id)?.lag_days ?? null,
+            comparison: lag.find((l) => l.report_id === a.report_id)?.basis,
+            baseline: lag.find((l) => l.report_id === a.report_id)?.baseline,
+          }))}
+          rowKey="report_id"
+          exportName="operations-performance"
+          canExport={can('ops-analytics:export')}
+          onExport={auditExport('analytics')}
+          columns={[
+            { field: 'report_date', headerName: 'Report date' },
+            { field: 'cum_days', headerName: 'Elapsed days' },
+            { field: 'basis', headerName: 'Time basis' },
+            { field: 'depth_m', headerName: 'MD (m)' },
+            { field: 'rop', headerName: 'ROP (m/h)' },
+            { field: 'lag_days', headerName: 'Lag (days)' },
+            { field: 'baseline', headerName: 'Baseline version' },
+            { field: 'comparison', headerName: 'Comparison basis' },
+          ]}
+        />
       </Box>
-
-      <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', lg: '1fr 1fr' }} mt={2}>
-        <ChartPanel title="Lag / Lead (days) — lag = actual − planned at same depth" height={320} empty={!lagOption} emptyMessage="No lag series — needs both plan and actual.">
-          {lagOption && <InteractiveChart option={lagOption as never} style={{ height: 280 }} />}
-        </ChartPanel>
-        <ChartPanel title="ROP (m/hr) — on-bottom only, reaming excluded" height={320} empty={!ropOption} emptyMessage="No ROP points — ensure blocks have depth_from/to and rotating_hours, and are counted as on-bottom drilling.">
-          {ropOption && <InteractiveChart option={ropOption as never} style={{ height: 280 }} />}
-        </ChartPanel>
-      </Box>
-
-      <SectionCard title="NPT bands & milestones">
-        <Typography fontSize={12} color="text.secondary">NPT bands shade the time axis where NPT blocks occurred; milestones mark spud, casing points, section TD, TD and rig release (planned vs actual). The chart above shows NPT bands when present; milestones are added where the timeline resolver provides them.</Typography>
-        {data?.npt_bands?.length ? <Typography fontSize={12} mt={1}>{data.npt_bands.length} NPT band(s) in this well/scope — shaded on the time axis.</Typography> : <Typography fontSize={12} mt={1} color="text.secondary">No NPT bands — no NPT blocks yet for this well/scope.</Typography>}
-      </SectionCard>
-
-      <Alert severity="success" sx={{ mt: 2 }}>Every chart point drills through to the blocks that produced it — click a point to open its report. All figures print their basis (“of logged time”, “rotating-hours basis”, “positive = behind”).</Alert>
     </Box>
   )
 }

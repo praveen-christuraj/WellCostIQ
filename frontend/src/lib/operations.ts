@@ -1,4 +1,4 @@
-import { api, body } from './api'
+import { api, body, uploadFiles } from './api'
 
 export type Scope = 'drilling' | 'completion'
 
@@ -29,7 +29,28 @@ export type OpsDocument = {
   updated_at: string
 }
 
+export type OpsSurvey = {
+  vsec_m: string | null
+  dls_deg_per_30m: string | null
+  md_m: string | null
+  tvd_m: string | null
+  inc_deg: string | null
+  azi_deg: string | null
+  ns_m: string | null
+  ew_m: string | null
+  tool: string
+  source: string
+}
+
 export type OpsReport = {
+  rejection_reason: string
+  baseline_plan_id: string | null
+  completed_plan_item_id: string | null
+  plan_checkpoints: { id: string; description: string; days: string }[]
+  site: string
+  extraction_notes: string
+  surveys: OpsSurvey[]
+  sources: { id: string; file_name: string }[]
   id: string
   organization_id: string
   well_id: string
@@ -92,6 +113,9 @@ export type OpsBlock = {
   classification: 'Planned' | 'UPA' | 'NPT'
   allocation: 'PT' | 'NPT' | 'UPA' | 'SP'
   is_productive: boolean
+  classification_evidence?: string
+  source_page?: number
+  source_bbox?: string
   classification_source: string
   npt_code_id: string | null
   npt_code_snapshot: string
@@ -99,6 +123,7 @@ export type OpsBlock = {
   cause_code: string
   hole_section_id: string | null
   phase_id: string | null
+  bit_depth_m: string | null
   depth_from_m: string | null
   depth_to_m: string | null
   depth_unit: string
@@ -118,6 +143,9 @@ export type OpsBlock = {
 }
 
 export type OpsKpi = {
+  productive_hours: number
+  nonproductive_hours: number
+  allocation_hours: Record<string, number>
   total_reports: number
   draft_reports: number
   submitted_reports: number
@@ -141,32 +169,78 @@ export type OpsDashboard = {
   kpis: OpsKpi
   npt_by_code: { code: string; minutes: number; hours: number; name: string }[]
   npt_by_agency: { agency: string; minutes: number; hours: number }[]
-  daily_trend: { date: string; logged_hours: number; npt_hours: number; planned_hours: number; depth_end_m: number | null }[]
+  daily_trend: { date: string; logged_hours: number; npt_hours: number; planned_hours: number; upa_hours: number }[]
   recent_reports: OpsReport[]
-  missing_reports: { well_code: string; date: string; reason: string }[]
+  missing_reports: { well_code: string; scope: string; date: string; reason: string }[]
 }
 
 export type OpsTimeDepth = {
-  plan: { cum_days: number; depth_m: number; label: string; report_date?: string }[]
-  actual: { cum_days: number; depth_m: number; label: string; report_date?: string }[]
+  plan: { cum_days: number; depth_m: number | null; label: string; report_date?: string }[]
+  projection: { cum_days: number; depth_m: number }[]
+  actual: {
+    report_id: string
+    rop: number | null
+    basis: string
+    cum_days: number
+    depth_m: number | null
+    label: string
+    report_date?: string
+  }[]
   npt_bands: { from: string; to: string; reason: string }[]
   milestones: { label: string; depth_m: number; days: number }[]
-  lag_series: { report_date: string; lag_days: number; depth_m: number }[]
+  lag_series: {
+    report_id: string
+    report_date: string
+    lag_days: number
+    depth_m: number | null
+    baseline: string
+    basis: string
+  }[]
 }
 
-export type OpsReference = {
+export type OpsScopeReference = {
+  document_types: string[]
   rigs: { id: string; rig_code: string; rig_name: string; display_name: string }[]
-  wells: { id: string; rig_id: string; block_id: string; well_code: string; well_name: string; display_name: string; drilling_available: boolean; completion_available: boolean }[]
-  hole_sections: { id: string; section_code: string; section_name: string }[]
-  phases: { id: string; phase_code: string; phase_name: string }[]
-  operation_codes: { id: string; operation_code: string; operation_name: string; default_classification: string; is_productive_default: boolean; category: string; description: string; sort_order: number }[]
-  npt_codes: { id: string; npt_code: string; npt_name: string; family: string; category: string; description: string; sort_order: number }[]
-  agencies: { id: string; agency_code: string; agency_name: string; category: string; sort_order: number }[]
+  wells: {
+    id: string
+    rig_id: string
+    block_id: string
+    well_code: string
+    well_name: string
+    display_name: string
+    drilling_available: boolean
+    completion_available: boolean
+  }[]
+}
+
+export type OpsReference = OpsScopeReference & {
+  vendors: { id: string; vendor_code: string; vendor_name: string }[]
+  phase_codes: { id: string; phase_code: string; phase_name: string }[]
+  activity_codes: { id: string; activity_code: string; activity_name: string; default_allocation: string }[]
+  operation_codes: {
+    id: string
+    operation_code: string
+    operation_name: string
+    default_classification: string
+    is_productive_default: boolean
+    category: string
+    description: string
+    sort_order: number
+  }[]
+  npt_codes: {
+    id: string
+    npt_code: string
+    npt_name: string
+    family: string
+    category: string
+    description: string
+    sort_order: number
+  }[]
   causes: { id: string; cause_code: string; cause_name: string; sort_order: number }[]
-  activities: { id: string; activity_code: string; activity_name: string }[]
 }
 
 export type OpsSettings = {
+  document_types: string[]
   id: string
   organization_id: string
   day_boundary_hour: number
@@ -201,8 +275,17 @@ export type OpsPlan = {
   updated_at: string
   well_code: string
   well_name: string
-  items: { id: string; sequence_no: number; description: string; target_depth_m: string | null; planned_hours: string; cum_planned_days: string | null }[]
+  items: {
+    id: string
+    sequence_no: number
+    description: string
+    target_depth_m: string | null
+    planned_hours: string
+    cum_planned_days: string | null
+  }[]
 }
+
+export const opsScopeReference = () => api<OpsScopeReference>('/operations/scope-reference')
 
 export function opsReference() {
   return api<OpsReference>('/operations/reference', { action: 'Load operations reference' })
@@ -210,13 +293,18 @@ export function opsReference() {
 
 export function opsDashboard(params: Record<string, string | undefined>) {
   const q = new URLSearchParams()
-  Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, v) })
+  Object.entries(params).forEach(([k, v]) => {
+    if (v) q.set(k, v)
+  })
   const suffix = q.toString() ? `?${q.toString()}` : ''
   return api<OpsDashboard>(`/operations/dashboard${suffix}`, { action: 'Load operations dashboard' })
 }
 
 export function opsTimeDepth(wellId: string, scope: string) {
-  return api<OpsTimeDepth>(`/operations/analytics/time-depth?well_id=${encodeURIComponent(wellId)}&scope=${encodeURIComponent(scope)}`, { action: 'Load time-depth curve' })
+  return api<OpsTimeDepth>(
+    `/operations/analytics/time-depth?well_id=${encodeURIComponent(wellId)}&scope=${encodeURIComponent(scope)}`,
+    { action: 'Load time-depth curve' },
+  )
 }
 
 export function opsSettingsGet() {
@@ -229,7 +317,9 @@ export function opsSettingsPut(data: Partial<OpsSettings>) {
 
 export function listDocuments(params: Record<string, string | undefined>) {
   const q = new URLSearchParams()
-  Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, v) })
+  Object.entries(params).forEach(([k, v]) => {
+    if (v) q.set(k, v)
+  })
   const s = q.toString() ? `?${q.toString()}` : ''
   return api<OpsDocument[]>(`/operations/documents${s}`, { action: 'Load documents' })
 }
@@ -238,32 +328,23 @@ export function listDeletedDocuments() {
   return api<OpsDocument[]>('/operations/documents/deleted', { action: 'Load deleted documents' })
 }
 
-export async function uploadDocument(form: FormData) {
-  const { getAccessToken } = await import('./api')
-  const token = getAccessToken()
-  const headers: Record<string, string> = {}
-  if (token) headers.Authorization = 'Bearer ' + token
-  const res = await fetch('/api/v1/operations/documents/upload', { method: 'POST', body: form, credentials: 'include', headers })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    const detail = body.detail
-    const msg = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Upload failed (' + res.status + ')'
-    throw new Error(msg)
-  }
-  return res.json() as Promise<OpsDocument>
+export function uploadDocument(file: File, fields: Record<string, string>) {
+  return uploadFiles<OpsDocument>('/operations/documents/upload', [file], fields, 'file')
 }
 
-export const uploadDocViaApi = uploadDocument
-
-export function extractDocument(documentId: string) {
-  return api<{ id: string; status: string }>(`/operations/documents/${documentId}/extract`, { method: 'POST', action: isExtractAction(documentId) })
+export function extractReport(document_id: string, report_date: string, reportId?: string) {
+  return api<OpsReport>(reportId ? `/operations/reports/${reportId}/extract` : '/operations/reports/from-document', {
+    method: 'POST',
+    body: body({ document_id, report_date: report_date || null }),
+    action: 'Extract report draft',
+  })
 }
-
-function isExtractAction(id: string) { return `Extract document ${id}` }
 
 export function listReports(params: Record<string, string | undefined>) {
   const q = new URLSearchParams()
-  Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, v) })
+  Object.entries(params).forEach(([k, v]) => {
+    if (v) q.set(k, v)
+  })
   const s = q.toString() ? `?${q.toString()}` : ''
   return api<OpsReport[]>(`/operations/reports${s}`, { action: 'Load reports' })
 }
@@ -276,7 +357,16 @@ export function createReport(data: Record<string, unknown>) {
   return api<OpsReport>('/operations/reports', { method: 'POST', body: body(data), action: 'Create report' })
 }
 
-export function saveReport(id: string, data: { report: Record<string, unknown>; blocks: Record<string, unknown>[] }) {
+export function saveReport(
+  id: string,
+  data: {
+    expected_updated_at?: string
+    confirm_review?: boolean
+    report: Record<string, unknown>
+    blocks: Record<string, unknown>[]
+    surveys?: OpsSurvey[]
+  },
+) {
   return api<OpsReport>(`/operations/reports/${id}`, { method: 'PUT', body: body(data), action: 'Save report' })
 }
 
@@ -289,23 +379,42 @@ export function approveReport(id: string) {
 }
 
 export function rejectReport(id: string, reason: string) {
-  return api<OpsReport>(`/operations/reports/${id}/reject`, { method: 'POST', body: body({ reason }), action: 'Reject report' })
+  return api<OpsReport>(`/operations/reports/${id}/reject`, {
+    method: 'POST',
+    body: body({ reason }),
+    action: 'Reject report',
+  })
 }
 
 export function getBrief(id: string) {
-  return api<{ summary: string; time_split: Record<string, unknown>; npt_items: unknown[]; depth_progress: Record<string, unknown>; data_quality: Record<string, unknown> }>(`/operations/reports/${id}/brief`, { action: 'Load brief' })
+  return api<{
+    summary: string
+    time_split: Record<string, unknown>
+    npt_items: unknown[]
+    depth_progress: Record<string, unknown>
+    data_quality: Record<string, unknown>
+  }>(`/operations/reports/${id}/brief`, { action: 'Load brief' })
 }
 
 export function bulkDeleteReports(ids: string[]) {
-  return api<{ affected_count: number }>('/operations/reports/bulk-delete', { method: 'POST', body: body({ ids }), action: 'Delete reports' })
+  return api<{ affected_count: number }>('/operations/reports/bulk-delete', {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Delete reports',
+  })
 }
 
 export function bulkRestoreReports(ids: string[]) {
-  return api<{ affected_count: number }>('/operations/reports/bulk-restore', { method: 'POST', body: body({ ids }), action: 'Restore reports' })
+  return api<{ affected_count: number }>('/operations/reports/bulk-restore', {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Restore reports',
+  })
 }
 
-export function listPlans(wellId?: string, scope?: string) {
+export function listPlans(wellId?: string, scope?: string, deleted = false) {
   const q = new URLSearchParams()
+  if (deleted) q.set('deleted', 'true')
   if (wellId) q.set('well_id', wellId)
   if (scope) q.set('scope', scope)
   const s = q.toString() ? `?${q.toString()}` : ''
@@ -324,6 +433,42 @@ export function activatePlan(planId: string) {
   return api<OpsPlan>(`/operations/plans/${planId}/activate`, { method: 'POST', action: 'Activate plan' })
 }
 
-export function exportAudit(format: string, record_count: number) {
-  return api<unknown>('/operations/reports/export-audit', { method: 'POST', body: body({ format, record_count }), action: 'Audit export' }).catch(() => null)
+export function auditExport(register: 'reports' | 'documents' | 'plans' | 'library' | 'analytics') {
+  return (format: 'csv' | 'xlsx' | 'pdf', record_count: number) =>
+    api<void>(`/operations/${register}/export-audit`, {
+      method: 'POST',
+      body: body({ format, record_count }),
+      action: 'Audit export',
+    })
 }
+
+export type TimelineRow = {
+  description: string
+  target_depth_m: string | null
+  planned_hours: string | null
+  source_row?: number
+}
+export type TimelinePreview = { sheet: string; sheets: string[]; warnings: string[]; items: TimelineRow[] }
+export const previewTimeline = (id: string, file: File, sheet = '') =>
+  uploadFiles<TimelinePreview>(`/operations/plans/${id}/import-preview`, [file], { sheet }, 'file')
+export const saveTimeline = (id: string, rows: TimelineRow[]) =>
+  api(`/operations/plans/${id}/items`, {
+    method: 'PUT',
+    body: body(
+      rows.map((row, i) => {
+        // Keep existing item metadata when editing just the description, depth or hours.
+        const {
+          id: _id,
+          source_row: _source,
+          cum_planned_days: _computed,
+          ...item
+        } = row as TimelineRow & { id?: string; cum_planned_days?: string }
+        return {
+          ...item,
+          sequence_no: i + 1,
+          description: row.description.trim(),
+          target_depth_m: row.target_depth_m ?? null,
+        }
+      }),
+    ),
+  })

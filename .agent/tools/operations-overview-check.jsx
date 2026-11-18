@@ -10,6 +10,7 @@ for (const key of ['window', 'document', 'HTMLElement', 'DocumentFragment', 'Ele
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 const { act } = await import('react')
+const {MemoryRouter} = await import('react-router-dom')
 const { createRoot } = await import('react-dom/client')
 const { AuthProvider } = await import('../../frontend/src/context/AuthContext')
 const { default: OperationsOverview } = await import('../../frontend/src/pages/operations/Overview')
@@ -27,13 +28,14 @@ const kpis = {
 }
 globalThis.fetch = async path => {
   if (path === '/api/v1/operations/dashboard') return Response.json({ kpis, recent_reports, daily_trend: [], npt_by_code: [], npt_by_agency: [], missing_reports: [] })
-  if (path === '/api/v1/operations/reference') return Response.json({ rigs: [], wells: [] })
-  if (path === '/api/v1/auth/refresh') return new Response(null, { status: 401 })
+  if (path === '/api/v1/operations/scope-reference') return Response.json({ rigs: [], wells: [] })
+  if (path === '/api/v1/auth/refresh') return Response.json({access_token:'test'})
+  if (path === '/api/v1/auth/me') return Response.json({is_owner:false,permission_keys:['ops-dashboard:read','ops-report:read']})
   throw new Error(`Unexpected request: ${path}`)
 }
 
 const root = createRoot(document.getElementById('root'))
-await act(async () => root.render(<AuthProvider><OperationsOverview /></AuthProvider>))
+await act(async () => root.render(<AuthProvider><MemoryRouter><OperationsOverview /></MemoryRouter></AuthProvider>))
 for (const [id, count] of [['logged', '2 blocks'], ['empty', '0 blocks'], ['legacy', 'Block count unavailable']]) {
   const open = document.querySelector(`a[href="/operations/reports/${id}"]`)
   assert.ok(open, `Report ${id} should still open from Recent reports`)

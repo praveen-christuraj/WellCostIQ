@@ -1,84 +1,182 @@
 import { useEffect, useState } from 'react'
-import { Alert, Box, Button, FormControlLabel, MenuItem, Switch, TextField, Typography } from '@mui/material'
-import { ErrorMessage, PageHeading } from '../../components/Common'
+import { Alert, Box, Button, FormControlLabel, MenuItem, Switch, TextField } from '@mui/material'
+import { ErrorMessage, PageHeading, useUnsavedChangesGuard } from '../../components/Common'
 import { SectionCard } from '../../components/ui/SectionCard'
+import { useAuth } from '../../context/AuthContext'
 import { opsSettingsGet, opsSettingsPut, type OpsSettings } from '../../lib/operations'
 
 export default function OperationsSettings() {
-  const [settings, setSettings] = useState<OpsSettings | null>(null)
-  const [draft, setDraft] = useState<Partial<OpsSettings>>({})
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-
-  const load = async () => {
-    setLoading(true); setError('')
-    try { const s = await opsSettingsGet(); setSettings(s); setDraft(s) } catch (e) { setError((e as Error).message) } finally { setLoading(false) }
+  const { can } = useAuth(),
+    write = can('ops-settings:update')
+  const [draft, setDraft] = useState<OpsSettings | null>(null),
+    [types, setTypes] = useState(''),
+    [dirty, setDirty] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState('')
+  const reset = (s: OpsSettings) => {
+    setDraft(s)
+    setTypes(s.document_types.join('\n'))
+    setDirty(false)
   }
-  useEffect(() => { load() }, [])
-
+  useEffect(() => {
+    opsSettingsGet()
+      .then(reset)
+      .catch((e) => setError(e.message))
+  }, [])
+  const change = (patch: Partial<OpsSettings>) => {
+    if (draft) {
+      setDirty(true)
+      setDraft({ ...draft, ...patch })
+    }
+  }
   const save = async () => {
-    setSaving(true); setError(''); setMessage('')
+    if (!draft || !write) return false
+    setBusy(true)
+    setError('')
+    setNotice('')
     try {
-      const payload = {
-        day_boundary_hour: draft.day_boundary_hour,
-        operating_timezone: draft.operating_timezone,
-        tour_pattern: draft.tour_pattern,
-        require_npt_code: draft.require_npt_code,
-        require_npt_agency: draft.require_npt_agency,
-        require_npt_reason: draft.require_npt_reason,
-        max_daily_hours: draft.max_daily_hours,
-        completeness_tolerance_minutes: draft.completeness_tolerance_minutes,
-        default_depth_unit: draft.default_depth_unit,
-        default_rop_basis: draft.default_rop_basis,
-        document_max_mb: draft.document_max_mb,
-      }
-      const updated = await opsSettingsPut(payload as never)
-      setSettings(updated); setDraft(updated); setMessage('Settings saved.')
-    } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
+      const { id, organization_id, created_at, updated_at, ...settings } = draft
+      reset(
+        await opsSettingsPut({
+          ...settings,
+          document_types: types
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean),
+        }),
+      )
+      setNotice('Operations settings saved.')
+      return true
+    } catch (e) {
+      setError((e as Error).message)
+      return false
+    } finally {
+      setBusy(false)
+    }
   }
-
-  if (loading) return <Box p={3}><Typography>Loading settings…</Typography></Box>
-  if (!settings && error) return <Box p={3}><ErrorMessage message={error} /></Box>
-
+  const guard = useUnsavedChangesGuard({ when: dirty, onSave: save })
   return (
     <Box>
-      <PageHeading eyebrow="Well Operations" title="Operations settings" subtitle="Per-workspace: day boundary, timezone, tour pattern, NPT completeness rules, depth unit and ROP basis. Changes are audited; tolerances affect validation. (Last in operations order: Plans/Timeline → Daily Reports → Analytics → Library/Settings)" />
-      {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
-      {message && <Box mb={2}><Alert severity="success">{message}</Alert></Box>}
-
-      <SectionCard title="Report period & time">
-        <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr 1fr' }}>
-          <TextField size="small" label="Day boundary hour (0–23)" type="number" value={draft.day_boundary_hour ?? 0} onChange={e => setDraft(d => ({ ...d, day_boundary_hour: Number(e.target.value) }))} helperText="00:00 matches the studied reports. 06:00 is the offshore industry norm — change only if crews use it." />
-          <TextField size="small" label="Operating timezone" value={draft.operating_timezone ?? ''} onChange={e => setDraft(d => ({ ...d, operating_timezone: e.target.value }))} helperText="e.g. Africa/Lagos. All reports store UTC, display local." />
-          <TextField size="small" label="Tour pattern" select value={draft.tour_pattern ?? 'single_24h'} onChange={e => setDraft(d => ({ ...d, tour_pattern: e.target.value }))}>
-            <MenuItem value="single_24h">Single 24h</MenuItem>
-            <MenuItem value="day_night_12h">Day/Night 12h</MenuItem>
-          </TextField>
-        </Box>
-        <Alert severity="info" sx={{ mt: 2 }}>The report day is midnight-to-midnight local by default (the OpenWells reports do 0:00→23:59). A 1-minute tolerance treats 23.98h as complete; one spill block past midnight is allowed and flagged.</Alert>
-      </SectionCard>
-
-      <SectionCard title="Validation & NPT completeness">
-        <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr 1fr' }}>
-          <FormControlLabel control={<Switch checked={!!draft.require_npt_code} onChange={e => setDraft(d => ({ ...d, require_npt_code: e.target.checked }))} />} label="Require NPT code for NPT blocks" />
-          <FormControlLabel control={<Switch checked={!!draft.require_npt_agency} onChange={e => setDraft(d => ({ ...d, require_npt_agency: e.target.checked }))} />} label="Require NPT agency" />
-          <FormControlLabel control={<Switch checked={!!draft.require_npt_reason} onChange={e => setDraft(d => ({ ...d, require_npt_reason: e.target.checked }))} />} label="Require NPT reason (≥10 chars)" />
-          <TextField size="small" label="Max daily hours" type="number" value={draft.max_daily_hours ?? 24} onChange={e => setDraft(d => ({ ...d, max_daily_hours: Number(e.target.value) }))} />
-          <TextField size="small" label="Completeness tolerance (minutes)" type="number" value={draft.completeness_tolerance_minutes ?? 2} onChange={e => setDraft(d => ({ ...d, completeness_tolerance_minutes: Number(e.target.value) }))} helperText="Difference between Σ blocks and period treated as unaccounted, not missing." />
-          <TextField size="small" label="Default depth unit" select value={draft.default_depth_unit ?? 'm'} onChange={e => setDraft(d => ({ ...d, default_depth_unit: e.target.value }))}><MenuItem value="m">m</MenuItem><MenuItem value="ft">ft</MenuItem></TextField>
-          <TextField size="small" label="Default ROP basis" select value={draft.default_rop_basis ?? 'rotating'} onChange={e => setDraft(d => ({ ...d, default_rop_basis: e.target.value }))}><MenuItem value="rotating">Rotating hours</MenuItem><MenuItem value="drilling">Drilling hours</MenuItem></TextField>
-          <TextField size="small" label="Document max MB" type="number" value={draft.document_max_mb ?? 25} onChange={e => setDraft(d => ({ ...d, document_max_mb: Number(e.target.value) }))} />
-        </Box>
-        <Alert severity="info" sx={{ mt: 2 }}>NPT can never be productive (DB check). UPA requires a reason. Overlaps are always blocking; sum ≠ period becomes unaccounted time, flagged in dashboard — never a hard block on a mid-report print. Allowed file types: pdf, xlsx, xlsm, xls, csv, docx — MIME sniffed.</Alert>
-      </SectionCard>
-
-      <SectionCard title="Retention & safety">
-        <Typography fontSize={13} color="text.secondary">Documents inherit retention (default 10 years), purge only through Deleted Entries with ops-doc:permanent-delete. Legal-hold flag prevents purge. Upload limits: 25 MB/file, ZIP/PDF bomb guards (page count, compressed-size ratio, per-page word cap), workbook XML never evaluated, macros never executed, external links never resolved, no network from parser, formula-injection sanitised on every export.</Typography>
-      </SectionCard>
-
-      <Box mt={2}><Button variant="contained" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</Button></Box>
+      {guard}
+      <PageHeading
+        eyebrow="Well Operations"
+        title="Operations settings"
+        subtitle="Workspace defaults for daily report intake and verification. These settings do not change costing."
+        action={
+          write && (
+            <Button variant="contained" onClick={save} disabled={!dirty || busy}>
+              Save settings
+            </Button>
+          )
+        }
+      />
+      {error && <ErrorMessage message={error} />}
+      {notice && <Alert severity="success">{notice}</Alert>}
+      {draft && (
+        <>
+          <SectionCard title="Document vault">
+            <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '2fr 1fr' }}>
+              <TextField
+                label="Document types · one per line"
+                multiline
+                minRows={4}
+                value={types}
+                disabled={!write}
+                onChange={(e) => {
+                  setTypes(e.target.value)
+                  setDirty(true)
+                }}
+                helperText="Remove a type to retire it for new uploads. Filed documents keep their original labels."
+              />
+              <TextField
+                label="Maximum file size (MB)"
+                type="number"
+                value={draft.document_max_mb}
+                disabled={!write}
+                onChange={(e) => change({ document_max_mb: Number(e.target.value) })}
+              />
+            </Box>
+          </SectionCard>
+          <SectionCard title="Reporting period">
+            <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: 'repeat(3,minmax(0,1fr))' }}>
+              <TextField
+                label="Operating timezone"
+                value={draft.operating_timezone}
+                disabled={!write}
+                onChange={(e) => change({ operating_timezone: e.target.value })}
+              />
+              <TextField
+                type="number"
+                label="Day boundary hour (0–23 local)"
+                value={draft.day_boundary_hour}
+                disabled={!write}
+                onChange={(e) => change({ day_boundary_hour: Number(e.target.value) })}
+              />
+              <TextField
+                type="number"
+                label="Completeness tolerance (minutes)"
+                value={draft.completeness_tolerance_minutes}
+                disabled={!write}
+                onChange={(e) => change({ completeness_tolerance_minutes: Number(e.target.value) })}
+              />
+            </Box>
+          </SectionCard>
+          <SectionCard title="Reporting defaults">
+            <Box display="flex" flexWrap="wrap" gap={2}>
+              {(
+                [
+                  ['tour_pattern', 'Tour pattern', ['single_24h', 'day_night_12h']],
+                  ['default_depth_unit', 'Preferred source depth unit', ['m', 'ft']],
+                  ['default_rop_basis', 'Preferred ROP basis', ['rotating', 'drilling']],
+                ] as const
+              ).map(([k, title, opts]) => (
+                <TextField
+                  key={k}
+                  select
+                  sx={{ minWidth: 170 }}
+                  label={title}
+                  value={draft[k]}
+                  disabled={!write}
+                  onChange={(e) => change({ [k]: e.target.value })}
+                >
+                  {opts.map((o) => (
+                    <MenuItem key={o} value={o}>
+                      {o}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              ))}
+              <TextField
+                type="number"
+                label="Maximum daily hours"
+                value={draft.max_daily_hours}
+                disabled={!write}
+                onChange={(e) => change({ max_daily_hours: Number(e.target.value) })}
+              />
+            </Box>
+          </SectionCard>
+          <SectionCard title="Submission checks">
+            <Box display="grid">
+              {(
+                [
+                  ['require_npt_code', 'Require an NPT code for nonproductive time'],
+                  ['require_npt_agency', 'Require a responsible vendor for NPT and UPA'],
+                  ['require_npt_reason', 'Require a reason for NPT and UPA'],
+                ] as const
+              ).map(([k, l]) => (
+                <FormControlLabel
+                  key={k}
+                  label={l}
+                  control={
+                    <Switch checked={draft[k]} disabled={!write} onChange={(e) => change({ [k]: e.target.checked })} />
+                  }
+                />
+              ))}
+            </Box>
+          </SectionCard>
+        </>
+      )}
     </Box>
   )
 }

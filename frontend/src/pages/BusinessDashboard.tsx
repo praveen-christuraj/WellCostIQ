@@ -846,7 +846,7 @@ export default function BusinessDashboard() {
       }
     }
     return {
-      title: 'Operations dashboard',
+      title: 'Costing Dashboard',
       subtitle: 'Rig and well plans, AFE budgets, SOW adjustments, actual cost, NPT/UPA time and depth progress.',
       scope: [
         filters.rig ? (data?.filters.rigs.find(rig => rig.id === filters.rig)?.code ?? 'Selected rig') : 'All rigs',
@@ -1230,8 +1230,8 @@ export default function BusinessDashboard() {
       figures={exportFigures}
       buildDocument={buildDashboardDocument}
       onExport={(format, recordCount) => recordExport(format, recordCount)}
-      fileName="operations-dashboard"
-      title="Export the Operations dashboard"
+      fileName="costing-dashboard"
+      title="Export the Costing Dashboard"
     />
     <DrillThroughPanel wellId={drillWell} filters={filters} onClose={() => setDrillWell('')}/>
   </>

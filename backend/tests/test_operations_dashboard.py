@@ -1,15 +1,17 @@
 """Wire contract consumed by the Well Operations Overview's recent-report rows."""
 
-from datetime import datetime, timedelta, timezone
-
-from fastapi.testclient import TestClient
+from datetime import UTC, datetime, timedelta
 
 from test_rig_well import create_rig, create_well, fresh_database, login  # noqa: F401 - autouse fixture
+
+# The shared fixture must configure its disposable database before app.core.database is imported.
+# isort: split
 
 from app.core.database import SessionLocal
 from app.main import app
 from app.models.operations import OpsActivityBlock
-
+from app.models.rig_well import Well
+from fastapi.testclient import TestClient
 
 OPS = "/api/v1/operations"
 
@@ -19,22 +21,37 @@ def test_recent_reports_have_public_block_lists():
         headers = login(client)
         rig = create_rig(client, headers)
         well = create_well(client, headers, rig["id"])
+        with SessionLocal() as db:
+            db.get(Well, well["id"]).config_status = "configured"
+            db.commit()
         for day in ("2026-11-16", "2026-11-17"):
-            created = client.post(f"{OPS}/reports", headers=headers, json={
-                "well_id": well["id"], "rig_id": rig["id"], "report_date": day,
-            })
+            created = client.post(
+                f"{OPS}/reports",
+                headers=headers,
+                json={
+                    "well_id": well["id"],
+                    "rig_id": rig["id"],
+                    "report_date": day,
+                },
+            )
             assert created.status_code == 200, created.text
         report = created.json()
-        start = datetime(2026, 11, 17, tzinfo=timezone.utc)
+        start = datetime(2026, 11, 17, tzinfo=UTC)
         # The workbook extractor writes draft blocks directly, including rows
         # beyond the editor's 200-row limit. Don't hide those reports or rows.
         with SessionLocal() as db:
             for seq, minutes, deleted in [(1, 60, False), (2, 30, True), (201, 0, False)]:
-                db.add(OpsActivityBlock(
-                    organization_id=report["organization_id"], report_id=report["id"],
-                    sequence_no=seq, started_at=start, ended_at=start + timedelta(minutes=minutes),
-                    duration_minutes=minutes, is_deleted=deleted,
-                ))
+                db.add(
+                    OpsActivityBlock(
+                        organization_id=report["organization_id"],
+                        report_id=report["id"],
+                        sequence_no=seq,
+                        started_at=start,
+                        ended_at=start + timedelta(minutes=minutes),
+                        duration_minutes=minutes,
+                        is_deleted=deleted,
+                    )
+                )
             db.commit()
 
         response = client.get(f"{OPS}/dashboard", headers=headers)
@@ -50,12 +67,20 @@ def test_recent_reports_have_public_block_lists():
         assert other_workspace.json()["recent_reports"] == []
 
         # Reading an extracted draft must not loosen validation of manual edits.
-        edit = client.put(f"{OPS}/reports/{report['id']}", headers=headers, json={
-            "report": {},
-            "blocks": [{
-                "sequence_no": 201, "duration_minutes": 0,
-                "started_at": start.isoformat(), "ended_at": start.isoformat(),
-            }],
-        })
+        edit = client.put(
+            f"{OPS}/reports/{report['id']}",
+            headers=headers,
+            json={
+                "report": {},
+                "blocks": [
+                    {
+                        "sequence_no": 201,
+                        "duration_minutes": 0,
+                        "started_at": start.isoformat(),
+                        "ended_at": start.isoformat(),
+                    }
+                ],
+            },
+        )
         assert edit.status_code == 422, edit.text
         assert {error["loc"][-1] for error in edit.json()["detail"]} == {"sequence_no", "duration_minutes"}

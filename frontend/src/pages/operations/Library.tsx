@@ -1,101 +1,265 @@
 import { useEffect, useState } from 'react'
-import { Box, Button, Tab, Tabs, TextField, Alert, Typography } from '@mui/material'
+import { Alert, Box, Button, MenuItem, Tab, Tabs, TextField, Typography } from '@mui/material'
+import { AddRounded, DeleteOutlineRounded, RestoreRounded } from '@mui/icons-material'
+import { FormDialog, PageHeading } from '../../components/Common'
 import { DataTable } from '../../components/DataTable'
-import { ErrorMessage, PageHeading } from '../../components/Common'
-import { SectionCard } from '../../components/ui/SectionCard'
-import { api } from '../../lib/api'
+import { ImportDialog } from '../../components/ImportDialog'
+import { useAuth } from '../../context/AuthContext'
+import { api, body } from '../../lib/api'
+import { auditExport } from '../../lib/operations'
 
-type Kind = 'operation-codes' | 'activity-codes' | 'npt-codes' | 'agencies' | 'causes'
-const KINDS: { key: Kind; label: string }[] = [
-  { key: 'operation-codes', label: 'Operation codes' },
-  { key: 'activity-codes', label: 'Activity codes' },
-  { key: 'npt-codes', label: 'NPT codes' },
-  { key: 'agencies', label: 'Agencies' },
-  { key: 'causes', label: 'Cause codes' },
-]
+const kinds = {
+  'operation-codes': {
+    label: 'Operation codes',
+    code: 'operation_code',
+    name: 'operation_name',
+    defaults: { default_classification: 'Planned', category: 'other' },
+  },
+  'activity-codes': {
+    label: 'Activity codes',
+    code: 'activity_code',
+    name: 'activity_name',
+    defaults: { default_allocation: 'PT' },
+  },
+  'npt-codes': { label: 'NPT codes', code: 'npt_code', name: 'npt_name', defaults: { family: 'other', category: 'other' } },
+  causes: { label: 'Cause codes', code: 'cause_code', name: 'cause_name', defaults: {} },
+  'phase-codes': { label: 'Phase codes', code: 'phase_code', name: 'phase_name', defaults: {} },
+  'source-marks': {
+    label: 'Source mark rules',
+    code: 'mark_code',
+    name: 'mark_name',
+    defaults: { default_classification: 'Planned', default_allocation: 'PT' },
+  },
+} as const
+type Kind = keyof typeof kinds
+type Row = { id: string; is_deleted: boolean } & Record<string, unknown>
 
 export default function OperationsLibrary() {
-  const [kind, setKind] = useState<Kind>('operation-codes')
-  const [rows, setRows] = useState<Record<string, unknown>[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [formOpen, setFormOpen] = useState(false)
-  const [editing, setEditing] = useState<Record<string, unknown> | null>(null)
-  const [form, setForm] = useState<Record<string, string>>({})
-
+  const { can } = useAuth(),
+    [kind, setKind] = useState<Kind>('operation-codes'),
+    [deleted, setDeleted] = useState(false),
+    [rows, setRows] = useState<Row[]>([]),
+    [selected, setSelected] = useState<Row[]>([])
+  const [form, setForm] = useState<Record<string, string> | null>(null),
+    [id, setId] = useState(''),
+    [pending, setPending] = useState<Row[]>([]),
+    [importing, setImporting] = useState(false),
+    [error, setError] = useState(''),
+    [busy, setBusy] = useState(false)
+  const spec = kinds[kind],
+    path = `/operations/masters/${kind}`
+  const getRows = () =>
+    api<Row[]>(path + (deleted ? '?include_deleted=true' : '')).then((rs) => rs.filter((r) => r.is_deleted === deleted))
   const load = async () => {
-    setLoading(true); setError('')
-    try { const data = await api<Record<string, unknown>[]>(`/operations/masters/${kind}`, { action: `Load ${kind}` }); setRows(data) } catch (e) { setError((e as Error).message) } finally { setLoading(false) }
+    setRows(await getRows())
+    setSelected([])
   }
-  useEffect(() => { load() }, [kind])
-
-  const startCreate = () => {
-    setEditing(null)
-    if (kind === 'operation-codes') setForm({ operation_code: '', operation_name: '', category: 'other', default_classification: 'Planned', description: '' })
-    else if (kind === 'activity-codes') setForm({ activity_code: '', activity_name: '', default_allocation: 'PT', description: '' })
-    else if (kind === 'npt-codes') setForm({ npt_code: '', npt_name: '', family: 'other', category: 'other', description: '' })
-    else if (kind === 'agencies') setForm({ agency_code: '', agency_name: '', category: 'operator', description: '' })
-    else setForm({ cause_code: '', cause_name: '', description: '' })
-    setFormOpen(true)
+  useEffect(() => {
+    let current = true
+    setRows([])
+    setSelected([])
+    setError('')
+    getRows()
+      .then((rs) => {
+        if (current) setRows(rs)
+      })
+      .catch((e) => {
+        if (current) setError(e.message)
+      })
+    return () => {
+      current = false
+    }
+  }, [kind, deleted])
+  const edit = (row?: Row) => {
+    const defaults = { [spec.code]: '', [spec.name]: '', ...spec.defaults, description: '' }
+    setId(row?.id ?? '')
+    setForm(Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, String(row?.[k] ?? v)])))
+    setError('')
   }
-  const startEdit = (row: Record<string, unknown>) => {
-    setEditing(row)
-    if (kind === 'operation-codes') setForm({ operation_code: String(row.operation_code || ''), operation_name: String(row.operation_name || ''), category: String(row.category || ''), default_classification: String(row.default_classification || 'Planned'), description: String(row.description || '') })
-    else if (kind === 'activity-codes') setForm({ activity_code: String(row.activity_code || ''), activity_name: String(row.activity_name || ''), default_allocation: String(row.default_allocation || 'PT'), description: String(row.description || '') })
-    else if (kind === 'npt-codes') setForm({ npt_code: String(row.npt_code || ''), npt_name: String(row.npt_name || ''), family: String(row.family || ''), category: String(row.category || ''), description: String(row.description || '') })
-    else if (kind === 'agencies') setForm({ agency_code: String(row.agency_code || ''), agency_name: String(row.agency_name || ''), category: String(row.category || ''), description: String(row.description || '') })
-    else setForm({ cause_code: String(row.cause_code || ''), cause_name: String(row.cause_name || ''), description: String(row.description || '') })
-    setFormOpen(true)
-  }
-  const save = async () => {
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true)
     setError('')
     try {
-      if (editing) await api(`/operations/masters/${kind}/${editing.id}`, { method: 'PUT', body: JSON.stringify(form), action: `Update ${kind}` })
-      else await api(`/operations/masters/${kind}`, { method: 'POST', body: JSON.stringify(form), action: `Create ${kind}` })
-      setFormOpen(false); await load()
-    } catch (e) { setError((e as Error).message) }
+      await fn()
+      await load()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
   }
-
-  const columns =
-    kind === 'operation-codes'
-      ? [{ field: 'operation_code', headerName: 'Code', width: 100 }, { field: 'operation_name', headerName: 'Name', flex: 1 }, { field: 'default_classification', headerName: 'Class', width: 100 }, { field: 'is_productive_default', headerName: 'Prod?', width: 80, valueFormatter: (p: { value: boolean }) => p.value ? 'Yes' : 'No' }, { field: 'description', headerName: 'Description', flex: 1 }]
-      : kind === 'activity-codes'
-        ? [{ field: 'activity_code', headerName: 'Code', width: 100 }, { field: 'activity_name', headerName: 'Name', flex: 1 }, { field: 'default_allocation', headerName: 'Alloc', width: 90 }, { field: 'description', headerName: 'Description', flex: 1 }]
-        : kind === 'npt-codes'
-          ? [{ field: 'npt_code', headerName: 'Code', width: 120 }, { field: 'npt_name', headerName: 'Name', flex: 1 }, { field: 'family', headerName: 'Family', width: 120 }, { field: 'category', headerName: 'Category', width: 120 }, { field: 'description', headerName: 'Description', flex: 1 }]
-          : kind === 'agencies'
-            ? [{ field: 'agency_code', headerName: 'Code', width: 140 }, { field: 'agency_name', headerName: 'Name', flex: 1 }, { field: 'category', headerName: 'Category', width: 130 }, { field: 'description', headerName: 'Description', flex: 1 }]
-            : [{ field: 'cause_code', headerName: 'Code', width: 120 }, { field: 'cause_name', headerName: 'Name', flex: 1 }, { field: 'description', headerName: 'Description', flex: 1 }]
-
   return (
     <Box>
-      <PageHeading eyebrow="Well Operations" title="Code library — operations" subtitle="All categorizations and codes are user-configurable: phase codes, operation codes A–T, activity codes, NPT family, agencies and causes. Starter list ships as import templates — load via import, not seeded by migration." />
-      {error && <Box mb={2}><ErrorMessage message={error} /></Box>}
-
-      <Tabs value={kind} onChange={(_, v) => setKind(v)} variant="scrollable" scrollButtons="auto">
-        {KINDS.map(k => <Tab key={k.key} value={k.key} label={k.label} />)}
+      <PageHeading
+        eyebrow="Well Operations"
+        title="Code library"
+        subtitle="Define this workspace’s activity, operation and reason codes. Codes are displayed alongside their names. Responsible parties for new NPT / UPA entries come from active Master Data vendors."
+        action={
+          <>
+            {!deleted && can('ops-master:create') && (
+              <Button variant="contained" startIcon={<AddRounded />} onClick={() => edit()}>
+                New code
+              </Button>
+            )}
+            <Button variant="outlined" startIcon={<RestoreRounded />} onClick={() => setDeleted(!deleted)}>
+              {deleted ? 'Active entries' : 'Deleted entries'}
+            </Button>
+          </>
+        }
+      />
+      <Tabs variant="scrollable" value={kind} onChange={(_, v) => setKind(v)}>
+        {(Object.keys(kinds) as Kind[]).map((k) => (
+          <Tab key={k} value={k} label={kinds[k].label} />
+        ))}
       </Tabs>
-
-      <SectionCard title={`${KINDS.find(k => k.key === kind)?.label} — ${rows.length} record(s)`} action={<Button variant="contained" onClick={startCreate} disabled={loading}>New</Button>}>
-        <DataTable
-          rows={rows}
-          
-          rowKey='id'
-          columns={[...(columns as never[]), { field: 'id', headerName: '', width: 90, sortable: false, cellRenderer: (p: { data: Record<string, unknown> }) => <Button size="small" onClick={() => startEdit(p.data)}>Edit</Button> }]}
-        />
-        <Alert severity="info" sx={{ mt: 2 }}>The `Codes` sheet from operations reports is fully soft-coded — import via Master Data import (xlsx/csv) or add here. Mapping from OpenWells phase abbreviations (DRLPRO, DRLSUR, CSGIN2, EVAL…) → hole section + operation code lives in `ops_phase_map` (editable). Streamlined after UAT.</Alert>
-      </SectionCard>
-
-      {formOpen && (
-        <Box mt={2} p={2} border={`1px solid`} sx={{ borderColor: 'divider', borderRadius: 2 }} bgcolor="background.paper">
-          <Typography fontWeight={700} mb={1}>{editing ? 'Edit' : 'New'} — {kind}</Typography>
-          <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }}>
-            {Object.keys(form).map(k => (
-              <TextField key={k} size="small" label={k} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} />
-            ))}
-          </Box>
-          <Box mt={2} display="flex" gap={1}><Button variant="contained" onClick={save}>Save</Button><Button onClick={() => setFormOpen(false)}>Cancel</Button></Box>
+      {kind === 'source-marks' && (
+        <Alert severity="info">
+          Add a printed source mark to override its suggested classification and allocation. These rules affect future drafts,
+          never saved logs.
+        </Alert>
+      )}
+      {error && <Alert severity="error">{error}</Alert>}
+      {selected.length > 0 && (
+        <Box display="flex" gap={2} alignItems="center" py={1}>
+          <Typography>{selected.length} selected</Typography>
+          {can(deleted ? 'ops-master:restore' : 'ops-master:delete') && (
+            <Button onClick={() => setPending(selected)}>{deleted ? 'Restore selected' : 'Move to Deleted entries'}</Button>
+          )}
         </Box>
+      )}
+      <DataTable
+        key={`${kind}/${deleted}`}
+        rows={rows}
+        fillHeight
+        selectable
+        exportSelected
+        onSelectionChange={setSelected}
+        canExport={can('ops-master:export')}
+        onExport={auditExport('library')}
+        exportName={`operations-${kind}`}
+        onImport={!deleted && can('ops-master:import') ? () => setImporting(true) : undefined}
+        columns={[
+          { field: spec.code, headerName: 'Code' },
+          {
+            field: spec.name,
+            headerName: 'Name',
+            cellRenderer: ({ data: r }: { data: Row }) => `${r[spec.name]} (${r[spec.code]})`,
+          },
+          ...Object.keys(spec.defaults).map((k) => ({ field: k, headerName: k.replaceAll('_', ' ') })),
+          { field: 'description', headerName: 'Description' },
+          {
+            headerName: 'Actions',
+            width: 155,
+            minWidth: 140,
+            sortable: false,
+            cellRenderer: ({ data: r }: { data: Row }) => (
+              <>
+                {!deleted && can('ops-master:update') && (
+                  <Button size="small" onClick={() => edit(r)}>
+                    Edit
+                  </Button>
+                )}
+                {can(deleted ? 'ops-master:restore' : 'ops-master:delete') && (
+                  <Button
+                    size="small"
+                    aria-label={deleted ? 'Restore' : 'Delete'}
+                    color={deleted ? 'inherit' : 'error'}
+                    onClick={() => setPending([r])}
+                  >
+                    {deleted ? <RestoreRounded /> : <DeleteOutlineRounded />}
+                  </Button>
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
+      {form && (
+        <FormDialog
+          open
+          title={`${id ? 'Edit' : 'New'} code`}
+          onClose={() => setForm(null)}
+          onSubmit={() =>
+            run(async () => {
+              await api(path + (id ? `/${id}` : ''), { method: id ? 'PUT' : 'POST', body: body(form) })
+              setForm(null)
+            })
+          }
+          busy={busy}
+          submitDisabled={!form[spec.code]?.trim() || !form[spec.name]?.trim()}
+        >
+          <Box display="grid" gap={2} pt={1}>
+            {Object.keys(form).map((k) => {
+              const options =
+                k === 'default_classification'
+                  ? ['Planned', 'UPA', 'NPT']
+                  : k === 'default_allocation'
+                    ? ['PT', 'UPA', 'NPT', 'SP']
+                    : null
+              return (
+                <TextField
+                  key={k}
+                  select={!!options}
+                  label={k.replaceAll('_', ' ')}
+                  value={form[k]}
+                  onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+                >
+                  {options?.map((o) => (
+                    <MenuItem key={o} value={o}>
+                      {o}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )
+            })}
+            {error && <Alert severity="error">{error}</Alert>}
+          </Box>
+        </FormDialog>
+      )}
+      {pending.length > 0 && (
+        <FormDialog
+          open
+          title={`${deleted ? 'Restore' : 'Move to Deleted entries'} · ${pending.length} codes?`}
+          danger={!deleted}
+          onClose={() => setPending([])}
+          submitLabel={deleted ? 'Restore' : 'Delete'}
+          busy={busy}
+          onSubmit={() =>
+            run(async () => {
+              await api(`${path}/bulk-${deleted ? 'restore' : 'delete'}`, {
+                method: 'POST',
+                body: body({ ids: pending.map((r) => r.id) }),
+              })
+              setPending([])
+            })
+          }
+        >
+          Historical reports retain their recorded values.{error && <Alert severity="error">{error}</Alert>}
+        </FormDialog>
+      )}
+      {importing && (
+        <ImportDialog
+          open
+          title={`Import ${spec.label.toLowerCase()}`}
+          onClose={() => setImporting(false)}
+          headers={[spec.code, spec.name]}
+          optionalHeaders={[...Object.keys(spec.defaults), 'description']}
+          templateName={`${kind}.csv`}
+          headerAliases={{
+            Code: spec.code,
+            Name: spec.name,
+            Description: 'description',
+            ...Object.fromEntries(Object.keys(spec.defaults).map((k) => [k.replaceAll('_', ' '), k])),
+          }}
+          onRows={async (rows) => {
+            const result = await api<{ errors: string[] }>(path + '/import', {
+              method: 'POST',
+              body: body(rows.map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v !== '')))),
+            })
+            await load()
+            return result.errors
+          }}
+        />
       )}
     </Box>
   )

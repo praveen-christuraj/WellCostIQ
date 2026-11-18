@@ -90,6 +90,13 @@ function Guard({ permission, children }: { permission: string | string[]; childr
 function Landing() {
   const { can } = useAuth()
   if (can('rig-well:read') || can('afe:read') || can('daily-cost:read')) return <Navigate to="/business-dashboard" replace/>
+  if (can('ops-dashboard:read')) return <Navigate to="/operations" replace/>
+  if (can('ops-plan:read')) return <Navigate to="/operations/plans" replace/>
+  if (can('ops-report:read')) return <Navigate to="/operations/reports" replace/>
+  if (can('ops-analytics:read')) return <Navigate to="/operations/analytics" replace/>
+  if (can('ops-master:read')) return <Navigate to="/operations/library" replace/>
+  if (can('ops-settings:read')) return <Navigate to="/operations/settings" replace/>
+  if (can('ops-doc:read')) return <Navigate to="/operations/documents" replace/>
   return can('users:read') ? <Navigate to="/users" replace/> : <Navigate to="/dashboard" replace/>
 }
 
@@ -181,7 +188,7 @@ export default function App() {
           <Route path="reports/service-wise-cost" element={<Guard permission="daily-cost:read"><ServiceWiseCostReport/></Guard>}/>
           <Route path="reports/vendor-wise-cost" element={<Guard permission="daily-cost:read"><VendorWiseCostReport/></Guard>}/>
           <Route path="reports/npt-upa" element={<Guard permission="daily-cost:read"><NptUpaReport/></Guard>}/>
-          <Route path="operations" element={<Guard permission="ops-report:read"><OperationsOverview/></Guard>}/>
+          <Route path="operations" element={<Guard permission="ops-dashboard:read"><OperationsOverview/></Guard>}/>
           <Route path="operations/documents" element={<Guard permission="ops-doc:read"><OperationsDocuments/></Guard>}/>
           <Route path="operations/reports" element={<Guard permission="ops-report:read"><OperationsReports/></Guard>}/>
           <Route path="operations/reports/:id" element={<Guard permission="ops-report:read"><OperationsReport/></Guard>}/>
