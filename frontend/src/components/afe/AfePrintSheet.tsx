@@ -40,10 +40,13 @@ const depthText = (value: string | number | null | undefined, unit: string): str
     : `${meters.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m`
 }
 
-/** Labels arrive as "CODE · Name"; printed reports intentionally keep only the name. */
+/** Labels arrive as "CODE — Name" (or "CODE · Name"); printed reports intentionally keep only the name. */
 const nameOnly = (label: string): string => {
-  const parts = label.split(' · ').map(part => part.trim()).filter(Boolean)
-  return parts.length > 1 ? parts.slice(1).join(' · ') : (label || '—')
+  for (const separator of [' — ', ' · ']) {
+    const parts = label.split(separator).map(part => part.trim()).filter(Boolean)
+    if (parts.length > 1) return parts.slice(1).join(separator)
+  }
+  return label || '—'
 }
 
 /** Keep the entered rates (and their currency) beside the charging basis on page one. */
@@ -171,6 +174,7 @@ export function AfePrintSheet({ estimate, preview = false }: { estimate: AfeEsti
     + printGroups.length * 2 + consumableCategories.length + well.sections.length + 8
 
   const sheet = <div className={`afe-print-sheet afe-cost-print-sheet${preview ? ' afe-print-sheet--preview' : ''}`} aria-hidden={preview ? undefined : 'true'}>
+    <div className="ps-page-border" aria-hidden="true"/>
     {/* Page 1 - compact summary: metadata, one categorized cost table, total and well plan. */}
     <div className={`ps-page ps-afe-summary${pageOneDetailRows > 20 ? ' ps-afe-dense' : ''}`}>
       <header className="ps-titlebar">

@@ -14,7 +14,7 @@ for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
-const { DailyCostPrintSheet, useCostPrint, validLeadLagDays } = await import('../../frontend/src/components/daily-cost/DailyCostPrintSheet')
+const { DailyCostPrintSheet, printMoney, useCostPrint, validLeadLagDays } = await import('../../frontend/src/components/daily-cost/DailyCostPrintSheet')
 const { costReportTitle, reportSections } = await import('../../frontend/src/lib/dailyCost')
 const line = {
   service_id: 'service-1', activity_id: 'activity-1', sub_activity_id: 'sub-1', hole_section_id: 'section-1', phase_id: 'phase-1',
@@ -142,15 +142,22 @@ const serviceBodyRows = [...servicePanel.querySelectorAll('.dcr-cost-item-row')]
 assert.equal(serviceBodyRows[0].cells.length, 10, 'a service row prints all ten cost columns')
 const mudLoggingSplit = serviceBodyRows.find(row => row.cells[0].textContent === 'Mud logging')
 assert.deepEqual([...mudLoggingSplit.cells].map(cell => cell.textContent),
-  ['Mud logging', '€1,000', '€250', '€50', '€250', '€0', '€50', '€300', '€700', '30.000%'],
-  'a service row prints planned, NPT and UPA activity costs beside its cumulative total')
+  ['Mud logging', '€1,000', '€250', '€50', '€250', '-', '€50', '€300', '€700', '30.000%'],
+  'a service row prints planned, NPT and UPA activity costs beside its cumulative total, showing "-" when nil')
 const serviceFooter = [...servicePanel.querySelectorAll('tfoot tr:last-child th')].map(cell => cell.textContent)
 assert.deepEqual(serviceFooter,
-  ['Services + consumables total', '€19,000', '€2,375', '€300', '€2,625', '€0', '€50', '€2,675', '€16,325', '14.079%'],
-  'the merged footer totals every service and consumable value, including each cumulative classification')
+  ['Services + consumables total', '€19,000', '€2,375', '€300', '€2,625', '-', '€50', '€2,675', '€16,325', '14.079%'],
+  'the merged footer totals every service and consumable value, showing "-" when nil')
 const fuelRow = combinedRows.find(row => row.cells[0].textContent === 'Fuel')
-assert.deepEqual([...fuelRow.cells].map(cell => cell.textContent).slice(2, 8), ['€0', '€100', '€100', '€0', '€0', '€100'],
-  'a consumable prints its day cost and planned/NPT/UPA/total cumulative values')
+assert.deepEqual([...fuelRow.cells].map(cell => cell.textContent).slice(2, 8), ['-', '€100', '€100', '-', '-', '€100'],
+  'a consumable prints its day cost and planned/NPT/UPA/total cumulative values, showing "-" when nil')
+assert.ok(!sheet.textContent.includes('€0') && !sheet.textContent.includes('$0'),
+  'daily cost reports never print €0 or $0 when no cost was incurred')
+assert.equal(printMoney(0, 'USD'), '-', 'zero USD prints as "-"')
+assert.equal(printMoney('0.000', 'USD'), '-', 'zero string prints as "-"')
+assert.equal(printMoney(-0.2, 'USD'), '-', 'sub-dollar rounding to zero prints as "-" instead of "-$0"')
+assert.equal(printMoney(0, 'EUR'), '-', 'zero EUR prints as "-"')
+assert.equal(printMoney(100, 'USD'), '$100', 'non-zero USD retains currency symbol')
 assert.ok(!sheet.textContent.includes('USD '), 'the printed report uses the $ symbol instead of the USD code')
 
 // The report title names the well scope it costs.
@@ -171,30 +178,39 @@ for (const hidden of ['SVC-03', 'SVC-20', 'Bit Alpha', 'Bit Beta', 'Mud Chemical
 }
 for (const heading of [
   'Reporting milestone', 'Section-wise planned depth & current depth', 'Services and consumables cost · AFE vs last day, this day and cumulative',
-  'Tangibles cost · AFE vs actual', 'AFE vs actual summary',
+  'AFE vs actual summary',
   'Mud chemical cost · section-wise', 'Consumption / losses · cumulative', 'Mud cost analysis · section / mud type',
   'NPT summary', 'UPA summary',
 ]) assert.ok(sheet.textContent.includes(heading), `cover prints ${heading}`)
-// Page one follows MODEL REPORTS/REVISED DAILY REPORT TABLE PLACEMENTS.jpg: an upper
-// and a middle band over two columns, then one full-width lower band.
+assert.equal(sheet.querySelector('.daily-report-cover .dcr-eyebrow')?.textContent, 'Well cost report',
+  'cover eyebrow drops the Daily Cost Management prefix')
+assert.equal(sheet.querySelector('.daily-report-cover .dcr-tangibles'), null,
+  'Tangibles cost · AFE vs actual is removed from the cover')
+assert.equal(sheet.querySelector('.daily-report-cover .dcr-lih'), null,
+  'LIH cost · manual register deduction from the AFE is removed from the cover')
+assert.ok(!sheet.querySelector('.daily-report-cover').textContent.includes('Tangibles cost · AFE vs actual'),
+  'cover omits the Tangibles cost heading')
+assert.ok(!sheet.querySelector('.daily-report-cover').textContent.includes('LIH cost · manual register deduction from the AFE'),
+  'cover omits the LIH register heading')
 const panelTitle = node => node.querySelector('h2')?.textContent
 const coverLayout = sheet.querySelector('.daily-report-cover .dcr-layout')
 assert.deepEqual([...coverLayout.children].map(node => node.classList.contains('dcr-panel') ? panelTitle(node) : node.className),
   ['dcr-left', 'dcr-mud-stack', 'Consumption / losses · cumulative matrix', 'dcr-bottomline'],
   'page one spans the left stack across rows 1-2 beside mud and losses, above the full-width lower band')
+assert.deepEqual([...coverLayout.querySelector('.dcr-left').children].map(node => node.classList.contains('dcr-panel') ? panelTitle(node) : node.className),
+  ['dcr-topline', 'Services and consumables cost · AFE vs last day, this day and cumulative'],
+  'the left column spans milestone/depth/time and Services + Consumables down to the Consumption / losses baseline')
 assert.deepEqual([...coverLayout.querySelector('.dcr-left > .dcr-topline').children].map(panelTitle),
   ['Reporting milestone', 'Section-wise planned depth & current depth', 'Time position'], 'the milestone, depth and time strip heads the left column')
 assert.equal(panelTitle(coverLayout.querySelector('.dcr-left > .dcr-cost-panel')), 'Services and consumables cost · AFE vs last day, this day and cumulative',
   'the merged services and consumables schedule sits directly under the milestone, depth and time strip')
-assert.equal(panelTitle(coverLayout.querySelector('.dcr-left > .dcr-tangibles')), 'Tangibles cost · AFE vs actual',
-  'Tangibles anchors the bottom of the left column so adjustments stay strictly inside Services + Consumables and Tangibles')
 assert.deepEqual([...coverLayout.querySelector('.dcr-mud-stack').children].map(panelTitle),
   ['Mud cost analysis · section / mud type', 'Mud chemical cost · section-wise'], 'Mud cost analysis sits over Mud chemical cost, beside Services')
 const lowerRow = sheet.querySelector('.dcr-bottomline')
 assert.deepEqual([...lowerRow.children].map(node => node.classList.contains('dcr-stack') ? 'stack' : panelTitle(node)),
-  ['stack', 'UPA summary', 'NPT summary'], 'the full-width lower band places the LIH/AFE/NDT stack, then UPA summary, then NPT summary')
-assert.deepEqual([...lowerRow.querySelector('.dcr-stack').children].map(node => node.classList.contains('dcr-lih') ? 'LIH' : node.classList.contains('dcr-overall') ? 'AFE' : 'NDT'),
-  ['LIH', 'AFE', 'NDT'], 'NDT follows LIH and AFE at the bottom-left only when records exist')
+  ['UPA summary', 'NPT summary', 'stack'], 'the full-width lower band places UPA summary and NPT summary on the left, then the AFE/NDT stack on the right')
+assert.deepEqual([...lowerRow.querySelector('.dcr-stack').children].map(node => node.classList.contains('dcr-overall') ? 'AFE' : 'NDT'),
+  ['AFE', 'NDT'], 'NDT follows AFE vs actual summary at the bottom-right only when records exist')
 const ndtTable = lowerRow.querySelector('.dcr-ndt')
 assert.ok(sheet.querySelector('.daily-report-cover').classList.contains('dcr-has-ndt'), 'NDT-bearing cover keeps its dcr-has-ndt state hook')
 assert.ok(ndtTable.textContent.includes('Drill pipe inspection') && ndtTable.textContent.includes('20') && ndtTable.textContent.includes('18') && ndtTable.textContent.includes('15') && ndtTable.textContent.includes('3'), 'NDT table prints received, consumed and good/bad backloaded quantities')
@@ -208,8 +224,10 @@ assert.deepEqual([...ndtHeaderRows[1].querySelectorAll('th')].map(cell => cell.t
 assert.equal(ndtTable.querySelectorAll('colgroup col').length, 5, 'the grouped header keeps five leaf columns')
 assert.equal(ndtTable.querySelectorAll('tbody tr')[0].cells.length, 5, 'an NDT row prints description, received, consumed and both backloads')
 assert.ok(!ndtTable.textContent.includes('Batch A') && !ndtTable.textContent.includes('Remarks'), 'NDT remarks are no longer printed')
-assert.ok(lowerRow.lastElementChild.classList.contains('dcr-incident') && panelTitle(lowerRow.lastElementChild) === 'NPT summary', 'NPT is the far-right lower panel, with UPA in the middle')
-assert.ok(lowerRow.lastElementChild.textContent.includes('Sub-activity operations remark'), 'NPT/UPA summaries use the Well Sub-Activity remark')
+assert.ok(lowerRow.children[0].classList.contains('dcr-incident') && panelTitle(lowerRow.children[0]) === 'UPA summary', 'UPA is the far-left lower panel')
+assert.ok(lowerRow.children[1].classList.contains('dcr-incident') && panelTitle(lowerRow.children[1]) === 'NPT summary', 'NPT sits beside UPA on the left of the lower band')
+assert.ok(lowerRow.lastElementChild.classList.contains('dcr-stack'), 'AFE vs actual summary (+ NDT) sits on the far-right under Consumption / losses')
+assert.ok(lowerRow.children[1].textContent.includes('Sub-activity operations remark'), 'NPT/UPA summaries use the Well Sub-Activity remark')
 const depthPanel = coverLayout.querySelector('.dcr-depth')
 assert.equal(depthPanel.querySelector('h2').nextElementSibling.className, 'dcr-well-objective', 'the well objective sits between the depth title and table header')
 assert.equal(depthPanel.querySelector('.dcr-well-objective').textContent, 'Well objective Evaluate and develop the reservoir', 'the depth panel prints the saved well objective')
@@ -241,10 +259,11 @@ assert.equal(mudCostPanel.querySelector('tbody tr td:nth-child(2)').textContent,
 const mudCostTotal = mudCostPanel.querySelector('tfoot tr')
 assert.deepEqual([...mudCostTotal.cells].map(cell => cell.textContent), ['Total', '€3,500', '€200', '€188'], 'mud chemical totals print planned, actual and reconciled for every section')
 assert.equal(mudCostPanel.querySelector('.dcr-mud-note'), null, 'the mud chemical panel no longer prints the AFE allowance note')
-assert.equal(sheet.querySelector('.dcr-tangibles span:first-child strong').textContent, '€4,000', 'daily report reads the tangible AFE amount from its locked budget line')
 const afeSummaryRows = [...sheet.querySelectorAll('.dcr-overall tbody tr')].map(row => [...row.cells].map(cell => cell.textContent))
 assert.deepEqual(afeSummaryRows[1], ['Consumables', '€16,000', '€100'],
   'without a well summary the bulk print keeps its own AFE-scoped consumables actual')
+assert.deepEqual(afeSummaryRows[2], ['Tangibles', '€4,000', '-'],
+  'AFE vs actual summary retains the locked tangible AFE amount')
 const afeSummaryNote = sheet.querySelector('.dcr-overall p').textContent
 assert.equal(afeSummaryNote, 'AFE available = €6,900 · 1.429% used', 'AFE summary labels the final balance as the available amount')
 assert.ok(!afeSummaryNote.includes('after LIH') && !afeSummaryNote.includes('Balance'), 'AFE summary removes the old after-LIH and duplicate balance wording')
@@ -276,12 +295,16 @@ const summaryWithoutTangibleFactor = {
   }] },
 }
 await act(async () => root.render(<DailyCostPrintSheet coversOnly report={{
-  title: 'Daily Cost Report', period: '10 Oct 2026', days: [second], overviewDays: [second],
+  title: 'Daily Cost Report', period: '10 Oct 2026', reportKind: 'daily', days: [second], overviewDays: [second],
   summary: summaryWithoutTangibleFactor,
 }}/>))
 const summarySheet = document.querySelector('.afe-print-sheet')
-assert.equal(summarySheet.querySelector('.dcr-tangibles span:first-child strong').textContent, '€4,000',
-  'well-summary printing falls back to the locked tangible AFE budget when its actual factor is absent')
+assert.equal(summarySheet.querySelector('.dcr-eyebrow')?.textContent, 'Daily cost report',
+  'daily report eyebrow renders Daily cost report without Daily Cost Management prefix')
+assert.equal(summarySheet.querySelector('.dcr-tangibles'), null,
+  'Tangibles cost · AFE vs actual is also omitted on well-summary daily reports')
+assert.equal(summarySheet.querySelector('.dcr-lih'), null,
+  'LIH register panel is also omitted on well-summary daily reports')
 const summaryMud = summarySheet.querySelector('.dcr-mud-cost')
 assert.equal(summaryMud.querySelector('tbody tr td:nth-child(2)').textContent, '€9,000',
   'well-summary printing reads planned mud cost from the section AFE allowance on the summary payload')
@@ -290,6 +313,8 @@ assert.equal(summaryMud.querySelector('.dcr-mud-note'), null,
 const summaryAfeRows = [...summarySheet.querySelectorAll('.dcr-overall tbody tr')].map(row => [...row.cells].map(cell => cell.textContent))
 assert.deepEqual(summaryAfeRows[1], ['Consumables', '€16,000', '€88'],
   'the AFE vs actual summary compares consumables at the reconciled mud chemicals cost, not the recorded actual')
+assert.deepEqual(summaryAfeRows[2], ['Tangibles', '€4,000', '-'],
+  'well-summary printing falls back to the locked tangible AFE budget when its actual factor is absent')
 assert.deepEqual(summaryAfeRows.at(-1), ['Total', '€23,000', '€800'],
   'the summary total keeps the API comparison actual that already includes the reconciled mud chemicals')
 let trigger
@@ -324,7 +349,7 @@ assert.equal(bulkSheet.querySelectorAll('.daily-report-cover').length, 2, 'every
 assert.equal(bulkSheet.querySelectorAll('.daily-report-details').length, 0, 'bulk print omits the cumulative schedules')
 assert.equal(bulkSheet.querySelectorAll('.dcr-titlebar h1').length, 2, 'each selected report keeps its own title bar')
 assert.equal(bulkSheet.querySelectorAll('.dcr-ndt').length, 0, 'reports without NDT records retain the original layout')
-assert.ok([...bulkSheet.querySelectorAll('.dcr-stack')].every(stack => stack.children.length === 2 && !stack.classList.contains('dcr-stack--ndt')), 'empty NDT data leaves the LIH/AFE double-decker unchanged')
+assert.ok([...bulkSheet.querySelectorAll('.dcr-stack')].every(stack => stack.children.length === 1 && !stack.classList.contains('dcr-stack--ndt')), 'empty NDT data leaves the AFE summary single-panel stack unchanged')
 // NDT Inspection Details stacks in the lower band, so its rows draw on the same page-one
 // height as Services rows and push a long schedule one density step down.
 const withServiceLines = count => ({ ...second, comparison: { ...second.comparison, budget_lines: [
@@ -609,16 +634,24 @@ assert.match(styles, /grid-template-areas:\s*"left mud"\s*"left loss"\s*"lower l
 assert.ok(styles.includes('grid-template-columns: minmax(0, 2.58fr) minmax(0, 1fr);'), "the two columns keep the model's 737 : 286 px split")
 assert.ok(styles.includes('grid-template-rows: minmax(max-content, 1.3fr) max-content minmax(max-content, 1fr);'),
   'every band keeps at least its content height, the middle band is as tall as its tallest side and spare height goes to the upper and lower bands')
-assert.ok(styles.includes('.dcr-left { grid-area: left; grid-template-rows: max-content minmax(0, 1fr) max-content; }'),
-  'the left column anchors the strip at top, Tangibles at bottom, and Services + Consumables in between')
+assert.ok(styles.includes('.dcr-left { grid-area: left; grid-template-rows: max-content minmax(0, 1fr); }'),
+  'the left column anchors the strip at top and spans Services + Consumables down to the losses baseline')
+assert.ok(styles.includes('.wcp-report-preview .daily-cost-print-sheet .dcr-left { grid-area: left; display: grid; gap: 8px; grid-template-rows: max-content minmax(0, 1fr); }'),
+  'on-screen preview also spans Services + Consumables down the left column')
 assert.ok(styles.includes('.dcr-mud-stack { grid-area: mud; grid-template-rows: minmax(max-content, 1.17fr) minmax(max-content, 1fr); }'),
   'the mud pair always fills the upper band')
-assert.ok(styles.includes('.dcr-bottomline { grid-area: lower; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, .61fr) minmax(0, 1fr) minmax(0, 1fr);'),
-  "the lower band keeps the model's 237 : 390 : 390 px stack, UPA and NPT columns")
-assert.ok(styles.includes('.dcr-stack { min-width: 0; min-height: 0; display: grid; grid-template-rows: max-content minmax(0, 1fr);'),
-  'LIH keeps its content height and the AFE vs actual summary fills the stack')
-assert.ok(styles.includes('.dcr-stack--ndt { grid-template-rows: max-content max-content minmax(0, 1fr); }'),
-  'the NDT triple decker sizes LIH and the AFE summary to their content and pulls NDT up to fill the lower band')
+assert.ok(styles.includes('.dcr-bottomline { grid-area: lower; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.29fr) minmax(0, 1.29fr) minmax(0, 1fr);'),
+  'the lower band places UPA and NPT beneath Services + Consumables and the AFE/NDT stack beneath Consumption / losses')
+assert.ok(styles.includes('.wcp-report-preview .daily-cost-print-sheet .dcr-bottomline { grid-area: lower; display: grid; grid-template-columns: minmax(0, 1.29fr) minmax(0, 1.29fr) minmax(0, 1fr);'),
+  'on-screen preview matches the lower band placement')
+assert.ok(styles.includes('.dcr-stack { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr);'),
+  'the AFE vs actual summary fills the right-side lower stack when NDT is absent')
+assert.ok(styles.includes('.dcr-stack--ndt { grid-template-rows: max-content minmax(0, 1fr); }'),
+  'when NDT records exist, AFE vs actual summary sizes to content and NDT fills beneath it')
+assert.ok(styles.includes('.wcp-report-preview .daily-cost-print-sheet .dcr-eyebrow {') && styles.includes('text-transform: uppercase'),
+  'on-screen preview uppercases the report eyebrow to match print')
+assert.ok(!styles.includes('.dcr-tangibles') && !styles.includes('.dcr-lih'),
+  'retired Tangibles and LIH cover CSS selectors are removed')
 assert.ok(!styles.includes('--dcr-lower-row-height') && !/\.dcr-(main|side)\b/.test(styles), 'the fixed lower-row height and the old main/side columns are retired')
 assert.match(styles, /\.dcr-density-3 \.dcr-stack \.dcr-panel table,\s*\S+ \.dcr-density-3 \.dcr-panel\.dcr-mud-cost table,\s*\S+ \.dcr-density-3 \.dcr-panel\.dcr-loss-matrix table \{ font-size: 5\.8pt; \}/,
   'density 3 compresses the stack, mud cost and loss tables by name')
@@ -631,7 +664,12 @@ assert.ok(styles.includes('.dcr-cost-panel.dcr-cost-density-2 td,'), 'density-2 
 assert.ok(styles.includes('padding: .855mm .3mm;'), 'density-2 cost rows retain the 2x increase')
 assert.ok(styles.includes('padding: .585mm .24mm;'), 'density-3 cost rows retain the 2x increase')
 assert.ok(styles.includes('padding: .36mm .18mm;'), 'density-4 cost rows retain the 2x increase')
-assert.ok(styles.includes('.dcr-cost-group-row th { padding: .96mm .34mm;'), 'group-name rows are also doubled')
+assert.ok(styles.includes('.dcr-cost-group-row th { padding: .96mm .34mm;') && styles.includes('.dcr-cost-group-row th { padding: .96mm .34mm; background: #E8EEF6 !important; color: #123A63; font-size: 6.2pt; font-weight: 800; letter-spacing: .2pt; text-align: left;'),
+  'group-name rows are doubled and left-aligned')
+assert.ok(styles.includes('.wcp-report-preview .daily-cost-print-sheet .dcr-cost-group-row th { background: #E8EEF6; color: #123A63; font-size: 8px; font-weight: 800; text-align: left;'),
+  'on-screen preview also keeps cost-group rows left-aligned')
+assert.ok(!/\.daily-cost-print-sheet \.dcr-cost-group-row th[^{]*text-align:\s*center/.test(styles) && !styles.includes('.daily-cost-print-sheet .dcr-cost-group-row th,'),
+  'print centering rule no longer overrides .dcr-cost-group-row th back to center')
 assert.ok(styles.includes('dcr-cost-density-5 tfoot th { padding: .18mm .15mm;'), 'the densest cost rows remain scoped to the cost panel')
 assert.ok(!styles.includes('.dcr-cost-panel table { height: 100%; }'), 'the merged schedule is not stretched into oversized rows')
 

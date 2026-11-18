@@ -153,9 +153,11 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 export function printMoney(value: string | number | null | undefined, currency = '') {
   const amount = Number(value ?? 0)
   if (!Number.isFinite(amount)) return '—'
+  if (Math.abs(amount) < 0.5) return '-'
   const code = currency.trim().toUpperCase()
   const symbol = CURRENCY_SYMBOLS[code]
   const formatted = Math.abs(amount).toLocaleString(undefined, { maximumFractionDigits: 0 })
+  if (formatted === '0') return '-'
   const sign = amount < 0 ? '-' : ''
   return symbol ? `${sign}${symbol}${formatted}` : `${sign}${code ? `${code} ` : ''}${formatted}`
 }
@@ -468,37 +470,24 @@ function ReportCover({ report }: { report: CostPrintReport }) {
     const groupRow = latestComparison.groups?.find(item => item.cost_group === group)
     return { planned, actual: asNumber(groupRow?.actual_to_date) }
   }
-  /** Day split for a cost group, taken from the report day's own comparison. */
-  const groupSplit = (group: 'Services' | 'Consumables' | 'Tangibles') => {
-    const row = latestComparison.groups?.find(item => item.cost_group === group)
-    const actual = groupPosition(group).actual
-    const today = row?.actual_today === undefined ? 0 : asNumber(row.actual_today)
-    const prior = row?.actual_prior === undefined ? actual - today : asNumber(row.actual_prior)
-    return { prior, today }
-  }
   const servicePosition = groupPosition('Services')
   const consumablePosition = groupPosition('Consumables')
   const coverCostGroups = dailyCoverCostGroups(services, consumables)
   const coverCostRows = coverCostGroups.flatMap(group => group.rows)
   const tangiblePosition = groupPosition('Tangibles')
-  const tangibleDay = groupSplit('Tangibles')
-  const unbudgetedTangibles = costRows.tangibles.filter(row => !row.is_planned && asNumber(row.actual_to_date) !== 0)
   const totalPlanned = asNumber(summary?.totals.planned ?? latestComparison.planned_total)
   const totalActual = asNumber(summary?.totals.comparison_actual ?? latestComparison.actual_to_date)
   const otherExpenses = asNumber(summary?.totals.other_expenses ?? latestComparison.other_expenses_to_date)
   // LIH Cost Register: separate from every budgeted group, added to the actual
-  // cost and deducted explicitly from the AFE amount.
+  // cost and deducted explicitly from the AFE amount in AFE vs actual summary.
   const lihBucket = (report.lihReport?.totals ?? []).find(row => row.currency === currency)
   const lihTotal = asNumber(summary?.totals.lih_cost ?? lihBucket?.total ?? 0)
-  const lihLineCount = summary?.totals.lih_line_count ?? lihBucket?.line_count ?? 0
-  const lihEntryCount = summary?.totals.lih_entries ?? lihBucket?.entry_count ?? 0
   const ndtInspections = report.ndtInspections ?? []
   // Cover-level density only reacts to an unusually long NDT register in the
-  // bottom-left stack, so Services + Consumables row count never alters the
-  // heights or font sizes of LIH, AFE vs actual, NDT, UPA, NPT, mud or losses.
+  // bottom-right stack, so Services + Consumables row count never alters the
+  // heights or font sizes of AFE vs actual, NDT, UPA, NPT, mud or losses.
   const densityStep = ndtInspections.length > 8 ? 4 : ndtInspections.length > 6 ? 3 : ndtInspections.length > 4 ? 2 : 1
   const actualIncludingLih = totalActual + lihTotal
-  const afeAvailable = totalPlanned - lihTotal
   const balance = asNumber(
     summary?.totals.comparison_balance_including_lih
       ?? (summary ? totalPlanned - lihTotal - totalActual : latestComparison.balance),
@@ -694,16 +683,16 @@ function ReportCover({ report }: { report: CostPrintReport }) {
 
   return <section className={`daily-report-cover ps-page dcr-density-${densityStep}${ndtInspections.length ? ' dcr-has-ndt' : ''}`}>
     <header className="dcr-titlebar">
-      <div><div className="dcr-eyebrow">Daily Cost Management · {report.reportKind === 'daily' ? 'Daily cost report' : 'Well cost report'}</div><h1>{reportTitle(report)}</h1></div>
+      <div><div className="dcr-eyebrow">{report.reportKind === 'daily' ? 'Daily cost report' : 'Well cost report'}</div><h1>{reportTitle(report)}</h1></div>
       <div className="dcr-report-meta"><strong>{latest.entry.well_name}</strong><span>{latest.entry.rig_name}</span><span>{report.period}</span></div>
     </header>
-    {/* Page-one placement follows MODEL REPORTS/REVISED DAILY REPORT TABLE
-        PLACEMENTS.jpg: right column keeps Mud cost analysis + Mud chemical cost
-        over Consumption / losses, and the full-width lower band keeps LIH / AFE
-        vs actual / NDT | UPA summary | NPT summary at their exact positions and
-        heights. The left column spans the upper and middle bands so Services +
-        Consumables and Tangibles share their allocated left-side space without
-        ever shifting or compressing any right-hand or bottom table. */}
+    {/* Page-one placement: right column keeps Mud cost analysis + Mud chemical
+        cost over Consumption / losses; the left column spans the upper and
+        middle bands with Reporting milestone / Depth / Time over Services +
+        Consumables; and the full-width lower band places UPA summary | NPT
+        summary on the left, with AFE vs actual summary (and conditional NDT
+        Inspection Details beneath it) aligned on the right under Consumption /
+        losses. */}
     <div className="dcr-layout">
       <div className="dcr-left">
         <div className="dcr-topline">
@@ -713,14 +702,6 @@ function ReportCover({ report }: { report: CostPrintReport }) {
         </div>
         <CostTable title="Services and consumables cost · AFE vs last day, this day and cumulative" groups={coverCostGroups}
           totalLabel="Services + consumables total" costDensity={costDensityStep}/>
-        <section className="dcr-panel dcr-tangibles"><h2>Tangibles cost · AFE vs actual</h2><div>
-          <span>AFE <strong>{printMoney(tangiblePosition.planned, currency)}</strong></span>
-          <span>Up to {displayDate(priorDate)} <strong>{printMoney(tangibleDay.prior, currency)}</strong></span>
-          <span>Cost on {displayDate(String(reportDate))} <strong>{printMoney(tangibleDay.today, currency)}</strong></span>
-          <span>Actual <strong>{printMoney(tangiblePosition.actual, currency)}</strong></span>
-          <span>Balance <strong>{printMoney(tangiblePosition.planned - tangiblePosition.actual, currency)}</strong></span>
-          <span>Used <strong>{percent(tangiblePosition.actual, tangiblePosition.planned)}</strong></span>
-        </div>{unbudgetedTangibles.length > 0 && <p className="dcr-tangibles-unbudgeted">Unbudgeted: {unbudgetedTangibles.map(row => `${costName(row.item_name)} (${printMoney(row.actual_to_date, currency)})`).join(' · ')}</p>}</section>
       </div>
       <div className="dcr-mud-stack">
         <section className="dcr-panel dcr-mud-analysis"><h2>Mud cost analysis · section / mud type</h2><table><thead><tr><th>Measure</th>{mudSections.map(row => <th key={row.section_id}>{sectionNameOnly(row.section_label)}<span>{row.mud_type ?? 'Not configured'}</span></th>)}</tr></thead><tbody>
@@ -742,15 +723,14 @@ function ReportCover({ report }: { report: CostPrintReport }) {
         {!mudSections.length && <tr><td colSpan={2} className="dcr-none">No consumption or loss data.</td></tr>}
       </tbody></table></section>
       <div className="dcr-bottomline">
-        {/* Bottom-left: the LIH register, the AFE vs actual summary below it and,
-            only when records exist, NDT Inspection Details beneath both. */}
+        <IncidentTable title="UPA summary" rows={upa} total={asNumber(summary?.totals.upa ?? latestComparison.upa_to_date)}/>
+        <IncidentTable title="NPT summary" rows={npt} total={asNumber(summary?.totals.npt ?? latestComparison.npt_to_date)}/>
+        {/* Bottom-right (under Consumption / losses): AFE vs actual summary and,
+            only when records exist, NDT Inspection Details beneath it. */}
         <div className={`dcr-stack${ndtInspections.length ? ' dcr-stack--ndt' : ''}`}>
-          <section className="dcr-panel dcr-lih"><h2>LIH cost · manual register deduction from the AFE</h2><div><span>LIH cost <strong>{printMoney(lihTotal, currency)}</strong></span><span className="dcr-lih-deduct">Deducted from AFE <strong>{printMoney(lihTotal, currency)}</strong></span><span>Actual incl. LIH <strong>{printMoney(actualIncludingLih, currency)}</strong></span><span>AFE available after LIH <strong>{printMoney(afeAvailable, currency)}</strong></span></div><p className="dcr-lih-note">{lihEntryCount ? `${lihLineCount} item${lihLineCount === 1 ? '' : 's'} across ${lihEntryCount} LIH register day${lihEntryCount === 1 ? '' : 's'} · item detail prints on the cumulative pages.` : 'No LIH cost recorded for this report.'}</p></section>
           <section className="dcr-panel dcr-overall"><h2>AFE vs actual summary</h2><table><tbody><tr><th>Services</th><td>{printMoney(servicePosition.planned, currency)}</td><td>{printMoney(servicePosition.actual, currency)}</td></tr><tr><th>Consumables</th><td>{printMoney(consumablePosition.planned, currency)}</td><td>{printMoney(consumableComparisonActual, currency)}</td></tr><tr><th>Tangibles</th><td>{printMoney(tangiblePosition.planned, currency)}</td><td>{printMoney(tangiblePosition.actual, currency)}</td></tr><tr><th>Other expenses</th><td>—</td><td>{printMoney(otherExpenses, currency)}</td></tr><tr><th>LIH cost · register</th><td>—</td><td>{printMoney(lihTotal, currency)}</td></tr><tr className="dcr-total"><th>Total</th><td>{printMoney(totalPlanned, currency)}</td><td>{printMoney(actualIncludingLih, currency)}</td></tr></tbody></table><p>AFE available = {printMoney(balance, currency)} · {percent(actualIncludingLih, totalPlanned)} used</p></section>
           {ndtInspections.length > 0 && <section className="dcr-panel dcr-ndt"><h2>NDT Inspection Details</h2><table><colgroup><col/><col/><col/><col/><col/></colgroup><thead><tr><th rowSpan={2}>Description</th><th rowSpan={2}>Received</th><th rowSpan={2}>Consumed</th><th colSpan={2}>Backloads</th></tr><tr><th>Good</th><th>Bad</th></tr></thead><tbody>{ndtInspections.map(row => <tr key={row.id}><td>{row.description}</td><td className="num">{quantityText(row.quantity_received)}</td><td className="num">{quantityText(row.quantity_consumed)}</td><td className="num">{quantityText(row.quantity_backloaded_good)}</td><td className="num">{quantityText(row.quantity_backloaded_bad)}</td></tr>)}</tbody></table></section>}
         </div>
-        <IncidentTable title="UPA summary" rows={upa} total={asNumber(summary?.totals.upa ?? latestComparison.upa_to_date)}/>
-        <IncidentTable title="NPT summary" rows={npt} total={asNumber(summary?.totals.npt ?? latestComparison.npt_to_date)}/>
       </div>
     </div>
     <footer className="dcr-footer"><span style={{ marginLeft: 'auto' }}>Printed {printed}{report.reportKind === 'daily' ? '' : ' · cumulative schedules begin on page 2'}</span></footer>
