@@ -32,6 +32,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.rig_well import now, uid
 
@@ -151,7 +152,7 @@ class AfeServiceLine(AfeChildRecord):
     )
     phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True)
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
-    service_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    service_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
 
     rates: Mapped[list["AfeServiceRate"]] = relationship(
@@ -188,7 +189,7 @@ class AfeServiceRate(AfeChildRecord):
 
     line_id: Mapped[str] = mapped_column(ForeignKey("afe_service_lines.id", ondelete="CASCADE"), nullable=False, index=True)
     charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
-    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
 
 
 class AfeServiceScopeRate(AfeChildRecord):
@@ -215,7 +216,7 @@ class AfeServiceScopeRate(AfeChildRecord):
     )
     phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True)
     charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
-    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
 
 
 class AfeServiceCharge(AfeChildRecord):
@@ -230,7 +231,7 @@ class AfeServiceCharge(AfeChildRecord):
 
     line_id: Mapped[str] = mapped_column(ForeignKey("afe_service_lines.id", ondelete="CASCADE"), nullable=False, index=True)
     charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     quantity_unit: Mapped[str] = mapped_column(String(10), default="days", server_default="days", nullable=False)
 
 
@@ -256,7 +257,7 @@ class AfeServiceScopeDays(AfeChildRecord):
         ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     quantity_unit: Mapped[str] = mapped_column(String(10), default="days", server_default="days", nullable=False)
 
 
@@ -269,7 +270,7 @@ class AfeServiceSectionRate(AfeChildRecord):
     line_id: Mapped[str] = mapped_column(ForeignKey("afe_service_lines.id", ondelete="CASCADE"), nullable=False, index=True)
     hole_section_id: Mapped[str] = mapped_column(ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True)
     phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True)
-    amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
 
 
 class AfeConsumableLine(AfeChildRecord):
@@ -296,10 +297,10 @@ class AfeConsumableLine(AfeChildRecord):
     hole_section_id: Mapped[str] = mapped_column(ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True)
     phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True, index=True)
     drill_bit_id: Mapped[str | None] = mapped_column(ForeignKey("drill_bits.id", ondelete="RESTRICT"), nullable=True, index=True)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("1"), server_default="1", nullable=False)
-    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    estimated_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("1"), server_default="1", nullable=False)
+    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    estimated_amount: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
 
@@ -313,9 +314,9 @@ class AfeTangibleLine(AfeChildRecord):
 
     afe_id: Mapped[str] = mapped_column(ForeignKey("afes.id", ondelete="CASCADE"), nullable=False)
     tangible_id: Mapped[str] = mapped_column(ForeignKey("tangibles.id", ondelete="RESTRICT"), nullable=False, index=True)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("1"), server_default="1", nullable=False)
-    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("1"), server_default="1", nullable=False)
+    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     uom: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
     remarks: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
@@ -337,4 +338,4 @@ class AfeExchangeRate(AfeChildRecord):
 
     afe_id: Mapped[str] = mapped_column(ForeignKey("afes.id", ondelete="CASCADE"), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(10), nullable=False)
-    rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)

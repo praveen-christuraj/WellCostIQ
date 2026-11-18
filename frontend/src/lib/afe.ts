@@ -520,7 +520,7 @@ export function amountText(value: string | number | null | undefined, currency =
   if (value === null || value === undefined || value === '') return '—'
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return '—'
-  const text = parsed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const text = parsed.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
   return currency ? `${currency} ${text}` : text
 }
 
@@ -539,7 +539,7 @@ export function afeTotalText(afe: Pick<Afe, 'total_cost' | 'standard_currency' |
 export function daysText(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—'
   const parsed = Number(value)
-  return Number.isFinite(parsed) ? `${parsed.toLocaleString(undefined, { maximumFractionDigits: 4 })} d` : '—'
+  return Number.isFinite(parsed) ? `${parsed.toLocaleString(undefined, { maximumFractionDigits: 3 })} d` : '—'
 }
 
 // Day quantities can be entered in days or hours (hours convert at 24 per day).

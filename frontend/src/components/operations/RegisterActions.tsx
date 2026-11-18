@@ -5,9 +5,9 @@ import { FormDialog } from '../Common'
 import { useAuth } from '../../context/AuthContext'
 import { api, body } from '../../lib/api'
 
-type Row = { id: string; status: string }
+type Row = { id: string; status: string; is_deleted?: boolean }
 type Action = 'delete' | 'restore' | 'permanent-delete' | 'edit'
-export const editableReport = (r: Row) => ['draft', 'in_review', 'rejected'].includes(r.status)
+export const editableReport = (r: Row) => !r.is_deleted && ['draft', 'in_review', 'rejected'].includes(r.status)
 
 /** A single (confirmed) row or checked-set operation, following the costing register. */
 export function useRegisterActions<T extends Row>(

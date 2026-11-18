@@ -86,6 +86,7 @@ const modules: NavModule[] = [
     { label: 'Analytics', path: '/operations/analytics', icon: InsightsOutlined, permission: 'ops-analytics:read' },
     { label: 'Documents', path: '/operations/documents', icon: DescriptionOutlined, permission: 'ops-doc:read' },
     { label: 'Code library', path: '/operations/library', icon: ListAltOutlined, permission: 'ops-master:read' },
+    { label: 'Ask & guide', path: '/operations/guide', icon: SupportAgentOutlined, anyOf: ['ops-report:read', 'ops-plan:read', 'ops-doc:read', 'ops-master:read'] },
     { label: 'Settings', path: '/operations/settings', icon: SettingsOutlined, permission: 'ops-settings:read' },
   ] },
   { label: 'Reports', icon: AssessmentOutlined, items: [

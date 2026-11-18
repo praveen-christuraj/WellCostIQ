@@ -323,7 +323,7 @@ export function money(value: Money | number | undefined, currency: string): stri
   if (value === null || value === undefined || value === '') return '—'
   const amount = Number(value)
   if (!Number.isFinite(amount)) return '—'
-  const formatted = Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const formatted = Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
   const sign = amount < 0 ? '−' : ''
   return `${sign}${currency ? `${currency} ` : ''}${formatted}`
 }
@@ -333,8 +333,8 @@ export function compactMoney(value: Money | number | undefined, currency: string
   const amount = Number(value)
   if (!Number.isFinite(amount)) return '—'
   const abs = Math.abs(amount)
-  const text = abs >= 1_000_000_000 ? `${(abs / 1_000_000_000).toFixed(2)}B`
-    : abs >= 1_000_000 ? `${(abs / 1_000_000).toFixed(2)}M`
+  const text = abs >= 1_000_000_000 ? `${(abs / 1_000_000_000).toFixed(3)}B`
+    : abs >= 1_000_000 ? `${(abs / 1_000_000).toFixed(3)}M`
       : abs >= 1_000 ? `${(abs / 1_000).toFixed(1)}K`
         : abs.toLocaleString(undefined, { maximumFractionDigits: 0 })
   return `${amount < 0 ? '−' : ''}${currency ? `${currency} ` : ''}${text}`

@@ -194,9 +194,9 @@ class _Lookups:
 def decimal_text(value: Any) -> str:
     """A stored decimal as an operator reads it.
 
-    The columns keep ten decimals, so a depth of zero would otherwise arrive as
-    ``0E-10`` — which no numeric input accepts — and twelve days as
-    ``12.0000000000``. Trailing zeros are trimmed and exponent notation is never
+    The columns retain three fractional places, so a depth of zero would otherwise arrive as
+    ``0.000`` — which no numeric input accepts — and twelve days as
+    ``12.000``. Trailing zeros are trimmed and exponent notation is never
     produced, so every value can be typed straight into the field it came from.
     """
     if value in (None, ""):

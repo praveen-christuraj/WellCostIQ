@@ -27,11 +27,12 @@ import re
 import time
 from collections import OrderedDict
 from datetime import date, datetime, time as datetime_time, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from sqlalchemy import Date as SADate, DateTime as SADateTime, and_, select
 from sqlalchemy.orm import Session
 
+from app.core.precision import DECIMAL_PLACES
 from app.models import ReportDefinition
 from app.core.spreadsheets import safe_csv_cell
 from app.services import report_formula as formula
@@ -722,9 +723,9 @@ def format_value(value, column: dict) -> str:
         number = formula.to_decimal(value)
         if number is None:
             return formula.to_text(value)
-        places = max(0, min(8, int(column.get("decimals", 2))))
+        places = max(0, min(DECIMAL_PLACES, int(column.get("decimals", DECIMAL_PLACES))))
         try:
-            scaled = number.quantize(Decimal(1).scaleb(-places))
+            scaled = number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
         except InvalidOperation:
             scaled = number
         text = f"{scaled:,.{places}f}"
@@ -1405,7 +1406,7 @@ def export_csv(design: dict, result: dict, title: str) -> bytes:
 
 
 def _column(key, label, column_name, *, data_type="text", aggregate="NONE", show_total=False,
-            decimals=2, prefix="", suffix="", related_key="", related_table="", hidden=False, kind="DATA",
+            decimals=DECIMAL_PLACES, prefix="", suffix="", related_key="", related_table="", hidden=False, kind="DATA",
             formula=""):
     return {
         "key": key, "label": label, "kind": kind, "column_name": column_name,
@@ -1465,8 +1466,8 @@ def starter_designs() -> list[dict]:
                 _column("service", "Service", "service_name_snapshot"),
                 _column("vendor", "Vendor", "vendor_name_snapshot"),
                 _column("activity", "Activity", "activity_name_snapshot"),
-                _column("quantity", "Quantity", "quantity", data_type="number", aggregate="SUM", show_total=True, decimals=2),
-                _column("usd", "Amount (USD)", "usd_amount", data_type="number", aggregate="SUM", show_total=True, decimals=2),
+                _column("quantity", "Quantity", "quantity", data_type="number", aggregate="SUM", show_total=True, decimals=DECIMAL_PLACES),
+                _column("usd", "Amount (USD)", "usd_amount", data_type="number", aggregate="SUM", show_total=True, decimals=DECIMAL_PLACES),
             ],
             groupings=[{"kind": "group", "column_key": "service", "bucket": "VALUE"}],
             sorts=[{"column_key": "usd", "direction": "DESC"}],
@@ -1493,7 +1494,7 @@ def starter_designs() -> list[dict]:
             [
                 _column("company", "Fuel Company", "company_name_snapshot"),
                 _column("category", "Category", "category_name_snapshot"),
-                _column("litres", "Litres", "litres", data_type="number", aggregate="SUM", show_total=True, decimals=2),
+                _column("litres", "Litres", "litres", data_type="number", aggregate="SUM", show_total=True, decimals=DECIMAL_PLACES),
                 _column("lines", "Lines", "id", data_type="text", aggregate="COUNT", show_total=True, decimals=0),
             ],
             groupings=[{"kind": "group", "column_key": "company", "bucket": "VALUE"}],

@@ -1,3 +1,4 @@
+import { DECIMAL_PLACES, formatBusinessDecimal } from './precision'
 import type { ExchangeRate, InvoiceLine, InvoicePaymentSplit, InvoiceTax } from './invoiceProcessing'
 
 export const numeric = (value: string | number | null | undefined): number => {
@@ -28,7 +29,10 @@ export function resolveExchangeRate(currency: string, invoiceCurrency: string, c
   const direct = configured.find(item => item.is_active && item.base_currency === invoiceCurrency && item.quote_currency === currency)
   if (direct) return numeric(direct.rate)
   const inverse = configured.find(item => item.is_active && item.base_currency === currency && item.quote_currency === invoiceCurrency)
-  return inverse ? 1 / numeric(inverse.rate) : null
+  const factor = numeric(inverse?.rate)
+  if (factor <= 0) return null
+  const rounded = Number((1 / factor).toFixed(DECIMAL_PLACES))
+  return rounded > 0 ? rounded : null
 }
 export type DraftTotals = {
   invoiceSubtotal: number; verifiedSubtotal: number; invoiceTaxTotal: number; verifiedTaxTotal: number
@@ -80,7 +84,9 @@ export function calculateDraft(
 }
 /** Worksheet subtotal variance excludes taxes; the commercial summary separately shows the after-tax variance. */
 export const subtotalDifference = (invoiceSubtotal: string, verifiedSubtotal: string): number => numeric(invoiceSubtotal) - numeric(verifiedSubtotal)
-export const formatAmount = (value: string | number | null | undefined, maximumFractionDigits = 2) => numeric(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits })
-/** Display stored decimal precision without padding quantities, rates and FX with ten zeroes. */
-export const formatPrecise = (value: string | number | null | undefined, maximumFractionDigits = 10) => numeric(value).toLocaleString(undefined, { maximumFractionDigits })
+export const formatAmount = (value: string | number | null | undefined, digits = DECIMAL_PLACES) =>
+  formatBusinessDecimal(value ?? 0, digits)
+/** Display quantities, rates and FX without padding them with zeroes. */
+export const formatPrecise = (value: string | number | null | undefined, digits = DECIMAL_PLACES) =>
+  formatBusinessDecimal(value ?? 0, digits, false)
 export const formatDate = (value: string | null | undefined) => value ? new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '—'

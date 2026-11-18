@@ -84,10 +84,10 @@ export function ReviseRateDialog({ config, record, busy, error, onClose, onSubmi
         {record.effective_date && <Typography fontSize={12} color="text.secondary">Effective since {record.effective_date}</Typography>}
       </Box>
       <TextField label={uplift ? 'New rate as per PO' : 'New unit rate'} type="number" required value={form.unit_rate ?? ''}
-        onChange={event => setForm({ ...form, unit_rate: event.target.value })} inputProps={{ min: 0, step: 'any' }}
-        helperText={change === null ? ' ' : `Change ${change >= 0 ? '+' : ''}${change.toFixed(2)}% from current`} fullWidth/>
+        onChange={event => setForm({ ...form, unit_rate: event.target.value })} inputProps={{ min: 0, step: 0.001 }}
+        helperText={change === null ? ' ' : `Change ${change >= 0 ? '+' : ''}${change.toFixed(3)}% from current`} fullWidth/>
       {uplift && <TextField label="Cost uplift %" type="number" required value={form.cost_uplift ?? ''}
-        onChange={event => setForm({ ...form, cost_uplift: event.target.value })} inputProps={{ min: 0, step: 'any' }}
+        onChange={event => setForm({ ...form, cost_uplift: event.target.value })} inputProps={{ min: 0, step: 0.001 }}
         helperText={`New final cost ${previewFinalCost(newRate, form.cost_uplift ?? '')}`} fullWidth/>}
       <MasterSelect label="Currency" source="currencies" value={form.currency ?? ''} required onChange={code => setForm({ ...form, currency: code })} onError={setLocalError}/>
       <TextField label="PO number" value={form.po_number ?? ''} onChange={event => setForm({ ...form, po_number: event.target.value })} inputProps={{ maxLength: 100 }} fullWidth/>

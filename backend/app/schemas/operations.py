@@ -7,7 +7,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.precision import Decimal10
+from app.core.precision import Decimal3
+from app.schemas.ai import AiErrorCode
 
 Scope = Literal["drilling", "completion"]
 ReportType = Literal["DDR", "DCR", "DMR", "RMR"]
@@ -315,7 +316,7 @@ class OpsExtractionJobOut(_Strict):
 # ---------------------------------------------------------------------------
 class OpsActivityBlockIn(_Strict):
     block_id: str | None = Field(default=None, max_length=36)
-    sequence_no: int = Field(ge=1, le=200)
+    sequence_no: int = Field(ge=1, le=2000)
     started_at: datetime
     ended_at: datetime
     duration_minutes: int = Field(ge=1, le=1440)
@@ -335,19 +336,19 @@ class OpsActivityBlockIn(_Strict):
     cause_code: str = Field(default="", max_length=50)
     hole_section_id: str | None = None
     phase_id: str | None = None
-    depth_from_m: Decimal10 | None = None
-    depth_to_m: Decimal10 | None = None
+    depth_from_m: Decimal3 | None = None
+    depth_to_m: Decimal3 | None = None
     depth_unit: str = Field(default="m", max_length=5)
-    footage_m: Decimal10 | None = None
-    bit_depth_m: Decimal10 | None = None
-    rotating_hours: Decimal10 | None = None
-    rop_m_per_hr: Decimal10 | None = None
+    footage_m: Decimal3 | None = None
+    bit_depth_m: Decimal3 | None = None
+    rotating_hours: Decimal3 | None = None
+    rop_m_per_hr: Decimal3 | None = None
     rop_basis: str = Field(default="rotating", max_length=20)
     responsible_party: str = Field(default="", max_length=200)
     vendor_id: str | None = None
     reason: str = Field(default="", max_length=500)
     narrative: str = Field(default="", max_length=5000)
-    confidence: Decimal = Field(default=Decimal("0.50"), ge=0, le=1)
+    confidence: Decimal3 = Field(default=Decimal("0.500"), ge=0, le=1)
     review_state: Literal["suggested", "accepted", "edited", "rejected"] = "suggested"
 
 
@@ -367,6 +368,12 @@ class OpsActivityBlockOut(OpsActivityBlockIn):
     is_deleted: bool
     created_at: datetime
     updated_at: datetime
+    source_activity_code: str = ''
+    source_activity_label: str = ''
+    source_operation_label: str = ''
+    source_phase_label: str = ''
+    source_mark_label: str = ''
+    source_cause_label: str = ''
     # enriched
     operation_code: str | None = None
     operation_name: str | None = None
@@ -390,13 +397,13 @@ class OpsReportCreate(_Strict):
     period_end_at: datetime | None = None
     hole_section_id: str | None = None
     phase_id: str | None = None
-    depth_start_m: Decimal10 | None = None
-    depth_end_m: Decimal10 | None = None
+    depth_start_m: Decimal3 | None = None
+    depth_end_m: Decimal3 | None = None
     depth_unit: str = Field(default="m", max_length=5)
-    tvd_m: Decimal10 | None = None
-    progress_m: Decimal10 | None = None
-    rotating_hours: Decimal10 | None = None
-    dfs_days: Decimal10 | None = None
+    tvd_m: Decimal3 | None = None
+    progress_m: Decimal3 | None = None
+    rotating_hours: Decimal3 | None = None
+    dfs_days: Decimal3 | None = None
     operation_summary: str = Field(default="", max_length=10000)
     forward_plan: str = Field(default="", max_length=10000)
     hse_summary: str = Field(default="", max_length=10000)
@@ -418,13 +425,13 @@ class OpsReportUpdate(_Strict):
     period_end_at: datetime | None = None
     hole_section_id: str | None = None
     phase_id: str | None = None
-    depth_start_m: Decimal10 | None = None
-    depth_end_m: Decimal10 | None = None
+    depth_start_m: Decimal3 | None = None
+    depth_end_m: Decimal3 | None = None
     depth_unit: str | None = Field(default=None, max_length=5)
-    tvd_m: Decimal10 | None = None
-    progress_m: Decimal10 | None = None
-    rotating_hours: Decimal10 | None = None
-    dfs_days: Decimal10 | None = None
+    tvd_m: Decimal3 | None = None
+    progress_m: Decimal3 | None = None
+    rotating_hours: Decimal3 | None = None
+    dfs_days: Decimal3 | None = None
     operation_summary: str | None = Field(default=None, max_length=10000)
     forward_plan: str | None = Field(default=None, max_length=10000)
     hse_summary: str | None = Field(default=None, max_length=10000)
@@ -496,14 +503,14 @@ class OpsReportOut(_Strict):
 
 class OpsSurveyIn(_Strict):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
-    md_m: Decimal10 | None = None
-    tvd_m: Decimal10 | None = None
-    inc_deg: Decimal10 | None = Field(default=None, ge=0, le=180)
-    azi_deg: Decimal10 | None = Field(default=None, ge=0, le=360)
-    ns_m: Decimal10 | None = None
-    ew_m: Decimal10 | None = None
-    vsec_m: Decimal10 | None = None
-    dls_deg_per_30m: Decimal10 | None = None
+    md_m: Decimal3 | None = None
+    tvd_m: Decimal3 | None = None
+    inc_deg: Decimal3 | None = Field(default=None, ge=0, le=180)
+    azi_deg: Decimal3 | None = Field(default=None, ge=0, le=360)
+    ns_m: Decimal3 | None = None
+    ew_m: Decimal3 | None = None
+    vsec_m: Decimal3 | None = None
+    dls_deg_per_30m: Decimal3 | None = None
     tool: str = Field(default="", max_length=100)
     source: str = Field(default="manual", max_length=20)
 
@@ -512,7 +519,7 @@ class OpsReportSaveIn(_Strict):
     expected_updated_at: datetime | None = None
     confirm_review: bool = False
     report: OpsReportUpdate
-    blocks: list[OpsActivityBlockIn] | None = Field(default=None, max_length=200)
+    blocks: list[OpsActivityBlockIn] | None = Field(default=None, max_length=2000)
     surveys: list[OpsSurveyIn] | None = Field(default=None, max_length=200)
 
 
@@ -608,6 +615,29 @@ class OpsNptParetoItem(_Strict):
     pct: float
 
 
+class OpsRegisterFolderOut(_Strict):
+    rig_key: str
+    well_key: str
+    rig_id: str | None
+    well_id: str | None
+    rig_code: str
+    well_code: str
+    well_name: str
+    scope: str
+    record_count: int
+
+
+class OpsDefaultCodeOut(_Strict):
+    id: str
+    family: str
+    code: str
+    name: str
+    description: str
+    source: str
+    classification: str
+    allocation: str
+
+
 class OpsReferenceOut(_Strict):
     document_types: list[str]
     vendors: list[dict[str, str]]
@@ -629,7 +659,7 @@ class OpsPlanVersionIn(_Strict):
     label: str = Field(min_length=1, max_length=200)
     basis: str = Field(default="engineer", max_length=20)
     planned_start_at: datetime | None = None
-    planned_days: Decimal10 | None = None
+    planned_days: Decimal3 | None = None
     notes: str = Field(default="", max_length=5000)
 
 
@@ -639,15 +669,32 @@ class OpsPlanItemIn(_Strict):
     phase_id: str | None = None
     operation_code_id: str | None = None
     description: str = Field(min_length=1, max_length=500)
-    target_depth_m: Decimal10 | None = Field(default=None, ge=0)
-    delta_depth_m: Decimal10 | None = None
-    planned_hours: Decimal10 = Field(ge=0)
-    cum_planned_days: Decimal10 | None = None
-    rop_assumption_m_per_hr: Decimal10 | None = None
-    trip_speed_m_per_hr: Decimal10 | None = None
-    contingency_hours: Decimal10 = Field(default=Decimal(0))
+    target_depth_m: Decimal3 | None = Field(default=None, ge=0)
+    delta_depth_m: Decimal3 | None = None
+    planned_hours: Decimal3 = Field(ge=0)
+    cum_planned_days: Decimal3 | None = None
+    rop_assumption_m_per_hr: Decimal3 | None = None
+    trip_speed_m_per_hr: Decimal3 | None = None
+    contingency_hours: Decimal3 = Field(default=Decimal(0))
     is_critical_path: bool = True
     notes: str = Field(default="", max_length=500)
+
+
+class OpsBriefRequest(_Strict):
+    use_ai: bool = False
+
+
+class OpsPlanStudyRequest(OpsBriefRequest):
+    items: list[OpsPlanItemIn] | None = Field(default=None, min_length=1, max_length=2000)
+
+
+class OpsStudyOut(_Strict):
+    summary: str
+    warnings: list[str] = Field(default_factory=list)
+    ai_text: str = ''
+    ai_model: str = ''
+    ai_error: str = ''
+    ai_error_code: AiErrorCode = ''
 
 
 class OpsPlanVersionOut(_Strict):
@@ -680,8 +727,8 @@ class OpsImportRow(_Strict):
     report_date: date
     report_no_text: str = Field(default="", max_length=50)
     rig_code: str = Field(default="", max_length=50)
-    depth_start_m: Decimal10 | None = None
-    depth_end_m: Decimal10 | None = None
+    depth_start_m: Decimal3 | None = None
+    depth_end_m: Decimal3 | None = None
     operation_summary: str = Field(default="", max_length=5000)
     report_type: str = Field(default="DDR", max_length=10)
 

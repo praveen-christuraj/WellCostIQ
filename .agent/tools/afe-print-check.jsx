@@ -88,7 +88,7 @@ assert.equal(tangibleTable.querySelector('tbody tr').cells[3].textContent, '1', 
 assert.equal(tangibleTable.querySelector('tbody tr').cells[4].textContent, '$30', 'USD rate prints with a dollar symbol')
 assert.ok(![...tangibleTable.querySelectorAll('thead th')].some(th => th.textContent === 'Ccy'), 'currency column is omitted')
 
-assert.ok(pages[0].textContent.includes('1,000.13 m') && pages[0].textContent.includes('10.13 d') && pages[1].textContent.includes('1'), 'depths and days retain precision while quantities round to whole units')
+assert.ok(pages[0].textContent.includes('1,000.126 m') && pages[0].textContent.includes('10.126 d') && pages[1].textContent.includes('1'), 'depths and days retain precision while quantities round to whole units')
 assert.ok(!pages[0].textContent.includes('Authorisation') && pages[1].textContent.includes('Authorisation'), 'sign-off is kept with supporting detail')
 assert.equal(pages[0].querySelector('h1').textContent, 'AFE Cost Estimate', 'the first-page title uses the requested short wording')
 assert.equal(pages[1].querySelector('h1').textContent, 'AFE Cost Estimate', 'the supporting page repeats the requested short report title')
@@ -253,23 +253,23 @@ assert.deepEqual([...document.querySelectorAll('.ps-afe-summary .ps-service-grou
 
 const componentEstimate = structuredClone(convertedEstimate)
 componentEstimate.services = [{
-  ...convertedEstimate.services[1], amount: '0.0041666666',
-  components: [{ amount: '0.0020833333' }, { amount: '0.0020833333' }],
+  ...convertedEstimate.services[1], amount: '0.004',
+  components: [{ amount: '0.002' }, { amount: '0.002' }],
 }]
-componentEstimate.summary.services_total = '0.0050000000'
+componentEstimate.summary.services_total = '0.004'
 await act(async () => root.render(<AfePrintSheet estimate={componentEstimate}/>))
 assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$0',
-  'component-by-component ten-place half-up conversion matches the existing backend summary at a rounding boundary')
+  'component-by-component three-place half-up conversion matches the existing backend summary at a rounding boundary')
 
 const precisionEstimate = structuredClone(estimate)
-precisionEstimate.services = ['0.0024999999', '0.0025'].map((amount, index) => ({
+precisionEstimate.services = ['0.247', '0.252'].map((amount, index) => ({
   ...estimate.services[0], id: `precision-${index}`, service_group: 'Rig Operations', amount,
 }))
 await act(async () => root.render(<AfePrintSheet estimate={precisionEstimate}/>))
-assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$0', 'subtotals retain ten-place precision rather than rounding each line to cents')
-precisionEstimate.services[0].amount = '0.0025'
+assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$0', 'subtotals retain three-place precision rather than rounding each line to cents')
+precisionEstimate.services[0].amount = '0.248'
 await act(async () => root.render(<AfePrintSheet estimate={precisionEstimate}/>))
-assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$0', 'the final subtotal rounds to whole units')
+assert.equal(document.querySelector('.ps-service-group-total .num').textContent, '$1', 'the printed subtotal rounds to whole units only after pricing')
 
 const pendingEstimate = structuredClone(convertedEstimate)
 pendingEstimate.summary.currency.converted = false

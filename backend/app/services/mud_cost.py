@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.core.precision import DECIMAL_QUANT
 from app.core.units import depth_to_meters
 from app.domain.mud_cost import (
     MUD_COST_LINE_SPECS,
@@ -1278,7 +1279,7 @@ def record_print(db: Session, user: User, data: MudCostExportAudit, request: Req
 # ---------------------------------------------------------------------------
 # Section-scoped mud configuration and reconciliation
 # ---------------------------------------------------------------------------
-RECONCILIATION_QUANT = Decimal("0.0000000001")
+RECONCILIATION_QUANT = DECIMAL_QUANT
 MUD_CHEMICAL_CATEGORY = "Mud Chemicals"
 
 
@@ -1493,7 +1494,7 @@ def upsert_section_setting(
         summary=(
             f"{'Configured' if action == 'create' else 'Updated'} mud type {data.mud_type} "
             f"({MUD_COST_MUD_TYPE_LABELS.get(data.mud_type, data.mud_type)}) for {label}; "
-            f"Cost/BBL base rate {currency} {base_rate:,.10f}"
+            f"Cost/BBL base rate {currency} {base_rate:,.3f}"
             + (f"; remarks: {existing.remarks}" if existing.remarks else "")
         ),
         request=request,
@@ -1731,7 +1732,9 @@ def reconcile_well(
                 consumption_losses=cumulative_consumption,
             )
             if calc.cost_per_bbl is not None:
-                latest_rate = calc.cost_per_bbl
+                # Keep the division at working precision until the loss amount
+                # is calculated; the displayed Cost/BBL is a rounded result.
+                latest_rate = calc.beta / calc.total_mud if calc.beta is not None else calc.cost_per_bbl
             if not is_configured:
                 day_reconciled = None
                 cumulative_reconciled = None
@@ -1769,7 +1772,7 @@ def reconcile_well(
                 total_mud=calc.total_mud,
                 alpha=calc.alpha,
                 beta=calc.beta,
-                cost_per_bbl=latest_rate,
+                cost_per_bbl=_recon_amount(latest_rate) if latest_rate is not None else None,
                 consumption_losses=_recon_amount(consumption),
                 reconciled_cost=day_reconciled,
                 cumulative_additions=_recon_amount(cumulative_additions),
@@ -1790,7 +1793,6 @@ def reconcile_well(
         extra_obm = sum((row.extra_obm_received for row in window), ZERO)
         actual = sum((row.actual_cost for row in window), ZERO)
         consumption = sum((row.consumption_losses for row in window), ZERO)
-        latest_rate = section_daily_rows[-1].cost_per_bbl if section_daily_rows else None
         total_mud = _recon_amount(opening_stock + extra_obm + additions)
         alpha = _recon_amount((opening_stock + extra_obm) * base_rate) if is_configured and not is_wbm else None
         beta = _recon_amount(alpha + actual) if alpha is not None else None
@@ -1837,7 +1839,7 @@ def reconcile_well(
             alpha=alpha,
             beta=beta,
             consumption_losses=_recon_amount(consumption),
-            cost_per_bbl=latest_rate,
+            cost_per_bbl=_recon_amount(latest_rate) if latest_rate is not None else None,
             reconciled_cost=reconciled,
             adjustment=(
                 _recon_amount(reconciled - actual)

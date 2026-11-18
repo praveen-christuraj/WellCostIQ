@@ -130,8 +130,15 @@ def downgrade():
         b.drop_constraint("fk_ops_job_report", type_="foreignkey")
         b.drop_column("report_id")
     resize_confidence(sa.Numeric(28, 10), sa.Numeric(5, 2))
-    op.drop_column("ops_daily_reports", "baseline_plan_id")
-    op.drop_column("ops_daily_reports", "completed_plan_item_id")
+    # SQLite cannot DROP a column referenced by its inline foreign key. The
+    # later decimal migration can reflect that FK as a table-level constraint.
+    if op.get_context().dialect.name == "sqlite":
+        with op.batch_alter_table("ops_daily_reports", recreate="always") as b:
+            b.drop_column("baseline_plan_id")
+            b.drop_column("completed_plan_item_id")
+    else:
+        op.drop_column("ops_daily_reports", "baseline_plan_id")
+        op.drop_column("ops_daily_reports", "completed_plan_item_id")
     op.drop_column("ops_activity_blocks", "classification_evidence")
     op.drop_table("ops_document_types")
     op.drop_table("ops_mark_rules")

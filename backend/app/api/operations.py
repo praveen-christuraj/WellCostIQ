@@ -1,5 +1,6 @@
 """Well Operations API — documents, reports, analytics, masters, plans."""
 
+import re
 from datetime import date
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -19,14 +20,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import defer
 
 from app.api.deps import Current, Db, granted, owner, require, require_any
+from app.domain.operations.default_codes import catalogue_rows, describe_code
+from app.domain.operations.study import timeline_study
+from app.schemas.ai import AiConnectionStatus
+from app.services import ollama
 from app.models.vendor_master import Vendor
 from app.schemas.operations import (
     OpsActivityCodeIn,
     OpsAgencyIn,
     OpsBulkActionOut,
     OpsBulkEdit,
+    OpsBriefRequest,
     OpsCauseIn,
     OpsDashboardOut,
+    OpsDefaultCodeOut,
     OpsDocumentEdit,
     OpsDocumentOut,
     OpsExportAudit,
@@ -40,28 +47,70 @@ from app.schemas.operations import (
     OpsOperationCodeIn,
     OpsPhaseCodeIn,
     OpsPlanItemIn,
+    OpsPlanStudyRequest,
     OpsPlanVersionIn,
     OpsPlanVersionOut,
     OpsReferenceOut,
+    OpsRegisterFolderOut,
     OpsRejectIn,
     OpsReportCreate,
     OpsReportOut,
     OpsReportSaveIn,
     OpsSettingsIn,
     OpsSettingsOut,
+    OpsStudyOut,
 )
 from app.services.audit import record as audit_record
 from app.services.operations import analytics as analytics_svc
 from app.services.operations import documents as docs_svc
 from app.services.operations import extraction as extract_svc
+from app.services.operations import guide as guide_svc
 from app.services.operations import masters as masters_svc
 from app.services.operations import plans as plans_svc
+from app.services.operations import register as register_svc
 from app.services.operations import reports as reports_svc
 from app.services.operations import scope as scope_svc
 from app.services.operations import settings as settings_svc
+from app.services.operations.study_ai import with_ai
 from app.services.operations.workbooks import timeline_preview
 
 router = APIRouter(prefix="/operations", tags=["Well Operations"])
+
+
+OpsRegister = Literal['plans', 'reports', 'documents']
+
+
+@router.get('/directory/{resource}', response_model=list[OpsRegisterFolderOut])
+def register_folders(resource: OpsRegister, db: Db, user: Current, deleted: bool = False):
+    require(register_svc.READ_PERMISSIONS[resource])(user)
+    return register_svc.folders(db, user.organization_id, resource, deleted)
+
+
+@router.get('/directory/{resource}/records', response_model=list[OpsPlanVersionOut | OpsReportOut | OpsDocumentOut])
+def register_records(
+    resource: OpsRegister, db: Db, user: Current,
+    rig: Annotated[str, Query(min_length=4, max_length=256)],
+    well: Annotated[str, Query(min_length=4, max_length=256)],
+    scope: Literal['', 'drilling', 'completion'] = '', deleted: bool = False,
+):
+    require(register_svc.READ_PERMISSIONS[resource])(user)
+    rows = register_svc.records(db, user.organization_id, resource, deleted, rig, well, scope)
+    if resource == 'plans':
+        return [_plan_out(row) for row in rows]
+    if resource == 'reports':
+        return [_to_report_out(row) for row in rows]
+    return rows
+
+
+@router.get('/guide', dependencies=[Depends(require_any('ops-report:read', 'ops-plan:read', 'ops-doc:read', 'ops-master:read'))])
+def guide(user: Current):
+    return guide_svc.manual({'*'} if owner(user) else granted(user))
+
+
+@router.get('/ai-status', response_model=AiConnectionStatus,
+            dependencies=[Depends(require_any('ops-report:read', 'ops-plan:read'))])
+def ai_status(probe: bool = False):
+    return ollama.check_status(probe=probe)
 
 
 # ---------------------------------------------------------------------------
@@ -269,10 +318,24 @@ def bulk_purge_documents(data: OpsIDs, request: Request, db: Db, user: Current):
 # ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
+def _block_source_codes(block):
+    # Older drafts only recorded the printed activity token in the evidence.
+    # Interpret it on read rather than re-extracting or rewriting reviewed logs.
+    activity = block.source_activity_code
+    if not activity and (match := re.search(r"(?:^| · )Code ([^·]+?)(?= · |$)", block.classification_evidence or '')):
+        activity = match[1].strip()
+    return {
+        'source_activity_code': activity,
+        'source_activity_label': describe_code(activity, 'OpenWells code token' if block.source_page else 'Activity'),
+        'source_operation_label': describe_code(block.source_operation_code, 'Operation'),
+        'source_phase_label': describe_code(block.phase_raw, 'OpenWells phase', 'Programme phase'),
+        'source_mark_label': describe_code(block.source_mark, 'Source mark', 'Allocation', 'Trouble / NPT'),
+        'source_cause_label': describe_code(block.source_cause_code, 'Cause', 'Trouble / NPT'),
+    }
+
+
 def _to_report_out(report):
     blocks = getattr(report, "_blocks", []) or []
-    # Enrich block with op/npt names if needed
-    # Already handled via service enrichment lazy
     unacc = getattr(report, "_unaccounted_minutes", 0) or 0
     total = getattr(report, "_total_block_minutes", 0) or sum(getattr(b, "duration_minutes", 0) for b in blocks)
     return {
@@ -340,6 +403,7 @@ def _to_report_out(report):
                 "ended_at": b.ended_at,
                 "duration_minutes": b.duration_minutes,
                 "phase_raw": b.phase_raw or "",
+                **_block_source_codes(b),
                 "operation_code_id": b.operation_code_id,
                 "activity_code_id": b.activity_code_id,
                 "activity_id": b.activity_id,
@@ -488,8 +552,8 @@ def bulk_edit(data: OpsBulkEdit, request: Request, db: Db, user: Current):
 
 
 @router.get("/reports/{report_id}", response_model=OpsReportOut, dependencies=[Depends(require("ops-report:read"))])
-def get_report(report_id: str, db: Db, user: Current):
-    r = reports_svc.get_report(db, user.organization_id, report_id)
+def get_report(report_id: str, db: Db, user: Current, include_deleted: bool = False):
+    r = reports_svc.get_report(db, user.organization_id, report_id, include_deleted=include_deleted)
     return _to_report_out(r)
 
 
@@ -549,8 +613,16 @@ def reject_report(report_id: str, data: OpsRejectIn, request: Request, db: Db, u
 
 
 @router.get("/reports/{report_id}/brief", dependencies=[Depends(require("ops-report:read"))])
-def get_brief(report_id: str, db: Db, user: Current):
-    return reports_svc.brief_for_report(db, user.organization_id, report_id)
+def get_brief(report_id: str, db: Db, user: Current, include_deleted: bool = False):
+    return reports_svc.brief_for_report(db, user.organization_id, report_id, include_deleted=include_deleted)
+
+
+@router.post('/reports/{report_id}/brief', response_model=OpsStudyOut, dependencies=[Depends(require('ops-report:read'))])
+def review_brief(report_id: str, data: OpsBriefRequest, request: Request, db: Db, user: Current,
+                 include_deleted: bool = False):
+    result = reports_svc.brief_for_report(db, user.organization_id, report_id, include_deleted=include_deleted)
+    return with_ai({'summary': result['summary']}, db, user, request, entity_type='ops_report',
+                   entity_id=report_id, use_ai=data.use_ai)
 
 
 @router.post(
@@ -773,6 +845,14 @@ def _master_kind(kind: str) -> str:
     return kind
 
 
+@router.get(
+    '/default-codes', response_model=list[OpsDefaultCodeOut],
+    dependencies=[Depends(require('ops-master:read'))],
+)
+def default_codes():
+    return catalogue_rows()
+
+
 @router.get("/masters/{kind}", dependencies=[Depends(require("ops-master:read"))])
 def list_masters(kind: str, db: Db, user: Current, include_deleted: bool = False):
     kind = _master_kind(kind)
@@ -881,9 +961,26 @@ def _plan_out(r):
     }
 
 
+@router.get('/plans/{plan_id}', response_model=OpsPlanVersionOut, dependencies=[Depends(require('ops-plan:read'))])
+def get_plan(plan_id: str, db: Db, user: Current):
+    return _plan_out(plans_svc.get_plan(db, user.organization_id, plan_id, include_deleted=True))
+
+
 @router.post("/plans", response_model=OpsPlanVersionOut, dependencies=[Depends(require("ops-plan:create"))])
 def create_plan(data: OpsPlanVersionIn, request: Request, db: Db, user: Current):
     return _plan_out(plans_svc.create_plan(db, user.organization_id, data, user, request))
+
+
+@router.post('/plans/{plan_id}/study', response_model=OpsStudyOut, dependencies=[Depends(require('ops-plan:read'))])
+def study_plan(plan_id: str, data: OpsPlanStudyRequest, request: Request, db: Db, user: Current):
+    plan = plans_svc.get_plan(db, user.organization_id, plan_id, include_deleted=True)
+    if data.items is not None:
+        require('ops-plan:update')(user)
+        if plan.is_deleted or plan.status != 'draft':
+            raise HTTPException(409, 'Preview rows can only be studied on a draft timeline.')
+    items = data.items if data.items is not None else plan._items
+    result = timeline_study(items, has_start=plan.planned_start_at is not None, scope=plan.scope)
+    return with_ai(result, db, user, request, entity_type='ops_plan', entity_id=plan_id, use_ai=data.use_ai)
 
 
 @router.post("/plans/{plan_id}/import-preview", dependencies=[Depends(require("ops-plan:import"))])
@@ -953,8 +1050,8 @@ def restore_plan(plan_id: str, db: Db, user: Current, request: Request):
     status_code=204,
     dependencies=[Depends(require("ops-report:read")), Depends(require("ops-report:print"))],
 )
-def print_report(report_id: str, db: Db, user: Current, request: Request):
-    report = reports_svc.get_report(db, user.organization_id, report_id)
+def print_report(report_id: str, db: Db, user: Current, request: Request, include_deleted: bool = False):
+    report = reports_svc.get_report(db, user.organization_id, report_id, include_deleted=include_deleted)
     audit_record(
         db,
         organization_id=user.organization_id,

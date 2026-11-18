@@ -7,18 +7,25 @@ from io import BytesIO
 
 from pypdf import PdfReader
 
-from app.core.units import depth_to_meters
+from app.core.precision import rounded
 from app.domain.operations.normalise import parse_date_flexible
-from app.services.operations.workbooks import number
+from app.services.operations.workbooks import measured_depth, number
 
 NUM = r"[+-]?\d[\d,]*(?:\.\d+)?"
 CLOCK = r"(?:[01]?\d|2[0-3]):[0-5]\d|24:00"
 TIME_ROW = re.compile(rf"^\s*({CLOCK})\s+({CLOCK})\s+(.*)$")
-# Multiple spaces separate phase, activity code and classification ("EVAL 1" is one phase).
+# PDF text layout uses columns separated by runs of spaces, including after
+# multiword phases such as EVAL 1. A bracketed activity is not a class mark.
 DETAIL = re.compile(
-    rf"^({NUM})\s+(?:([A-Za-z][\w-]*(?: \d+)?)\s{{2,}})?(?:(\d{{1,2}})\s{{2,}})?(?:([PUD])\s+)?(?:({NUM})\s{{2,}}({NUM})(?:\s+|$))?(.*)$"
+    rf"^({NUM})(?=\s|$)\s*(?:([A-Za-z][\w/-]*(?: [\w/-]+)*)\s{{2,}})?"
+    rf"(?:(\d{{1,3}}|\[\s*\d{{1,3}}\s*\]|\(\s*\d{{1,3}}\s*\))\s{{2,}})?"
+    rf"(?:(P|U|D|PT|UPA|NPT|SP|N|[TX][A-Z]\d{{2}})\s{{2,}})?"
+    rf"(?:({NUM})\s{{2,}}({NUM})(?:\s+|$))?(.*)$",
+    re.IGNORECASE,
 )
-SECTION = re.compile(r"^\s*\d+(?:\.\d+)?\s{2,}([A-Za-z].*)$")
+SECTION = re.compile(r"^\s{0,12}\d+(?:\.\d+)?\s{2,}([A-Za-z].*)$")
+LOG_HEADER = re.compile(r"^\s*From\s+To\s+Dur(?:ation)?\.?\s+.*?\b(MD from|Depth from)\b.*\bOperation\b", re.I)
+FOOTER = re.compile(r"(?:OpenWells|Page \d+(?: of \d+)?|\w+ \d{1,2}, \d{4} at .*)", re.I)
 
 
 def clean(text):
@@ -45,7 +52,7 @@ def parse_pdf(content, fallback_day=None):
 
     def measured(label):
         m = re.search(rf"\b{label}[ \t]+({NUM})\s*\((m|ft)\)", header, re.IGNORECASE)
-        return depth_to_meters(number(m[1]), m[2]) if m else None
+        return measured_depth(m[1], m[2]) if m else None
 
     source_date = parse_date_flexible(find(r"Report date[ \t]*:?[ \t]+([\d/.-]+)"))
     day = source_date or fallback_day
@@ -77,6 +84,7 @@ def parse_pdf(content, fallback_day=None):
     }
     unit = "m"
     block = None
+    continuation_start = 0
     for page_no, text in enumerate(pages, 1):
         mode = ""
         survey_unit = "m"
@@ -86,9 +94,13 @@ def parse_pdf(content, fallback_day=None):
             if heading:
                 name = clean(heading[1]).lower()
                 mode = "survey" if name.startswith("surveys") else ""
+                block = None
                 continue
-            if re.search(r"^\s*From\s+To\s+Dur\.", line, re.IGNORECASE) and "Operation" in line:
+            if (log_header := LOG_HEADER.match(line)) or (
+                re.search(r"^\s*From\s+To\s+Dur\.", line, re.I) and 'Operation' in line
+            ):
                 mode = "log"
+                continuation_start = log_header.start(1) if log_header else 35
                 continue
             if re.fullmatch(
                 r"\s*(?:From|Start(?: time)?)\s+(?:To|End(?: time)?)\s+(?:Activity|Operation|Description|Narrative)\s*",
@@ -125,17 +137,17 @@ def parse_pdf(content, fallback_day=None):
                     dogleg_per_100ft = True
                 vals = line.split()
                 if len(vals) >= 8 and all(number(v) is not None for v in vals[:8]):
-                    md, inc, azi, tvd, ns, ew, vs, dls = map(number, vals[:8])
+                    md, inc, azi, tvd, ns, ew, vs, dls = vals[:8]
                     result["surveys"].append(
                         {
-                            "md_m": depth_to_meters(md, survey_unit),
-                            "inc_deg": inc,
-                            "azi_deg": azi,
-                            "tvd_m": depth_to_meters(tvd, survey_unit),
-                            "ns_m": depth_to_meters(ns, survey_unit),
-                            "ew_m": depth_to_meters(ew, survey_unit),
-                            "vsec_m": depth_to_meters(vs, survey_unit),
-                            "dls_deg_per_30m": (dls * Decimal("0.9843") if dogleg_per_100ft else dls),
+                            "md_m": measured_depth(md, survey_unit),
+                            "inc_deg": number(inc),
+                            "azi_deg": number(azi),
+                            "tvd_m": measured_depth(tvd, survey_unit),
+                            "ns_m": measured_depth(ns, survey_unit),
+                            "ew_m": measured_depth(ew, survey_unit),
+                            "vsec_m": measured_depth(vs, survey_unit),
+                            "dls_deg_per_30m": rounded(Decimal(dls.replace(",", "")) * (Decimal("0.9843") if dogleg_per_100ft else Decimal(1))),
                             "source": "PDF",
                             "tool": " ".join(vals[8:])[:100],
                         }
@@ -152,31 +164,39 @@ def parse_pdf(content, fallback_day=None):
                 detail = DETAIL.match(rest)
                 block = None
                 # Next-day lookahead commonly prints 23:59 → 06:00 with blank/zero duration.
-                if not detail or number(detail[1]) <= 0:
+                if not detail or (number(detail[1], precision=False) or 0) <= 0:
                     result["warnings"].append(
                         f"Page {page_no}: {a}–{b} has no positive printed duration; excluded from this day."
                     )
                     continue
                 hours, phase, code, mark, d1, d2, narr = detail.groups()
                 start, end = at(a), at(b)
-                if end <= start:
+                if end == start:
+                    result['warnings'].append(f'Page {page_no}: {a}–{b} has identical clocks; verify it in the source.')
+                    continue
+                if end < start:
                     end += timedelta(days=1)
+                if not narr.strip() and not (phase or code):
+                    result['warnings'].append(f'Page {page_no}: {a}–{b} has no readable operation. Check the source.')
                 block = {
                     "start": start,
                     "end": end,
                     "phase_raw": phase or "",
                     "code": code or "",
                     "mark": mark or "",
-                    "depth_from_m": depth_to_meters(number(d1), unit),
-                    "depth_to_m": depth_to_meters(number(d2), unit),
-                    "narrative": clean(narr),
+                    "depth_from_m": measured_depth(d1, unit),
+                    "depth_to_m": measured_depth(d2, unit),
+                    "narrative": clean(narr)[:5000],
                     "source_page": page_no,
                     "source": f"PDF page {page_no}",
                 }
                 result["blocks"].append(block)
                 if abs((end - start).total_seconds() / 3600 - float(hours)) > 0.035:
                     result["warnings"].append(f"Page {page_no}: verify printed duration {hours} h against {a}–{b}.")
-            elif block is not None and line.startswith(" " * 35) and len(block["narrative"]) < 5000:
+            elif (
+                block is not None and line.strip() and line.startswith(' ' * continuation_start)
+                and not FOOTER.fullmatch(clean(line)) and len(block['narrative']) < 5000
+            ):
                 block["narrative"] = (block["narrative"] + " " + clean(line)).strip()[:5000]
     if not result["blocks"] and not result["operation_summary"]:
         raise ValueError(

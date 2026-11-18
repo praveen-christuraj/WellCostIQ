@@ -8,10 +8,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.domain.operations.classify import build_brief
+from app.core.precision import rounded
 from app.domain.operations.durations import duration_minutes as calc_duration
 from app.domain.operations.durations import resolve_period, utc
 from app.domain.operations.metrics import compute_rop, penetration, period_balance
+from app.domain.operations.study import daily_brief
 from app.models import User
 from app.models.master_data import Activity
 from app.models.operations import (
@@ -135,7 +136,7 @@ def _compute_metrics(db: Session, report: OpsDailyReport, blocks: list[OpsActivi
     metric.footage_m = footage
     metric.rop_m_per_hr = compute_rop(footage, rotating_hours)
     metric.npt_block_count = sum(1 for b in blocks if b.classification == "NPT")
-    metric.avg_confidence = Decimal(str(round(avg_conf, 2)))
+    metric.avg_confidence = rounded(Decimal(str(avg_conf)))
     metric.review_state = report.status
     metric.computed_at = datetime.now(UTC)
 
@@ -781,8 +782,8 @@ def purge_reports(db: Session, organization_id: str, ids: list[str], user: User,
     return {"affected_count": affected}
 
 
-def brief_for_report(db: Session, organization_id: str, report_id: str):
-    report = get_report(db, organization_id, report_id)
+def brief_for_report(db: Session, organization_id: str, report_id: str, *, include_deleted=False):
+    report = get_report(db, organization_id, report_id, include_deleted=include_deleted)
     blocks = getattr(report, "_blocks", [])
     total = sum(b.duration_minutes for b in blocks)
     planned = sum(b.duration_minutes for b in blocks if b.classification == "Planned")
@@ -796,7 +797,7 @@ def brief_for_report(db: Session, organization_id: str, report_id: str):
             "responsible_party": b.responsible_party,
         }
         for b in blocks
-        if b.classification == "NPT"
+        if b.classification == "NPT" or b.allocation == "NPT"
     ]
     time_split = {
         "planned_minutes": planned,
@@ -804,36 +805,12 @@ def brief_for_report(db: Session, organization_id: str, report_id: str):
         "npt_minutes": npt,
         "unaccounted_minutes": getattr(report, "_unaccounted_minutes", 0),
         "total_minutes": total,
-        "avg_confidence": str(round(float(sum(b.confidence for b in blocks) / len(blocks)) if blocks else 0, 2)),
+        "avg_confidence": str(rounded(sum((b.confidence for b in blocks), Decimal(0)) / len(blocks))) if blocks else "0.000",
     }
     footage, rotating_hours = penetration(report, blocks)
     rop = compute_rop(footage, rotating_hours)
 
-    def fmt(value):
-        return f"{value:.2f}" if value is not None else "—"
-
-    text = build_brief(
-        report.well_code_snapshot,
-        report.well_name_snapshot,
-        str(report.report_date),
-        report.day_number,
-        fmt(report.depth_start_m),
-        fmt(report.depth_end_m),
-        fmt(footage) + " m",
-        fmt(rop) + " m/h",
-        [
-            {"classification": b.classification, "narrative": b.narrative, "duration_minutes": b.duration_minutes}
-            for b in blocks
-        ],
-        time_split,
-        npt_items,
-    )
-    if report.report_type == "DMR" and not blocks:
-        text = f"{report.well_code_snapshot} · {report.report_date} · Mud measurements only. No activity hours allocated."
-    if report.operation_summary:
-        text += "\nSummary: " + report.operation_summary[:500]
-    if report.forward_plan:
-        text += "\nNext: " + report.forward_plan[:240]
+    text = daily_brief(report, blocks, footage, rotating_hours, rop)
     return {
         "report_id": report.id,
         "well_code": report.well_code_snapshot,
@@ -847,8 +824,8 @@ def brief_for_report(db: Session, organization_id: str, report_id: str):
             "depth_start_m": str(report.depth_start_m) if report.depth_start_m is not None else None,
             "depth_end_m": str(report.depth_end_m) if report.depth_end_m is not None else None,
             "footage_m": str(footage) if footage is not None else None,
-            "rotating_hours": rotating_hours,
-            "rop_m_per_hr": rop,
+            "rotating_hours": str(rounded(rotating_hours)) if rotating_hours is not None else None,
+            "rop_m_per_hr": str(rop) if rop is not None else None,
         },
         "data_quality": {
             "blocks": len(blocks),

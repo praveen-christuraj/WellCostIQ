@@ -54,6 +54,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.rig_well import now, uid
 
@@ -244,14 +245,14 @@ class FuelCostEntry(Base):
 
     # AGO burnt by the rig engines themselves.
     rig_engine_consumption: Mapped[Decimal] = mapped_column(
-        Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False
+        Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False
     )
     rig_engine_remarks: Mapped[str] = mapped_column(
         String(FUEL_MAX_REMARKS), default="", server_default="", nullable=False
     )
     # Rig Saving (litres): AGO saved through usage of gas; never joins the AGO balance.
     gas_consumption: Mapped[Decimal] = mapped_column(
-        Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False
+        Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False
     )
     gas_remarks: Mapped[str] = mapped_column(
         String(FUEL_MAX_REMARKS), default="", server_default="", nullable=False
@@ -259,7 +260,7 @@ class FuelCostEntry(Base):
 
     # Physical anchor: set on the rig's first day or through an authorised
     # override; otherwise the previous day's actual closing carries in.
-    opening_stock: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    opening_stock: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     opening_overridden: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
@@ -268,14 +269,14 @@ class FuelCostEntry(Base):
     )
 
     receipt_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False
+        Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False
     )
     receipt_remarks: Mapped[str] = mapped_column(
         String(FUEL_MAX_REMARKS), default="", server_default="", nullable=False
     )
 
     # Physical count at the end of the day; empty accepts the book closing.
-    closing_stock: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    closing_stock: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     closing_remarks: Mapped[str] = mapped_column(
         String(FUEL_MAX_REMARKS), default="", server_default="", nullable=False
     )
@@ -350,7 +351,7 @@ class FuelCostCompanyLine(Base):
         String(FUEL_MAX_CATEGORY_NAME), default="", server_default="", nullable=False
     )
     litres: Mapped[Decimal] = mapped_column(
-        Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False
+        Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False
     )
     remarks: Mapped[str] = mapped_column(
         String(FUEL_MAX_REMARKS), default="", server_default="", nullable=False

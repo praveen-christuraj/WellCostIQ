@@ -1,5 +1,11 @@
 # Durable project memory
 
+## Operations review and shared three-place precision (2026-11-18)
+
+- API `0.17.0`; Alembic `c1d9e5a4f702` after `b4d621f389aa`. `Decimal3`/`Decimal3Days`, `DECIMAL_QUANT` and `Numeric(28, 3)` supersede the historical ten-place notes below. Preserve internal calculation precision until a result is priced or displayed. Back up first: scale reduction rounds snapshots, rejects an FX factor or required positive invoice input that would become zero, and is not reversible by downgrade. Modern SQLite needs a batch drop for the prior review migration's inline report FKs on deep downgrade.
+- Well Operations registers open on rig folders, then well folders. Directory endpoints return counts then scoped summaries; get timeline/report detail on demand. Report details stay directly linkable, open as full-width review/edit dialogs, and accept source suggestions only after explicit confirmation. Deleted daily reports can be opened read-only from their scoped folder; reads and PDF audit opt in with `include_deleted=true`, while edit and workflow endpoints still require an active record.
+- `default_codes.py` contains code reference data only. Workbook numbers and observed OpenWells tokens are separate families; never infer universal code semantics, seed identities or treat a printed mark as approval. Source fields remain attached to extracted blocks even after review. `study.py` builds rule-based daily and timeline briefs. Opt-in Ollama adds separate narrative wording only; `guide.py` supplies role-filtered topics and code lookups. See `docs/operations/daily-workflow.md`.
+
 ## Well Operations — reviewed daily workflow (2026-11-17)
 
 - **Current implementation supersedes the plan-only notes below.** See `docs/operations/daily-workflow.md` for the operator and deployment guide. API 0.16.0; Alembic `b4d621f389aa` after `830ae530918e`. `/business-dashboard` is **Costing Dashboard** (same costing API). `/operations` is **Operations Dashboard** (`ops-dashboard:read`). No new costing dependency or module entitlement switch. Assign tab/action capabilities independently; new grants backfill owners only. Use `/operations/scope-reference` for rig + configured well scopes/document types; report reference includes active workspace vendor names and Operations codes, not costing data.

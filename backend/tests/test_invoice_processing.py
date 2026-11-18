@@ -259,7 +259,7 @@ def test_idvs_calculations_workflow_documents_dashboard_and_tenant_isolation():
         assert data["total_invoices"] == 1 and data["paid_count"] == 1
         assert data["jv_block_count"] == 1 and data["attachment_count"] == 2
         assert data["currency_totals"][0]["currency_code"] == "USD"
-        assert data["vendor_rows"][0]["verified_total"] == "184.5000000000"
+        assert data["vendor_rows"][0]["verified_total"] == "184.500"
         assert data["block_rows"][0]["block_code"] == "OML-01"
         assert len(data["ageing_rows"]) == 5
         assert {row["currency_code"] for row in data["ageing_rows"]} == {"USD"}
@@ -276,6 +276,26 @@ def test_idvs_calculations_workflow_documents_dashboard_and_tenant_isolation():
         assert deleted_detail.status_code == 200 and deleted_detail.json()["is_deleted"] is True
         assert client.delete(f"/api/v1/invoice-processing/attachments/{spreadsheet.json()[0]['id']}", headers=north).status_code == 409
         assert client.post("/api/v1/invoice-processing/invoices/bulk-restore", headers=north, json={"ids": [row["id"]]}).status_code == 200
+
+
+def test_inverse_payment_split_rate_that_would_round_to_zero_is_rejected():
+    with TestClient(app) as client:
+        headers = login(client)
+        vendor, order, block, rig, well = create_commercial_scope(client, headers)
+        location, category, term = create_configuration(client, headers, vendor, block)
+        rate_url = "/api/v1/invoice-processing/config/exchange-rates"
+        rate_id = client.get("/api/v1/invoice-processing/configuration", headers=headers).json()["exchange_rates"][0]["id"]
+        rate = {"base_currency": "USD", "quote_currency": "NGN", "rate": "2000.001", "is_active": True}
+        assert client.patch(f"{rate_url}/{rate_id}", headers=headers, json=rate).is_success
+        payload = invoice_payload(vendor, order, block, rig, well, location, category, term)
+        payload.update(currency_code="NGN", payment_splits=[{"currency_code": "USD", "percentage": "100"}])
+        invoice_url = "/api/v1/invoice-processing/invoices"
+        rejected = client.post(invoice_url, headers=headers, json=payload)
+        assert rejected.status_code == 422 and "too small for three decimal places" in rejected.json()["detail"]
+        assert client.patch(f"{rate_url}/{rate_id}", headers=headers, json={**rate, "rate": "2000"}).is_success
+        accepted = client.post(invoice_url, headers=headers, json=payload)
+        assert accepted.status_code == 201, accepted.text
+        assert Decimal(accepted.json()["payment_splits"][0]["exchange_rate"]) == Decimal("0.001")
 
 
 def test_multiline_import_lifecycle_and_row_errors():

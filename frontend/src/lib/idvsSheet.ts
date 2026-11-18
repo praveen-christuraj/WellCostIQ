@@ -163,7 +163,7 @@ export function buildIdvsSheet(invoice: InvoiceDetail): IdvsSheet {
       const sign = tax.direction === 'addition' ? 1 : -1
       const invoiceAmount = sign * numeric(tax.invoice_amount)
       const verifiedAmount = sign * numeric(tax.verified_amount)
-      const rate = numeric(tax.rate_percent).toLocaleString(undefined, { maximumFractionDigits: 4 })
+      const rate = numeric(tax.rate_percent).toLocaleString(undefined, { maximumFractionDigits: 3 })
       return summaryRow('summary', `${tax.tax_name} @ ${rate}%${tax.direction === 'deduction' ? ' (deduction)' : ''}`, invoiceAmount, verifiedAmount, invoiceAmount - verifiedAmount)
     }),
     summaryRow('total', `Total (${currency})`, numeric(invoice.invoice_total), numeric(invoice.verified_total), numeric(invoice.difference_amount), true),
@@ -172,7 +172,7 @@ export function buildIdvsSheet(invoice: InvoiceDetail): IdvsSheet {
     ...invoice.payment_splits.map(split => {
       const rate = numeric(split.exchange_rate)
       const share = numeric(split.percentage) / 100
-      const label = `${numeric(split.percentage).toLocaleString(undefined, { maximumFractionDigits: 4 })}% ${split.currency_code}${split.currency_code !== currency ? ` (FX ${rate.toLocaleString(undefined, { maximumFractionDigits: 10 })})` : ''}`
+      const label = `${numeric(split.percentage).toLocaleString(undefined, { maximumFractionDigits: 3 })}% ${split.currency_code}${split.currency_code !== currency ? ` (FX ${rate.toLocaleString(undefined, { maximumFractionDigits: 3 })})` : ''}`
       const invoiceAmount = numeric(invoice.invoice_total) * share * rate
       const verifiedAmount = numeric(split.amount)
       return summaryRow('summary', label, invoiceAmount, verifiedAmount, invoiceAmount - verifiedAmount)

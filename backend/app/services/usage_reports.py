@@ -25,6 +25,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import select, union_all
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.precision import DECIMAL_QUANT
 from app.models.rig_well import WELL_TRACKING_STATUSES
 from app.models import (
     Afe,
@@ -71,8 +72,8 @@ from app.services.operational_time import (
     record_service_allocation,
 )
 
-MONEY_QUANT = Decimal("0.01")
-QTY_QUANT = Decimal("0.0001")
+MONEY_QUANT = DECIMAL_QUANT
+QTY_QUANT = DECIMAL_QUANT
 ZERO = Decimal("0")
 WELL_LEVEL_KEY = "__well__"
 WELL_LEVEL_LABEL = "Well level (no hole section)"

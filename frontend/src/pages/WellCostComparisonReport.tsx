@@ -52,7 +52,7 @@ function amountText(amounts: CurrencyAmounts, hasRecords: boolean, pending = fal
   if (!amounts.size) return '—'
   return [...amounts.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([currency, value]) => `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+    .map(([currency, value]) => `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`)
     .join(' · ')
 }
 
@@ -180,7 +180,7 @@ export default function WellCostComparisonReport() {
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([currency, value]) => {
             const sign = value > 0 ? '+' : ''
-            return `${currency} ${sign}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            return `${currency} ${sign}${value.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
           })
           .join(' · ')
         : '—'
@@ -201,7 +201,7 @@ export default function WellCostComparisonReport() {
         // is itself part of the actual spend.
         const actual = actualAmounts.get(currency) ?? 0
         const lihInCurrency = lihAmounts.get(currency) ?? 0
-        balance = `${currency} ${(planned - lihInCurrency - actual).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        balance = `${currency} ${(planned - lihInCurrency - actual).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
         incurred = planned > 0 ? `${((actual + lihInCurrency) / planned * 100).toFixed(1)}%` : '—'
       }
 
@@ -225,7 +225,7 @@ export default function WellCostComparisonReport() {
         actual_including_lih: canReadDaily ? actualIncludingLih : 'Not available',
         actual_usd: canReadDaily
           ? entries.length > 0
-            ? `USD ${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            ? `USD ${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
             : '—'
           : 'Not available',
         afe_balance: canReadAfe && canReadDaily ? balance : 'Not available',
@@ -290,11 +290,11 @@ export default function WellCostComparisonReport() {
     { headerName: 'ACTUAL / AFE %', field: 'costs_incurred', minWidth: 155, headerTooltip: 'Actual cost plus LIH as a percentage of the adjusted AFE amount: (Actual / AFE) × 100' },
     { headerName: 'PLANNED DEPTH (m)', field: 'planned_depth_m', minWidth: 160 },
     { headerName: 'ACTUAL DEPTH (m)', field: 'actual_depth_m', minWidth: 155 },
-    { headerName: 'PLANNED DAYS', field: 'planned_days', minWidth: 135, headerTooltip: 'Original planned days', valueFormatter: params => Number(params.value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 }) },
+    { headerName: 'PLANNED DAYS', field: 'planned_days', minWidth: 135, headerTooltip: 'Original planned days', valueFormatter: params => Number(params.value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 3 }) },
     {
       headerName: 'ADJ PLANNED DAYS', field: 'adjusted_planned_days', minWidth: 160,
       headerTooltip: 'Adjusted planned days from the approved plan adjustment',
-      valueFormatter: params => params.value == null ? '—' : Number(params.value).toLocaleString(undefined, { maximumFractionDigits: 2 }),
+      valueFormatter: params => params.value == null ? '—' : Number(params.value).toLocaleString(undefined, { maximumFractionDigits: 3 }),
     },
     {
       headerName: 'ACTUAL DAYS', field: 'actual_days', minWidth: 145,

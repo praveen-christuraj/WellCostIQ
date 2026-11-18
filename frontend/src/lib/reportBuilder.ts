@@ -228,7 +228,7 @@ export function emptyColumn(index = 0): ReportColumn {
     related_key_column: '',
     formula: '',
     data_type: 'text',
-    decimals: 2,
+    decimals: 3,
     prefix: '',
     suffix: '',
     aggregate: 'NONE',

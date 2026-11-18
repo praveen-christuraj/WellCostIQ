@@ -22,7 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.precision import Decimal10
+from app.core.precision import Decimal3
 
 # One rig's day is generous at a billion litres; the ceiling only stops absurd input.
 MAX_LITRES = Decimal("1000000000")
@@ -234,7 +234,7 @@ class FuelCostCompanyLineIn(_Strict):
     id: str | None = Field(default=None, max_length=36)
     company_id: str = Field(min_length=1, max_length=36)
     category_id: str = Field(default="", max_length=36)
-    litres: Decimal10 = Field(ge=0, le=MAX_LITRES)
+    litres: Decimal3 = Field(ge=0, le=MAX_LITRES)
     remarks: str = Field(default="", max_length=MAX_REMARKS)
     source: Literal["manual", "import"] = "manual"
 
@@ -259,23 +259,23 @@ class FuelCostEntrySave(_Strict):
 
     rig_id: str = Field(min_length=1, max_length=36)
     cost_date: date
-    rig_engine_consumption: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_LITRES)
+    rig_engine_consumption: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_LITRES)
     rig_engine_remarks: str = Field(default="", max_length=MAX_REMARKS)
     # Rig Saving (litres): AGO saved through gas usage. Accepted via either
     # ``rig_saving_litres`` or the legacy ``gas_consumption`` key.
-    gas_consumption: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_LITRES)
+    gas_consumption: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_LITRES)
     gas_remarks: str = Field(default="", max_length=MAX_REMARKS)
-    rig_saving_litres: Decimal10 | None = Field(default=None, ge=0, le=MAX_LITRES)
+    rig_saving_litres: Decimal3 | None = Field(default=None, ge=0, le=MAX_LITRES)
     rig_saving_remarks: str | None = Field(default=None, max_length=MAX_REMARKS)
-    opening_stock: Decimal10 | None = Field(default=None, ge=0, le=MAX_LITRES)
+    opening_stock: Decimal3 | None = Field(default=None, ge=0, le=MAX_LITRES)
     opening_overridden: bool = False
     # Returns an ordinary day to the carried-forward opening. Ignored on the
     # rig's first day (its opening is the anchor the chain starts from).
     clear_opening_override: bool = False
     opening_remarks: str = Field(default="", max_length=MAX_REMARKS)
-    receipt_quantity: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_LITRES)
+    receipt_quantity: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_LITRES)
     receipt_remarks: str = Field(default="", max_length=MAX_REMARKS)
-    closing_stock: Decimal10 | None = Field(default=None, ge=0, le=MAX_LITRES)
+    closing_stock: Decimal3 | None = Field(default=None, ge=0, le=MAX_LITRES)
     closing_remarks: str = Field(default="", max_length=MAX_REMARKS)
     remarks: str = Field(default="", max_length=MAX_DAY_REMARKS)
     lines: list[FuelCostCompanyLineIn] = Field(default_factory=list, max_length=MAX_LINES_PER_DAY)
@@ -319,7 +319,7 @@ class FuelCostOpeningStockUpdate(_Strict):
     from — so it cannot be cleared.
     """
 
-    opening_stock: Decimal10 | None = Field(default=None, ge=0, le=MAX_LITRES)
+    opening_stock: Decimal3 | None = Field(default=None, ge=0, le=MAX_LITRES)
     remarks: str = Field(default="", max_length=MAX_REMARKS)
     clear_override: bool = False
 

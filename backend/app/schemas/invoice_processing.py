@@ -6,14 +6,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.precision import Decimal10, Decimal10Days
+from app.core.precision import Decimal3, Decimal3Days
 
 TaxDirection = Literal["addition", "deduction"]
 BlockCategory = Literal["own", "jv"]
 SignatureRole = Literal["prepared", "checked", "verified", "approved"]
 WorkflowAction = Literal["submit", "send_to_accounts", "receive_epicor", "approve_epicor"]
 ExportFormat = Literal["csv", "xlsx", "pdf"]
-MAX_MONEY = Decimal("9999999999999999.9999999999")
+MAX_MONEY = Decimal("9999999999999999.999")
 MAX_DAYS = Decimal("100000")
 
 
@@ -64,7 +64,7 @@ class InvoiceConfigImport(_Strict):
 
 class InvoicePaymentTermSplitIn(_Strict):
     currency_code: str = Field(min_length=2, max_length=10)
-    percentage: Decimal10 = Field(gt=0, le=100)
+    percentage: Decimal3 = Field(gt=0, le=100)
 
     @field_validator("currency_code", mode="before")
     @classmethod
@@ -104,7 +104,7 @@ class InvoicePaymentTermIn(_Strict):
 class InvoiceTaxConfigurationIn(_Strict):
     tax_code: str = Field(min_length=1, max_length=50)
     tax_name: str = Field(min_length=1, max_length=150)
-    rate_percent: Decimal10 = Field(ge=0, le=100)
+    rate_percent: Decimal3 = Field(ge=0, le=100)
     direction: TaxDirection = "deduction"
     # Report and register switches. A tax that is not report-visible is stored on
     # the IDVS and in the register but never printed or added to the report total.
@@ -129,7 +129,7 @@ class InvoiceTaxConfigurationIn(_Strict):
 class InvoiceExchangeRateIn(_Strict):
     base_currency: str = Field(min_length=2, max_length=10)
     quote_currency: str = Field(min_length=2, max_length=10)
-    rate: Decimal10 = Field(gt=0)
+    rate: Decimal3 = Field(gt=0)
     description: str = Field(default="", max_length=500)
     is_active: bool = True
 
@@ -334,13 +334,13 @@ class InvoiceConfiguration(_Strict):
 
 class InvoiceLineIn(_Strict):
     description: str = Field(min_length=1, max_length=2000)
-    invoice_quantity: Decimal10 = Field(gt=0, le=MAX_MONEY)
+    invoice_quantity: Decimal3 = Field(gt=0, le=MAX_MONEY)
     # Days are used only when the IDVS enables the day count; otherwise they are stored as 1.
-    invoice_days: Decimal10Days | None = Field(default=None, gt=0, le=MAX_DAYS)
-    invoice_unit_price: Decimal10 = Field(ge=0, le=MAX_MONEY)
-    verified_quantity: Decimal10 | None = Field(default=None, ge=0, le=MAX_MONEY)
-    verified_days: Decimal10Days | None = Field(default=None, ge=0, le=MAX_DAYS)
-    verified_unit_price: Decimal10 | None = Field(default=None, ge=0, le=MAX_MONEY)
+    invoice_days: Decimal3Days | None = Field(default=None, gt=0, le=MAX_DAYS)
+    invoice_unit_price: Decimal3 = Field(ge=0, le=MAX_MONEY)
+    verified_quantity: Decimal3 | None = Field(default=None, ge=0, le=MAX_MONEY)
+    verified_days: Decimal3Days | None = Field(default=None, ge=0, le=MAX_DAYS)
+    verified_unit_price: Decimal3 | None = Field(default=None, ge=0, le=MAX_MONEY)
     remarks: str = Field(default="", max_length=1000)
 
     @field_validator("description", "remarks", mode="before")
@@ -357,7 +357,7 @@ class InvoiceSignatureIn(_Strict):
 class InvoiceTaxIn(_Strict):
     tax_configuration_id: str | None = None
     tax_name: str = Field(default="", max_length=150)
-    rate_percent: Decimal10 | None = Field(default=None, ge=0, le=100)
+    rate_percent: Decimal3 | None = Field(default=None, ge=0, le=100)
     direction: TaxDirection | None = None
     # Omitted values follow the linked configuration; a manual tax defaults to both on.
     is_report_visible: bool | None = None
@@ -371,8 +371,8 @@ class InvoiceTaxIn(_Strict):
 
 class InvoicePaymentSplitIn(_Strict):
     currency_code: str = Field(min_length=2, max_length=10)
-    percentage: Decimal10 = Field(gt=0, le=100)
-    exchange_rate: Decimal10 | None = Field(default=None, gt=0)
+    percentage: Decimal3 = Field(gt=0, le=100)
+    exchange_rate: Decimal3 | None = Field(default=None, gt=0)
 
     @field_validator("currency_code", mode="before")
     @classmethod
@@ -405,8 +405,8 @@ class InvoiceSave(_Strict):
     currency_code: str = Field(min_length=2, max_length=10)
     payment_term_id: str | None = None
     payment_tenure_days: int | None = Field(default=None, ge=0, le=3650)
-    disallowed_amount: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_MONEY)
-    advance_amount: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_MONEY)
+    disallowed_amount: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_MONEY)
+    advance_amount: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_MONEY)
     remarks: str = Field(default="", max_length=1000)
     day_count_enabled: bool = False
     # Blank signing space printed between the sign-off roles and the names, in millimetres.

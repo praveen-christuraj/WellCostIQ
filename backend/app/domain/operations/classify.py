@@ -1,137 +1,79 @@
-"""Explainable suggestions. Printed classification outranks the programme and keywords."""
+"""Explainable classification and programme matching. Suggestions are never approvals."""
 
 import re
 
+from app.domain.operations.default_codes import find_code
+from app.domain.operations.drilling import activities, time_signal
+
 
 def tokens(text):
-    return {
-        w
-        for w in re.findall(r"[a-z]{3,}", text.lower())
-        if w
-        not in {
-            "the",
-            "and",
-            "with",
-            "from",
-            "for",
-            "per",
-            "continue",
-            "cont",
-            "same",
-            "well",
-            "plan",
-            "hole",
-            "depth",
-        }
-    }
+    stop = {'the', 'and', 'with', 'from', 'for', 'per', 'continue', 'cont', 'same', 'well', 'plan', 'hole', 'depth'}
+    return set(re.findall(r'[a-z]{3,}', text.lower())) - stop
 
 
-def suggest(mark, narrative, library_allocation, timeline, elapsed_hours):
-    words = tokens(narrative)
-    best = None
+def programme_match(narrative, timeline, elapsed_hours):
+    """Match the work first; schedule proximity only breaks ties between comparable activities."""
+    words, actions = tokens(narrative), set(activities(narrative))
+    candidates = []
+    scheduled = None
     for item, start, end in timeline:
-        wanted = tokens(item.description)
-        common = wanted & words
-        if len(common) < 2:
-            continue
-        overlap = len(common) / max(1, min(len(wanted), len(words)))
-        if overlap < 0.3:
-            continue
         in_window = elapsed_hours is not None and start <= elapsed_hours < end
-        rank = (overlap + 0.3 * in_window, len(common))
-        if best is None or rank > best[0]:
-            best = rank, item, in_window
-    hint = (
-        ""
-        if not best
-        else f"Programme item {best[1].sequence_no}: {best[1].description[:95]}"
-        + (" (scheduled window)" if best[2] else " (activity match)")
-    )
-    if not hint and elapsed_hours is not None:
-        scheduled = next((it for it, a, z in timeline if a <= elapsed_hours < z), None)
-        if scheduled:
-            hint = (
-                f"Programme window: {scheduled.sequence_no}. {scheduled.description[:85]} (no clear activity match)"
-            )
-    explicit = {
-        "P": "PT",
-        "PLANNED": "PT",
-        "PT": "PT",
-        "U": "UPA",
-        "UPA": "UPA",
-        "D": "NPT",
-        "N": "NPT",
-        "NPT": "NPT",
-        "SP": "SP",
-    }.get(mark.strip().upper())
-    if explicit:
-        allocation, source, confidence, reason = explicit, "report", 0.90, f"Report mark: {mark}"
-    elif library_allocation in ("PT", "NPT", "UPA", "SP"):
-        allocation, source, confidence, reason = library_allocation, "code", 0.75, "Workspace activity-code default"
-    elif re.search(
-        r"\b(wait(?:ed|ing)? (?:on|for)|breakdown|equipment failure|stuck pipe|lost circulation)\b",
-        narrative,
-        re.IGNORECASE,
-    ):
-        allocation, source, confidence, reason = "NPT", "keyword", 0.6, "Delay or failure in narrative"
-    elif best:
-        allocation, source, confidence, reason = "PT", "timeline", 0.7, "Matches the active programme"
-    elif re.search(r"\b(unplanned|unscheduled|additional wiper trip)\b", narrative, re.IGNORECASE):
-        allocation, source, confidence, reason = "UPA", "keyword", 0.6, "Unscheduled work in narrative"
+        if in_window:
+            scheduled = item
+        wanted, planned_actions = tokens(item.description), set(activities(item.description))
+        common = wanted & words
+        action_match = bool(actions & planned_actions)
+        if actions and planned_actions and not action_match:
+            continue
+        overlap = len(common) / max(1, len(wanted | words))
+        if action_match or (len(common) >= 2 and overlap >= 0.2):
+            candidates.append(((action_match, in_window, round(overlap, 3), len(common)), item))
+    candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+    if candidates and (len(candidates) == 1 or candidates[0][0] != candidates[1][0]):
+        score, item = candidates[0]
+        mode = 'scheduled window' if score[1] else 'activity match; timing not confirmed'
+        return True, f'Programme item {item.sequence_no}: {item.description[:95]} ({mode})'
+    if candidates:
+        return False, 'Multiple programme activities match; confirm the checkpoint manually'
+    if scheduled:
+        return False, f'Programme window: {scheduled.sequence_no}. {scheduled.description[:85]} (no clear activity match)'
+    return False, ''
+
+
+def suggest(mark, narrative, library_allocation, timeline, elapsed_hours, *, mark_rule=None, printed_allocation=''):
+    matches, hint = programme_match(narrative, timeline, elapsed_hours)
+    explicit = find_code(mark, 'Source mark', 'Allocation', 'Trouble / NPT')
+    signal = time_signal(narrative)
+    classification = ''
+    if mark_rule:
+        allocation, source, confidence = mark_rule.default_allocation, 'workspace', 0.95
+        classification = mark_rule.default_classification
+        reason = f'Workspace mark: {mark_rule.mark_code} — {mark_rule.mark_name}'
+    elif explicit:
+        classification = explicit.classification
+        allocation = explicit.allocation or {'Planned': 'PT', 'UPA': 'UPA', 'NPT': 'NPT'}[classification]
+        source, confidence = 'report', 0.90
+        reason = f'Report mark: {mark} — {explicit.name}'
+    elif library_allocation in ('PT', 'NPT', 'UPA', 'SP'):
+        allocation, source, confidence, reason = library_allocation, 'code', 0.75, 'Workspace activity-code default'
+    elif signal:
+        allocation, source, confidence, reason = signal[0], 'keyword', 0.60, f'Narrative signal: {signal[1]}'
+    elif matches:
+        allocation, source, confidence, reason = 'PT', 'timeline', 0.70, 'Activity matches programme'
     else:
-        allocation, source, confidence, reason = (
-            "PT",
-            "unresolved",
-            0.25,
-            "No decisive evidence; verify classification",
-        )
-    classification = "Planned" if allocation in ("PT", "SP") else allocation
+        allocation, source, confidence, reason = 'PT', 'unresolved', 0.25, 'No decisive evidence; verify classification'
+    if printed_allocation:
+        # Summary can mark a block U while placing its hours under NPT. Never
+        # replace a known classification with the other axis of the time ledger.
+        allocation = printed_allocation
+        if not classification and source == 'unresolved':
+            reason = 'No printed classification; verify independently of allocation'
+    classification = classification or ('Planned' if allocation in ('PT', 'SP') else allocation)
     return {
-        "classification": classification,
-        "allocation": allocation,
-        "is_productive": classification != "NPT",
-        "confidence": confidence,
-        "classification_source": source,
-        "classification_evidence": " · ".join(filter(None, [reason, hint])),
+        'classification': classification,
+        'allocation': allocation,
+        'is_productive': classification != 'NPT' and allocation != 'NPT',
+        'confidence': confidence,
+        'classification_source': source,
+        'classification_evidence': ' · '.join(filter(None, (reason, hint))),
     }
-
-
-def build_brief(
-    well_code: str,
-    well_name: str,
-    report_date_str: str,
-    day_number: int | None,
-    depth_start: str,
-    depth_end: str,
-    footage: str,
-    rop: str,
-    blocks: list[dict],
-    time_split: dict,
-    npt_items: list[dict],
-) -> str:
-    """Deterministic brief composition."""
-    lines: list[str] = []
-    lines.append(f"Well {well_code} ({well_name}) — Day {day_number or '—'} — {report_date_str}")
-    lines.append(f"Depth {depth_start} → {depth_end} ({footage} footage, ROP {rop})")
-    lines.append("")
-    # Top blocks by duration
-    top = sorted(blocks, key=lambda b: b.get("duration_minutes", 0), reverse=True)[:3]
-    if top:
-        lines.append("Key activities:")
-        for b in top:
-            lines.append(
-                f"  • {b.get('classification', '')} — {b.get('narrative', '')[:120]} ({b.get('duration_minutes', 0)} min)"
-            )
-        lines.append("")
-    lines.append(
-        f"Time: {time_split['planned_minutes'] / 60:.2f} h planned · {time_split['upa_minutes'] / 60:.2f} h UPA · {time_split['npt_minutes'] / 60:.2f} h NPT. Period balance: {time_split['unaccounted_minutes']} min."
-    )
-    if npt_items:
-        lines.append("NPT events:")
-        for n in npt_items[:3]:
-            lines.append(
-                f"  • {n.get('npt_code', '')} — {n.get('reason', '')[:100]} ({n.get('duration_minutes', 0)} min, {n.get('responsible_party', '')})"
-            )
-        lines.append("")
-
-    return "\n".join(lines)

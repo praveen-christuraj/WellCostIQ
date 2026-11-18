@@ -36,12 +36,12 @@ const MAX_REPORTED_ERRORS = 12
 /** Mirrors the server's rule so the button is disabled for the same reason it would fail. */
 const MIN_REASON_LENGTH = 3
 
-/** A spreadsheet number as typed: 1250, 12.5 — never 1250.0000000000. */
+/** A spreadsheet number as typed: 1250, 12.5 — never 1250.000. */
 function readableNumber(value: string): string {
   const trimmed = value.trim()
   const numeric = Number(trimmed)
   if (!Number.isFinite(numeric)) return trimmed
-  return String(Number(numeric.toFixed(4)))
+  return String(Number(numeric.toFixed(3)))
 }
 
 const columnsFor = (config: TypeConfig): { key: string; label: string; numeric?: boolean }[] => [

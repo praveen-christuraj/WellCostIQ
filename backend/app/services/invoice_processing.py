@@ -872,7 +872,10 @@ def _exchange_rate(db: Session, organization_id: str, base: str, quote: str, sup
         InvoiceExchangeRate.is_deleted.is_(False), InvoiceExchangeRate.is_active.is_(True),
     ))
     if inverse:
-        return money(Decimal("1") / inverse.rate)
+        rate = money(Decimal("1") / inverse.rate)
+        if rate > 0:
+            return rate
+        raise HTTPException(422, f"The inverse {base} to {quote} rate is too small for three decimal places.")
     raise HTTPException(
         422,
         f"Configure an exchange rate for {base} → {quote}, or enter the rate on this payment split before saving",

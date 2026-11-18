@@ -16,17 +16,17 @@ keeps its stored totals. A tax that is visible only on the register still has
 its amount stored per row, but it never changes the IDVS report total.
 
 Different output currencies stay on separate payment-split rows and are never
-added together. Values retain the application's ten-decimal storage precision;
-presentation layers may show two decimals without changing these calculations.
+added together. Stored results use the application's three-place decimal precision.
 """
 
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from app.core.precision import DECIMAL_QUANT
 from typing import Iterable, Protocol
 
 ZERO = Decimal("0")
 HUNDRED = Decimal("100")
-QUANT = Decimal("0.0000000001")
+QUANT = DECIMAL_QUANT
 
 
 def decimal(value: Decimal | str | int | None) -> Decimal:

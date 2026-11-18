@@ -34,6 +34,7 @@ from typing import Any, Sequence
 
 from fastapi import HTTPException, Request
 
+from app.core.precision import DECIMAL_QUANT
 from app.core.units import depth_to_meters
 from sqlalchemy import case, func, literal, select, union_all
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -74,8 +75,8 @@ from app.services.operational_time import AllocationKey, hours_to_days, record_s
 
 log = logging.getLogger(__name__)
 
-MONEY = Decimal("0.01")
-PERCENT = Decimal("0.01")
+MONEY = DECIMAL_QUANT
+PERCENT = DECIMAL_QUANT
 ACCESS_KEYS = ("rig-well:read", "afe:read", "daily-cost:read")
 EXPORT_KEYS = ("rig-well:export", "afe:export", "daily-cost:export")
 AFE_STATUS_LABELS = {
@@ -392,8 +393,8 @@ def _allocated_classification_days(
         afe_hours[(allocation_afes[key], classification)] += hours
 
     return (
-        {key: hours_to_days(hours) for key, hours in well_hours.items()},
-        {key: hours_to_days(hours) for key, hours in afe_hours.items()},
+        {key: hours_to_days(hours).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP) for key, hours in well_hours.items()},
+        {key: hours_to_days(hours).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP) for key, hours in afe_hours.items()},
     )
 
 
@@ -1199,7 +1200,7 @@ def dashboard(
             severity="error",
             title=f"{len(over_budget)} well{'s' if len(over_budget) != 1 else ''} over the AFE amount",
             detail=(
-                f"Actual cost exceeds the effective AFE by {selected} {overspend:,.2f}. "
+                f"Actual cost exceeds the effective AFE by {selected} {overspend:,.3f}. "
                 "Open a well to see the cost lines behind it."
             ),
         ))

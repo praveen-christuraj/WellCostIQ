@@ -29,6 +29,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.master_data import MasterDataRecord, now, uid
 
@@ -90,9 +91,9 @@ class PricedRecord(MasterDataRecord):
 
     __abstract__ = True
 
-    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    cost_uplift: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    final_cost: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    cost_uplift: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    final_cost: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     po_number: Mapped[str] = mapped_column(String(100), default="", server_default="", nullable=False)
     effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -114,11 +115,11 @@ class RateRevision(Base):
     )
     revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
     effective_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    previous_unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    cost_uplift: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    final_cost: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
-    previous_final_cost: Mapped[Decimal | None] = mapped_column(Numeric(28, 10), nullable=True)
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    previous_unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    cost_uplift: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    final_cost: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    previous_final_cost: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     uom: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
     po_number: Mapped[str] = mapped_column(String(100), default="", server_default="", nullable=False)

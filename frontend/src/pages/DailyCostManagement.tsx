@@ -966,7 +966,7 @@ export default function DailyCostManagement() {
             label={`USD conversion rate (1 ${selectedAfe.standard_currency.toUpperCase()} = ? USD)`}
             value={usdExchangeRate}
             onChange={event => { setUsdExchangeRate(event.target.value); setCreateError('') }}
-            inputProps={{ min: 0.000001, step: 'any' }}
+            inputProps={{ min: 0.001, step: 0.001 }}
             error={Boolean(usdExchangeRate) && !usdRateValid}
             helperText={`USD is the standard currency across all wells. Enter the conversion rate for ${selectedAfe.standard_currency.toUpperCase()} to calculate USD values automatically.`}
           />

@@ -14,6 +14,7 @@ AFE total, and each one carries a mandatory remark.
 
 from __future__ import annotations
 
+from app.core.precision import DECIMAL_PLACES
 from app.models.daily_cost import DailyCostServiceCostItem
 
 import hashlib
@@ -79,10 +80,10 @@ from app.domain.service_groups import service_group_rank
 MONEY = DECIMAL_QUANT
 RATE = DECIMAL_QUANT
 FX = DECIMAL_QUANT
-# Decimal ledger columns are Numeric(28, 10). PostgreSQL rejects anything larger with a
+# Decimal ledger columns are Numeric(28, DECIMAL_PLACES). PostgreSQL rejects anything larger with a
 # driver error, which would surface as an opaque 500, so the limit is checked here
 # and reported to the user as ordinary validation.
-MONEY_LIMIT = Decimal("9999999999999999.9999999999")
+MONEY_LIMIT = Decimal("9999999999999999.999")
 MAX_IMPORT_ERRORS = 100
 SERVICE_ONE_TIME = {"Mobilization", "Demobilization", "Fixed Charge"}
 SERVICE_DAY_BASED = {"Operation", "Standby", "Personnel-Operation", "Personnel-Standby", "Others"}
@@ -1062,7 +1063,7 @@ def reference_data(db: Session, organization_id: str) -> DailyCostReference:
             afe_type=afe.afe_type, status=afe.status, configuration_scope=afe.configuration_scope,
             standard_currency=estimate.summary.currency.standard_currency,
             total_cost=Decimal(estimate.summary.total), estimate_saved_at=afe.estimate_saved_at,
-            display_name=f"{afe.afe_code} — {afe.afe_name} · {estimate.summary.currency.standard_currency} {Decimal(estimate.summary.total):,.2f}",
+            display_name=f"{afe.afe_code} — {afe.afe_name} · {estimate.summary.currency.standard_currency} {Decimal(estimate.summary.total):,.3f}",
         ))
 
     catalogue_items: list[DailyCostCatalogueOption] = []
@@ -3156,8 +3157,8 @@ def _warnings(entry: DailyCostEntry, comparison: DailyCostComparison) -> list[Da
                 code="other-expenses-deducted", severity="warning",
                 message=(
                     f"Other expenses recorded on this sheet ({_other_expense_label(entry.other_expense_lines)}): "
-                    f"{entry.standard_currency} {entry.other_expenses_total:,.2f}. These have no AFE allowance and are "
-                    f"deducted from the AFE total, leaving {entry.standard_currency} {comparison.balance:,.2f}."
+                    f"{entry.standard_currency} {entry.other_expenses_total:,.3f}. These have no AFE allowance and are "
+                    f"deducted from the AFE total, leaving {entry.standard_currency} {comparison.balance:,.3f}."
                 ),
             )
         )
@@ -3166,7 +3167,7 @@ def _warnings(entry: DailyCostEntry, comparison: DailyCostComparison) -> list[Da
             DailyCostWarnings(
                 code="other-expenses-deducted", severity="info",
                 message=(
-                    f"Other expenses of {entry.standard_currency} {comparison.other_expenses_to_date:,.2f} recorded "
+                    f"Other expenses of {entry.standard_currency} {comparison.other_expenses_to_date:,.3f} recorded "
                     "on earlier sheets of this AFE are deducted from the AFE total."
                 ),
             )
@@ -3176,10 +3177,10 @@ def _warnings(entry: DailyCostEntry, comparison: DailyCostComparison) -> list[Da
             DailyCostWarnings(
                 code="lih-cost-deducted", severity="warning",
                 message=(
-                    f"LIH Cost Register: {entry.standard_currency} {comparison.lih_cost_to_date:,.2f} filed against "
+                    f"LIH Cost Register: {entry.standard_currency} {comparison.lih_cost_to_date:,.3f} filed against "
                     f"this AFE is added to the actual cost and deducted from the AFE total. AFE available after "
-                    f"LIH: {entry.standard_currency} {comparison.afe_available:,.2f}; actual cost including LIH: "
-                    f"{entry.standard_currency} {comparison.actual_including_lih:,.2f}."
+                    f"LIH: {entry.standard_currency} {comparison.afe_available:,.3f}; actual cost including LIH: "
+                    f"{entry.standard_currency} {comparison.actual_including_lih:,.3f}."
                 ),
             )
         )
@@ -3187,16 +3188,16 @@ def _warnings(entry: DailyCostEntry, comparison: DailyCostComparison) -> list[Da
         warnings.append(
             DailyCostWarnings(
                 code="afe-over-budget", severity="warning",
-                message=f"Actual cost to {comparison.effective_on.isoformat()} (including LIH) is over the AFE budget by {entry.standard_currency} {abs(comparison.balance):,.2f}.",
+                message=f"Actual cost to {comparison.effective_on.isoformat()} (including LIH) is over the AFE budget by {entry.standard_currency} {abs(comparison.balance):,.3f}.",
             )
         )
     if entry.upa_total:
         warnings.append(
-            DailyCostWarnings(code="upa-recorded", severity="info", message=f"UPA charges recorded: {entry.standard_currency} {entry.upa_total:,.2f}.")
+            DailyCostWarnings(code="upa-recorded", severity="info", message=f"UPA charges recorded: {entry.standard_currency} {entry.upa_total:,.3f}.")
         )
     if entry.npt_total:
         warnings.append(
-            DailyCostWarnings(code="npt-recorded", severity="warning", message=f"NPT charges recorded: {entry.standard_currency} {entry.npt_total:,.2f}.")
+            DailyCostWarnings(code="npt-recorded", severity="warning", message=f"NPT charges recorded: {entry.standard_currency} {entry.npt_total:,.3f}.")
         )
     overrides = sum(
         1 for row in [*entry.service_lines, *entry.consumable_lines, *entry.tangible_lines, *entry.other_expense_lines]
@@ -3353,7 +3354,7 @@ def save_day(
                     f"{'Imported' if action == 'import' else 'Saved'} daily costs for {entry.well_code_snapshot} on {entry.cost_date.isoformat()}: "
                     f"{len(service_rows)} service, {len(consumable_rows)} consumable, {len(tangible_rows)} tangible "
                     f"and {len(other_rows)} other-expense line(s); "
-                    f"{entry.standard_currency} {entry.total_cost:,.2f}"
+                    f"{entry.standard_currency} {entry.total_cost:,.3f}"
                 ),
                 request=request,
             )
@@ -3369,8 +3370,8 @@ def save_day(
                     label=entry.daily_cost_code,
                     summary=(
                         f"Other expenses for {entry.daily_cost_code} changed from "
-                        f"{entry.standard_currency} {other_before:,.2f} to {entry.standard_currency} "
-                        f"{entry.other_expenses_total:,.2f} ({_other_expense_label(entry.other_expense_lines)}); "
+                        f"{entry.standard_currency} {other_before:,.3f} to {entry.standard_currency} "
+                        f"{entry.other_expenses_total:,.3f} ({_other_expense_label(entry.other_expense_lines)}); "
                         f"deducted from AFE {entry.afe_code_snapshot}"
                     ),
                     request=request,
@@ -3471,16 +3472,16 @@ def preview_day(
         warnings.append(DailyCostWarnings(
             code="other-expenses-preview", severity="warning",
             message=(
-                f"Other expenses in this preview: {entry.standard_currency} {other_total:,.2f} "
+                f"Other expenses in this preview: {entry.standard_currency} {other_total:,.3f} "
                 f"({_other_expense_label(other_rows)}). They have no AFE allowance and reduce the AFE amount."
             ),
         ))
     if total > entry.baseline.total_amount:
         warnings.append(DailyCostWarnings(code="daily-over-budget", severity="warning", message="This day's actual costs alone exceed the full AFE budget."))
     if upa_total:
-        warnings.append(DailyCostWarnings(code="upa-preview", severity="info", message=f"UPA charges in this preview: {entry.standard_currency} {upa_total:,.2f}."))
+        warnings.append(DailyCostWarnings(code="upa-preview", severity="info", message=f"UPA charges in this preview: {entry.standard_currency} {upa_total:,.3f}."))
     if npt_total:
-        warnings.append(DailyCostWarnings(code="npt-preview", severity="warning", message=f"NPT charges in this preview: {entry.standard_currency} {npt_total:,.2f}."))
+        warnings.append(DailyCostWarnings(code="npt-preview", severity="warning", message=f"NPT charges in this preview: {entry.standard_currency} {npt_total:,.3f}."))
     override_count = sum(1 for row in all_rows if row.override_rate is not None)
     if override_count:
         warnings.append(DailyCostWarnings(code="override-preview", severity="info", message=f"{override_count} daily rate override(s) are priced and will be auditable."))
@@ -3739,7 +3740,7 @@ def submit_entry(
         _audit(
             db, user=user, action="submit", entity_type="daily_cost", entity_id=entry.id,
             label=entry.daily_cost_code,
-            summary=f"Submitted daily cost sheet {entry.daily_cost_code} ({entry.standard_currency} {entry.total_cost:,.2f})" + (f": {data.remarks}" if data.remarks else ""),
+            summary=f"Submitted daily cost sheet {entry.daily_cost_code} ({entry.standard_currency} {entry.total_cost:,.3f})" + (f": {data.remarks}" if data.remarks else ""),
             request=request,
         )
         _commit(db)
@@ -4218,7 +4219,7 @@ def _factor_rows(
             amount=_money(amount_value),
             planned=_money(planned) if planned is not None else None,
             balance=_money(planned - amount_value) if planned is not None else None,
-            share=(amount_value / total * Decimal("100")).quantize(Decimal("0.01")) if total > 0 else Decimal("0.00"),
+            share=(amount_value / total * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP) if total > 0 else Decimal("0.00"),
             quantity=quantity,
         ))
     return result
@@ -4391,7 +4392,7 @@ def _party_factor_rows(
             planned=None,
             balance=None,
             share=(
-                (value["booked"] / total * Decimal("100")).quantize(Decimal("0.01"))
+                (value["booked"] / total * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
                 if total > 0 else Decimal("0.00")
             ),
             quantity=value["quantity"],
@@ -5073,7 +5074,7 @@ def well_cost_summary(
             afe_type=afe.afe_type, status=afe.status, configuration_scope=afe.configuration_scope,
             standard_currency=entry_rows[0].standard_currency if entry_rows else currency,
             total_cost=planned_total, estimate_saved_at=afe.estimate_saved_at,
-            display_name=f"{afe.afe_code} — {afe.afe_name} · {entry_rows[0].standard_currency if entry_rows else currency} {planned_total:,.2f}",
+            display_name=f"{afe.afe_code} — {afe.afe_name} · {entry_rows[0].standard_currency if entry_rows else currency} {planned_total:,.3f}",
         ))
 
     # ---- SOW adjustments ----------------------------------------------------
@@ -5300,9 +5301,9 @@ def well_cost_summary(
                 mud_warnings.append(DailyCostWarnings(
                     code="mud-cost-reconciled", severity="info",
                     message=(
-                        f"Mud chemicals compare at {currency} {comparison_mud_cost:,.2f} reconciled "
-                        f"(recorded actual {currency} {actual_mud_chemicals:,.2f}; "
-                        f"adjustment {currency} {mud_reconciliation.adjustment:,.2f})."
+                        f"Mud chemicals compare at {currency} {comparison_mud_cost:,.3f} reconciled "
+                        f"(recorded actual {currency} {actual_mud_chemicals:,.3f}; "
+                        f"adjustment {currency} {mud_reconciliation.adjustment:,.3f})."
                     ),
                 ))
     comparison_actual = _money(actual_total - actual_mud_chemicals + comparison_mud_cost)
@@ -5313,11 +5314,11 @@ def well_cost_summary(
     comparison_balance = _money(planned_total - comparison_actual)
     comparison_balance_including_lih = _money(planned_total - lih_total - comparison_actual)
     comparison_used = (
-        (comparison_actual / planned_total * Decimal("100")).quantize(Decimal("0.01"))
+        (comparison_actual / planned_total * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
         if planned_total > 0 else Decimal("0.00")
     )
     comparison_used_including_lih = (
-        (comparison_actual_including_lih / planned_total * Decimal("100")).quantize(Decimal("0.01"))
+        (comparison_actual_including_lih / planned_total * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
         if planned_total > 0 else Decimal("0.00")
     )
     comparison_adjusted_balance = (
@@ -5512,7 +5513,7 @@ def well_cost_summary(
                 planned=Decimal("0.00"),
                 balance=_money(-lih_total),
                 share=(
-                    (lih_total / factor_base * Decimal("100")).quantize(Decimal("0.01"))
+                    (lih_total / factor_base * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
                     if factor_base > 0 else Decimal("0.00")
                 ),
                 quantity=Decimal(lih_lines),
@@ -5630,7 +5631,7 @@ def well_cost_summary(
     if actual_total > planned_total and planned_total > 0:
         warnings.append(DailyCostWarnings(
             code="well-over-budget", severity="warning",
-            message=f"Actual cost exceeds the locked AFE budget by {currency} {actual_total - planned_total:,.2f}."))
+            message=f"Actual cost exceeds the locked AFE budget by {currency} {actual_total - planned_total:,.3f}."))
     over_afe = [row for row in positions if row.over_budget]
     if over_afe:
         warnings.append(DailyCostWarnings(
@@ -5639,21 +5640,21 @@ def well_cost_summary(
     if upa or npt:
         warnings.append(DailyCostWarnings(
             code="upa-npt", severity="warning",
-            message=f"Unplanned and non-productive charges so far: {currency} {upa + npt:,.2f} "
-                    f"(UPA {upa:,.2f} · NPT {npt:,.2f})."))
+            message=f"Unplanned and non-productive charges so far: {currency} {upa + npt:,.3f} "
+                    f"(UPA {upa:,.3f} · NPT {npt:,.3f})."))
     if other_expenses:
         warnings.append(DailyCostWarnings(
             code="other-expenses-deducted", severity="warning",
-            message=f"Other expenses (LIH, hole problems and similar) so far: {currency} {other_expenses:,.2f}. "
+            message=f"Other expenses (LIH, hole problems and similar) so far: {currency} {other_expenses:,.3f}. "
                     "They have no AFE allowance and are deducted from the AFE total above."))
     if lih_total:
         warnings.append(DailyCostWarnings(
             code="lih-cost-deducted", severity="warning",
             message=(
-                f"LIH Cost Register: {currency} {lih_total:,.2f} across {lih_entries} day(s) and "
+                f"LIH Cost Register: {currency} {lih_total:,.3f} across {lih_entries} day(s) and "
                 f"{lih_lines} item(s) is added to the actual cost and deducted explicitly from the AFE "
-                f"total. AFE available after LIH: {currency} {_money(planned_total - lih_total):,.2f}; "
-                f"actual cost including LIH: {currency} {actual_including_lih:,.2f}."
+                f"total. AFE available after LIH: {currency} {_money(planned_total - lih_total):,.3f}; "
+                f"actual cost including LIH: {currency} {actual_including_lih:,.3f}."
             )))
     if lih_excluded:
         warnings.append(DailyCostWarnings(
@@ -5661,7 +5662,7 @@ def well_cost_summary(
             message=(
                 "LIH cost recorded in another currency is not added to this "
                 f"{currency} comparison: "
-                + ", ".join(f"{code} {amount:,.2f}" for code, amount in sorted(lih_excluded.items()))
+                + ", ".join(f"{code} {amount:,.3f}" for code, amount in sorted(lih_excluded.items()))
                 + ". Align the register AFE with the well's standard currency."
             )))
     unrated = next((group for group in factors if group.dimension == "rate_source"
@@ -5691,7 +5692,7 @@ def well_cost_summary(
     )
     adjusted_balance = _money(adjusted_planned - actual_total) if adjusted_planned is not None else None
     adjusted_used = (
-        (actual_total / adjusted_planned * Decimal("100")).quantize(Decimal("0.01"))
+        (actual_total / adjusted_planned * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
         if adjusted_planned is not None and adjusted_planned > 0
         else None
     )
@@ -5716,7 +5717,7 @@ def well_cost_summary(
     spud_days_variance = sum((row.days_variance for row in spudded_rows), Decimal("0.000"))
     totals = DailyCostWellTotals(
         currency=currency, planned=planned_total, actual=actual_total, balance=_money(remaining),
-        used_percent=(actual_total / planned_total * Decimal("100")).quantize(Decimal("0.01")) if planned_total > 0 else Decimal("0.00"),
+        used_percent=(actual_total / planned_total * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP) if planned_total > 0 else Decimal("0.00"),
         services=_money(services), consumables=_money(consumables), tangibles=_money(tangibles),
         other_expenses=_money(other_expenses),
         services_actual_planned=_money(services_actual_planned),
@@ -5823,7 +5824,7 @@ def well_cost_summary(
     forecast_final = _money(actual_total + run_rate * remaining_planned)
     forecast_variance = _money(forecast_final - effective_planned)
     forecast_note = (
-        f"Projected at {currency} {run_rate:,.2f} per "
+        f"Projected at {currency} {run_rate:,.3f} per "
         f"{'elapsed day' if spudded_rows else 'recorded cost date'} over the "
         f"{remaining_planned} planned day(s) still ahead."
         if recorded_days else
@@ -5879,7 +5880,7 @@ def well_cost_summary(
         amount=out_of_scope_amount,
         line_count=len(out_lines),
         share_percent=(
-            (out_of_scope_amount / actual_total * Decimal("100")).quantize(Decimal("0.01"))
+            (out_of_scope_amount / actual_total * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
             if actual_total > 0 else Decimal("0.00")
         ),
         planned_amount=Decimal("0.00"),
@@ -5920,7 +5921,7 @@ def well_cost_summary(
             npt=_money(value) if str(classification) == "NPT" else Decimal("0.00"),
             upa=_money(value) if str(classification) == "UPA" else Decimal("0.00"),
             share=(
-                (value / actual_total * Decimal("100")).quantize(Decimal("0.01"))
+                (value / actual_total * Decimal("100")).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
                 if actual_total > 0 else Decimal("0.00")
             ),
         ))

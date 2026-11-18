@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.precision import Decimal10, Decimal10Days
+from app.core.precision import Decimal3, Decimal3Days
 from app.schemas.afe import (
     ConsumableLineIn,
     ConsumableLineOut,
@@ -53,7 +53,7 @@ class PlanPhaseIn(BaseModel):
 
     pair_key: str | None = Field(default=None, max_length=64)
     phase_id: str = Field(min_length=1, max_length=36)
-    days: Decimal10Days = Field(ge=Decimal("0"))
+    days: Decimal3Days = Field(ge=Decimal("0"))
     remarks: str = Field(default="", max_length=1000)
 
     model_config = ConfigDict(extra="forbid")
@@ -69,8 +69,8 @@ class PlanSectionIn(BaseModel):
 
     pair_key: str | None = Field(default=None, max_length=64)
     hole_section_id: str = Field(min_length=1, max_length=36)
-    from_depth: Decimal10 = Field(ge=Decimal("0"))
-    to_depth: Decimal10 = Field(ge=Decimal("0"))
+    from_depth: Decimal3 = Field(ge=Decimal("0"))
+    to_depth: Decimal3 = Field(ge=Decimal("0"))
     remarks: str = Field(default="", max_length=1000)
     phases: list[PlanPhaseIn] = Field(min_length=1, max_length=50)
 

@@ -25,6 +25,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.rig_well import now, uid
 
@@ -126,7 +127,7 @@ class InvoicePaymentTermSplit(Base):
         ForeignKey("invoice_payment_terms.id", ondelete="CASCADE"), nullable=False, index=True
     )
     currency_code: Mapped[str] = mapped_column(String(10), nullable=False)
-    percentage: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    percentage: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     term: Mapped[InvoicePaymentTerm] = relationship(back_populates="splits")
@@ -163,7 +164,7 @@ class InvoiceTaxConfiguration(InvoiceRecord):
 
     tax_code: Mapped[str] = mapped_column(String(50), nullable=False)
     tax_name: Mapped[str] = mapped_column(String(150), nullable=False)
-    rate_percent: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    rate_percent: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     direction: Mapped[str] = mapped_column(String(20), default="deduction", server_default="deduction", nullable=False)
     # Printed on the IDVS report, so it moves the report's invoice/verified total.
     is_report_visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
@@ -211,7 +212,7 @@ class InvoiceExchangeRate(InvoiceRecord):
 
     base_currency: Mapped[str] = mapped_column(String(10), nullable=False)
     quote_currency: Mapped[str] = mapped_column(String(10), nullable=False)
-    rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     description: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
 
@@ -347,20 +348,20 @@ class Invoice(InvoiceRecord):
     payment_tenure_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
 
-    disallowed_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    advance_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    invoice_subtotal: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    verified_subtotal: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    invoice_tax_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    verified_tax_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    invoice_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    verified_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    adjusted_verified_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    disallowed_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    advance_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    invoice_subtotal: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    verified_subtotal: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    invoice_tax_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    verified_tax_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    invoice_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    verified_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    adjusted_verified_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     # Register-only amount: the verified total with every net-payable tax applied,
     # including taxes the IDVS report deliberately leaves out. Payment splits keep
     # using ``adjusted_verified_amount`` (the IDVS report amount).
-    net_payable_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    difference_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    net_payable_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    difference_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
 
     status: Mapped[str] = mapped_column(String(30), default="draft", server_default="draft", nullable=False)
     submitted_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -415,15 +416,15 @@ class InvoiceLine(Base):
     )
     invoice_id: Mapped[str] = mapped_column(ForeignKey("invoice_idvs.id", ondelete="CASCADE"), nullable=False)
     description: Mapped[str] = mapped_column(String(2000), nullable=False)
-    invoice_quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    invoice_days: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("1"), server_default="1", nullable=False)
-    invoice_unit_price: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    invoice_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    verified_quantity: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    verified_days: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("1"), server_default="1", nullable=False)
-    verified_unit_price: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    verified_total: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    difference_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    invoice_quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    invoice_days: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("1"), server_default="1", nullable=False)
+    invoice_unit_price: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    invoice_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    verified_quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    verified_days: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("1"), server_default="1", nullable=False)
+    verified_unit_price: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    verified_total: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    difference_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     remarks: Mapped[str] = mapped_column(String(1000), default="", server_default="", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
@@ -447,14 +448,14 @@ class InvoiceTax(Base):
         ForeignKey("invoice_tax_configurations.id", ondelete="SET NULL"), nullable=True
     )
     tax_name: Mapped[str] = mapped_column(String(150), nullable=False)
-    rate_percent: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    rate_percent: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     direction: Mapped[str] = mapped_column(String(20), nullable=False)
     # Snapshots of the configuration switches taken when the IDVS line was saved.
     is_report_visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     is_net_payable: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     source: Mapped[str] = mapped_column(String(20), default="manual", server_default="manual", nullable=False)
-    invoice_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
-    verified_amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    invoice_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
+    verified_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     invoice: Mapped[Invoice] = relationship(back_populates="taxes")
@@ -475,9 +476,9 @@ class InvoicePaymentSplit(Base):
     )
     invoice_id: Mapped[str] = mapped_column(ForeignKey("invoice_idvs.id", ondelete="CASCADE"), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(10), nullable=False)
-    percentage: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    exchange_rate: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(28, 10), default=Decimal("0"), server_default="0", nullable=False)
+    percentage: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    exchange_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     invoice: Mapped[Invoice] = relationship(back_populates="payment_splits")

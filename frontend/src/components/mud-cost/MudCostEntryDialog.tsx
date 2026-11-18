@@ -1,3 +1,4 @@
+import { DECIMAL_PLACES, DECIMAL_SCALE } from '../../lib/precision'
 import { useEffect, useMemo, useState } from 'react'
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Divider, Paper, Table, TableBody,
@@ -18,23 +19,22 @@ export type MudCostEditorPayload = MudCostEntryUpdatePayload
 type LineState = Record<string, { amount: string; remarks: string }>
 type FormState = { entry_date: string; lines: LineState }
 
-const DECIMAL_SCALE = 10_000_000_000n
-const MAX_QUANTITY_SCALED = 9999999999999999999999999n
-const QUANTITY_PATTERN = /^(?:\d+|\d*\.\d{1,10})$/
+const MAX_QUANTITY_SCALED = (10n ** 15n) * DECIMAL_SCALE - 1n
+const QUANTITY_PATTERN = /^(?:\d+|\d*\.\d{1,3})$/
 
 function quantityScaled(value: string | null | undefined): bigint {
   const text = (value ?? '').trim()
   if (text.startsWith('-')) return -quantityScaled(text.slice(1))
   if (!text || !QUANTITY_PATTERN.test(text)) return 0n
   const [whole = '0', fraction = ''] = text.split('.')
-  return BigInt(whole || '0') * DECIMAL_SCALE + BigInt((fraction + '0000000000').slice(0, 10) || '0')
+  return BigInt(whole || '0') * DECIMAL_SCALE + BigInt(fraction.padEnd(DECIMAL_PLACES, '0') || '0')
 }
 
 function displayScaled(value: bigint): string {
   const negative = value < 0n
   const absolute = negative ? -value : value
   const whole = (absolute / DECIMAL_SCALE).toLocaleString()
-  const fraction = String(absolute % DECIMAL_SCALE).padStart(10, '0').replace(/0+$/, '')
+  const fraction = String(absolute % DECIMAL_SCALE).padStart(DECIMAL_PLACES, '0').replace(/0+$/, '')
   return `${negative ? '−' : ''}${whole}${fraction ? `.${fraction}` : ''}`
 }
 
@@ -83,7 +83,7 @@ function NumberCell({ line, value, onChange, error, disabled = false }: {
     value={value}
     disabled={disabled}
     onChange={event => onChange(event.target.value)}
-    inputProps={{ min: 0, step: 0.0000000001, inputMode: 'decimal', 'aria-label': `${line.label} quantity` }}
+    inputProps={{ min: 0, step: 0.001, inputMode: 'decimal', 'aria-label': `${line.label} quantity` }}
     error={Boolean(error)}
     helperText={error || ' '}
     sx={{ minWidth: 130, '& .MuiFormHelperText-root': { minHeight: 16, mt: 0 } }}
@@ -157,7 +157,7 @@ export function MudCostEntryDialog({ open, onClose, onSave, entry, rig, section,
       const text = value.amount.trim()
       if (text) {
         if (!QUANTITY_PATTERN.test(text)) {
-          errors[spec.code] = `${spec.label}: enter a non-negative quantity with up to 10 decimal places.`
+          errors[spec.code] = `${spec.label}: enter a non-negative quantity with up to 3 decimal places.`
           continue
         }
         if (quantityScaled(text) > MAX_QUANTITY_SCALED) {

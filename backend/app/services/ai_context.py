@@ -115,7 +115,7 @@ class WellComparisonResult:
 def _money(value: Decimal | int | float | None) -> str:
     if value is None:
         return "0.00"
-    return f"{Decimal(str(value)):,.2f}"
+    return f"{Decimal(str(value)):,.3f}"
 
 
 def _signed_money(currency: str, value: Decimal) -> str:
@@ -139,7 +139,7 @@ def _days(value: Decimal | int | None) -> str:
     dec = Decimal(str(value))
     if dec == dec.to_integral_value():
         return str(int(dec))
-    return f"{dec:.2f}".rstrip("0").rstrip(".")
+    return f"{dec:.3f}".rstrip("0").rstrip(".")
 
 
 def _effective_afe(summary: DailyCostWellSummary) -> Decimal:

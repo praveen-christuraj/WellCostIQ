@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
-from app.core.precision import Decimal10
+from app.core.precision import Decimal3
 from app.domain.afe_costing import CHARGE_CATEGORIES, CHARGING_BASES, CONSUMABLE_CATEGORIES
 
 AfeType = Literal["Drilling", "Completion"]
@@ -196,14 +196,14 @@ class AfeExportAudit(BaseModel):
 
 class RateIn(BaseModel):
     category: ChargeCategory
-    unit_rate: Decimal10 = Field(ge=0, le=Decimal("100000000"))
+    unit_rate: Decimal3 = Field(ge=0, le=Decimal("100000000"))
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ChargeIn(BaseModel):
     category: ChargeCategory
-    quantity: Decimal10 = Field(ge=0, le=Decimal("100000"))
+    quantity: Decimal3 = Field(ge=0, le=Decimal("100000"))
     quantity_unit: QuantityUnit = "days"
 
     model_config = ConfigDict(extra="forbid")
@@ -212,7 +212,7 @@ class ChargeIn(BaseModel):
 class SectionRateIn(BaseModel):
     hole_section_id: str = Field(min_length=1, max_length=36)
     phase_id: str | None = Field(default=None, max_length=36)
-    amount: Decimal10 = Field(ge=0, le=Decimal("100000000000"))
+    amount: Decimal3 = Field(ge=0, le=Decimal("100000000000"))
 
     model_config = ConfigDict(extra="forbid")
 
@@ -223,7 +223,7 @@ class ScopeRateIn(BaseModel):
     hole_section_id: str = Field(min_length=1, max_length=36)
     phase_id: str | None = Field(default=None, max_length=36)
     category: ChargeCategory
-    unit_rate: Decimal10 = Field(ge=0, le=Decimal("100000000"))
+    unit_rate: Decimal3 = Field(ge=0, le=Decimal("100000000"))
 
     model_config = ConfigDict(extra="forbid")
 
@@ -240,7 +240,7 @@ class ScopeDaysIn(BaseModel):
     hole_section_id: str = Field(min_length=1, max_length=36)
     phase_id: str | None = Field(default=None, max_length=36)
     category: ChargeCategory
-    quantity: Decimal10 = Field(ge=0, le=Decimal("100000"))
+    quantity: Decimal3 = Field(ge=0, le=Decimal("100000"))
     quantity_unit: QuantityUnit = "days"
 
     model_config = ConfigDict(extra="forbid")
@@ -259,7 +259,7 @@ class ServiceLineIn(BaseModel):
     hole_section_id: str | None = Field(default=None, max_length=36)
     phase_id: str | None = Field(default=None, max_length=36)
     currency: str = Field(default="", max_length=10)
-    service_amount: Decimal10 = Field(default=Decimal("0"), ge=0, le=Decimal("100000000000"))
+    service_amount: Decimal3 = Field(default=Decimal("0"), ge=0, le=Decimal("100000000000"))
     remarks: str = Field(default="", max_length=500)
     rates: list[RateIn] = Field(default_factory=list, max_length=8)
     charges: list[ChargeIn] = Field(default_factory=list, max_length=50)
@@ -294,9 +294,9 @@ class ConsumableLineIn(BaseModel):
     hole_section_id: str = Field(min_length=1, max_length=36)
     phase_id: str | None = Field(default=None, max_length=36)
     drill_bit_id: str | None = Field(default=None, max_length=36)
-    quantity: Decimal10 = Field(default=Decimal("1"), ge=0, le=Decimal("1000000"))
-    override_rate: Decimal10 | None = Field(default=None, ge=0, le=Decimal("100000000"))
-    estimated_amount: Decimal10 | None = Field(default=None, ge=0, le=Decimal("100000000000"))
+    quantity: Decimal3 = Field(default=Decimal("1"), ge=0, le=Decimal("1000000"))
+    override_rate: Decimal3 | None = Field(default=None, ge=0, le=Decimal("100000000"))
+    estimated_amount: Decimal3 | None = Field(default=None, ge=0, le=Decimal("100000000000"))
     currency: str = Field(default="", max_length=10)
     remarks: str = Field(default="", max_length=500)
 
@@ -322,8 +322,8 @@ class ConsumableLineIn(BaseModel):
 class TangibleLineIn(BaseModel):
     client_key: str | None = Field(default=None, max_length=64)
     tangible_id: str = Field(min_length=1, max_length=36)
-    quantity: Decimal10 = Field(default=Decimal("1"), ge=0, le=Decimal("1000000"))
-    override_rate: Decimal10 | None = Field(default=None, ge=0, le=Decimal("100000000"))
+    quantity: Decimal3 = Field(default=Decimal("1"), ge=0, le=Decimal("1000000"))
+    override_rate: Decimal3 | None = Field(default=None, ge=0, le=Decimal("100000000"))
     remarks: str = Field(default="", max_length=500)
 
     model_config = ConfigDict(extra="forbid")
@@ -338,7 +338,7 @@ class ExchangeRateIn(BaseModel):
     """Units of the standard currency per one unit of ``currency_code``."""
 
     currency_code: str = Field(max_length=10)
-    rate: Decimal10 = Field(gt=0)
+    rate: Decimal3 = Field(gt=0)
 
     model_config = ConfigDict(extra="forbid")
 

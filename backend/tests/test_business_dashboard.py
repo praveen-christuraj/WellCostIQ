@@ -240,7 +240,7 @@ def test_business_dashboard_aggregates_plan_budget_and_actuals():
         assert well["rig_code"] == "RIG-01"
         assert well["status"] == "active"
         assert well["config_status"] == "configured"
-        assert well["drilling_planned_days"] == "10.00"
+        assert well["drilling_planned_days"] == "10.000"
         assert well["completion_planned_days"] is None
         assert well["first_cost_date"] == "2026-10-10"
         assert well["last_cost_date"] == "2026-10-11"
@@ -248,9 +248,9 @@ def test_business_dashboard_aggregates_plan_budget_and_actuals():
 
         afe = data["afes"][0]
         assert afe["afe_code"] == "AFE-01"
-        assert afe["afe_amount"] == "6000.00"
-        assert afe["actual_amount"] == "1000.00"
-        assert afe["afe_balance"] == "5000.00"
+        assert afe["afe_amount"] == "6000.000"
+        assert afe["actual_amount"] == "1000.000"
+        assert afe["afe_balance"] == "5000.000"
         assert Decimal(afe["npt_days"]) == Decimal("0")
         assert Decimal(afe["upa_days"]) == Decimal("0")
         assert afe["conversion_pending"] is False
@@ -258,7 +258,7 @@ def test_business_dashboard_aggregates_plan_budget_and_actuals():
         # Charts and tables are real aggregations, not placeholders.
         assert [point["cost_date"] for point in data["daily"]] == ["2026-10-10", "2026-10-11"]
         assert Decimal(data["daily"][-1]["cumulative"]) == Decimal("1000.00")
-        assert data["daily"][0]["npt"] == "200.00"
+        assert data["daily"][0]["npt"] == "200.000"
         groups = {row["key"]: row for row in data["cost_groups"]}
         assert Decimal(groups["services"]["planned"]) == Decimal("1000.00")
         assert Decimal(groups["consumables"]["planned"]) == Decimal("5000.00")
@@ -377,13 +377,13 @@ def test_business_dashboard_uses_allocated_hours_for_fractional_npt_upa_days():
             db.commit()
 
         payload = client.get("/api/v1/dashboard/business", headers=headers).json()
-        assert Decimal(payload["kpis"]["npt_days"]) == Decimal("0.3125")  # 7.5 / 24
+        assert Decimal(payload["kpis"]["npt_days"]) == Decimal("0.313")  # 7.5 / 24
         assert Decimal(payload["kpis"]["upa_days"]) == Decimal("0.2500")  # (3 + 3) / 24
-        assert Decimal(payload["wells"][0]["npt_days"]) == Decimal("0.3125")
+        assert Decimal(payload["wells"][0]["npt_days"]) == Decimal("0.313")
         assert Decimal(payload["afes"][0]["upa_days"]) == Decimal("0.2500")
-        assert Decimal(payload["rigs"][0]["npt_days"]) == Decimal("0.3125")
+        assert Decimal(payload["rigs"][0]["npt_days"]) == Decimal("0.313")
         classification = {row["key"]: row for row in payload["classification"]}
-        assert Decimal(classification["NPT"]["days"]) == Decimal("0.3125")
+        assert Decimal(classification["NPT"]["days"]) == Decimal("0.313")
 
         second_day = client.get(
             "/api/v1/dashboard/business?from=2026-10-11&to=2026-10-11",
@@ -434,12 +434,12 @@ def test_business_dashboard_respects_rbac_and_tenant_scope():
         assert payload["capabilities"] == {"plan": False, "budget": False, "actuals": True}
         assert payload["kpis"]["afe_amount"] is None
         assert payload["kpis"]["planned_days"] is None
-        assert payload["kpis"]["actual_amount"] == "1000.00"
+        assert payload["kpis"]["actual_amount"] == "1000.000"
         assert Decimal(payload["kpis"]["npt_days"]) == Decimal("0")
         assert payload["afes"] == []
         assert payload["wells"][0]["afe_amount"] is None
         assert payload["wells"][0]["planned_days"] is None
-        assert payload["wells"][0]["actual_amount"] == "1000.00"
+        assert payload["wells"][0]["actual_amount"] == "1000.000"
 
         blocked_headers = login(client, email="blocked@example.com")
         assert client.get("/api/v1/dashboard/business", headers=blocked_headers).status_code == 403
@@ -497,7 +497,7 @@ def test_dashboard_actual_days_are_exact_fractional_elapsed_time():
         assert Decimal(afe["actual_days"]) == Decimal("1.583")
         assert afe["actual_days_basis"] == "spud"
         # Planned 10 days against 1.583 actual: the variance keeps its decimals.
-        assert Decimal(data["kpis"]["day_variance"]) == Decimal("-8.42")
+        assert Decimal(data["kpis"]["day_variance"]) == Decimal("-8.417")
 
         # A recorded completion instant freezes the count at that exact minute.
         completed = client.put(

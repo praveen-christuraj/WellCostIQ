@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.precision import DECIMAL_QUANT
 from app.models import Afe, Currency, LihCostEntry, LihCostLine, Rig, UnitOfMeasurement, Well
 from app.models.entities import User
 from app.models.rig_well import uid
@@ -53,17 +54,15 @@ from app.schemas.lih_cost import (
 )
 from app.services import audit
 
-CENT = Decimal("0.01")
-TEN_PLACES = Decimal("0.0000000001")
 SUGGESTION_LIMIT = 200
 
 
 def _money(value: Decimal | int | str | None) -> Decimal:
-    return Decimal(value or 0).quantize(CENT, rounding=ROUND_HALF_UP)
+    return Decimal(value or 0).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
 
 
 def _quantity(value: Decimal | int | str | None) -> Decimal:
-    return Decimal(value or 0).quantize(TEN_PLACES, rounding=ROUND_HALF_UP)
+    return Decimal(value or 0).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
 
 
 def _actor_name(user: User) -> str:
@@ -605,8 +604,8 @@ def add_line(
         summary=(
             f"Added LIH item “{data.item_description}” to {entry.well_code_snapshot} on "
             f"{entry.cost_date.isoformat()}: {Decimal(data.no_of_units).normalize():f} "
-            f"{data.unit or 'unit'} × {entry.currency} {Decimal(data.unit_cost):,.2f} = "
-            f"{entry.currency} {total:,.2f}"
+            f"{data.unit or 'unit'} × {entry.currency} {Decimal(data.unit_cost):,.3f} = "
+            f"{entry.currency} {total:,.3f}"
         ),
         request=request,
     )
@@ -643,7 +642,7 @@ def update_line(
         entity_label=f"LIH item · {data.item_description}"[:255],
         summary=(
             f"Updated LIH item “{data.item_description}” on {entry.well_code_snapshot} "
-            f"{entry.cost_date.isoformat()}: {entry.currency} {total:,.2f}"
+            f"{entry.cost_date.isoformat()}: {entry.currency} {total:,.3f}"
         ),
         request=request,
     )
@@ -666,7 +665,7 @@ def delete_line(
         db, user=user, action="delete", entity_type="lih_cost_line", entity_id=line_id,
         entity_label=f"LIH item · {description}"[:255],
         summary=(
-            f"Removed LIH item “{description}” ({entry.currency} {amount:,.2f}) from "
+            f"Removed LIH item “{description}” ({entry.currency} {amount:,.3f}) from "
             f"{entry.well_code_snapshot} {entry.cost_date.isoformat()}"
         ),
         request=request,
@@ -804,7 +803,7 @@ def save_day(
     _recalculate(entry)
     _bump_revision(entry)
     entry.updated_by = actor
-    saved = f"{entry.line_count} item(s), {entry.currency} {Decimal(entry.total_cost):,.2f}"
+    saved = f"{entry.line_count} item(s), {entry.currency} {Decimal(entry.total_cost):,.3f}"
     if action == "create":
         summary = (
             f"Opened the LIH register for {well.well_code} on {data.cost_date.isoformat()} and saved "
@@ -853,7 +852,7 @@ def delete_lines(
         summary=(
             f"Removed {len(wanted)} LIH item(s) from {entry.well_code_snapshot} on "
             f"{entry.cost_date.isoformat()}; the day is now {entry.line_count} item(s), "
-            f"{entry.currency} {Decimal(entry.total_cost):,.2f}"
+            f"{entry.currency} {Decimal(entry.total_cost):,.3f}"
         ),
         request=request,
     )
@@ -1024,7 +1023,7 @@ def soft_delete_entries(
             entity_label=f"LIH · {entry.well_code_snapshot} · {entry.cost_date.isoformat()}",
             summary=(
                 f"Moved the LIH register of {entry.well_code_snapshot} on {entry.cost_date.isoformat()} "
-                f"({entry.currency} {Decimal(entry.total_cost):,.2f}) to Deleted Entries"
+                f"({entry.currency} {Decimal(entry.total_cost):,.3f}) to Deleted Entries"
             ),
             request=request,
         )
@@ -1063,7 +1062,7 @@ def restore_entries(
             entity_label=f"LIH · {entry.well_code_snapshot} · {entry.cost_date.isoformat()}",
             summary=(
                 f"Restored the LIH register of {entry.well_code_snapshot} on {entry.cost_date.isoformat()} "
-                f"({entry.currency} {Decimal(entry.total_cost):,.2f})"
+                f"({entry.currency} {Decimal(entry.total_cost):,.3f})"
             ),
             request=request,
         )
@@ -1083,7 +1082,7 @@ def permanently_delete_entries(
             entity_label=f"LIH · {entry.well_code_snapshot} · {entry.cost_date.isoformat()}",
             summary=(
                 f"Permanently deleted the LIH register of {entry.well_code_snapshot} on "
-                f"{entry.cost_date.isoformat()} ({entry.currency} {Decimal(entry.total_cost):,.2f}, "
+                f"{entry.cost_date.isoformat()} ({entry.currency} {Decimal(entry.total_cost):,.3f}, "
                 f"{entry.line_count} item(s))"
             ),
             request=request,

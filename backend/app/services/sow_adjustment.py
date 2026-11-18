@@ -603,7 +603,7 @@ def create_well_plan_adjustment(
         entity_label=f"{well.well_code} {data.configuration_scope} Rev {revision}",
         summary=(
             f"Recorded {data.configuration_scope} plan adjustment Rev {revision} (draft) for well {well.well_code}: "
-            f"{after_days:,.2f} days across {after_count} section(s) vs configured {before_days:,.2f} days "
+            f"{after_days:,.3f} days across {after_count} section(s) vs configured {before_days:,.3f} days "
             f"across {before_count} section(s). Reason: {row.reason}"
         ),
         request=request,
@@ -697,7 +697,7 @@ def _set_well_plan_status(
         row.approved_at = _now()
         action, summary = "approve", (
             f"Approved {row.configuration_scope} plan adjustment Rev {row.revision_number} for well "
-            f"{well.well_code if well else ''}: {Decimal(row.planned_days_after):,.2f} days"
+            f"{well.well_code if well else ''}: {Decimal(row.planned_days_after):,.3f} days"
             + (f". {remarks.strip()}" if remarks.strip() else "")
         )
     else:
@@ -1491,7 +1491,7 @@ def create_afe_adjustment(
         entity_label=f"{afe.afe_code} Rev {revision}",
         summary=(
             f"Recorded SOW adjustment Rev {revision} (draft) for AFE {afe.afe_code}: "
-            f"{standard_currency} {adjusted_total:,.2f} vs original {standard_currency} {Decimal(total):,.2f} "
+            f"{standard_currency} {adjusted_total:,.3f} vs original {standard_currency} {Decimal(total):,.3f} "
             f"({len(data.services)} service, {len(data.consumables)} consumable, {len(data.tangibles)} tangible revised line(s)). "
             f"Reason: {row.reason}"
         ),
@@ -1682,7 +1682,7 @@ def _set_afe_adjustment_status(
         row.approved_at = _now()
         action, summary = "approve", (
             f"Approved SOW adjustment Rev {row.revision_number} for AFE {afe.afe_code if afe else ''}: "
-            f"{row.standard_currency} {Decimal(row.adjusted_total):,.2f}"
+            f"{row.standard_currency} {Decimal(row.adjusted_total):,.3f}"
             + (f". {remarks.strip()}" if remarks.strip() else "")
         )
     else:

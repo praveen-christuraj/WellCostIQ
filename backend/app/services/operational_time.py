@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from app.core.precision import DECIMAL_QUANT
 from typing import TypeAlias
 
 ONE_TIME_SERVICE_CATEGORIES = frozenset({"Mobilization", "Demobilization", "Fixed Charge"})
-DURATION_HOURS_QUANT = Decimal("0.01")
-DURATION_DAYS_QUANT = Decimal("0.0001")
+DURATION_HOURS_QUANT = DECIMAL_QUANT
+DURATION_DAYS_QUANT = DECIMAL_QUANT
 
 AllocationKey: TypeAlias = tuple[str, date, str, str, str, str, str, str]
 
@@ -58,4 +59,4 @@ def record_service_allocation(
 
 
 def hours_to_days(hours: Decimal) -> Decimal:
-    return (hours / Decimal("24")).quantize(DURATION_DAYS_QUANT)
+    return hours / Decimal("24")

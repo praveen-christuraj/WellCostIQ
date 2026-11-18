@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.precision import Decimal10
+from app.core.precision import Decimal3
 
 Scope = Literal["drilling", "completion"]
 MAX_LINES = 500
@@ -24,10 +24,10 @@ class _Strict(BaseModel):
 
 class NdtLineIn(_Strict):
     description: str = Field(min_length=1, max_length=300)
-    quantity_received: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
-    quantity_consumed: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
-    quantity_backloaded_good: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
-    quantity_backloaded_bad: Decimal10 = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
+    quantity_received: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
+    quantity_consumed: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
+    quantity_backloaded_good: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
+    quantity_backloaded_bad: Decimal3 = Field(default=Decimal("0"), ge=0, le=MAX_QUANTITY)
     remarks: str = Field(default="", max_length=500)
 
     @field_validator("description", "remarks", mode="before")

@@ -27,7 +27,7 @@ Rules
   rate is the override when one is entered, otherwise the captured rate.
 * Sections and phases must come from the well configuration. Anything outside it
   is reported as a warning and is never silently priced into a section.
-* Entered and calculated decimals are retained to 10 places (half-up).
+* Entered and calculated decimals are reported to 3 places (half-up); unit conversions retain working precision until pricing.
 * Currency. Every line keeps its entered currency. The estimate has one standard
   currency. When only one currency is detected, that currency is the standard and
   no rate is needed. When several are detected, a standard currency must be chosen
@@ -100,7 +100,7 @@ def normalize_days(quantity: Decimal, unit: str) -> Decimal:
     value = Decimal(quantity)
     if unit == UNIT_HOURS:
         value = value / HOURS_PER_DAY
-    return _qty(value)
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -443,11 +443,11 @@ def _day_component(
     return Component(
         group=GROUP_SERVICES,
         category=category,
-        description=f"{category} — {days} day(s) @ {_qty(rate)} · {scope_label}",
+        description=f"{category} — {_qty(days)} day(s) @ {_qty(rate)} · {scope_label}",
         amount=amount,
         section_id=section.section_id if section else None,
         phase_id=phase.phase_id if phase else None,
-        quantity=days,
+        quantity=_qty(days),
         rate=_qty(rate),
         unit="day",
     )
@@ -615,7 +615,7 @@ def _daily_components(line: ServiceLine, well: WellScope, warnings: list[str]) -
                 else:
                     # An entered total is split across the sections by their planned days.
                     for section in weighted:
-                        entries.append((_qty(explicit * section.days / total_weight), shared, section.section_id, None))
+                        entries.append((explicit * section.days / total_weight, shared, section.section_id, None))
             else:
                 for section_id, phase_id in covered:
                     if (category, section_id, phase_id) in scope_rates:
@@ -631,7 +631,7 @@ def _daily_components(line: ServiceLine, well: WellScope, warnings: list[str]) -
             if days == 0:
                 continue
             if rate == 0:
-                warnings.append(f"{category}: {days} day(s) entered without a unit rate, so not priced")
+                warnings.append(f"{category}: {_qty(days)} day(s) entered without a unit rate, so not priced")
                 continue
             resolved = _resolve_scope(well, section_id, phase_id, warnings, category)
             if resolved is None:
@@ -656,7 +656,7 @@ def _daily_components(line: ServiceLine, well: WellScope, warnings: list[str]) -
         if _shared_rate(line, category) is None and not any(
             key[0] == category for key in scope_rates
         ):
-            warnings.append(f"{category}: {days} day(s) entered without a unit rate, so not priced")
+            warnings.append(f"{category}: {_qty(days)} day(s) entered without a unit rate, so not priced")
     return components
 
 

@@ -113,6 +113,12 @@ export type OpsBlock = {
   classification: 'Planned' | 'UPA' | 'NPT'
   allocation: 'PT' | 'NPT' | 'UPA' | 'SP'
   is_productive: boolean
+  source_activity_code?: string
+  source_activity_label?: string
+  source_operation_label?: string
+  source_phase_label?: string
+  source_mark_label?: string
+  source_cause_label?: string
   classification_evidence?: string
   source_page?: number
   source_bbox?: string
@@ -349,8 +355,8 @@ export function listReports(params: Record<string, string | undefined>) {
   return api<OpsReport[]>(`/operations/reports${s}`, { action: 'Load reports' })
 }
 
-export function getReport(id: string) {
-  return api<OpsReport>(`/operations/reports/${id}`, { action: 'Load report' })
+export function getReport(id: string, includeDeleted = false) {
+  return api<OpsReport>(`/operations/reports/${id}${includeDeleted ? '?include_deleted=true' : ''}`, { action: 'Load report' })
 }
 
 export function createReport(data: Record<string, unknown>) {
@@ -386,14 +392,14 @@ export function rejectReport(id: string, reason: string) {
   })
 }
 
-export function getBrief(id: string) {
+export function getBrief(id: string, includeDeleted = false) {
   return api<{
     summary: string
     time_split: Record<string, unknown>
     npt_items: unknown[]
     depth_progress: Record<string, unknown>
     data_quality: Record<string, unknown>
-  }>(`/operations/reports/${id}/brief`, { action: 'Load brief' })
+  }>(`/operations/reports/${id}/brief${includeDeleted ? '?include_deleted=true' : ''}`, { action: 'Load brief' })
 }
 
 export function bulkDeleteReports(ids: string[]) {
@@ -451,24 +457,64 @@ export type TimelineRow = {
 export type TimelinePreview = { sheet: string; sheets: string[]; warnings: string[]; items: TimelineRow[] }
 export const previewTimeline = (id: string, file: File, sheet = '') =>
   uploadFiles<TimelinePreview>(`/operations/plans/${id}/import-preview`, [file], { sheet }, 'file')
-export const saveTimeline = (id: string, rows: TimelineRow[]) =>
-  api(`/operations/plans/${id}/items`, {
-    method: 'PUT',
-    body: body(
-      rows.map((row, i) => {
-        // Keep existing item metadata when editing just the description, depth or hours.
-        const {
-          id: _id,
-          source_row: _source,
-          cum_planned_days: _computed,
-          ...item
-        } = row as TimelineRow & { id?: string; cum_planned_days?: string }
-        return {
-          ...item,
-          sequence_no: i + 1,
-          description: row.description.trim(),
-          target_depth_m: row.target_depth_m ?? null,
-        }
-      }),
-    ),
+function timelinePayload(rows: TimelineRow[]) {
+  return rows.map((row, i) => {
+    // Keep existing metadata when editing just the description, depth or hours.
+    const { id: _id, source_row: _source, cum_planned_days: _computed, ...item } = row as TimelineRow & {
+      id?: string; cum_planned_days?: string
+    }
+    return { ...item, sequence_no: i + 1, description: row.description.trim(), target_depth_m: row.target_depth_m ?? null }
   })
+}
+
+export const saveTimeline = (id: string, rows: TimelineRow[]) =>
+  api(`/operations/plans/${id}/items`, { method: 'PUT', body: body(timelinePayload(rows)) })
+
+export type OpsDefaultCode = {
+  id: string
+  family: string
+  code: string
+  name: string
+  description: string
+  source: string
+  classification: string
+  allocation: string
+}
+export const defaultOpsCodes = () => api<OpsDefaultCode[]>('/operations/default-codes', { action: 'Load default operations codes' })
+
+export type OpsRegisters = { plans: OpsPlan; reports: OpsReport; documents: OpsDocument }
+export type OpsFolderCount = {
+  rig_key: string
+  well_key: string
+  rig_id: string | null
+  well_id: string | null
+  rig_code: string
+  well_code: string
+  well_name: string
+  scope: string
+  record_count: number
+}
+export const operationsFolders = (resource: keyof OpsRegisters, deleted: boolean) =>
+  api<OpsFolderCount[]>(`/operations/directory/${resource}?deleted=${deleted}`, { action: 'Load rig and well folders' })
+export const operationsRecords = <K extends keyof OpsRegisters>(resource: K, rig: string, well: string, scope: string, deleted: boolean) =>
+  api<OpsRegisters[K][]>(`/operations/directory/${resource}/records?${new URLSearchParams({ rig, well, scope, deleted: String(deleted) })}`, { action: 'Load well folder' })
+export const getOpsPlan = (id: string) => api<OpsPlan>(`/operations/plans/${id}`, { action: 'Load timeline' })
+
+export type OpsGuideTopic = { id: string; title: string; question: string; body: string; steps: string[]; route: string }
+export const opsGuide = () => api<OpsGuideTopic[]>('/operations/guide', { action: 'Load Well Operations guide' })
+
+export type OpsStudy = {
+  summary: string
+  warnings: string[]
+  ai_text: string
+  ai_model: string
+  ai_error: string
+  ai_error_code: import('./ai').AiErrorCode
+}
+export const opsAiStatus = () => api<import('./ai').AiConnectionStatus>('/operations/ai-status?probe=true', { action: 'Check offline AI connection' })
+export const reviewBrief = (id: string, useAi: boolean, includeDeleted = false) => api<OpsStudy>(`/operations/reports/${id}/brief${includeDeleted ? '?include_deleted=true' : ''}`, {
+  method: 'POST', body: body({ use_ai: useAi }), action: 'Generate daily narrative',
+})
+export const studyTimeline = (id: string, useAi: boolean, rows?: TimelineRow[]) => api<OpsStudy>(`/operations/plans/${id}/study`, {
+  method: 'POST', body: body({ use_ai: useAi, ...(rows ? { items: timelinePayload(rows) } : {}) }), action: 'Study timeline',
+})

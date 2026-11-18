@@ -422,16 +422,16 @@ export function formatDepth(
     ? Number(metersOverride)
     : depthToMeters(value, unit)
   if (meters == null || !Number.isFinite(meters)) return '—'
-  const formattedMeters = `${meters.toLocaleString(undefined, { maximumFractionDigits: 2 })} m`
+  const formattedMeters = `${meters.toLocaleString(undefined, { maximumFractionDigits: 3 })} m`
   if (unit === 'ft') {
-    return `${formattedMeters} (${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })} ft)`
+    return `${formattedMeters} (${Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 })} ft)`
   }
   return formattedMeters
 }
 
 export function formatDays(value: string | number | null | undefined): string {
   if (value == null || value === '') return '—'
-  return `${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} days`
+  return `${Number(value).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} days`
 }
 
 export function entityLabel(kind: DeletedRigWellRecord['entity_type']): string {

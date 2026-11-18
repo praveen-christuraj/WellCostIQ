@@ -39,6 +39,7 @@ from sqlalchemy import case, delete, func, literal, select, union_all
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.precision import DECIMAL_QUANT
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.domain import entry_rules as rules
@@ -550,7 +551,7 @@ def _profile_rows(db: Session, organization_id: str, kind: str, subject_ids: Seq
 
 
 def _quantized(value: float) -> Decimal:
-    return Decimal(repr(value)).quantize(Decimal("0.0000000001"))
+    return Decimal(repr(value)).quantize(DECIMAL_QUANT)
 
 
 def _build_profile_rows(

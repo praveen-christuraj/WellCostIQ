@@ -131,7 +131,7 @@ function decimalText(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return '—'
   const parsed = Number(value)
   return Number.isFinite(parsed)
-    ? parsed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    ? parsed.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })
     : '—'
 }
 

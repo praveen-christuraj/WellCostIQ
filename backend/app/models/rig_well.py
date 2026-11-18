@@ -43,6 +43,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.precision import DECIMAL_PLACES
 from app.core.database import Base
 from app.models.master_data import HoleSection, Phase
 
@@ -332,8 +333,8 @@ class WellSection(Base):
     hole_section_id: Mapped[str] = mapped_column(
         ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    from_depth: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
-    to_depth: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    from_depth: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    to_depth: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     remarks: Mapped[str] = mapped_column(String(1000), default="", server_default="", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
@@ -371,7 +372,7 @@ class WellPhase(Base):
     phase_id: Mapped[str] = mapped_column(
         ForeignKey("phases.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    days: Mapped[Decimal] = mapped_column(Numeric(28, 10), nullable=False)
+    days: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     remarks: Mapped[str] = mapped_column(String(1000), default="", server_default="", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

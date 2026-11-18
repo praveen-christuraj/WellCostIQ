@@ -1,3 +1,4 @@
+import { DECIMAL_PLACES, DECIMAL_SCALE } from '../../lib/precision'
 import { useEffect, useState } from 'react'
 import { Alert, Box, TextField } from '@mui/material'
 import { ErrorMessage, FormDialog } from '../Common'
@@ -20,11 +21,11 @@ export function MudCostOpeningStockDialog({ entry, onClose, onSave }: {
 
   const submit = async () => {
     if (!entry) return
-    const validFormat = /^(?:\d+|\d*\.\d{1,10})$/.test(amount.trim())
+    const validFormat = /^(?:\d+|\d*\.\d{1,3})$/.test(amount.trim())
     const [whole = '0', fraction = ''] = amount.trim().split('.')
-    const scaled = validFormat ? BigInt(whole || '0') * 10_000_000_000n + BigInt(fraction.padEnd(10, '0')) : 0n
-    if (!validFormat || scaled > 9999999999999999999999999n) {
-      setError('Enter a non-negative opening stock below 1,000,000,000,000,000 with up to 10 decimal places.')
+    const scaled = validFormat ? BigInt(whole || '0') * DECIMAL_SCALE + BigInt(fraction.padEnd(DECIMAL_PLACES, '0')) : 0n
+    if (!validFormat || scaled > (10n ** 15n) * DECIMAL_SCALE - 1n) {
+      setError('Enter a non-negative opening stock below 1,000,000,000,000,000 with up to 3 decimal places.')
       return
     }
     setSaving(true)
@@ -51,7 +52,7 @@ export function MudCostOpeningStockDialog({ entry, onClose, onSave }: {
     <Box display="grid" gap={1.6}>
       <TextField label="Initial opening stock (bbl)" type="number" value={amount}
         onChange={event => setAmount(event.target.value)} required
-        inputProps={{ min: 0, step: '0.0000000001' }}/>
+        inputProps={{ min: 0, step: '0.001' }}/>
       <TextField label="Opening stock remarks" value={remarks} multiline minRows={2}
         onChange={event => setRemarks(event.target.value)} inputProps={{ maxLength: 500 }}/>
       <ErrorMessage message={error}/>

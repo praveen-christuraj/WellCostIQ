@@ -6,6 +6,7 @@ changed client cannot move a quantity into a different material-balance column.
 """
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
+from app.core.precision import DECIMAL_QUANT
 from typing import Mapping
 
 
@@ -146,9 +147,8 @@ def closing_stock(
 
 
 # Reconciliation arithmetic is kept in the domain layer so the Mud Cost page
-# and the Well Cost Analysis read exactly the same numbers. Values are kept at
-# the ten-decimal entry precision; presentation may round to currency cents.
-RECONCILIATION_QUANT = Decimal("0.0000000001")
+# and Well Cost Analysis use the same three-place result precision.
+RECONCILIATION_QUANT = DECIMAL_QUANT
 
 
 @dataclass(frozen=True)
@@ -216,13 +216,14 @@ def reconcile_mud(
         )
     rate = base_rate if base_rate is not None else Decimal("0")
     alpha = _q((opening_stock + extra_obm_received) * rate)
-    beta = _q(alpha + actual_cost)
-    cost_per_bbl = _q(beta / total_mud) if total_mud > 0 else None
-    reconciled = _q(consumption_losses * cost_per_bbl) if cost_per_bbl is not None else None
+    beta = alpha + actual_cost
+    rate_per_bbl = beta / total_mud if total_mud > 0 else None
+    cost_per_bbl = _q(rate_per_bbl) if rate_per_bbl is not None else None
+    reconciled = _q(consumption_losses * rate_per_bbl) if rate_per_bbl is not None else None
     return MudCostReconciliation(
         total_mud=total_mud,
         alpha=alpha,
-        beta=beta,
+        beta=_q(beta),
         cost_per_bbl=cost_per_bbl,
         reconciled_cost=reconciled,
     )

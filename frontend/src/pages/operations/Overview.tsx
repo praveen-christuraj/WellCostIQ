@@ -154,7 +154,7 @@ export default function OperationsOverview() {
           />
           <StatCard
             label="Verified hours"
-            value={k.total_logged_hours.toFixed(2)}
+            value={k.total_logged_hours.toFixed(3)}
             hint={`${k.planned_hours} planned · ${k.upa_hours} UPA · ${k.npt_hours} NPT`}
           />
           <StatCard

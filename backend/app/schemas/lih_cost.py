@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.precision import Decimal10
+from app.core.precision import Decimal3
 
 MAX_UNITS = Decimal("1000000")
 MAX_UNIT_COST = Decimal("100000000")
@@ -49,16 +49,16 @@ class LihCostLineIn(_Strict):
     id: str | None = Field(default=None, max_length=36)
     source: Literal["manual", "duplicate", "import"] = "manual"
     item_description: str = Field(min_length=1, max_length=300)
-    od_size: Decimal10 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
-    id_size: Decimal10 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
-    fish_neck_od: Decimal10 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
-    fish_neck_length: Decimal10 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
+    od_size: Decimal3 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
+    id_size: Decimal3 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
+    fish_neck_od: Decimal3 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
+    fish_neck_length: Decimal3 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
     serial_number: str = Field(default="", max_length=100)
     connection: str = Field(default="", max_length=100)
-    length: Decimal10 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
-    no_of_units: Decimal10 = Field(gt=0, le=MAX_UNITS)
+    length: Decimal3 | None = Field(default=None, ge=0, le=MAX_DIMENSION)
+    no_of_units: Decimal3 = Field(gt=0, le=MAX_UNITS)
     unit: str = Field(default="", max_length=50)
-    unit_cost: Decimal10 = Field(ge=0, le=MAX_UNIT_COST)
+    unit_cost: Decimal3 = Field(ge=0, le=MAX_UNIT_COST)
     remarks: str = Field(default="", max_length=500)
 
     @field_validator(

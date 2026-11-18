@@ -1,58 +1,28 @@
 import { useEffect, useState } from 'react'
 import { CloudUploadOutlined, DownloadOutlined, RestoreRounded } from '@mui/icons-material'
-import { Alert, Box, Button, MenuItem, TextField } from '@mui/material'
+import { Alert, Box, Button, MenuItem, TextField, Typography } from '@mui/material'
 import { DataTable } from '../../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading } from '../../components/Common'
-import { ScopeDirectory, type Folder } from '../../components/operations/ScopeDirectory'
+import { recordLocation, ScopeDirectory, useOperationsRegister } from '../../components/operations/ScopeDirectory'
 import { SourceDialog } from '../../components/operations/SourceDialog'
 import { useRegisterActions } from '../../components/operations/RegisterActions'
 import { useAuth } from '../../context/AuthContext'
 import { api, body, downloadFile } from '../../lib/api'
-import {
-  auditExport,
-  listDeletedDocuments,
-  listDocuments,
-  opsScopeReference,
-  type OpsDocument,
-  type OpsScopeReference,
-} from '../../lib/operations'
+import { auditExport, type OpsDocument } from '../../lib/operations'
 
 export default function OperationsDocuments() {
   const { can } = useAuth()
-  const [rows, setRows] = useState<OpsDocument[]>([]),
-    [ref, setRef] = useState<OpsScopeReference | null>(null),
-    [deleted, setDeleted] = useState(false),
-    [upload, setUpload] = useState(false)
-  const [folder, setFolder] = useState<Folder | null>(null),
-    [error, setError] = useState(''),
+  const register = useOperationsRegister('documents')
+  const { rows, reference: ref, deleted, refresh, location } = register
+  const [upload, setUpload] = useState(false)
+  const [error, setError] = useState(''),
     [editing, setEditing] = useState<OpsDocument | null>(null),
     [busy, setBusy] = useState(false),
     [saveError, setSaveError] = useState('')
-  const getRows = () => (deleted ? listDeletedDocuments() : listDocuments({}))
-  const refresh = async () => {
-    setRows(await getRows())
-  }
   const controls = useRegisterActions<OpsDocument>('documents', deleted, refresh)
   useEffect(() => {
-    let current = true
-    setRows([])
-    setError('')
-    getRows()
-      .then((d) => {
-        if (current) setRows(d)
-      })
-      .catch((e) => {
-        if (current) setError(e.message)
-      })
-    return () => {
-      current = false
-    }
-  }, [deleted])
-  useEffect(() => {
-    opsScopeReference()
-      .then(setRef)
-      .catch((e) => setError(e.message))
-  }, [])
+    controls.clear()
+  }, [location.rig, location.well, location.scope, deleted])
   return (
     <Box>
       <PageHeading
@@ -62,7 +32,12 @@ export default function OperationsDocuments() {
         action={
           <Box display="flex" gap={1} flexWrap="wrap">
             {!deleted && can('ops-doc:upload') && (
-              <Button variant="contained" startIcon={<CloudUploadOutlined />} disabled={!ref} onClick={() => setUpload(true)}>
+              <Button
+                variant="contained"
+                startIcon={<CloudUploadOutlined />}
+                disabled={!ref || register.loading}
+                onClick={() => setUpload(true)}
+              >
                 Upload documents
               </Button>
             )}
@@ -71,8 +46,7 @@ export default function OperationsDocuments() {
               startIcon={<RestoreRounded />}
               onClick={() => {
                 controls.clear()
-                setFolder(null)
-                setDeleted(!deleted)
+                register.change({ rig: '' }, !deleted)
               }}
             >
               {deleted ? 'Active documents' : 'Deleted entries'}
@@ -80,80 +54,83 @@ export default function OperationsDocuments() {
           </Box>
         }
       />
-      {error && <ErrorMessage message={error} />}
-      <ScopeDirectory
-        rows={rows}
-        reference={ref}
-        folder={folder}
-        change={(f) => {
-          controls.clear()
-          setFolder(f)
-        }}
-      />
-      {controls.bar}
-      <DataTable
-        rows={folder ? rows.filter((r) => (r.well_id ?? '') === folder.well_id && r.scope === folder.scope) : rows}
-        selectable
-        exportSelected
-        onSelectionChange={controls.setSelected}
-        selectionResetKey={controls.resetKey}
-        fillHeight
-        exportName="operations-document-index"
-        canExport={can('ops-doc:export')}
-        onExport={auditExport('documents')}
-        columns={[
-          { field: 'file_name', headerName: 'File name', minWidth: 230 },
-          { field: 'document_type', headerName: 'Type' },
-          { field: 'document_date', headerName: 'Document date' },
-          { field: 'rig_code_snapshot', headerName: 'Rig' },
-          { field: 'well_code_snapshot', headerName: 'Well' },
-          { field: 'scope', headerName: 'Scope' },
-          { field: 'uploaded_by_name', headerName: 'Filed by' },
-          { field: 'notes', headerName: 'Notes' },
-          {
-            headerName: 'Actions',
-            width: 260,
-            minWidth: 245,
-            sortable: false,
-            cellRenderer: ({ data: r }: { data: OpsDocument }) => (
-              <Box display="flex" alignItems="center" height="100%">
-                {!deleted && can('ops-doc:download') && (
-                  <Button
-                    size="small"
-                    aria-label={`Download ${r.file_name}`}
-                    onClick={() =>
-                      downloadFile(`/operations/documents/${r.id}/download`, r.file_name).catch((e) => setError(e.message))
-                    }
-                  >
-                    <DownloadOutlined />
-                  </Button>
-                )}
-                {!deleted && can('ops-doc:update') && (
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      setEditing(r)
-                      setSaveError('')
-                    }}
-                  >
-                    Edit
-                  </Button>
-                )}
-                {controls.actions([r])}
-              </Box>
-            ),
-          },
-        ]}
-      />
-      {controls.dialog}
+      {(register.error || error) && <ErrorMessage message={register.error || error} />}
+      <ScopeDirectory {...register} resource="documents" />
+      {location.well &&
+        (register.loading ? (
+          <Typography role="status">Loading documents…</Typography>
+        ) : (
+          <>
+            {controls.bar}
+            <DataTable
+              key={JSON.stringify([location, deleted])}
+              rows={rows}
+              selectable
+              exportSelected
+              onSelectionChange={controls.setSelected}
+              selectionResetKey={controls.resetKey}
+              fillHeight
+              exportName="operations-document-index"
+              canExport={can('ops-doc:export')}
+              onExport={auditExport('documents')}
+              columns={[
+                { field: 'file_name', headerName: 'File name', minWidth: 230 },
+                { field: 'document_type', headerName: 'Type' },
+                { field: 'document_date', headerName: 'Document date' },
+                { field: 'rig_code_snapshot', headerName: 'Rig' },
+                { field: 'well_code_snapshot', headerName: 'Well' },
+                { field: 'scope', headerName: 'Scope' },
+                { field: 'uploaded_by_name', headerName: 'Filed by' },
+                { field: 'notes', headerName: 'Notes' },
+                {
+                  headerName: 'Actions',
+                  width: 260,
+                  minWidth: 245,
+                  sortable: false,
+                  cellRenderer: ({ data: r }: { data: OpsDocument }) => (
+                    <Box display="flex" alignItems="center" height="100%">
+                      {!deleted && can('ops-doc:download') && (
+                        <Button
+                          size="small"
+                          aria-label={`Download ${r.file_name}`}
+                          onClick={() =>
+                            downloadFile(`/operations/documents/${r.id}/download`, r.file_name).catch((e) =>
+                              setError(e.message),
+                            )
+                          }
+                        >
+                          <DownloadOutlined />
+                        </Button>
+                      )}
+                      {!deleted && can('ops-doc:update') && (
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setEditing(r)
+                            setSaveError('')
+                          }}
+                        >
+                          Edit
+                        </Button>
+                      )}
+                      {controls.actions([r])}
+                    </Box>
+                  ),
+                },
+              ]}
+            />
+            {controls.dialog}
+          </>
+        ))}
       {upload && ref && (
         <SourceDialog
           reference={ref}
-          initial={folder}
+          initial={register.destination()}
           onClose={() => setUpload(false)}
-          onSaved={() => {
+          onSaved={(_, doc) => {
             setUpload(false)
-            refresh().catch((e) => setError(e.message))
+            if (doc) register.change(recordLocation(doc))
+            void refresh()
           }}
         />
       )}

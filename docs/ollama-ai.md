@@ -41,6 +41,10 @@ default) or when the remote AI host is temporarily offline.
    - When an AI review is active, *Export report* offers an optional **AI cost
      analytic review** section for PDF and an **AI review** worksheet for Excel.
 
+3. **Well Operations daily brief and timeline study**
+   - Off by default. **Use offline AI** checks the existing connection; an explicit generate action sends only a bounded excerpt of the rule-based study to the configured instance. No original files are sent.
+   - The draft paragraph is separate from the measured time, depth, rotating ROP and programme calculations. It does not edit, accept or submit records. On a failed connection or an unsuitable response, the rule-based brief remains available.
+
 ---
 
 ## 1. Set up the remote Ollama PC on your LAN

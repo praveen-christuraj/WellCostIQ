@@ -394,9 +394,9 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
                   <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1 }}>
                     <Typography fontSize={10} fontWeight={800} color="text.secondary" textTransform="uppercase">Revised planned days</Typography>
                     <Typography fontSize={15} fontWeight={800} mt={.3}>
-                      {totalDays.toFixed(2)} d
+                      {totalDays.toFixed(3)} d
                       <Typography component="span" fontSize={11.5} color="text.secondary" ml={1}>
-                        against {configuredTotalDays.toFixed(2)} d entered ({(totalDays - configuredTotalDays) >= 0 ? '+' : ''}{(totalDays - configuredTotalDays).toFixed(2)} d)
+                        against {configuredTotalDays.toFixed(3)} d entered ({(totalDays - configuredTotalDays) >= 0 ? '+' : ''}{(totalDays - configuredTotalDays).toFixed(3)} d)
                       </Typography>
                     </Typography>
                   </Box>
@@ -429,7 +429,7 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
                         <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
                           <Box className="table-icon" sx={{ width: 26, height: 26, fontSize: 10.5, fontWeight: 800 }}>{String(sectionIndex + 1).padStart(2, '0')}</Box>
                           <Typography fontWeight={800} fontSize={12.5}>Hole Section {sectionIndex + 1}{selectedSection ? ` · ${selectedSection.code}` : ''}</Typography>
-                          <Tag>{phaseDays.toFixed(2)} days</Tag>
+                          <Tag>{phaseDays.toFixed(3)} days</Tag>
                           {change !== 'kept' && changeLabel(change)}
                         </Box>
                         <Box display="flex" gap={.2}>
@@ -444,10 +444,10 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
                           {section.hole_section_id && !selectedSection && <MenuItem value={section.hole_section_id} disabled>Deleted or unavailable section · choose another</MenuItem>}
                           {options.hole_sections.map(option => <MenuItem key={option.id} value={option.id}>{option.code} — {option.name}</MenuItem>)}
                         </TextField>
-                        <TextField type="number" label={`From (${depthUnit})`} required value={section.from_depth} inputProps={{ min: 0, step: .0000000001 }}
+                        <TextField type="number" label={`From (${depthUnit})`} required value={section.from_depth} inputProps={{ min: 0, step: 0.001 }}
                           helperText={before && !sameNumber(before.from_depth, section.from_depth) ? wasChip(before.from_depth) : undefined}
                           onChange={event => updateSection(section.key, { from_depth: event.target.value })}/>
-                        <TextField type="number" label={`To (${depthUnit})`} required value={section.to_depth} inputProps={{ min: 0, step: .0000000001 }}
+                        <TextField type="number" label={`To (${depthUnit})`} required value={section.to_depth} inputProps={{ min: 0, step: 0.001 }}
                           helperText={before && !sameNumber(before.to_depth, section.to_depth) ? wasChip(before.to_depth) : undefined}
                           onChange={event => updateSection(section.key, { to_depth: event.target.value })}/>
                         <TextField label="Section remarks" value={section.remarks} inputProps={{ maxLength: 1000 }}
@@ -473,7 +473,7 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
                               {phase.phase_id && !selectedPhase && <MenuItem value={phase.phase_id} disabled>Deleted or unavailable phase · choose another</MenuItem>}
                               {options.phases.map(option => <MenuItem key={option.id} value={option.id}>{option.code} — {option.name}</MenuItem>)}
                             </TextField>
-                            <TextField type="number" label="Days" required value={phase.days} inputProps={{ min: 0, step: .0000000001 }}
+                            <TextField type="number" label="Days" required value={phase.days} inputProps={{ min: 0, step: 0.001 }}
                               helperText={phaseBefore && !sameNumber(phaseBefore.days, phase.days) ? wasChip(`${phaseBefore.days} d`) : undefined}
                               onChange={event => updatePhase(section.key, phase.key, { days: event.target.value })}/>
                             <TextField label="Phase remarks" value={phase.remarks} inputProps={{ maxLength: 1000 }}
@@ -509,7 +509,7 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
                   <Typography fontWeight={800} fontSize={14}>
                     {formatDays(adjustment.planned_days_after)}{' '}
                     <Typography component="span" fontSize={12.5} color="text.secondary">
-                      ({Number(adjustment.delta_days) > 0 ? '+' : ''}{Number(adjustment.delta_days).toLocaleString(undefined, { maximumFractionDigits: 2 })} d)
+                      ({Number(adjustment.delta_days) > 0 ? '+' : ''}{Number(adjustment.delta_days).toLocaleString(undefined, { maximumFractionDigits: 3 })} d)
                     </Typography>
                   </Typography>
                 </Box>

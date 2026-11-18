@@ -30,6 +30,8 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.precision import DECIMAL_QUANT
+from app.services.operations.guide import answers as operations_answer
 from app.models import (
     Afe,
     CementAdditive,
@@ -63,8 +65,8 @@ from app.schemas.assistant import (
     AssistantTable,
 )
 
-MONEY = Decimal("0.01")
-DAYS = Decimal("0.001")
+MONEY = DECIMAL_QUANT
+DAYS = DECIMAL_QUANT
 TRANSCRIPT_LIMIT = 40
 
 # ---------------------------------------------------------------------------
@@ -768,7 +770,7 @@ def _find_well(db: Session, organization_id: str, question: str) -> Well | None:
 def _money(value: Any) -> str:
     if value is None:
         return "—"
-    return f"{Decimal(str(value)).quantize(MONEY, rounding=ROUND_HALF_UP):,.2f}"
+    return f"{Decimal(str(value)).quantize(MONEY, rounding=ROUND_HALF_UP):,.3f}"
 
 
 def _days(value: Any) -> str:
@@ -1828,7 +1830,7 @@ def _answer_cost_search(
         if matched_well is not None:
             lih_query = lih_query.where(LihCostEntry.well_id == matched_well.id)
         for well_code, dt, desc, units, cost, curr in db.execute(lih_query.order_by(LihCostEntry.cost_date.desc()).limit(10)).all():
-            lih_rows.append([well_code, dt.isoformat(), desc, f"{Decimal(units):,.2f}", f"{curr} {_money(cost)}"])
+            lih_rows.append([well_code, dt.isoformat(), desc, f"{Decimal(units):,.3f}", f"{curr} {_money(cost)}"])
 
         ndt_pred = _matches_any(
             [NdtInspection.description, NdtInspection.remarks, NdtInspection.well_code_snapshot],
@@ -2281,62 +2283,67 @@ def ask(
     matched_wells: list[Well] = []
     unmatched_wells: list[str] = []
     comparison: Any = None
+    operations = operations_answer(text, route, permissions)
     try:
-        comp_answer, matched_wells, unmatched_wells, comparison = _maybe_well_comparison(
-            db, organization_id, text, permissions
-        )
-        if comp_answer is not None:
-            answer = comp_answer
-        elif intent == "data_health":
-            answer = _answer_data_health(db, organization_id, permissions)
-        elif intent == "price_lookup":
-            answer = _answer_price_lookup(db, organization_id, text, permissions)
-        elif intent == "cost_search":
-            answer = _answer_cost_search(db, organization_id, text, permissions, explicit=True) or _knowledge_answer(
-                db, organization_id, text, route, permissions
-            )
-        elif intent == "status" and _can(permissions, "rig-well:read"):
-            answer = _answer_status(db, organization_id)
-        elif intent == "actual_days" and _can(permissions, "daily-cost:read"):
-            answer = _answer_actual_days(db, organization_id, text)
-        elif intent == "forecast" and _can(permissions, "daily-cost:read"):
-            answer = _answer_forecast(db, organization_id, text)
-        elif intent == "out_of_scope" and _can(permissions, "daily-cost:read"):
-            answer = _answer_out_of_scope(db, organization_id, text)
-        elif intent == "npt_upa" and _can(permissions, "daily-cost:read"):
-            answer = _answer_npt_upa(db, organization_id, text)
-        elif intent == "cost_position" and _can(permissions, "daily-cost:read"):
-            if len(matched_wells) == 1 and comparison is not None and unmatched_wells:
-                answer = AssistantAnswer(
-                    answer=comparison.prose,
-                    intent="cost_position",
-                    confidence="high",
-                    category="calculation",
-                    facts=comparison.facts,
-                    tables=comparison.tables,
-                    sources=comparison.sources,
-                    follow_ups=comparison.follow_ups,
-                )
-            else:
-                answer = _answer_cost_position(db, organization_id, text, permissions)
-        elif intent in ("actual_days", "forecast", "out_of_scope", "npt_upa", "cost_position", "status"):
-            answer = _permission_answer("daily-cost:read" if intent != "status" else "rig-well:read")
+        if operations is not None:
+            answer = operations
         else:
-            if len(matched_wells) == 1 and comparison is not None and any(
-                k in text.lower() for k in ("total cost", "well cost", "cost of", "total spend", "how much")
-            ):
-                answer = AssistantAnswer(
-                    answer=comparison.prose,
-                    intent="cost_position",
-                    confidence="high",
-                    category="calculation",
-                    facts=comparison.facts,
-                    tables=comparison.tables,
-                    sources=comparison.sources,
-                    follow_ups=comparison.follow_ups,
+            # Costing and workspace analysis stay separate from Well Operations.
+            comp_answer, matched_wells, unmatched_wells, comparison = _maybe_well_comparison(
+                db, organization_id, text, permissions
+            )
+            if comp_answer is not None:
+                answer = comp_answer
+            elif intent == "data_health":
+                answer = _answer_data_health(db, organization_id, permissions)
+            elif intent == "price_lookup":
+                answer = _answer_price_lookup(db, organization_id, text, permissions)
+            elif intent == "cost_search":
+                answer = _answer_cost_search(db, organization_id, text, permissions, explicit=True) or _knowledge_answer(
+                    db, organization_id, text, route, permissions
                 )
+            elif intent == "status" and _can(permissions, "rig-well:read"):
+                answer = _answer_status(db, organization_id)
+            elif intent == "actual_days" and _can(permissions, "daily-cost:read"):
+                answer = _answer_actual_days(db, organization_id, text)
+            elif intent == "forecast" and _can(permissions, "daily-cost:read"):
+                answer = _answer_forecast(db, organization_id, text)
+            elif intent == "out_of_scope" and _can(permissions, "daily-cost:read"):
+                answer = _answer_out_of_scope(db, organization_id, text)
+            elif intent == "npt_upa" and _can(permissions, "daily-cost:read"):
+                answer = _answer_npt_upa(db, organization_id, text)
+            elif intent == "cost_position" and _can(permissions, "daily-cost:read"):
+                if len(matched_wells) == 1 and comparison is not None and unmatched_wells:
+                    answer = AssistantAnswer(
+                        answer=comparison.prose,
+                        intent="cost_position",
+                        confidence="high",
+                        category="calculation",
+                        facts=comparison.facts,
+                        tables=comparison.tables,
+                        sources=comparison.sources,
+                        follow_ups=comparison.follow_ups,
+                    )
+                else:
+                    answer = _answer_cost_position(db, organization_id, text, permissions)
+            elif intent in ("actual_days", "forecast", "out_of_scope", "npt_upa", "cost_position", "status"):
+                answer = _permission_answer("daily-cost:read" if intent != "status" else "rig-well:read")
             else:
-                answer = _knowledge_answer(db, organization_id, text, route, permissions)
+                if len(matched_wells) == 1 and comparison is not None and any(
+                    k in text.lower() for k in ("total cost", "well cost", "cost of", "total spend", "how much")
+                ):
+                    answer = AssistantAnswer(
+                        answer=comparison.prose,
+                        intent="cost_position",
+                        confidence="high",
+                        category="calculation",
+                        facts=comparison.facts,
+                        tables=comparison.tables,
+                        sources=comparison.sources,
+                        follow_ups=comparison.follow_ups,
+                    )
+                else:
+                    answer = _knowledge_answer(db, organization_id, text, route, permissions)
     except Exception:  # noqa: BLE001 - a bad stored figure must not break the assistant
         answer = AssistantAnswer(
             answer=(
@@ -2347,7 +2354,7 @@ def ask(
             confidence="low",
             category="faq",
         )
-    if use_ai:
+    if use_ai and operations is None:
         try:
             answer = _enrich_with_ollama(
                 db,

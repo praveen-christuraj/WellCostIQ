@@ -182,7 +182,7 @@ def test_real_programme_to_reviewed_daily_kpis():
         )
         assert Decimal(reviewed["surveys"][0]["md_m"]) == Decimal("3960.69")
         # The length columns are metric, but the printed 1.60 dogleg is degrees/100 ft.
-        assert Decimal(reviewed["surveys"][0]["dls_deg_per_30m"]) == Decimal("1.60") * Decimal("0.9843")
+        assert Decimal(reviewed["surveys"][0]["dls_deg_per_30m"]) == Decimal("1.575")
         assert reviewed["extraction_status"] == "reviewed"
         assert reviewed["blocks"][1]["responsible_party"] == "Rig contractor"
         assert post(address + "/extract", json=source)["operation_summary"] == edited["report"]["operation_summary"]
@@ -191,8 +191,8 @@ def test_real_programme_to_reviewed_daily_kpis():
         assert "Engineer verified" in get(address + "/brief")["summary"]
         dash = get("/dashboard", params=folder)
         k = dash["kpis"]
-        assert k["total_logged_hours"] == 23.98 and k["npt_hours"] == round(block["duration_minutes"] / 60, 2)
-        assert k["avg_rop"] == round(135 / 13.42, 2) and dash["npt_by_agency"][0]["agency"] == "Rig contractor"
+        assert k["total_logged_hours"] == 23.983 and k["npt_hours"] == round(block["duration_minutes"] / 60, 3)
+        assert k["avg_rop"] == round(135 / 13.42, 3) and dash["npt_by_agency"][0]["agency"] == "Rig contractor"
         curve = get("/analytics/time-depth", params=folder)
         assert curve["actual"][0]["cum_days"] == 54 and curve["actual"][0]["depth_m"] == 4127
         assert curve["lag_series"][0]["lag_days"] == round(54 - float(checkpoint["cum_planned_days"]), 3)
@@ -242,6 +242,14 @@ def test_register_lifecycle_permissions_and_exports():
         assert good(c.post(OPS + "/reports/bulk-delete", headers=h, json=ids))["affected_count"] == 2
         assert good(c.get(OPS + "/reports", headers=h)) == []
         assert len(good(c.get(OPS + "/reports/deleted", headers=h))) == 2
+        report_path = OPS + f"/reports/{ids['ids'][0]}"
+        trash = {"include_deleted": True}
+        assert c.get(report_path, headers=h).status_code == 404
+        assert good(c.get(report_path, headers=h, params=trash))["is_deleted"]
+        assert good(c.get(report_path + "/brief", headers=h, params=trash))["summary"]
+        assert c.post(report_path + "/print-audit", headers=h, params=trash).status_code == 204
+        assert c.post(report_path + "/submit", headers=h, params=trash).status_code == 404
+        assert c.get(report_path, headers=login(c, "south"), params=trash).status_code == 404
         assert c.post(OPS + "/reports", headers=h, json=dict(**folder, report_date="2026-11-15")).status_code == 409
         assert good(c.post(OPS + "/reports/bulk-restore", headers=h, json=ids))["affected_count"] == 2
         c.post(OPS + "/reports/bulk-delete", headers=h, json=ids).raise_for_status()
@@ -306,7 +314,7 @@ def test_parser_edge_cases_and_ambiguous_depth():
     rmr = parse_pdf(next(MODELS.glob("RMR*.pdf")).read_bytes())
     assert sum((b["end"] - b["start"]).total_seconds() for b in rmr["blocks"]) / 3600 == 8.5
     ogini = parse_pdf(next(MODELS.glob("DDR_41*.pdf")).read_bytes())
-    assert ogini["rotating_hours"] is None and ogini["depth_end_m"] == Decimal("944.8338921061")
+    assert ogini["rotating_hours"] is None and ogini["depth_end_m"] == Decimal("944.834")
     assert planned_at_depth([{"depth_m": 0, "cum_days": 0}, {"depth_m": 500, "cum_days": 10}], 250) == 5
     assert planned_at_depth([{"depth_m": 500, "cum_days": 8}, {"depth_m": 500, "cum_days": 10}], 500) is None
 

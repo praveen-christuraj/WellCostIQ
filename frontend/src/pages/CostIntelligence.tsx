@@ -454,7 +454,7 @@ export default function CostIntelligence() {
           { label: 'Operational spend', value: amount(detail.breakdown.unit_economics.operational_actual, currency) },
           { label: 'Tangibles spend', value: amount(detail.breakdown.unit_economics.tangible_actual, currency) },
           { label: 'Operational daily avg', value: amount(detail.breakdown.unit_economics.operational_daily_avg, currency) },
-          { label: 'CPI', value: detail.breakdown.unit_economics.burn_efficiency_index != null ? detail.breakdown.unit_economics.burn_efficiency_index.toFixed(2) : '—' },
+          { label: 'CPI', value: detail.breakdown.unit_economics.burn_efficiency_index != null ? detail.breakdown.unit_economics.burn_efficiency_index.toFixed(3) : '—' },
         ] : undefined,
         figures: [
           ...(captured('ci-well-daily') ? [figure('ci-well-daily', 'Daily operational cost & tangibles', 'Daily operational spend separated from lump-sum tangibles, with flagged days and the opening baseline.')] : []),
@@ -725,7 +725,7 @@ export default function CostIntelligence() {
               <StatCard
                 label="Cost Performance (CPI)"
                 value={detail.breakdown.unit_economics.burn_efficiency_index != null
-                  ? detail.breakdown.unit_economics.burn_efficiency_index.toFixed(2)
+                  ? detail.breakdown.unit_economics.burn_efficiency_index.toFixed(3)
                   : '—'}
                 tone={detail.breakdown.unit_economics.burn_efficiency_index == null ? 'default'
                   : detail.breakdown.unit_economics.burn_efficiency_index >= 1 ? 'positive' : 'warning'}

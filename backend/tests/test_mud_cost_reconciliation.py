@@ -363,9 +363,9 @@ def test_reconciliation_uses_actual_daily_cost_and_latest_cost_per_bbl():
         assert first["cost_date"] == "2026-10-11"
         assert Decimal(first["total_mud"]) == Decimal("150")
         assert Decimal(first["beta"]) == Decimal("1100")
-        assert Decimal(first["cost_per_bbl"]) == Decimal("7.3333333333")
-        assert Decimal(first["reconciled_cost"]) == Decimal("73.333333333")
-        assert Decimal(first["cumulative_reconciled_cost"]) == Decimal("73.333333333")
+        assert Decimal(first["cost_per_bbl"]) == Decimal("7.333")
+        assert Decimal(first["reconciled_cost"]) == Decimal("73.333")
+        assert Decimal(first["cumulative_reconciled_cost"]) == Decimal("73.333")
         assert second["cost_date"] == "2026-10-12"
         assert Decimal(second["cumulative_total_mud"]) == Decimal("200")
         assert Decimal(second["cost_per_bbl"]) == Decimal("8")
@@ -747,7 +747,7 @@ def test_well_wide_kpi_sources_use_inception_balances_and_latest_saved_rates():
         wbm = by_section[scope["sections"][1]["id"]]
         assert obm["cost_per_bbl"] == report_by_section[scope["sections"][0]["id"]]["cost_per_bbl"]
         assert Decimal(obm["total_mud"]) == 134  # other receipts affect stock, not the pricing basis
-        assert Decimal(obm["cost_per_bbl"]) == Decimal("2.6119402985")
+        assert Decimal(obm["cost_per_bbl"]) == Decimal("2.612")
         assert Decimal(wbm["cost_per_bbl"]) == 0  # zero is a valid rate, not an absent rate
 
         # Soft delete recalculates the inception balance; restore brings it back.
@@ -758,7 +758,7 @@ def test_well_wide_kpi_sources_use_inception_balances_and_latest_saved_rates():
         assert Decimal(surface_after["closing_stock"]) == Decimal(first["closing_stock"]) == 123
         rates_after = _json(client, "get", f"/api/v1/mud-cost/reconciliation?{query}&include_draft=true&to=9999-12-31", headers)
         surface_rate_after = next(row for row in rates_after["sections"] if row["section_id"] == scope["sections"][0]["id"])
-        assert Decimal(surface_rate_after["cost_per_bbl"]) == Decimal("2.6923076923")
+        assert Decimal(surface_rate_after["cost_per_bbl"]) == Decimal("2.692")
         restored = client.post(f"/api/v1/mud-cost/entries/{future['id']}/restore", headers=headers)
         assert restored.status_code == 200, restored.text
         after_restore = _json(client, "get", f"/api/v1/mud-cost/material-balance?{query}&view=inception", headers)
