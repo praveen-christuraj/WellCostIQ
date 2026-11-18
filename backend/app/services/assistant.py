@@ -2283,7 +2283,7 @@ def ask(
     matched_wells: list[Well] = []
     unmatched_wells: list[str] = []
     comparison: Any = None
-    operations = operations_answer(text, route, permissions)
+    operations = operations_answer(text, route, permissions, db=db, organization_id=organization_id)
     try:
         if operations is not None:
             answer = operations
@@ -2354,7 +2354,38 @@ def ask(
             confidence="low",
             category="faq",
         )
-    if use_ai and operations is None:
+    if use_ai and operations is not None:
+        from app.core.config import get_settings
+
+        if get_settings().ollama_enabled and answer.intent != "permission":
+            try:
+                from app.services.operations.ops_ai import enrich_operations_answer
+
+                answer = enrich_operations_answer(
+                    db,
+                    organization_id,
+                    user=user,
+                    question=text,
+                    permissions=permissions,
+                    base=answer,
+                )
+            except Exception:  # noqa: BLE001
+                import logging
+
+                logging.getLogger(__name__).exception("Unexpected operations assistant AI enrichment error")
+                cfg = get_settings()
+                answer = answer.model_copy(
+                    update={
+                        "ai_used": False,
+                        "ai_model": cfg.ollama_model,
+                        "ai_error": (
+                            "AI communication error: failed to complete the Well Operations AI request. "
+                            "Verified workspace answer shown below; check server logs and retry."
+                        ),
+                        "ai_error_code": "server_error",
+                    }
+                )
+    elif use_ai and operations is None:
         try:
             answer = _enrich_with_ollama(
                 db,

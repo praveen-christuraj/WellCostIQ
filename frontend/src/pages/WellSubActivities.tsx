@@ -25,6 +25,7 @@ import {
   type Well,
   type WellConfigurationScope,
 } from '../lib/rigWell'
+import { formatWatDate } from '../lib/time'
 
 function isPlannedActivity(activity?: MasterActivity | null): boolean {
   if (!activity) return true
@@ -346,7 +347,7 @@ export default function WellSubActivities() {
       ),
     },
     { headerName: 'DESCRIPTION / REMARKS', field: 'description', minWidth: 230, flex: 1.4, valueFormatter: params => params.value || '—' },
-    { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 170, minWidth: 170, maxWidth: 170, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: SubActivity }) => data && <Box display="flex" alignItems="center" height="100%" gap={.2}>

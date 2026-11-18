@@ -98,12 +98,16 @@ export default function OperationsSettings() {
               />
             </Box>
           </SectionCard>
-          <SectionCard title="Reporting period">
+          <SectionCard
+            title="Reporting period"
+            subtitle="All timestamps across WellCostIQ default to West Africa Time (Africa/Lagos, WAT UTC+1:00)."
+          >
             <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: 'repeat(3,minmax(0,1fr))' }}>
               <TextField
                 label="Operating timezone"
                 value={draft.operating_timezone}
                 disabled={!write}
+                helperText="Default: Africa/Lagos (WAT, UTC+1:00)."
                 onChange={(e) => change({ operating_timezone: e.target.value })}
               />
               <TextField

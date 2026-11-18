@@ -17,6 +17,7 @@ import {
   costIntelligenceAiStatus, requestCostIntelligenceAiReview,
   type AiReviewFocus, type AiReviewScope, type IntelligenceAiReview, type IntelligenceWell,
 } from '../../lib/costIntelligence'
+import { formatWatClock } from '../../lib/time'
 
 export function AiCostReviewPanel({
   wells,
@@ -325,7 +326,7 @@ export function AiCostReviewPanel({
                   <Tag tone="neutral">{`${review.statistical_findings_count} statistical · ${review.entry_signals_count} entry check${review.entry_signals_count === 1 ? '' : 's'}`}</Tag>
                 </Box>
                 <Typography fontSize={11.5} color="text.secondary">
-                  Generated {new Date(review.generated_at).toLocaleTimeString()}{review.duration_ms ? ` in ${formatAiDuration(review.duration_ms)}` : ''} · advice only
+                  Generated {formatWatClock(review.generated_at, true)}{review.duration_ms ? ` in ${formatAiDuration(review.duration_ms)}` : ''} · advice only
                 </Typography>
               </Box>
 

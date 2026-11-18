@@ -44,10 +44,24 @@ export type OpsSurvey = {
 
 export type OpsReport = {
   rejection_reason: string
+  reopened_at: string | null
+  reopened_by: string
+  reopen_reason: string
+  submitted_at: string | null
+  submitted_by: string
+  approved_at: string | null
+  approved_by: string
   baseline_plan_id: string | null
   completed_plan_item_id: string | null
   plan_checkpoints: { id: string; description: string; days: string }[]
+  customer: string
+  project: string
   site: string
+  datum: string
+  supervisor: string
+  engineer: string
+  uwi: string
+  block_text: string
   extraction_notes: string
   surveys: OpsSurvey[]
   sources: { id: string; file_name: string }[]
@@ -74,11 +88,29 @@ export type OpsReport = {
   depth_start_m: string | null
   depth_end_m: string | null
   depth_unit: string
+  tvd_start_m: string | null
   tvd_m: string | null
+  tvd_source: string
+  bit_depth_m: string | null
   progress_m: string | null
   rotating_hours: string | null
+  cum_rotating_hours: string | null
+  spud_date: string | null
   dfs_days: string | null
   est_days: string | null
+  md_auth_m: string | null
+  last_casing_size_in: string | null
+  last_casing_depth_m: string | null
+  hole_section_text: string
+  hole_size_in: string | null
+  current_status: string
+  mud_type: string
+  mud_weight_ppg: string | null
+  mud_viscosity_sec: string | null
+  mud_pv_cp: string | null
+  mud_yp_lbf: string | null
+  bha_summary: string
+  pob_count: number | null
   operation_summary: string
   forward_plan: string
   hse_summary: string
@@ -130,8 +162,11 @@ export type OpsBlock = {
   hole_section_id: string | null
   phase_id: string | null
   bit_depth_m: string | null
+  mud_weight_ppg: string | null
   depth_from_m: string | null
   depth_to_m: string | null
+  tvd_from_m: string | null
+  tvd_to_m: string | null
   depth_unit: string
   footage_m: string | null
   rotating_hours: string | null
@@ -275,6 +310,10 @@ export type OpsPlan = {
   status: string
   planned_start_at: string | null
   planned_days: string | null
+  approved_by: string
+  reopened_at: string | null
+  reopened_by: string
+  reopen_reason: string
   notes: string
   is_deleted: boolean
   created_at: string
@@ -338,10 +377,10 @@ export function uploadDocument(file: File, fields: Record<string, string>) {
   return uploadFiles<OpsDocument>('/operations/documents/upload', [file], fields, 'file')
 }
 
-export function extractReport(document_id: string, report_date: string, reportId?: string) {
+export function extractReport(document_id: string, report_date: string, reportId?: string, use_ai = false) {
   return api<OpsReport>(reportId ? `/operations/reports/${reportId}/extract` : '/operations/reports/from-document', {
     method: 'POST',
-    body: body({ document_id, report_date: report_date || null }),
+    body: body({ document_id, report_date: report_date || null, use_ai }),
     action: 'Extract report draft',
   })
 }
@@ -392,6 +431,14 @@ export function rejectReport(id: string, reason: string) {
   })
 }
 
+export function reopenReport(id: string, remarks: string) {
+  return api<OpsReport>(`/operations/reports/${id}/reopen`, {
+    method: 'POST',
+    body: body({ remarks }),
+    action: 'Reopen daily report',
+  })
+}
+
 export function getBrief(id: string, includeDeleted = false) {
   return api<{
     summary: string
@@ -437,6 +484,18 @@ export function addPlanItem(planId: string, data: Record<string, unknown>) {
 
 export function activatePlan(planId: string) {
   return api<OpsPlan>(`/operations/plans/${planId}/activate`, { method: 'POST', action: 'Activate plan' })
+}
+
+export function updatePlan(planId: string, data: Record<string, unknown>) {
+  return api<OpsPlan>(`/operations/plans/${planId}`, { method: 'PUT', body: body(data), action: 'Update plan' })
+}
+
+export function reopenPlan(planId: string, remarks: string) {
+  return api<OpsPlan>(`/operations/plans/${planId}/reopen`, {
+    method: 'POST',
+    body: body({ remarks }),
+    action: 'Reopen timeline',
+  })
 }
 
 export function auditExport(register: 'reports' | 'documents' | 'plans' | 'library' | 'analytics') {
@@ -518,3 +577,310 @@ export const reviewBrief = (id: string, useAi: boolean, includeDeleted = false) 
 export const studyTimeline = (id: string, useAi: boolean, rows?: TimelineRow[]) => api<OpsStudy>(`/operations/plans/${id}/study`, {
   method: 'POST', body: body({ use_ai: useAi, ...(rows ? { items: timelinePayload(rows) } : {}) }), action: 'Study timeline',
 })
+
+export type OpsNarratives = {
+  operation_summary: string
+  forward_plan: string
+  hse_summary: string
+  engineering_brief: string
+  warnings: string[]
+  ai_used: boolean
+  ai_model: string
+  ai_error: string
+  ai_error_code: import('./ai').AiErrorCode
+}
+
+export const generateReportNarratives = (id: string, useAi = true, focus = '') =>
+  api<OpsNarratives>(`/operations/reports/${id}/narratives`, {
+    method: 'POST',
+    body: body({ use_ai: useAi, focus }),
+    action: 'Generate daily report narratives',
+  })
+
+export type OpsAiPrefill = {
+  report: OpsReport
+  updated_header_fields: string[]
+  updated_block_count: number
+  notes: string[]
+  ai_used: boolean
+  ai_model: string
+  ai_error: string
+  ai_error_code: import('./ai').AiErrorCode
+}
+
+export const aiPrefillReport = (id: string) =>
+  api<OpsAiPrefill>(`/operations/reports/${id}/ai-prefill`, {
+    method: 'POST',
+    action: 'Run AI extraction prefill',
+  })
+
+export type OpsAiReviewItem = {
+  severity: 'high' | 'medium' | 'low' | 'info'
+  category: string
+  title: string
+  detail: string
+  well_code: string
+  report_date: string
+  report_id: string
+}
+
+export type OpsAiReview = {
+  generated_at: string
+  timezone_label: string
+  scope_label: string
+  deterministic_summary: string
+  executive_summary: string
+  highlights: string[]
+  anomalies: OpsAiReviewItem[]
+  recommended_actions: string[]
+  ai_used: boolean
+  ai_model: string
+  ai_endpoint: string
+  ai_error: string
+  ai_error_code: import('./ai').AiErrorCode
+}
+
+export const runOpsAiReview = (params: {
+  well_id?: string | null
+  rig_id?: string | null
+  scope?: Scope | null
+  date_from?: string | null
+  date_to?: string | null
+  focus?: string
+  use_ai?: boolean
+}) =>
+  api<OpsAiReview>('/operations/ai-review', {
+    method: 'POST',
+    body: body({
+      well_id: params.well_id || null,
+      rig_id: params.rig_id || null,
+      scope: params.scope || null,
+      date_from: params.date_from || null,
+      date_to: params.date_to || null,
+      focus: params.focus || '',
+      use_ai: params.use_ai ?? true,
+    }),
+    action: 'Run operations AI review',
+  })
+
+export type OpsSummaryActivity = {
+  id: string
+  line_no: number
+  report_id: string
+  report_date: string
+  report_no: string
+  report_type: string
+  report_status: string
+  scope: string
+  day_number: number | null
+  hole_section: string
+  start_wat: string
+  end_wat: string
+  duration_minutes: number
+  duration_hours: number
+  cum_hours: number
+  cum_days: number
+  phase_code: string
+  phase_label: string
+  operation_code: string
+  activity_code: string
+  classification: string
+  allocation: string
+  is_productive: boolean
+  npt_code: string
+  cause_code: string
+  responsible_party: string
+  depth_from_m: number | null
+  depth_to_m: number | null
+  tvd_from_m: number | null
+  tvd_to_m: number | null
+  bit_depth_m: number | null
+  footage_m: number | null
+  rotating_hours: number | null
+  rop_m_per_hr: number | null
+  mud_weight_ppg: number | null
+  reason: string
+  narrative: string
+  review_state: string
+}
+
+export type OpsSummaryDay = {
+  report_id: string
+  report_date: string
+  scope: string
+  report_type: string
+  report_no: string
+  day_number: number | null
+  dfs_days: number | null
+  status: string
+  reopened: boolean
+  hole_section: string
+  depth_start_m: number | null
+  depth_end_m: number | null
+  tvd_start_m: number | null
+  tvd_m: number | null
+  tvd_source: string
+  bit_depth_m: number | null
+  progress_m: number | null
+  rotating_hours: number | null
+  rop_m_per_hr: number | null
+  mud_type: string
+  mud_weight_ppg: number | null
+  mud_viscosity_sec: number | null
+  last_casing: string
+  pob_count: number | null
+  logged_hours: number
+  pt_hours: number
+  upa_hours: number
+  npt_hours: number
+  sp_hours: number
+  productive_pct: number
+  unaccounted_hours: number
+  block_count: number
+  survey_count: number
+  current_status: string
+  operation_summary: string
+  forward_plan: string
+  hse_summary: string
+}
+
+export type OpsSummaryBreakdown = {
+  classification: string
+  allocation: string
+  responsible_party: string
+  code: string
+  cause_code: string
+  events: number
+  hours: number
+  days: number
+  pct_of_total: number
+  pct_of_npt: number
+  sample_reason: string
+}
+
+export type OpsSummaryPhase = {
+  phase: string
+  hole_section: string
+  events: number
+  total_hours: number
+  total_days: number
+  pt_hours: number
+  upa_hours: number
+  npt_hours: number
+  sp_hours: number
+  productive_pct: number
+  max_md_m: number | null
+  max_tvd_m: number | null
+  footage_m: number
+}
+
+export type OpsSummarySurvey = {
+  report_id: string
+  report_date: string
+  report_no: string
+  scope: string
+  md_m: number | null
+  tvd_m: number | null
+  inc_deg: number | null
+  azi_deg: number | null
+  ns_m: number | null
+  ew_m: number | null
+  vsec_m: number | null
+  dls_deg_per_30m: number | null
+  tool: string
+  source: string
+}
+
+export type OpsWellSummary = {
+  generated_at: string
+  timezone: string
+  timezone_label: string
+  well_id: string
+  well_code: string
+  well_name: string
+  rig_code: string
+  rig_name: string
+  block_text: string
+  field_site: string
+  customer: string
+  uwi: string
+  datum: string
+  scope_label: string
+  include_drafts: boolean
+  spud_date: string | null
+  first_report_date: string | null
+  last_report_date: string | null
+  latest_status: string
+  latest_hole_section: string
+  last_casing: string
+  latest_mud: string
+  latest_bha: string
+  kpis: {
+    total_reports: number
+    drilling_reports: number
+    completion_reports: number
+    draft_reports: number
+    submitted_reports: number
+    approved_reports: number
+    reopened_reports: number
+    total_blocks: number
+    total_logged_hours: number
+    total_logged_days: number
+    planned_days: number | null
+    schedule_variance_days: number | null
+    productive_hours: number
+    nonproductive_hours: number
+    pt_hours: number
+    upa_hours: number
+    npt_hours: number
+    sp_hours: number
+    productive_pct: number
+    npt_pct: number
+    upa_pct: number
+    sp_pct: number
+    unaccounted_hours: number
+    start_md_m: number | null
+    current_md_m: number | null
+    max_md_m: number | null
+    authorized_md_m: number | null
+    current_tvd_m: number | null
+    max_tvd_m: number | null
+    latest_bit_depth_m: number | null
+    total_footage_m: number
+    total_rotating_hours: number
+    avg_rop_m_per_hr: number | null
+    latest_mud_weight_ppg: number | null
+    survey_count: number
+    max_inc_deg: number | null
+    max_dls_deg_per_30m: number | null
+    latest_pob: number | null
+  }
+  activities: OpsSummaryActivity[]
+  daily_rollup: OpsSummaryDay[]
+  pt_npt_breakdown: OpsSummaryBreakdown[]
+  phase_breakdown: OpsSummaryPhase[]
+  surveys: OpsSummarySurvey[]
+}
+
+export function getWellOperationSummary(params: {
+  well_id: string
+  scope?: string
+  from?: string
+  to?: string
+  include_drafts?: boolean
+}) {
+  const q = new URLSearchParams({ well_id: params.well_id })
+  if (params.scope) q.set('scope', params.scope)
+  if (params.from) q.set('from', params.from)
+  if (params.to) q.set('to', params.to)
+  q.set('include_drafts', String(params.include_drafts ?? true))
+  return api<OpsWellSummary>(`/operations/summary?${q.toString()}`, { action: 'Load well operation summary' })
+}
+
+export function auditSummaryExport(format: 'csv' | 'xlsx' | 'pdf', record_count: number) {
+  return api<void>('/operations/summary/export-audit', {
+    method: 'POST',
+    body: body({ format, record_count }),
+    action: 'Audit summary export',
+  })
+}

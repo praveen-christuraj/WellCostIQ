@@ -16,7 +16,7 @@ import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag } from '../comp
 import { useAuth } from '../context/AuthContext'
 import {
   fileSize, jobLabel, jobTone, relative, requestLabel, requestTone, scopeLabel, stamp,
-  triggerLabel, type BackupChecksum, type BackupCleanup, type BackupJob, type BackupJobList,
+  triggerLabel, utcClockToWat, watClockToUtc, type BackupChecksum, type BackupCleanup, type BackupJob, type BackupJobList,
   type BackupJobTable, type BackupOverview, type BackupRestoreRequest, type BackupRestoreRequestList,
   type BackupSettings, type BackupValidation, type BackupValidationDetail, type BackupValidationTable,
 } from '../lib/backup'
@@ -122,7 +122,7 @@ export default function BackupRecovery() {
       const current = await api<BackupSettings>('/backup/settings')
       setSettingsForm({
         enabled: current.enabled, schedule_mode: current.schedule_mode, interval_value: current.interval_value,
-        run_time: current.run_time, retention_days: current.retention_days, keep_minimum: current.keep_minimum,
+        run_time: utcClockToWat(current.run_time), retention_days: current.retention_days, keep_minimum: current.keep_minimum,
         backup_directory: current.backup_directory, scope: current.scope, compression_enabled: current.compression_enabled,
       })
       setSettingsDialog(true)
@@ -135,7 +135,10 @@ export default function BackupRecovery() {
     setSavingSettings(true)
     setSettingsError('')
     try {
-      await api<BackupSettings>('/backup/settings', { method: 'PUT', body: body(settingsForm) })
+      await api<BackupSettings>('/backup/settings', {
+        method: 'PUT',
+        body: body({ ...settingsForm, run_time: watClockToUtc(settingsForm.run_time) }),
+      })
       setSettingsDialog(false)
       setNotice('Backup schedule saved.')
       await load()
@@ -581,9 +584,9 @@ export default function BackupRecovery() {
             type="number" value={settingsForm.interval_value} fullWidth inputProps={{ min: 1, max: 10080 }}
             onChange={event => setSettingsForm(form => ({ ...form, interval_value: Number(event.target.value) }))}
             helperText={settingsForm.schedule_mode === 'minutes' ? 'Minutes between backups' : settingsForm.schedule_mode === 'hours' ? 'Hours between backups' : 'Kept for the daily/weekly rhythm'}/>
-          <TextField label="Run at (UTC)" value={settingsForm.run_time} fullWidth placeholder="02:00"
+          <TextField label="Run at (WAT)" value={settingsForm.run_time} fullWidth placeholder="03:00"
             onChange={event => setSettingsForm(form => ({ ...form, run_time: event.target.value }))}
-            helperText="24-hour clock, used by the daily and weekly schedules"/>
+            helperText="24-hour clock in West Africa Time (UTC+1:00) for daily and weekly schedules"/>
         </Stack>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
           <TextField label="Keep for (days)" type="number" value={settingsForm.retention_days} fullWidth inputProps={{ min: 1, max: 3650 }}

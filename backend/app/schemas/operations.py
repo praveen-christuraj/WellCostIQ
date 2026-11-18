@@ -338,9 +338,12 @@ class OpsActivityBlockIn(_Strict):
     phase_id: str | None = None
     depth_from_m: Decimal3 | None = None
     depth_to_m: Decimal3 | None = None
+    tvd_from_m: Decimal3 | None = None
+    tvd_to_m: Decimal3 | None = None
     depth_unit: str = Field(default="m", max_length=5)
     footage_m: Decimal3 | None = None
     bit_depth_m: Decimal3 | None = None
+    mud_weight_ppg: Decimal3 | None = None
     rotating_hours: Decimal3 | None = None
     rop_m_per_hr: Decimal3 | None = None
     rop_basis: str = Field(default="rotating", max_length=20)
@@ -400,23 +403,54 @@ class OpsReportCreate(_Strict):
     depth_start_m: Decimal3 | None = None
     depth_end_m: Decimal3 | None = None
     depth_unit: str = Field(default="m", max_length=5)
+    tvd_start_m: Decimal3 | None = None
     tvd_m: Decimal3 | None = None
+    tvd_source: str = Field(default="", max_length=40)
+    bit_depth_m: Decimal3 | None = None
     progress_m: Decimal3 | None = None
     rotating_hours: Decimal3 | None = None
+    cum_rotating_hours: Decimal3 | None = None
+    spud_date: date | None = None
     dfs_days: Decimal3 | None = None
+    est_days: Decimal3 | None = None
+    md_auth_m: Decimal3 | None = None
+    last_casing_size_in: Decimal3 | None = None
+    last_casing_depth_m: Decimal3 | None = None
+    hole_section_text: str = Field(default="", max_length=120)
+    hole_size_in: Decimal3 | None = None
+    current_status: str = Field(default="", max_length=500)
+    mud_type: str = Field(default="", max_length=100)
+    mud_weight_ppg: Decimal3 | None = None
+    mud_viscosity_sec: Decimal3 | None = None
+    mud_pv_cp: Decimal3 | None = None
+    mud_yp_lbf: Decimal3 | None = None
+    bha_summary: str = Field(default="", max_length=500)
+    pob_count: int | None = Field(default=None, ge=0, le=50000)
     operation_summary: str = Field(default="", max_length=10000)
     forward_plan: str = Field(default="", max_length=10000)
     hse_summary: str = Field(default="", max_length=10000)
     remarks: str = Field(default="", max_length=10000)
     source_document_id: str | None = None
     customer: str = Field(default="", max_length=200)
+    project: str = Field(default="", max_length=200)
+    site: str = Field(default="", max_length=200)
+    datum: str = Field(default="", max_length=100)
     supervisor: str = Field(default="", max_length=200)
     engineer: str = Field(default="", max_length=200)
+    uwi: str = Field(default="", max_length=100)
+    block_text: str = Field(default="", max_length=100)
 
 
 class OpsReportUpdate(_Strict):
     completed_plan_item_id: str | None = None
+    customer: str | None = Field(default=None, max_length=200)
+    project: str | None = Field(default=None, max_length=200)
     site: str | None = Field(default=None, max_length=200)
+    datum: str | None = Field(default=None, max_length=100)
+    supervisor: str | None = Field(default=None, max_length=200)
+    engineer: str | None = Field(default=None, max_length=200)
+    uwi: str | None = Field(default=None, max_length=100)
+    block_text: str | None = Field(default=None, max_length=100)
     rig_id: str | None = None
     report_no_text: str | None = Field(default=None, max_length=50)
     day_number: int | None = Field(default=None, ge=1)
@@ -428,10 +462,29 @@ class OpsReportUpdate(_Strict):
     depth_start_m: Decimal3 | None = None
     depth_end_m: Decimal3 | None = None
     depth_unit: str | None = Field(default=None, max_length=5)
+    tvd_start_m: Decimal3 | None = None
     tvd_m: Decimal3 | None = None
+    tvd_source: str | None = Field(default=None, max_length=40)
+    bit_depth_m: Decimal3 | None = None
     progress_m: Decimal3 | None = None
     rotating_hours: Decimal3 | None = None
+    cum_rotating_hours: Decimal3 | None = None
+    spud_date: date | None = None
     dfs_days: Decimal3 | None = None
+    est_days: Decimal3 | None = None
+    md_auth_m: Decimal3 | None = None
+    last_casing_size_in: Decimal3 | None = None
+    last_casing_depth_m: Decimal3 | None = None
+    hole_section_text: str | None = Field(default=None, max_length=120)
+    hole_size_in: Decimal3 | None = None
+    current_status: str | None = Field(default=None, max_length=500)
+    mud_type: str | None = Field(default=None, max_length=100)
+    mud_weight_ppg: Decimal3 | None = None
+    mud_viscosity_sec: Decimal3 | None = None
+    mud_pv_cp: Decimal3 | None = None
+    mud_yp_lbf: Decimal3 | None = None
+    bha_summary: str | None = Field(default=None, max_length=500)
+    pob_count: int | None = Field(default=None, ge=0, le=50000)
     operation_summary: str | None = Field(default=None, max_length=10000)
     forward_plan: str | None = Field(default=None, max_length=10000)
     hse_summary: str | None = Field(default=None, max_length=10000)
@@ -443,8 +496,22 @@ class OpsReportOut(_Strict):
     completed_plan_item_id: str | None = None
     plan_checkpoints: list[dict[str, str]] = []
     rejection_reason: str = ""
+    reopened_at: datetime | None = None
+    reopened_by: str = ""
+    reopen_reason: str = ""
+    submitted_at: datetime | None = None
+    submitted_by: str = ""
+    approved_at: datetime | None = None
+    approved_by: str = ""
     baseline_plan_id: str | None = None
+    customer: str = ""
+    project: str = ""
     site: str = ""
+    datum: str = ""
+    supervisor: str = ""
+    engineer: str = ""
+    uwi: str = ""
+    block_text: str = ""
     surveys: list["OpsSurveyIn"] = []
     extraction_notes: str = ""
     sources: list[dict[str, str]] = []
@@ -471,11 +538,29 @@ class OpsReportOut(_Strict):
     depth_start_m: Decimal | None
     depth_end_m: Decimal | None
     depth_unit: str
+    tvd_start_m: Decimal | None = None
     tvd_m: Decimal | None
+    tvd_source: str = ""
+    bit_depth_m: Decimal | None = None
     progress_m: Decimal | None
     rotating_hours: Decimal | None
+    cum_rotating_hours: Decimal | None = None
+    spud_date: date | None = None
     dfs_days: Decimal | None
     est_days: Decimal | None
+    md_auth_m: Decimal | None = None
+    last_casing_size_in: Decimal | None = None
+    last_casing_depth_m: Decimal | None = None
+    hole_section_text: str = ""
+    hole_size_in: Decimal | None = None
+    current_status: str = ""
+    mud_type: str = ""
+    mud_weight_ppg: Decimal | None = None
+    mud_viscosity_sec: Decimal | None = None
+    mud_pv_cp: Decimal | None = None
+    mud_yp_lbf: Decimal | None = None
+    bha_summary: str = ""
+    pob_count: int | None = None
     operation_summary: str
     forward_plan: str
     hse_summary: str
@@ -534,6 +619,7 @@ class OpsBulkEdit(OpsIDs):
 class OpsExtractIn(_Strict):
     document_id: str = Field(min_length=1, max_length=36)
     report_date: date | None = None
+    use_ai: bool = False
 
 
 class OpsBulkActionOut(_Strict):
@@ -542,6 +628,15 @@ class OpsBulkActionOut(_Strict):
 
 class OpsRejectIn(_Strict):
     reason: str = Field(min_length=1, max_length=500)
+
+
+class OpsReopenIn(_Strict):
+    remarks: str = Field(min_length=3, max_length=500)
+
+    @field_validator("remarks", mode="before")
+    @classmethod
+    def trim_remarks(cls, value: Any) -> Any:
+        return _trim(value)
 
 
 class OpsBriefOut(_Strict):
@@ -663,6 +758,18 @@ class OpsPlanVersionIn(_Strict):
     notes: str = Field(default="", max_length=5000)
 
 
+class OpsPlanUpdateIn(_Strict):
+    label: str | None = Field(default=None, min_length=1, max_length=200)
+    basis: str | None = Field(default=None, min_length=1, max_length=20)
+    planned_start_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=5000)
+
+    @field_validator("label", "basis", "notes", mode="before")
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
+
+
 class OpsPlanItemIn(_Strict):
     sequence_no: int = Field(ge=1)
     hole_section_id: str | None = None
@@ -697,6 +804,112 @@ class OpsStudyOut(_Strict):
     ai_error_code: AiErrorCode = ''
 
 
+class OpsNarrativeRequest(_Strict):
+    use_ai: bool = True
+    focus: str = Field(default="", max_length=500)
+
+    @field_validator("focus", mode="before")
+    @classmethod
+    def trim_focus(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OpsNarrativeOut(_Strict):
+    operation_summary: str = ""
+    forward_plan: str = ""
+    hse_summary: str = ""
+    engineering_brief: str = ""
+    warnings: list[str] = Field(default_factory=list)
+    ai_used: bool = False
+    ai_model: str = ""
+    ai_error: str = ""
+    ai_error_code: AiErrorCode = ""
+
+
+class OpsAiPrefillOut(_Strict):
+    report: OpsReportOut
+    updated_header_fields: list[str] = Field(default_factory=list)
+    updated_block_count: int = 0
+    notes: list[str] = Field(default_factory=list)
+    ai_used: bool = False
+    ai_model: str = ""
+    ai_error: str = ""
+    ai_error_code: AiErrorCode = ""
+
+
+class OpsAiReviewRequest(_Strict):
+    well_id: str | None = Field(default=None, max_length=36)
+    rig_id: str | None = Field(default=None, max_length=36)
+    scope: Scope | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    focus: str = Field(default="", max_length=500)
+    use_ai: bool = True
+
+    @field_validator("focus", mode="before")
+    @classmethod
+    def trim_focus(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OpsAiReviewItem(_Strict):
+    severity: Literal["high", "medium", "low", "info"] = "info"
+    category: str = ""
+    title: str
+    detail: str
+    well_code: str = ""
+    report_date: str = ""
+    report_id: str = ""
+
+
+class OpsAiReviewOut(_Strict):
+    generated_at: datetime
+    timezone_label: str = "WAT (UTC+1:00)"
+    scope_label: str = ""
+    deterministic_summary: str = ""
+    executive_summary: str = ""
+    highlights: list[str] = Field(default_factory=list)
+    anomalies: list[OpsAiReviewItem] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    ai_used: bool = False
+    ai_model: str = ""
+    ai_endpoint: str = ""
+    ai_error: str = ""
+    ai_error_code: AiErrorCode = ""
+
+
+class OpsWellSummaryOut(_Strict):
+    generated_at: datetime
+    timezone: str = "Africa/Lagos"
+    timezone_label: str = "WAT (UTC+1:00)"
+    well_id: str
+    well_code: str
+    well_name: str
+    rig_code: str = ""
+    rig_name: str = ""
+    block_text: str = ""
+    field_site: str = ""
+    customer: str = ""
+    uwi: str = ""
+    datum: str = ""
+    scope_label: str = ""
+    include_drafts: bool = True
+    spud_date: date | None = None
+    first_report_date: date | None = None
+    last_report_date: date | None = None
+    latest_status: str = ""
+    latest_hole_section: str = ""
+    last_casing: str = ""
+    latest_mud: str = ""
+    latest_bha: str = ""
+    kpis: dict[str, Any] = Field(default_factory=dict)
+    activities: list[dict[str, Any]] = Field(default_factory=list)
+    daily_rollup: list[dict[str, Any]] = Field(default_factory=list)
+    pt_npt_breakdown: list[dict[str, Any]] = Field(default_factory=list)
+    phase_breakdown: list[dict[str, Any]] = Field(default_factory=list)
+    surveys: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class OpsPlanVersionOut(_Strict):
     id: str
     organization_id: str
@@ -708,6 +921,10 @@ class OpsPlanVersionOut(_Strict):
     status: str
     planned_start_at: datetime | None
     planned_days: Decimal | None
+    approved_by: str = ""
+    reopened_at: datetime | None = None
+    reopened_by: str = ""
+    reopen_reason: str = ""
     notes: str
     is_deleted: bool
     created_at: datetime

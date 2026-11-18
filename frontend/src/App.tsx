@@ -70,6 +70,7 @@ const Assistant = lazy(() => import('./pages/Assistant'))
 const OperationsOverview = lazy(() => import('./pages/operations/Overview'))
 const OperationsDocuments = lazy(() => import('./pages/operations/Documents'))
 const OperationsReports = lazy(() => import('./pages/operations/Reports'))
+const OperationsSummary = lazy(() => import('./pages/operations/Summary'))
 const OperationsGuide = lazy(() => import('./pages/operations/Guide'))
 const OperationsAnalytics = lazy(() => import('./pages/operations/Analytics'))
 const OperationsLibrary = lazy(() => import('./pages/operations/Library'))
@@ -191,6 +192,7 @@ export default function App() {
           <Route path="operations" element={<Guard permission="ops-dashboard:read"><OperationsOverview/></Guard>}/>
           <Route path="operations/documents" element={<Guard permission="ops-doc:read"><OperationsDocuments/></Guard>}/>
           <Route path="operations/reports/:id?" element={<Guard permission="ops-report:read"><OperationsReports/></Guard>}/>
+          <Route path="operations/summary" element={<Guard permission="ops-report:read"><OperationsSummary/></Guard>}/>
           <Route path="operations/guide" element={<GuardAny permissions={['ops-report:read', 'ops-plan:read', 'ops-doc:read', 'ops-master:read']}><OperationsGuide/></GuardAny>}/>
           <Route path="operations/analytics" element={<Guard permission="ops-analytics:read"><OperationsAnalytics/></Guard>}/>
           <Route path="operations/library" element={<Guard permission="ops-master:read"><OperationsLibrary/></Guard>}/>

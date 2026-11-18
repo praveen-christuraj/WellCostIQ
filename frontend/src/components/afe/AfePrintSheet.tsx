@@ -4,6 +4,7 @@ import { depthToMeters } from '../../lib/units'
 import { type AfeEstimate, type AfeStatusEvent, type CurrencySetup, type ServiceLineOut } from '../../lib/afe'
 import { groupServiceOptions, sortServicesByGroup } from '../../lib/serviceGroups'
 import { APP_NAME } from '../../lib/appInfo'
+import { formatWatDateTime } from '../../lib/time'
 
 // Print layout for a saved AFE, in the fixed two-page AFE format:
 //   page 1 - title, compact well / AFE metadata, one categorized cost table,
@@ -433,7 +434,7 @@ export function AfePrintSheet({ estimate, preview = false }: { estimate: AfeEsti
               <th>Date</th>
               {stages.map(stage => {
                 const event = stageEvent(stage.action)
-                return <td key={stage.action}>{event ? new Date(event.created_at).toLocaleString() : '—'}</td>
+                return <td key={stage.action}>{event ? formatWatDateTime(event.created_at) : '—'}</td>
               })}
             </tr>
             <tr className="ps-sign">

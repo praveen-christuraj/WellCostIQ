@@ -81,7 +81,8 @@ export async function exportPdf<T>(filename: string, title: string, rows: T[], c
   doc.text(title, 14, 16)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
-  doc.text(`Generated ${new Date().toLocaleString()} · ${rows.length} records`, 14, 22)
+  const { watNowFormatted } = await import('./time')
+  doc.text(`Generated ${watNowFormatted()} · ${rows.length} records`, 14, 22)
   autoTable(doc, {
     startY: 27,
     head: [columns.map(c => c.header)],

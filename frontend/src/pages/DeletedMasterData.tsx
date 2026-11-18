@@ -13,6 +13,7 @@ import { MASTER_DATA_MODULES, type MasterDataModule, type MasterDataModuleKey, t
 import { vendorToForm, type PoSoOrder, type Vendor, type VendorFormState, type VendorOption, type VendorPayload } from '../lib/vendorMaster'
 import { CONSUMABLE_TYPES, TANGIBLE_CONFIG, type CatalogueOption, type PricedRecord, type TypeConfig } from '../lib/catalogue'
 import { serviceFormToPayload, serviceToForm, type Service, type ServiceFormState } from '../lib/serviceMaster'
+import { formatWatDateTime } from '../lib/time'
 
 // Every priced catalogue type soft-deletes, including the user's own fuel list.
 const DELETABLE_CATALOGUE: TypeConfig[] = [TANGIBLE_CONFIG, ...CONSUMABLE_TYPES]
@@ -332,7 +333,7 @@ export default function DeletedMasterData() {
     { headerName: 'NAME', field: 'name', minWidth: 190, flex: 1.1 },
     { headerName: 'SYMBOL', field: 'symbol', minWidth: 90, maxWidth: 110, valueFormatter: params => params.value || '—' },
     { headerName: 'DESCRIPTION', field: 'description', minWidth: 180, flex: 1.2, valueFormatter: params => params.value || '—' },
-    { headerName: 'DELETED', field: 'deleted_at', minWidth: 165, valueFormatter: params => params.value ? new Date(params.value).toLocaleString() : '' },
+    { headerName: 'DELETED', field: 'deleted_at', minWidth: 165, valueFormatter: params => params.value ? formatWatDateTime(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 300, minWidth: 300, maxWidth: 300, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: DeletedRow }) => <Box display="flex" alignItems="center" height="100%" gap={.2}>

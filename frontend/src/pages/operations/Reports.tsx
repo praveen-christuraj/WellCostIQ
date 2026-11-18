@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link as RouterLink, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { AddRounded, EditOutlined, FileOpenOutlined, RestoreRounded } from '@mui/icons-material'
-import { Alert, Box, Button, Chip, MenuItem, TextField, Typography } from '@mui/material'
+import { AddRounded, EditOutlined, FileOpenOutlined, LockOpenOutlined, RestoreRounded } from '@mui/icons-material'
+import { Alert, Box, Button, Chip, MenuItem, Stack, TextField, Typography } from '@mui/material'
 import { DataTable } from '../../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading } from '../../components/Common'
 import { ImportDialog } from '../../components/ImportDialog'
@@ -18,7 +18,8 @@ import { SourceDialog } from '../../components/operations/SourceDialog'
 import { editableReport, useRegisterActions } from '../../components/operations/RegisterActions'
 import { api, body } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
-import { auditExport, createReport, type OpsReport } from '../../lib/operations'
+import { auditExport, createReport, reopenReport, type OpsReport } from '../../lib/operations'
+import { WAT_LABEL, watTodayIso } from '../../lib/time'
 
 import OperationsReportDetail from './ReportDetail'
 
@@ -35,7 +36,9 @@ export default function OperationsReports() {
   const [dest, setDest] = useState<Folder>({ well_id: '', scope: 'drilling' }),
     [day, setDay] = useState(''),
     [no, setNo] = useState(''),
-    [reportType, setReportType] = useState('DDR')
+    [reportType, setReportType] = useState('DDR'),
+    [reopenTarget, setReopenTarget] = useState<OpsReport | null>(null),
+    [reopenRemarks, setReopenRemarks] = useState('')
   const controls = useRegisterActions<OpsReport>('reports', deleted, refresh)
   useEffect(() => {
     controls.clear()
@@ -48,11 +51,27 @@ export default function OperationsReports() {
   const open = () => {
     const folder = register.destination()
     setDest(folder ?? { well_id: '', scope: 'drilling' })
-    setDay(new Date().toISOString().slice(0, 10))
+    setDay(watTodayIso())
     setNo('')
     setReportType(folder?.scope === 'completion' ? 'DCR' : 'DDR')
     setFormError('')
     setDialog('manual')
+  }
+  const confirmReopen = async () => {
+    if (!reopenTarget) return
+    setBusy(true)
+    setFormError('')
+    try {
+      const updated = await reopenReport(reopenTarget.id, reopenRemarks.trim())
+      setReopenTarget(null)
+      setReopenRemarks('')
+      await refresh()
+      openReport(updated, recordLocation(updated))
+    } catch (e) {
+      setFormError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
   }
   const create = async () => {
     setBusy(true)
@@ -73,9 +92,20 @@ export default function OperationsReports() {
       <PageHeading
         eyebrow="Well Operations"
         title={deleted ? 'Deleted daily reports' : 'Daily reports'}
-        subtitle="Review the source, reconcile the activity hours, then submit the daily record. Only submitted or approved time contributes to performance KPIs."
+        subtitle={`Review extracted MDs, TVDs, wellbore parameters and activity hours (${WAT_LABEL}), then submit the daily record. Submitted and approved reports can be reopened to draft with audit remarks.`}
         action={
           <Box display="flex" gap={1} flexWrap="wrap">
+            <Button
+              component={RouterLink}
+              variant="outlined"
+              to={
+                rows[0]?.well_id
+                  ? `/operations/summary?well=${encodeURIComponent(rows[0].well_id)}${location.scope ? `&scope=${encodeURIComponent(location.scope)}` : ''}`
+                  : '/operations/summary'
+              }
+            >
+              Operation summary
+            </Button>
             <Button component={RouterLink} to="/operations/guide">
               Ask &amp; guide
             </Button>
@@ -138,7 +168,12 @@ export default function OperationsReports() {
                 { field: 'scope', headerName: 'Scope' },
                 { field: 'report_type', headerName: 'Type' },
                 { field: 'report_no_text', headerName: 'Report no.' },
-                { field: 'depth_end_m', headerName: 'Depth (m)' },
+                { field: 'depth_start_m', headerName: 'Start MD (m)' },
+                { field: 'depth_end_m', headerName: 'End MD (m)' },
+                { field: 'tvd_m', headerName: 'TVD (m)' },
+                { field: 'bit_depth_m', headerName: 'Bit (m)' },
+                { field: 'progress_m', headerName: 'Progress (m)' },
+                { field: 'mud_weight_ppg', headerName: 'MW (ppg)' },
                 {
                   field: 'total_block_minutes',
                   headerName: 'Logged hours',
@@ -147,18 +182,23 @@ export default function OperationsReports() {
                 {
                   field: 'status',
                   headerName: 'Status',
-                  cellRenderer: ({ value }: { value: string }) => <Chip size="small" label={value} />,
+                  minWidth: 155,
+                  cellRenderer: ({ data: r }: { data: OpsReport }) => (
+                    <Stack direction="row" gap={0.5} alignItems="center" height="100%">
+                      <Chip size="small" label={r.status} />
+                      {r.status === 'draft' && r.reopened_at && <Chip size="small" color="info" label="reopened" />}
+                    </Stack>
+                  ),
                 },
-                { field: 'remarks', headerName: 'Remarks' },
-                { field: 'depth_start_m', headerName: 'Start MD (m)' },
                 { field: 'operation_summary', headerName: 'Summary', tooltipField: 'operation_summary' },
+                { field: 'remarks', headerName: 'Remarks' },
                 {
                   headerName: 'Actions',
-                  width: 200,
-                  minWidth: 185,
+                  width: 265,
+                  minWidth: 235,
                   sortable: false,
                   cellRenderer: ({ data: r }: { data: OpsReport }) => (
-                    <Box display="flex" alignItems="center" height="100%">
+                    <Box display="flex" alignItems="center" gap={0.25} height="100%">
                       <Button
                         size="small"
                         startIcon={can('ops-report:update') && editableReport(r) ? <EditOutlined /> : undefined}
@@ -166,6 +206,22 @@ export default function OperationsReports() {
                       >
                         {can('ops-report:update') && editableReport(r) ? 'Edit' : 'Open'}
                       </Button>
+                      {!deleted &&
+                        (r.status === 'submitted' || r.status === 'approved') &&
+                        can('ops-report:reopen') && (
+                          <Button
+                            size="small"
+                            color="warning"
+                            startIcon={<LockOpenOutlined />}
+                            onClick={() => {
+                              setReopenRemarks('')
+                              setFormError('')
+                              setReopenTarget(r)
+                            }}
+                          >
+                            Reopen
+                          </Button>
+                        )}
                       {controls.actions([r])}
                     </Box>
                   ),
@@ -271,6 +327,32 @@ export default function OperationsReports() {
           }}
         />
       )}
+      <FormDialog
+        open={!!reopenTarget}
+        title={`Reopen ${reopenTarget?.report_type ?? ''} ${reopenTarget?.report_no_text ?? ''} (${reopenTarget?.report_date ?? ''})?`}
+        subtitle="Returns this submitted or approved daily report to editable draft so you can revise measurements, time blocks, surveys or narratives and re-submit. Reports older than 30 days also require the ops-report:amend capability. This reopen action is permanently recorded in the Audit Log."
+        submitLabel="Reopen as draft"
+        busyLabel="Reopening…"
+        onClose={() => setReopenTarget(null)}
+        onSubmit={confirmReopen}
+        busy={busy}
+        submitDisabled={reopenRemarks.trim().length < 3}
+        maxWidth="sm"
+      >
+        <Box display="grid" gap={2} pt={1}>
+          <TextField
+            required
+            label="Reason for reopening (audit log)"
+            multiline
+            minRows={3}
+            value={reopenRemarks}
+            onChange={(e) => setReopenRemarks(e.target.value)}
+            slotProps={{ htmlInput: { maxLength: 500 } }}
+            helperText="Minimum 3 characters. State what correction or addition is needed."
+          />
+          {formError && <Alert severity="error">{formError}</Alert>}
+        </Box>
+      </FormDialog>
       {id && (
         <OperationsReportDetail
           key={id}

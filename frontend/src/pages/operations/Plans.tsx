@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { AddOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, TextField, Typography } from '@mui/material'
+import { AddOutlined, LockOpenOutlined } from '@mui/icons-material'
+import { Alert, Box, Button, Stack, TextField, Typography } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
-import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag } from '../../components/Common'
+import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag, type Tone } from '../../components/Common'
 import { DataTable } from '../../components/DataTable'
 import {
   FolderFields,
@@ -12,9 +12,31 @@ import {
 } from '../../components/operations/ScopeDirectory'
 import { StudyPanel } from '../../components/operations/StudyPanel'
 import { TimelineEditor } from '../../components/operations/TimelineEditor'
-import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
-import { createPlan, activatePlan, auditExport, getOpsPlan, studyTimeline, type OpsPlan } from '../../lib/operations'
+import { api } from '../../lib/api'
+import {
+  activatePlan,
+  auditExport,
+  createPlan,
+  getOpsPlan,
+  reopenPlan,
+  studyTimeline,
+  updatePlan,
+  type OpsPlan,
+} from '../../lib/operations'
+import {
+  formatWatDateTime,
+  formatWatShort,
+  fromWatDateTimeInput,
+  toWatDateTimeInput,
+  WAT_LABEL,
+} from '../../lib/time'
+
+const planStatusTone = (status: string): Tone => {
+  if (status === 'active') return 'success'
+  if (status === 'draft') return 'warning'
+  return 'neutral'
+}
 
 export default function OperationsPlans() {
   const { can } = useAuth()
@@ -22,21 +44,29 @@ export default function OperationsPlans() {
   const { reference, deleted, rows, refresh, location } = register
   const [create, setCreate] = useState(false)
   const [folder, setFolder] = useState<Folder>({ well_id: '', scope: 'drilling' })
-  const [label, setLabel] = useState(''),
-    [start, setStart] = useState('')
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('')
+  const [label, setLabel] = useState('')
+  const [start, setStart] = useState('')
+  const [notes, setNotes] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [formError, setFormError] = useState('')
   const [editor, setEditor] = useState<{ plan: OpsPlan; edit: boolean } | null>(null)
+  const [metaEdit, setMetaEdit] = useState<OpsPlan | null>(null)
+  const [reopenTarget, setReopenTarget] = useState<OpsPlan | null>(null)
+  const [reopenRemarks, setReopenRemarks] = useState('')
   const [action, setAction] = useState<{ plan: OpsPlan; kind: 'activate' | 'delete' | 'restore' } | null>(null)
+
   const save = async () => {
     setBusy(true)
     setFormError('')
+    setNotice('')
     try {
       const plan = await createPlan({
         ...folder,
         label: label.trim(),
-        planned_start_at: start ? new Date(`${start}Z`).toISOString() : null,
+        planned_start_at: fromWatDateTimeInput(start),
+        notes: notes.trim(),
       })
       setCreate(false)
       register.change(register.formLocation(folder))
@@ -48,6 +78,47 @@ export default function OperationsPlans() {
       setBusy(false)
     }
   }
+
+  const saveMetadata = async () => {
+    if (!metaEdit) return
+    setBusy(true)
+    setFormError('')
+    setNotice('')
+    try {
+      await updatePlan(metaEdit.id, {
+        label: label.trim(),
+        planned_start_at: fromWatDateTimeInput(start),
+        notes: notes.trim(),
+      })
+      setMetaEdit(null)
+      await refresh()
+      setNotice('Draft plan details updated.')
+    } catch (e) {
+      setFormError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmReopen = async () => {
+    if (!reopenTarget) return
+    setBusy(true)
+    setFormError('')
+    setNotice('')
+    try {
+      const updated = await reopenPlan(reopenTarget.id, reopenRemarks.trim())
+      setReopenTarget(null)
+      setReopenRemarks('')
+      await refresh()
+      setNotice(`Timeline "${updated.label}" (v${updated.version_no}) reopened to draft. Update items or details, then re-activate when ready.`)
+      if (can('ops-plan:update')) setEditor({ plan: updated, edit: true })
+    } catch (e) {
+      setFormError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const open = async (id: string, edit: boolean) => {
     setBusy(true)
     setError('')
@@ -59,12 +130,28 @@ export default function OperationsPlans() {
       setBusy(false)
     }
   }
+
+  const openMetaDialog = (p: OpsPlan) => {
+    setLabel(p.label)
+    setStart(toWatDateTimeInput(p.planned_start_at))
+    setNotes(p.notes || '')
+    setFormError('')
+    setMetaEdit(p)
+  }
+
+  const openReopenDialog = (p: OpsPlan) => {
+    setEditor(null)
+    setReopenRemarks('')
+    setFormError('')
+    setReopenTarget(p)
+  }
+
   return (
     <Box>
       <PageHeading
         eyebrow="Well Operations"
         title={deleted ? 'Deleted plan versions' : 'Plans & timeline'}
-        subtitle="Browse by rig and well, then open a version to view its programme. Operations planned days are independent of costing."
+        subtitle={`Browse by rig and well, then open a version to view, edit or reopen its programme. Start timestamps use ${WAT_LABEL}; operations planned days are independent of costing.`}
         action={
           <>
             <Button component={RouterLink} to="/operations/guide">
@@ -82,6 +169,7 @@ export default function OperationsPlans() {
                   setFolder(register.destination() ?? { well_id: '', scope: 'drilling' })
                   setLabel('')
                   setStart('')
+                  setNotes('')
                   setFormError('')
                   setCreate(true)
                 }}
@@ -93,6 +181,11 @@ export default function OperationsPlans() {
         }
       />
       {(register.error || error) && <ErrorMessage message={register.error || error} />}
+      {notice && (
+        <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 2 }}>
+          {notice}
+        </Alert>
+      )}
       <ScopeDirectory {...register} resource="plans" />
       {location.well &&
         (register.loading ? (
@@ -107,19 +200,30 @@ export default function OperationsPlans() {
             onExport={auditExport('plans')}
             searchPlaceholder="Search plan versions…"
             columns={[
-              { field: 'label', headerName: 'Programme', minWidth: 225, flex: 2 },
-              { field: 'scope', headerName: 'Scope' },
-              { field: 'version_no', headerName: 'Version' },
+              { field: 'label', headerName: 'Programme', minWidth: 220, flex: 2 },
+              { field: 'scope', headerName: 'Scope', minWidth: 105 },
+              { field: 'version_no', headerName: 'Version', minWidth: 92 },
               {
                 field: 'status',
                 headerName: 'Status',
-                cellRenderer: ({ value }: { value: string }) => <Tag>{value}</Tag>,
+                minWidth: 165,
+                cellRenderer: ({ data: p }: { data: OpsPlan }) => (
+                  <Stack direction="row" gap={0.5} alignItems="center">
+                    <Tag tone={planStatusTone(p.status)}>{p.status}</Tag>
+                    {p.status === 'draft' && p.reopened_at && <Tag tone="info">Reopened</Tag>}
+                  </Stack>
+                ),
               },
-              { field: 'planned_days', headerName: 'Planned days' },
-              { field: 'planned_start_at', headerName: 'Start (UTC)' },
+              { field: 'planned_days', headerName: 'Planned days', minWidth: 120 },
+              {
+                field: 'planned_start_at',
+                headerName: 'Start (WAT)',
+                minWidth: 155,
+                valueFormatter: (p) => (p.value ? formatWatShort(String(p.value)) : '—'),
+              },
               {
                 headerName: 'Actions',
-                width: 315,
+                width: 390,
                 sortable: false,
                 cellRenderer: ({ data: p }: { data: OpsPlan }) => (
                   <>
@@ -127,8 +231,23 @@ export default function OperationsPlans() {
                       View timeline
                     </Button>
                     {!deleted && p.status === 'draft' && can('ops-plan:update') && (
-                      <Button size="small" disabled={busy} onClick={() => void open(p.id, true)}>
-                        Edit
+                      <>
+                        <Button size="small" disabled={busy} onClick={() => void open(p.id, true)}>
+                          Edit
+                        </Button>
+                        <Button size="small" disabled={busy} onClick={() => openMetaDialog(p)}>
+                          Details
+                        </Button>
+                      </>
+                    )}
+                    {!deleted && (p.status === 'active' || p.status === 'superseded') && can('ops-plan:reopen') && (
+                      <Button
+                        size="small"
+                        color="warning"
+                        disabled={busy}
+                        onClick={() => openReopenDialog(p)}
+                      >
+                        Reopen
                       </Button>
                     )}
                     {((deleted && can('ops-plan:restore')) ||
@@ -163,6 +282,7 @@ export default function OperationsPlans() {
             ]}
           />
         ))}
+
       <FormDialog
         open={create}
         title="New operations plan"
@@ -178,21 +298,99 @@ export default function OperationsPlans() {
           <TextField required label="Programme label" value={label} onChange={(e) => setLabel(e.target.value)} />
           <TextField
             type="datetime-local"
-            label="Programme start (UTC)"
+            label={`Programme start (${WAT_LABEL})`}
             slotProps={{ inputLabel: { shrink: true } }}
             value={start}
             onChange={(e) => setStart(e.target.value)}
-            helperText="Without a start, drilling needs reported days from spud. Completion needs a start for lead/lag."
+            helperText="Entered in West Africa Time (UTC+1:00). Without a start, drilling uses reported DFS; completion requires a start for lead/lag."
+          />
+          <TextField
+            label="Programme notes"
+            multiline
+            minRows={2}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
           />
           {formError && <Alert severity="error">{formError}</Alert>}
         </Box>
       </FormDialog>
+
+      <FormDialog
+        open={!!metaEdit}
+        title={`Edit plan details · ${metaEdit?.label ?? ''}`}
+        subtitle={`Update label, planned start (${WAT_LABEL}) or notes for this draft version.`}
+        submitLabel="Save details"
+        onClose={() => setMetaEdit(null)}
+        onSubmit={saveMetadata}
+        busy={busy}
+        submitDisabled={!label.trim()}
+        maxWidth="sm"
+      >
+        <Box display="grid" gap={2} pt={1}>
+          <TextField required label="Programme label" value={label} onChange={(e) => setLabel(e.target.value)} />
+          <TextField
+            type="datetime-local"
+            label={`Programme start (${WAT_LABEL})`}
+            slotProps={{ inputLabel: { shrink: true } }}
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            helperText="West Africa Time (Africa/Lagos, UTC+1:00)."
+          />
+          <TextField
+            label="Programme notes"
+            multiline
+            minRows={3}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
+          {formError && <Alert severity="error">{formError}</Alert>}
+        </Box>
+      </FormDialog>
+
+      <FormDialog
+        open={!!reopenTarget}
+        title={`Reopen ${reopenTarget?.label ?? 'timeline'} (v${reopenTarget?.version_no ?? ''})?`}
+        subtitle="Returns this timeline version to editable draft so you can revise activities, target depths, planned hours or start time, then re-activate it. Previously reviewed daily reports retain their historical baseline reference, and this reopen action is permanently recorded in the Audit Log."
+        submitLabel="Reopen as draft"
+        busyLabel="Reopening…"
+        onClose={() => setReopenTarget(null)}
+        onSubmit={confirmReopen}
+        busy={busy}
+        submitDisabled={reopenRemarks.trim().length < 3}
+        maxWidth="sm"
+      >
+        <Box display="grid" gap={2} pt={1}>
+          <TextField
+            required
+            label="Reason for reopening (audit log)"
+            multiline
+            minRows={3}
+            value={reopenRemarks}
+            onChange={(e) => setReopenRemarks(e.target.value)}
+            slotProps={{ htmlInput: { maxLength: 500 } }}
+            helperText="Minimum 3 characters. State what needs to be revised in the programme or timeline."
+          />
+          {formError && <Alert severity="error">{formError}</Alert>}
+        </Box>
+      </FormDialog>
+
       {editor &&
         (editor.edit && !editor.plan.is_deleted && editor.plan.status === 'draft' ? (
           <TimelineEditor plan={editor.plan} onClose={() => setEditor(null)} onSaved={refresh} />
         ) : (
-          <PlanView plan={editor.plan} onClose={() => setEditor(null)} />
+          <PlanView
+            plan={editor.plan}
+            onClose={() => setEditor(null)}
+            onReopen={
+              !editor.plan.is_deleted &&
+              (editor.plan.status === 'active' || editor.plan.status === 'superseded') &&
+              can('ops-plan:reopen')
+                ? () => openReopenDialog(editor.plan)
+                : undefined
+            }
+          />
         ))}
+
       {action && (
         <FormDialog
           open
@@ -220,9 +418,9 @@ export default function OperationsPlans() {
           }}
         >
           {action.kind === 'activate'
-            ? 'This becomes the baseline for this well and scope. The previous version is retained as superseded.'
+            ? 'This becomes the active baseline for this well and scope. Any prior active version is retained as superseded.'
             : action.kind === 'restore'
-              ? 'Restore this version as a draft.'
+              ? 'Restore this version as an editable draft.'
               : 'This draft and its items can be restored from Deleted versions.'}
           {formError && <Alert severity="error">{formError}</Alert>}
         </FormDialog>
@@ -231,7 +429,15 @@ export default function OperationsPlans() {
   )
 }
 
-function PlanView({ plan, onClose }: { plan: OpsPlan; onClose: () => void }) {
+function PlanView({
+  plan,
+  onClose,
+  onReopen,
+}: {
+  plan: OpsPlan
+  onClose: () => void
+  onReopen?: () => void
+}) {
   const { can } = useAuth()
   return (
     <PanelDialog
@@ -239,8 +445,27 @@ function PlanView({ plan, onClose }: { plan: OpsPlan; onClose: () => void }) {
       title={`Timeline · ${plan.label}`}
       maxWidth={false}
       onClose={onClose}
-      subtitle={`${plan.well_code} · ${plan.scope} · Version ${plan.version_no} · ${plan.status}`}
+      subtitle={`${plan.well_code} · ${plan.scope} · Version ${plan.version_no} · ${plan.status}${plan.planned_start_at ? ` · Start: ${formatWatDateTime(plan.planned_start_at)}` : ''}`}
+      footer={
+        <>
+          {onReopen && (
+            <Button color="warning" variant="outlined" startIcon={<LockOpenOutlined />} onClick={onReopen}>
+              Reopen as draft
+            </Button>
+          )}
+          <Button onClick={onClose} color="inherit">
+            Close
+          </Button>
+        </>
+      }
     >
+      {plan.reopened_at && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Last reopened by <strong>{plan.reopened_by || 'workspace user'}</strong> on{' '}
+          <strong>{formatWatDateTime(plan.reopened_at)}</strong>
+          {plan.reopen_reason ? ` — Reason: ${plan.reopen_reason}` : ''}.
+        </Alert>
+      )}
       <DataTable
         rows={plan.items}
         exportName={`${plan.well_code}-${plan.scope}-timeline-v${plan.version_no}`}

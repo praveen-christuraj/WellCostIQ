@@ -932,6 +932,34 @@ html[data-theme='dark'] .login-shell { background: #0B141A; }
 .ag-theme-quartz .ag-cell { line-height: var(--ag-row-height); }
 .ag-theme-quartz .ag-paging-panel { border-top: 1px solid var(--wcp-line); color: var(--wcp-text-muted); font-size: 11.5px; }
 
+/* Dropdown & popup z-index stack: body-portaled AG Grid popups (Page Size
+   selectors, column filters, cell editors, menus) and MUI dropdown popovers must
+   always render cleanly above MUI Dialog/Modal overlays (z-index 1300). */
+.ag-popup,
+.ag-popup-wrapper,
+.ag-popup-child,
+.ag-select-list,
+.ag-rich-select-list,
+.ag-menu,
+.ag-filter-wrapper,
+.ag-popup-editor {
+  z-index: 1550 !important;
+}
+.ag-popup {
+  pointer-events: auto;
+}
+.ag-tooltip,
+.ag-dnd-ghost {
+  z-index: 1650 !important;
+}
+.MuiPopover-root,
+.MuiMenu-root {
+  z-index: 1500;
+}
+.MuiAutocomplete-popper {
+  z-index: 1520 !important;
+}
+
 /* Frozen right-hand action column for plain MUI tables inside a horizontal
    scroller (the AG Grid registers get this from a pinned column instead — see
    DataTable). The header and body cells of the actions column both carry the

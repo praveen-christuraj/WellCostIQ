@@ -45,6 +45,16 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
     },
     shape: { borderRadius: radius.md },
     spacing: 4,
+    zIndex: {
+      mobileStepper: 1000,
+      fab: 1050,
+      speedDial: 1050,
+      appBar: 1100,
+      drawer: 1200,
+      modal: 1300,
+      snackbar: 1450,
+      tooltip: 1650,
+    },
     shadows,
     components: {
       MuiCssBaseline: {
@@ -170,6 +180,7 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
       MuiCheckbox: { styleOverrides: { root: { padding: 6 } } },
       MuiAutocomplete: {
         styleOverrides: {
+          popper: { zIndex: 1520 },
           paper: { borderRadius: radius.lg, border: `1px solid ${s.divider}`, boxShadow: sh.raised },
           listbox: { padding: 6 },
           option: {
@@ -188,14 +199,41 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
         },
       },
       MuiDialog: {
+        defaultProps: {
+          // Allow body-portaled AG Grid Page Size / filter popups and Autocomplete
+          // poppers opened from inside dialogs to receive focus and clicks cleanly.
+          disableEnforceFocus: true,
+        },
         styleOverrides: {
           paper: { borderRadius: radius.xl, border: `1px solid ${s.divider}`, boxShadow: sh.overlay },
         },
       },
+      // Dropdowns, Select/TablePagination menus and Autocomplete poppers always sit
+      // cleanly above Dialog/Modal surfaces (1300) and nested confirmation modals.
+      MuiPopover: {
+        styleOverrides: {
+          root: { zIndex: 1500 },
+        },
+      },
       MuiMenu: {
         styleOverrides: {
+          root: { zIndex: 1500 },
           paper: { borderRadius: radius.lg, border: `1px solid ${s.divider}`, boxShadow: sh.raised, padding: 0 },
           list: { padding: 6 },
+        },
+      },
+      MuiPopper: {
+        styleOverrides: {
+          root: { zIndex: 1520 },
+        },
+      },
+      MuiTablePagination: {
+        defaultProps: {
+          slotProps: {
+            select: {
+              MenuProps: { sx: { zIndex: 1520 } },
+            },
+          },
         },
       },
       MuiList: { styleOverrides: { root: { padding: 6 } } },
@@ -214,6 +252,7 @@ export const buildTheme = (mode: 'light' | 'dark'): Theme => {
       MuiTooltip: {
         defaultProps: { arrow: true },
         styleOverrides: {
+          popper: { zIndex: 1650 },
           tooltip: {
             backgroundColor: s.raised,
             color: s.text,

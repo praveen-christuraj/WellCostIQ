@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { NotificationPage, UserNotification } from '../lib/workflowTypes'
 import { notifyNotificationsChanged, onNotificationsChanged } from '../lib/uiEvents'
+import { formatWatDateTime } from '../lib/time'
 
 const SEVERITY_COLOUR: Record<string, string> = {
   info: 'var(--wcp-tone-info-fg)',
@@ -69,7 +70,7 @@ export default function NotificationBell() {
             <Box sx={{ width: 3, alignSelf: 'stretch', borderRadius: 2, mr: 1.2, bgcolor: SEVERITY_COLOUR[item.severity] ?? 'divider', flex: 'none' }}/>
             <ListItemText
               primary={item.title}
-              secondary={<>{item.message}<br/>{new Date(item.created_at).toLocaleString()} · {item.notification_type}</>}
+              secondary={<>{item.message}<br/>{formatWatDateTime(item.created_at)} · {item.notification_type}</>}
               primaryTypographyProps={{ fontSize: 12.8, fontWeight: item.read_at ? 600 : 800, noWrap: true }}
               secondaryTypographyProps={{ fontSize: 11.5, lineHeight: 1.45, mt: .3, sx: { display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }}/>
           </ListItemButton>)}

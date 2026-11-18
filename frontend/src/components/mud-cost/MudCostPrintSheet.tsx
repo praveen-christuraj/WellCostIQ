@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { mudQuantity, type MudCostBalanceRow } from '../../lib/mudCost'
 import { APP_NAME } from '../../lib/appInfo'
+import { watNowFormatted } from '../../lib/time'
 
 export type MudCostPrintReport = {
   rig: string
@@ -25,7 +26,7 @@ export function MudCostPrintSheet({ report }: { report: MudCostPrintReport | nul
       <div className="ps-titlemeta">
         <strong className="ps-titlecode">{report.rig}</strong>
         <span>{report.well}</span>
-        <span className="ps-printed">Printed {new Date().toLocaleString()}</span>
+        <span className="ps-printed">Printed {watNowFormatted()}</span>
       </div>
     </header>
     <table className="ps-meta"><tbody>

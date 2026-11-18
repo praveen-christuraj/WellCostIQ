@@ -12,6 +12,7 @@ import { SectionCard } from '../components/ui/SectionCard'
 import { api, body } from '../lib/api'
 import { numeric } from '../lib/invoiceCalculations'
 import { SIGNATURE_LABELS, SIGNATURE_ROLES, type BlockSetting, type ConfigItem, type ExchangeRate, type InvoiceConfiguration, type PaymentSplitInput, type PaymentTerm, type Signatory, type SignatureRole, type TaxConfiguration, type TaxDirection } from '../lib/invoiceProcessing'
+import { formatWatDateTime } from '../lib/time'
 
 type DialogKind = 'descriptions' | 'locations' | 'categories' | 'payment-terms' | 'taxes' | 'exchange-rates' | 'signatories' | null
 type SignatoryForm = { signatory_role: SignatureRole; full_name: string; designation: string; is_active: boolean }
@@ -134,7 +135,7 @@ export default function InvoiceConfigurationPage() {
         { field: 'name', headerName: 'Name', minWidth: 180 },
         { field: 'description', headerName: 'Description', minWidth: 220, flex: 1 },
         { headerName: 'Availability', valueGetter: p => p.data?.is_deleted ? 'Deleted' : p.data?.is_active ? 'Active' : 'Inactive' },
-        { field: 'updated_at', headerName: 'Updated', minWidth: 170, valueFormatter: p => p.value ? new Date(p.value).toLocaleString() : '—' },
+        { field: 'updated_at', headerName: 'Updated', minWidth: 170, valueFormatter: p => p.value ? formatWatDateTime(p.value) : '—' },
         { headerName: 'Actions', width: 120, cellRenderer: (p: ICellRendererParams<ConfigItem>) => p.data && <Stack direction="row"><IconButton aria-label="Edit or restore configuration" onClick={() => editItem(currentKind, p.data!)}><EditOutlined/></IconButton>{!p.data.is_deleted && <IconButton aria-label="Delete configuration" color="error" onClick={() => setRemove({ kind: currentKind, id: p.data!.id, label: p.data!.name })}><DeleteOutline/></IconButton>}</Stack> },
       ]} exportName={`invoice-${currentKind}`} canExport={can('invoice-processing:export')} onExport={async (format, count) => { await api('/invoice-processing/export-audit', { method: 'POST', body: body({ module: 'configuration', format, record_count: count, detail: currentKind }) }) }}/>
       </SectionCard>}

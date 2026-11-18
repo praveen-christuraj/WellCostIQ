@@ -5,6 +5,7 @@ import {
   entryCheckCounts, entryCheckSeverityLabel, entryCheckSummary, hasSuggestion,
   type EntryCheck, type EntryCheckLine,
 } from '../../lib/entryChecks'
+import { formatWatDateTime } from '../../lib/time'
 
 /** Open findings listed before the rest is folded away. */
 const OPEN_LIMIT = 8
@@ -19,7 +20,7 @@ function toneOf(check: EntryCheck): Tone {
 
 function reviewedLine(check: EntryCheck): string {
   const who = check.reviewed_by || 'a workspace user'
-  const when = check.reviewed_at ? ` on ${new Date(check.reviewed_at).toLocaleString()}` : ''
+  const when = check.reviewed_at ? ` on ${formatWatDateTime(check.reviewed_at)}` : ''
   return `Kept as entered by ${who}${when}${check.review_note ? `. Note: ${check.review_note}` : '.'}`
 }
 

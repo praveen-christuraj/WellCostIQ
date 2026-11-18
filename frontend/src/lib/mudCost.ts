@@ -1,3 +1,5 @@
+import { watTodayIso } from './time'
+
 export type MudCostCategory = 'opening_stock' | 'receipt' | 'additions' | 'consumption_losses' | 'others' | 'closing_stock'
 export type MudCostBalanceView = 'daily' | 'monthly' | 'section' | 'inception'
 export type MudCostLossView = 'daily' | 'monthly' | 'section' | 'inception'
@@ -367,9 +369,7 @@ export function mudQuantity(value: string | number | null | undefined): string {
 }
 
 export function localMudToday(): string {
-  const now = new Date()
-  const offset = now.getTimezoneOffset()
-  return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10)
+  return watTodayIso()
 }
 
 export function validMudDate(value: string): boolean {

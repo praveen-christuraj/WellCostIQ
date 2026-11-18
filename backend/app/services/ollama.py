@@ -572,6 +572,8 @@ def _build_payload(
 
     options: dict[str, Any] = {
         "temperature": temp,
+        "top_p": float(getattr(cfg, "ollama_top_p", 0.9)),
+        "repeat_penalty": float(getattr(cfg, "ollama_repeat_penalty", 1.08)),
         "num_ctx": int(cfg.ollama_num_ctx),
         "num_predict": tokens,
     }
@@ -660,11 +662,18 @@ def chat(
         payload=payload,
     )
     # Compatibility fallback for older Ollama servers that reject the top-level
-    # `think` boolean introduced alongside Qwen3 thinking models.
+    # `think` boolean introduced alongside Qwen3 thinking models: append Qwen3's
+    # native `/no_think` control token when thinking is disabled so compact models
+    # like qwen3:1.7b spend their full token budget on the grounded answer.
     if status_code == 400 and "think" in payload and "think" in _extract_remote_error(raw).lower():
+        fallback_sys = (
+            f"{system_prompt}\n/no_think"
+            if not cfg.ollama_think and cfg.ollama_model.lower().startswith("qwen3")
+            else system_prompt
+        )
         protocol, fallback_payload = _build_payload(
             cfg,
-            system_prompt=system_prompt,
+            system_prompt=fallback_sys,
             user_prompt=user_prompt,
             json_mode=json_mode,
             max_tokens=max_tokens,

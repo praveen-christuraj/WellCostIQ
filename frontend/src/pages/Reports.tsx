@@ -17,6 +17,7 @@ import { api } from '../lib/api'
 import type { AfeOverview } from '../lib/afe'
 import type { DailyCostOverview } from '../lib/dailyCost'
 import type { RigWellOverview } from '../lib/rigWell'
+import { formatWatDateTime } from '../lib/time'
 
 const USAGE_REPORT_CARDS = [
   {
@@ -207,7 +208,7 @@ export default function Reports() {
           {dashboard.activity.length === 0
             ? <Box sx={{ px: 2.25, py: 2.5 }}><Typography color="text.secondary" fontSize={12.5}>No recent source activity is available.</Typography></Box>
             : dashboard.activity.map(item => <Box key={`${item.entity_type}-${item.id}`} display="grid" gridTemplateColumns={{ xs: '1fr', md: '180px 1fr 200px' }} gap={1} alignItems="center" sx={{ px: 2.25, py: 1, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}>
-              <Typography fontSize={11.5} color="text.secondary" className="tnum">{new Date(item.created_at).toLocaleString()}</Typography>
+              <Typography fontSize={11.5} color="text.secondary" className="tnum">{formatWatDateTime(item.created_at)}</Typography>
               <Typography fontSize={12.5}>{item.summary || `${item.action} ${item.entity_type}`}</Typography>
               <Typography fontSize={11.5} color="text.secondary" noWrap>{item.entity_label || item.entity_type.replace(/_/g, ' ')}</Typography>
             </Box>)}

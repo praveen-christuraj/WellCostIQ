@@ -1,14 +1,15 @@
-# Offline LAN Ollama AI (`qwen3:4b-q4_K_M`)
+# Offline LAN Ollama AI (`qwen3:1.7b` / `qwen3:4b-q4_K_M`)
 
 WellCostIQ supports an optional, fully offline local-area-network (LAN) AI model
-served by **Ollama** (`qwen3:4b-q4_K_M`) running on another PC on the same
-network (or locally). No data is ever sent to any public cloud API, and
-everything continues to work deterministically when `OLLAMA_ENABLED=false` (the
-default) or when the remote AI host is temporarily offline.
+served by **Ollama** (compact models such as `qwen3:1.7b` as well as
+`qwen3:4b-q4_K_M`) running on another PC on the same network (or locally). No
+data is ever sent to any public cloud API, and everything continues to work
+deterministically when `OLLAMA_ENABLED=false` (the default) or when the remote
+AI host is temporarily offline.
 
 ## What it does
 
-1. **Workspace Database & Workflow Guide (`/assistant` and `Alt+G` drawer)**
+1. **Workspace Database, D&C Engineering & Workflow Guide (`/assistant` and `/operations/guide`)**
    - Answers natural-language questions over the caller's live, permitted
      workspace records and shipped/custom application workflows.
    - Computes exact `Decimal` figures and side-by-side multi-well comparisons
@@ -41,9 +42,11 @@ default) or when the remote AI host is temporarily offline.
    - When an AI review is active, *Export report* offers an optional **AI cost
      analytic review** section for PDF and an **AI review** worksheet for Excel.
 
-3. **Well Operations daily brief and timeline study**
-   - Off by default. **Use offline AI** checks the existing connection; an explicit generate action sends only a bounded excerpt of the rule-based study to the configured instance. No original files are sent.
-   - The draft paragraph is separate from the measured time, depth, rotating ROP and programme calculations. It does not edit, accept or submit records. On a failed connection or an unsuitable response, the rule-based brief remains available.
+3. **Well Operations D&C Intelligence, AI Prefill, Narratives & Operational Review**
+   - **AI Extraction & Gap Prefill** (`POST /operations/reports/extract` with `use_ai=true` and `POST /operations/reports/{id}/ai-prefill`): deterministic parsers extract all MDs, TVDs, bit depth, casing, mud properties, BHA, surveys, codes and WAT (`UTC+1:00`) blocks first; Offline AI optionally fills remaining missing header fields and refines unclassified activity blocks as reviewer suggestions without overwriting measured numbers.
+   - **AI D&C Narrative Generator** (`POST /operations/reports/{id}/narratives`): drafts engineering-grade 24-hour operation summary, 24-hour forecast, HSE summary, and brief grounded strictly in saved report data, with instant deterministic fallback.
+   - **AI Operational Analytics Review** (`POST /operations/ai-review` on `/operations/summary` and `/operations/analytics`): on-demand drilling & completion review across Comprehensive, NPT & Unplanned Delay, ROP & Drilling Optimization, and Wellbore/Mud/HSE focus areas.
+   - **Daily brief, timeline study & Well Operations Ask & Guide** (`/operations/guide`): compact `qwen3:1.7b`-tuned prompts with automatic Qwen3 `/no_think` handling and strict RBAC context boundaries.
 
 ---
 

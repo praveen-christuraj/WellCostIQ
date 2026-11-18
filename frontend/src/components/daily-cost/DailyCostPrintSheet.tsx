@@ -11,6 +11,7 @@ import type { NdtEntry } from '../../lib/ndtInspection'
 import { SERVICE_GROUPS, compareServiceCodes, compareServiceGroups, serviceGroupLabel } from '../../lib/serviceGroups'
 import { depthToMeters } from '../../lib/units'
 import { APP_NAME } from '../../lib/appInfo'
+import { watNowFormatted } from '../../lib/time'
 
 export type CostPrintReport = {
   title: string
@@ -561,7 +562,7 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const nptDays = npt.reduce((sum, row) => sum + row.days, 0)
   const upaDays = upa.reduce((sum, row) => sum + row.days, 0)
   const plannedActivityDays = Math.max(0, actualDays - nptDays - upaDays)
-  const printed = new Date().toLocaleString()
+  const printed = watNowFormatted()
   const reportDate = summary?.as_of ?? latest.entry.cost_date
   type MudSection = typeof mudSections[number]
   const mudMatrixRows: { label: string; value: (row: MudSection) => string }[] = [
@@ -825,7 +826,7 @@ function CumulativeReportDetails({ report }: { report: CostPrintReport }) {
     <header>
       <div className="ps-eyebrow">{APP_NAME} · cumulative saved costs</div>
       <h1>{reportTitle(report)}</h1>
-      <p>{report.period} · Printed {new Date().toLocaleString()}</p>
+      <p>{report.period} · Printed {watNowFormatted()}</p>
       <p>These schedules consolidate saved daily sheets. Daily line-by-line breakdowns are intentionally omitted; currencies and incompatible AFEs remain separate.</p>
     </header>
     {scopes.map(scope => {

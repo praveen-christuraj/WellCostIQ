@@ -11,9 +11,10 @@ import { api, body } from '../lib/api'
 import type { ImportRow } from '../lib/export'
 import { formatAmount, formatDate, numeric } from '../lib/invoiceCalculations'
 import { COMMON_SCOPE_LABEL, INVOICE_IMPORT_HEADERS, INVOICE_IMPORT_OPTIONAL, INVOICE_IMPORT_SAMPLE, INVOICE_STATUS_LABEL, WORKFLOW_ACTION, importInvoiceRow, type Invoice, type InvoiceImportResult, type InvoiceReference, type WorkflowAction } from '../lib/invoiceProcessing'
+import { watTodayIso } from '../lib/time'
 
 const statusTone = (status: string): 'neutral' | 'success' | 'info' | 'warning' => status === 'paid' || status === 'approved' ? 'success' : status === 'submitted' || status === 'sent_to_accounts' ? 'info' : status === 'epicor_pending' ? 'warning' : 'neutral'
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => watTodayIso()
 
 export default function InvoiceRegister({ deletedView = false }: { deletedView?: boolean }) {
   const navigate = useNavigate()

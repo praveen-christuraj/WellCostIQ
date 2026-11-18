@@ -40,6 +40,7 @@ import {
   buildReportPdf, type ReportDocument, type ReportFigure, type ReportKpi, type ReportSection, type ReportTable,
 } from './reportPdf'
 import { formatDepthMeters } from './units'
+import { watNowFormatted, watTodayIso } from './time'
 
 export type BundleScope = 'drilling' | 'completion' | 'both'
 
@@ -1076,7 +1077,7 @@ export async function buildWellBundleDocument(
     title: `${data.well.well_code} · ${data.well.well_name} — Consolidated Well Cost Report (${scopeLabel})`,
     subtitle: `Single-volume well dossier covering AFE Estimate, Daily Cost, Drill-In, Cost Analysis, LIH, NDT & Mud Cost Analysis.`,
     scope: `${rigLabel ? `Rig ${rigLabel} · ` : ''}${data.well.well_code} · ${scopeLabel} · ${periodLabel} · ${data.includeDraft ? 'Drafts included' : 'Submitted only'}`,
-    readAt: new Date().toLocaleString(),
+    readAt: watNowFormatted(),
     notices: [
       `Scope strictly filtered to ${scopeLabel}. Operational daily spend is separated from lump-sum tangibles in all charts.`,
       'Actual / AFE % is computed as (Actual ÷ Effective AFE) × 100 across all sections.',
@@ -1097,7 +1098,7 @@ export async function exportWellBundlePdf(request: WellBundleRequest): Promise<v
   })
   request.onProgress?.('Writing consolidated PDF file…')
   const pdf = await buildReportPdf(docSpec)
-  pdf.save(`${docSpec.fileName}-${new Date().toISOString().slice(0, 10)}.pdf`)
+  pdf.save(`${docSpec.fileName}-${watTodayIso()}.pdf`)
   await api('/daily-cost/export-audit', {
     method: 'POST',
     silent: true,

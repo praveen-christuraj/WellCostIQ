@@ -15,6 +15,7 @@ import type { Announcement, AnnouncementPage, NotificationOverview, Notification
 import { notifyNotificationsChanged, onNotificationsChanged } from '../lib/uiEvents'
 import type { Role, User } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
+import { formatWatDateTime, watTodayIso } from '../lib/time'
 
 const PAGE_SIZES = [20, 50, 100]
 const SEVERITIES = ['info', 'success', 'warning', 'error'] as const
@@ -215,7 +216,7 @@ export default function Notifications() {
   }
 
   const inboxColumns = useMemo<ExportColumn<UserNotification>[]>(() => [
-    { header: 'Received', value: row => new Date(row.created_at).toLocaleString() },
+    { header: 'Received', value: row => formatWatDateTime(row.created_at) },
     { header: 'Type', value: row => row.notification_type },
     { header: 'Severity', value: row => SEVERITY_LABEL[row.severity] ?? row.severity },
     { header: 'Title', value: row => row.title },
@@ -225,18 +226,18 @@ export default function Notifications() {
   ], [])
 
   const sentColumns = useMemo<ExportColumn<Announcement>[]>(() => [
-    { header: 'Sent', value: row => new Date(row.created_at).toLocaleString() },
+    { header: 'Sent', value: row => formatWatDateTime(row.created_at) },
     { header: 'Title', value: row => row.title },
     { header: 'Message', value: row => row.message },
     { header: 'Audience', value: row => row.audience_label },
     { header: 'Recipients', value: row => String(row.recipient_count) },
     { header: 'Read', value: row => String(row.read_count) },
     { header: 'Sent by', value: row => row.created_by_name },
-    { header: 'Recalled', value: row => row.recalled_at ? new Date(row.recalled_at).toLocaleString() : 'No' },
+    { header: 'Recalled', value: row => row.recalled_at ? formatWatDateTime(row.recalled_at) : 'No' },
   ], [])
 
   const exportWith = (format: 'csv' | 'xlsx' | 'pdf') => {
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = watTodayIso()
     const onSent = tab === 'sent'
     const rows = onSent ? sent : items
     const columns = onSent ? sentColumns : inboxColumns
@@ -348,7 +349,7 @@ export default function Notifications() {
                 <Typography color="text.secondary" fontSize={12} sx={{ mt: .4, lineHeight: 1.5 }}>{item.message}</Typography>
               </TableCell>
               <TableCell><Typography fontSize={11.5} color="text.secondary">{item.notification_type}</Typography></TableCell>
-              <TableCell><Typography fontSize={12}>{new Date(item.created_at).toLocaleString()}</Typography></TableCell>
+              <TableCell><Typography fontSize={12}>{formatWatDateTime(item.created_at)}</Typography></TableCell>
               <TableCell align="right"><Box display="flex" justifyContent="flex-end" gap={.25} flexWrap="wrap">
                 {item.action_path && <Tooltip title={item.action_path}><Button size="small" startIcon={<OpenInNewRounded sx={{ fontSize: 15 }}/>} onClick={() => void openItem(item)}>Open</Button></Tooltip>}
                 <Tooltip title={item.read_at ? 'Mark unread' : 'Mark read'}>
@@ -387,7 +388,7 @@ export default function Notifications() {
                 <TableCell>{item.recipient_count}</TableCell>
                 <TableCell>{item.read_count}</TableCell>
                 <TableCell>
-                  <Typography fontSize={12}>{new Date(item.created_at).toLocaleString()}</Typography>
+                  <Typography fontSize={12}>{formatWatDateTime(item.created_at)}</Typography>
                   <Typography color="text.secondary" fontSize={11}>by {item.created_by_name}</Typography>
                 </TableCell>
                 <TableCell align="right">{!item.recalled_at && <Button size="small" color="error" onClick={() => { setRecallTarget(item); setDialogError('') }}>Recall</Button>}</TableCell>

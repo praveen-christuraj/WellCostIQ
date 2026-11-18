@@ -9,6 +9,7 @@ import { useAuth } from '../../context/AuthContext'
 import { api, body } from '../../lib/api'
 import { afeTotalText, type Afe } from '../../lib/afe'
 import { ErrorDetails, StatusTag } from './AfeShared'
+import { formatWatDate, formatWatDateTime } from '../../lib/time'
 
 function RowActions({ afe, canDelete, onEstimate, onDelete }: {
   afe: Afe
@@ -79,8 +80,8 @@ export function AfeScopeList({ afees, exportName }: { afees: Afe[]; exportName: 
     { headerName: 'STATUS', field: 'status', minWidth: 125, maxWidth: 140, cellRenderer: ({ data }: { data: Afe }) => data && <Box display="flex" alignItems="center" height="100%"><StatusTag status={data.status}/></Box> },
     { headerName: 'ESTIMATE TOTAL', field: 'total_cost', minWidth: 170, flex: .9, valueFormatter: params => params.data ? afeTotalText(params.data) : '' },
     { headerName: 'WARNINGS', field: 'warning_count', minWidth: 115, maxWidth: 130, cellRenderer: ({ value }: { value: number }) => <Box display="flex" alignItems="center" height="100%">{value > 0 ? <Tag tone="warning">{value} to review</Tag> : <Tag>None</Tag>}</Box> },
-    { headerName: 'ESTIMATE SAVED', field: 'estimate_saved_at', minWidth: 150, valueFormatter: params => params.value ? new Date(params.value).toLocaleString() : 'Not saved' },
-    { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'ESTIMATE SAVED', field: 'estimate_saved_at', minWidth: 150, valueFormatter: params => params.value ? formatWatDateTime(params.value) : 'Not saved' },
+    { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 260, minWidth: 260, maxWidth: 260, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: Afe }) => data && <RowActions

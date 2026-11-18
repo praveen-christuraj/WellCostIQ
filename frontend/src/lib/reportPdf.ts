@@ -494,8 +494,10 @@ export async function buildReportPdf(report: ReportDocument): Promise<JsPdf> {
   return doc
 }
 
+import { watTodayIso } from './time'
+
 /** Build the document and hand it to the browser as a download. */
 export async function exportReportPdf(report: ReportDocument): Promise<void> {
   const doc = await buildReportPdf(report)
-  doc.save(`${report.fileName}-${new Date().toISOString().slice(0, 10)}.pdf`)
+  doc.save(`${report.fileName}-${watTodayIso()}.pdf`)
 }

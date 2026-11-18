@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import type { ImportRow } from '../lib/export'
 import { MASTER_DATA_MODULES, type MasterDataModule, type MasterDataModuleKey, type MasterDataRecord } from '../lib/masterData'
+import { formatWatDate } from '../lib/time'
 
 const moduleFor = (key: string | null): MasterDataModule =>
   MASTER_DATA_MODULES.find(module => module.key === key) ?? MASTER_DATA_MODULES[0]
@@ -183,7 +184,7 @@ export default function MasterDataRecords() {
       cellRenderer: ({ data }: { data: MasterDataRecord }) => data?.is_default ? <Tag tone="success">Default</Tag> : null,
     } as ColDef<MasterDataRecord>] : []),
     { headerName: 'DESCRIPTION', field: 'description', minWidth: 200, flex: 1.4, valueFormatter: params => params.value || '—' },
-    { headerName: 'UPDATED', field: 'updated_at', minWidth: 140, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'UPDATED', field: 'updated_at', minWidth: 140, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: isCurrencyModule(currentModule) ? 290 : 180, minWidth: isCurrencyModule(currentModule) ? 290 : 180, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: MasterDataRecord }) => <Box display="flex" alignItems="center" height="100%" gap={.3}>

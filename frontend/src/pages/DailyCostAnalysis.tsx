@@ -31,6 +31,7 @@ import {
 } from '../lib/dailyCost'
 import { compareServiceGroups } from '../lib/serviceGroups'
 import { formatDepthMeters } from '../lib/units'
+import { watNowFormatted } from '../lib/time'
 
 function StatCard({ label, value, hint, icon, tone = 'default' }: {
   label: string; value: string; hint: string; icon: ReactNode; tone?: 'default' | 'warning' | 'good'
@@ -463,7 +464,7 @@ export default function DailyCostAnalysis() {
       scope: [summary ? `${summary.well.well_code} — ${summary.well.well_name}` : '',
         dateFrom || dateTo ? `${dateFrom ? displayDate(dateFrom) : 'start'} to ${dateTo ? displayDate(dateTo) : 'today'}` : 'All cost dates',
         currency, includeDraft ? 'draft and submitted sheets' : 'submitted sheets only'].filter(Boolean).join(' · '),
-      readAt: new Date().toLocaleString(),
+      readAt: watNowFormatted(),
       notices: [
         includeDraft ? 'Draft and submitted daily sheets are included.' : 'Submitted daily sheets only.',
         'Amounts keep the currency the AFE was estimated in; unlike currencies are never summed together.',

@@ -14,6 +14,7 @@ import { api, body } from '../lib/api'
 import { exportCsv, exportPdf, exportXlsx, type ExportColumn } from '../lib/export'
 import type { PasswordResetRequest, ResetCode, SecurityAccount, SecurityBulkAction, SecurityOverview } from '../lib/workflowTypes'
 import { useAuth } from '../context/AuthContext'
+import { formatWatDate, formatWatDateTime, watTodayIso } from '../lib/time'
 
 const value = (input: number | undefined) => input === undefined ? '…' : input.toLocaleString()
 
@@ -260,7 +261,7 @@ export default function SecurityCenter() {
     { header: 'User', value: row => `${row.user_name} <${row.user_email}>` },
     { header: 'Initiated by', value: row => row.initiated_by === 'administrator' ? 'Administrator' : 'User request' },
     { header: 'Reason', value: row => row.reason || '' },
-    { header: 'Requested', value: row => new Date(row.requested_at).toLocaleString() },
+    { header: 'Requested', value: row => formatWatDateTime(row.requested_at) },
     { header: 'Status', value: row => row.status },
     { header: 'Review notes', value: row => row.review_notes || '' },
   ], [])
@@ -270,22 +271,22 @@ export default function SecurityCenter() {
     { header: 'Email', value: row => row.email },
     { header: 'Roles', value: row => row.role_names.join(', ') },
     { header: 'Active', value: row => row.is_active ? 'Yes' : 'No' },
-    { header: 'Locked until', value: row => row.locked_until ? new Date(row.locked_until).toLocaleString() : '' },
+    { header: 'Locked until', value: row => row.locked_until ? formatWatDateTime(row.locked_until) : '' },
     { header: 'Must change password', value: row => row.must_change_password ? 'Yes' : 'No' },
-    { header: 'Password changed', value: row => row.password_changed_at ? new Date(row.password_changed_at).toLocaleString() : 'Never recorded' },
+    { header: 'Password changed', value: row => row.password_changed_at ? formatWatDateTime(row.password_changed_at) : 'Never recorded' },
     {
       header: 'Password expires',
       value: row => row.password_expired ? 'Expired — change required'
-        : row.password_expires_at ? `${new Date(row.password_expires_at).toLocaleDateString()} (${row.password_days_remaining ?? 0} days)`
+        : row.password_expires_at ? `${formatWatDate(row.password_expires_at)} (${row.password_days_remaining ?? 0} days)`
           : 'Never (policy disabled)',
     },
-    { header: 'Last sign-in', value: row => row.last_login_at ? new Date(row.last_login_at).toLocaleString() : 'Never recorded' },
+    { header: 'Last sign-in', value: row => row.last_login_at ? formatWatDateTime(row.last_login_at) : 'Never recorded' },
     { header: 'Active sessions', value: row => String(row.active_sessions) },
   ], [])
 
   const exportWith = (format: 'csv' | 'xlsx' | 'pdf') => {
     const asAccounts = tab === 'accounts'
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = watTodayIso()
     if (asAccounts) {
       if (format === 'csv') exportCsv(`security-accounts-${stamp}.csv`, filteredAccounts, accountColumns)
       else if (format === 'xlsx') void exportXlsx(`security-accounts-${stamp}.xlsx`, filteredAccounts, accountColumns)
@@ -384,9 +385,9 @@ export default function SecurityCenter() {
                   <TableCell sx={{ maxWidth: 330 }}>
                     <Typography fontSize={12}>{row.reason || 'No reason supplied'}</Typography>
                     {row.review_notes && <Typography color="text.secondary" fontSize={11.5} mt={.4}>Review: {row.review_notes}</Typography>}
-                    {row.reviewed_at && <Typography color="text.secondary" fontSize={11} mt={.3}>Decided {new Date(row.reviewed_at).toLocaleString()}</Typography>}
+                    {row.reviewed_at && <Typography color="text.secondary" fontSize={11} mt={.3}>Decided {formatWatDateTime(row.reviewed_at)}</Typography>}
                   </TableCell>
-                  <TableCell>{new Date(row.requested_at).toLocaleString()}</TableCell>
+                  <TableCell>{formatWatDateTime(row.requested_at)}</TableCell>
                   <TableCell><Tag tone={STATUS_TONE[row.status] ?? 'neutral'}>{row.status}</Tag></TableCell>
                   <TableCell align="right">
                     {row.status === 'pending' && canReset ? <Box display="flex" justifyContent="flex-end" gap={.5}>
@@ -478,12 +479,12 @@ export default function SecurityCenter() {
                     </Box></TableCell>
                     <TableCell>
                       <Typography fontSize={12}>{days(account.password_changed_at)}</Typography>
-                      {account.password_changed_at && <Typography color="text.secondary" fontSize={11}>{new Date(account.password_changed_at).toLocaleDateString()}</Typography>}
+                      {account.password_changed_at && <Typography color="text.secondary" fontSize={11}>{formatWatDate(account.password_changed_at)}</Typography>}
                       {account.password_expires_at && <Typography color={account.password_expired ? 'error.main' : 'text.secondary'} fontSize={11}>
                         {account.password_expired ? 'Expired' : `Expires in ${account.password_days_remaining ?? 0}d`}
                       </Typography>}
                     </TableCell>
-                    <TableCell>{account.last_login_at ? new Date(account.last_login_at).toLocaleString() : 'Never'}</TableCell>
+                    <TableCell>{account.last_login_at ? formatWatDateTime(account.last_login_at) : 'Never'}</TableCell>
                     <TableCell>{account.active_sessions}</TableCell>
                     <TableCell align="right">
                       <Box display="flex" justifyContent="flex-end" gap={.25} flexWrap="wrap">
@@ -612,7 +613,7 @@ export default function SecurityCenter() {
       <Box display="grid" gap={2}>
         <TextField id="wcp-reset-code" fullWidth value={issued?.code ?? ''} label="Single-use reset code" InputProps={{ readOnly: true }}
           onFocus={event => event.target.select()}
-          helperText={issued ? `${issued.request} · expires ${new Date(issued.expires).toLocaleString()}` : ''}/>
+          helperText={issued ? `${issued.request} · expires ${formatWatDateTime(issued.expires)}` : ''}/>
         {copyState === 'failed' && <Alert severity="info">This browser did not allow copying. The code is selected — copy it with Ctrl+C (or ⌘C).</Alert>}
         <Alert severity="info">If the code is lost or expires, open the request under Reset requests and choose “Issue new code”.</Alert>
         <Alert severity="warning">The account holder signs in, chooses “Forgot password?”, then “I already have an approved reset code”. Redeeming it signs out every existing session.</Alert>

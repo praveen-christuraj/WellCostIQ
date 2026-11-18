@@ -12,6 +12,7 @@ import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { useAuth } from '../context/AuthContext'
 import { exportPdf, exportXlsx, type ExportColumn } from '../lib/export'
 import { EMPTY_RUN, type ReportDefinition, type ReportRun } from '../lib/reportBuilder'
+import { formatWatDateTime } from '../lib/time'
 
 type Answers = Record<string, string>
 
@@ -271,7 +272,7 @@ export default function CustomReportViewer() {
       {run.notes.map(note => <Typography key={note} color="text.secondary" fontSize={11.5}>{note}</Typography>)}
     </Stack>}
     <Typography color="text.secondary" fontSize={11.5} sx={{ mt: 1.5 }}>
-      Generated {run.generated_at ? new Date(run.generated_at).toLocaleString() : '—'} · {design.source_table} · {report.design.columns.length} columns · version {report.version}
+      Generated {run.generated_at ? formatWatDateTime(run.generated_at) : '—'} · {design.source_table} · {report.design.columns.length} columns · version {report.version}
     </Typography>
     {run.rows.length === 0 && run.total_rows > 0 && <Typography color="text.secondary" fontSize={11.5}>
       Use “Download all” to export every matching row, not only this page.

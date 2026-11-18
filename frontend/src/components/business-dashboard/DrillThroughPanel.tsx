@@ -20,6 +20,7 @@ import {
   type DashboardFilters, type DashboardDaySheet, type DashboardWellDetail, type Money,
 } from '../../lib/businessDashboard'
 import { formatDepthMeters } from '../../lib/units'
+import { watNowFormatted } from '../../lib/time'
 
 const SHEET_STATUS_LABELS: Record<string, string> = { draft: 'Draft', submitted: 'Submitted' }
 
@@ -282,7 +283,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
       subtitle: 'Plan, AFE budget and recorded actuals for one well, cut by activity, section and day.',
       scope: [well?.rig_code, well?.well_code, filters.currency || currency, filters.from || filters.to
         ? `${filters.from ? displayDate(filters.from) : 'start'} to ${filters.to ? displayDate(filters.to) : 'today'}` : 'All cost dates'].filter(Boolean).join(' · '),
-      readAt: new Date().toLocaleString(),
+      readAt: watNowFormatted(),
       notices: [
         filters.includeDraft ? 'Draft and submitted daily sheets are included.' : 'Submitted daily sheets only.',
         'Actual days are elapsed time, not a count of sheets; sections and activities report active days.',

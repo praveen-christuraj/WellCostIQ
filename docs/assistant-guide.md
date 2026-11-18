@@ -11,24 +11,30 @@ which one produced the answer:
 By default (`OLLAMA_ENABLED=false`) there is **no model call anywhere**: the same
 question always produces the same, checkable answer from curated memory and
 exact `Decimal` workspace calculations (including side-by-side multi-well
-comparisons such as `Compare "Well X" total cost with "Well Y"`). When an
-administrator enables offline LAN Ollama (`qwen3:4b-q4_K_M`) in `.env` — see
-[`ollama-ai.md`](ollama-ai.md) — users can toggle **AI database & workflow
-mode** in the Guide or `Alt+G` drawer to ask open-ended questions grounded
-strictly in their organization's RBAC-filtered records and application
-workflows. If the remote AI PC cannot be reached, the Guide alerts the user
-immediately and still displays the verified local answer.
+comparisons such as `Compare "Well X" total cost with "Well Y"`). When an administrator enables offline LAN Ollama (e.g. `qwen3:1.7b` or
+`qwen3:4b-q4_K_M`) in `.env` — see [`ollama-ai.md`](ollama-ai.md) — users can
+toggle **AI database & workflow mode** in **Help & Guide → Ask the guide** or
+**Well Operations → Ask & guide** to ask open-ended questions grounded strictly
+in their organization's RBAC-filtered records, drilling & completion engineering
+workflows, and application guides. If the remote AI PC cannot be reached, the
+Guide alerts the user immediately and still displays the verified local answer.
 
 ## Where to find it
 
 - **Help & Guide → Ask the guide** (`/assistant`, capability `assistant:read`),
-  with the ask box, the answer, outstanding data checks, the caller's own recent
-  questions and the full memory.
-- **Any page** — the floating button at the bottom right, or `Alt+G`. The drawer
-  opens the same service and passes the current route, so that page's memory entry
-  ranks first.
+  accessible directly from the left sidebar with the ask box, the answer,
+  outstanding data checks, the caller's own recent questions and the full memory.
+  (The floating bottom-right launcher button has been removed to keep forms,
+  tables and dialogs completely unobstructed.)
 
-- **Well Operations → Ask & guide** (`/operations/guide`) — a manual for rig/well folders, timeline study, daily extraction and review, printed code meanings, ROP and lead/lag. The manual shows only topics your role can read; asking a question also needs `assistant:read`. On an Operations page, the drawer uses the same curated topics. For instance, ask “What does workbook activity code 06 mean?” or “How is rotating ROP calculated?” Workflows and code answers remain deterministic even when model assistance is enabled elsewhere.
+- **Well Operations → Ask & guide** (`/operations/guide`) — a dedicated Well
+  Operations & D&C engineering guide covering rig/well folders, programme
+  timelines (including reopening active/superseded versions), daily extraction &
+  prefill (MD, TVD, bit depth, casing, mud, BHA, surveys, WAT activity blocks),
+  reopening submitted/approved daily reports, multi-day Well Operation Summary
+  PDF/Excel/CSV exports, printed code meanings, ROP, NPT/UPA, directional/mud/well-control
+  practices, and live workspace Well Operations queries under your role's RBAC
+  permissions, with an optional **Use Offline AI (Ollama)** toggle.
 
 ## What an answer contains
 

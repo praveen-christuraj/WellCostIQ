@@ -237,6 +237,8 @@ class Settings(BaseSettings):
     ollama_connect_timeout_seconds: int = 5
     ollama_timeout_seconds: int = 90
     ollama_temperature: float = 0.1
+    ollama_top_p: float = 0.9
+    ollama_repeat_penalty: float = 1.08
     ollama_num_ctx: int = 8192
     ollama_max_tokens: int = 1200
     # Qwen3 reasoning-trace toggle. False asks Ollama to skip long internal thinking

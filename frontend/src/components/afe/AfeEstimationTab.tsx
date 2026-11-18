@@ -12,6 +12,7 @@ import {
   type Afe, type AfeStatusAction,
 } from '../../lib/afe'
 import { StatusDialog, StatusTag } from './AfeShared'
+import { formatWatDateTime } from '../../lib/time'
 
 // Status moves and estimate access. The AFE register shows status only; it never changes it.
 function EstimateActions({ afe, can, onOpen, onStatus }: {
@@ -85,8 +86,8 @@ export function AfeEstimationTab() {
     { headerName: 'TANGIBLES', field: 'tangibles_total', minWidth: 130, valueFormatter: params => amountText(params.value, params.data?.standard_currency) },
     { headerName: 'TOTAL ESTIMATE', field: 'total_cost', minWidth: 175, flex: .9, valueFormatter: params => params.data ? afeTotalText(params.data) : '' },
     { headerName: 'WARNINGS', field: 'warning_count', minWidth: 115, maxWidth: 130, valueFormatter: params => Number(params.value) > 0 ? `${params.value} to review` : 'None' },
-    { headerName: 'ESTIMATE SAVED', field: 'estimate_saved_at', minWidth: 150, valueFormatter: params => params.value ? new Date(params.value).toLocaleString() : 'Not saved' },
-    { headerName: 'STATUS CHANGED', field: 'status_changed_at', minWidth: 150, valueFormatter: params => params.value ? new Date(params.value).toLocaleString() : '' },
+    { headerName: 'ESTIMATE SAVED', field: 'estimate_saved_at', minWidth: 150, valueFormatter: params => params.value ? formatWatDateTime(params.value) : 'Not saved' },
+    { headerName: 'STATUS CHANGED', field: 'status_changed_at', minWidth: 150, valueFormatter: params => params.value ? formatWatDateTime(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 260, minWidth: 260, maxWidth: 260, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: Afe }) => data && <EstimateActions
