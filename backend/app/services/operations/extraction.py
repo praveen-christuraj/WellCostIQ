@@ -33,7 +33,7 @@ from app.services.operations.plans import active_plan
 from app.services.operations.workbooks import daily_workbook
 
 
-def extract(db, org, document_id, requested_day, user, request, target_id=None):
+def extract(db, org, document_id, requested_day, user, request, target_id=None, *, use_ai: bool = False):
     doc = documents.get_document(db, org, document_id)
     well, rig = scope.resolve(db, org, doc.well_id, doc.scope, doc.rig_id)
     cfg = settings.get_settings(db, org)
@@ -166,24 +166,157 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None):
         )
     if not parsed.get("report_no_text") and doc.report_no_text:
         parsed["report_no_text"] = doc.report_no_text
-    for field, limit in [("report_no_text", 50), ("site", 200), ("event_code", 50)]:
+    if not parsed.get("day_number") and parsed.get("report_no_text") and str(parsed["report_no_text"]).isdigit():
+        candidate_day = int(parsed["report_no_text"])
+        if 1 <= candidate_day <= 9999:
+            parsed["day_number"] = candidate_day
+    for field, limit in [
+        ("report_no_text", 50),
+        ("customer", 200),
+        ("project", 200),
+        ("site", 200),
+        ("datum", 100),
+        ("supervisor", 200),
+        ("engineer", 200),
+        ("uwi", 100),
+        ("block_text", 100),
+        ("event_code", 50),
+        ("tvd_source", 40),
+        ("hole_section_text", 120),
+        ("current_status", 500),
+        ("mud_type", 100),
+        ("bha_summary", 500),
+    ]:
         if parsed.get(field):
             parsed[field] = str(parsed[field])[:limit]
     for field in (
         "report_no_text",
+        "day_number",
+        "customer",
+        "project",
+        "site",
+        "datum",
+        "supervisor",
+        "engineer",
+        "uwi",
+        "block_text",
+        "spud_date",
         "depth_start_m",
         "depth_end_m",
+        "tvd_start_m",
         "tvd_m",
+        "tvd_source",
+        "bit_depth_m",
         "progress_m",
         "dfs_days",
+        "est_days",
+        "md_auth_m",
         "rotating_hours",
+        "cum_rotating_hours",
+        "last_casing_size_in",
+        "last_casing_depth_m",
+        "hole_section_text",
+        "hole_size_in",
+        "current_status",
+        "mud_type",
+        "mud_weight_ppg",
+        "mud_viscosity_sec",
+        "mud_pv_cp",
+        "mud_yp_lbf",
+        "bha_summary",
+        "pob_count",
         "event_code",
         "operation_summary",
         "forward_plan",
-        "site",
+        "hse_summary",
     ):
         if parsed.get(field) is not None and getattr(report, field) in ("", None):
             setattr(report, field, parsed[field])
+    # Match workspace master-data HoleSection & Phase when not already selected.
+    from app.models.master_data import HoleSection, Phase
+    from app.models.vendor_master import Vendor
+    from app.services.operations.openwells import interpolate_tvd
+
+    if not report.hole_section_id and (report.hole_section_text or report.hole_size_in is not None):
+        hs_rows = db.scalars(
+            select(HoleSection).where(
+                HoleSection.organization_id == org,
+                HoleSection.is_deleted.is_(False),
+            )
+        ).all()
+        hs_target = code_key(report.hole_section_text or "")
+        size_token = str(report.hole_size_in.normalize()) if report.hole_size_in is not None else ""
+        for hs in hs_rows:
+            hs_name = str(getattr(hs, "section_name", "") or getattr(hs, "name", "") or "")
+            hs_code = str(getattr(hs, "section_code", "") or getattr(hs, "code", "") or "")
+            if (hs_target and hs_target in (code_key(hs_name), code_key(hs_code))) or (
+                size_token and size_token in hs_name
+            ):
+                report.hole_section_id = hs.id
+                break
+    if not report.phase_id:
+        ph_rows = db.scalars(
+            select(Phase).where(Phase.organization_id == org, Phase.is_deleted.is_(False))
+        ).all()
+        want_phase = "completion" if doc.scope == "completion" else "drilling"
+        for ph in ph_rows:
+            ph_name = str(getattr(ph, "phase_name", "") or getattr(ph, "name", "") or "").lower()
+            if want_phase in ph_name:
+                report.phase_id = ph.id
+                break
+
+    # Cross-report directional profile: fill missing opening/closing TVD from well survey history.
+    prior_profile = [
+        (s.md_m, s.tvd_m, s.inc_deg)
+        for s in db.scalars(
+            select(OpsSurvey).where(
+                OpsSurvey.organization_id == org,
+                OpsSurvey.well_id == well.id,
+                OpsSurvey.is_deleted.is_(False),
+                OpsSurvey.md_m.is_not(None),
+                OpsSurvey.tvd_m.is_not(None),
+            )
+        ).all()
+        if s.md_m is not None and s.tvd_m is not None and s.tvd_m <= s.md_m + 1
+    ]
+    for sv in parsed.get("surveys", []):
+        if sv.get("md_m") is not None and sv.get("tvd_m") is not None and sv["tvd_m"] <= sv["md_m"] + 1:
+            prior_profile.append((sv["md_m"], sv["tvd_m"], sv.get("inc_deg")))
+    if report.depth_end_m is not None and report.tvd_m is not None and report.tvd_source == "header":
+        prior_profile.append((report.depth_end_m, report.tvd_m, None))
+    if report.tvd_m is None and report.depth_end_m is not None and prior_profile:
+        est_tvd = interpolate_tvd(report.depth_end_m, prior_profile)
+        if est_tvd is not None:
+            report.tvd_m = est_tvd
+            report.tvd_source = "survey"
+            warnings.append(
+                f"Pre-filled closing TVD {est_tvd} m from well directional survey trajectory at {report.depth_end_m} m MD — verify before submitting."
+            )
+    if report.tvd_start_m is None and report.depth_start_m is not None and prior_profile:
+        report.tvd_start_m = interpolate_tvd(report.depth_start_m, prior_profile)
+    # Cross-report opening MD continuity when source left start MD blank.
+    if report.depth_start_m is None and parsed.get("report_type") != "RMR":
+        prev_end = db.scalar(
+            select(OpsDailyReport.depth_end_m)
+            .where(
+                OpsDailyReport.organization_id == org,
+                OpsDailyReport.well_id == well.id,
+                OpsDailyReport.scope == doc.scope,
+                OpsDailyReport.is_deleted.is_(False),
+                OpsDailyReport.report_date < day,
+                OpsDailyReport.depth_end_m.is_not(None),
+            )
+            .order_by(OpsDailyReport.report_date.desc())
+            .limit(1)
+        )
+        if prev_end is not None and (report.depth_end_m is None or prev_end <= report.depth_end_m):
+            report.depth_start_m = prev_end
+            if report.depth_end_m is not None and report.progress_m is None:
+                from app.core.precision import rounded
+
+                report.progress_m = rounded(report.depth_end_m - prev_end)
+            if report.tvd_start_m is None and prior_profile:
+                report.tvd_start_m = interpolate_tvd(prev_end, prior_profile)
     if target and parsed.get("report_type") == "DMR" and target.operation_summary != parsed["operation_summary"]:
         report.remarks = ((report.remarks or "") + "\nMud report: " + parsed["operation_summary"]).strip()
     report.source_document_id = report.source_document_id or doc.id
@@ -241,47 +374,153 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None):
     causes = lookup(OpsCause, "cause_code", "cause_name")
     trouble = lookup(OpsNptCode, "npt_code", "npt_name")
     mark_rules = lookup(OpsMarkRule, "mark_code")
+    active_vendors = db.scalars(
+        select(Vendor).where(
+            Vendor.organization_id == org,
+            Vendor.is_deleted.is_(False),
+            Vendor.status == "active",
+        )
+    ).all()
+    vendor_lookup = {
+        code_key(k): v
+        for v in active_vendors
+        for k in (v.vendor_code, v.vendor_name)
+        if k
+    }
+
+    def _infer_operation(raw_op: str, phase_raw: str, narr: str):
+        if raw_op and (direct := operations.get(code_key(raw_op))):
+            return direct
+        pr = (phase_raw or "").upper()
+        nl = (narr or "").lower()
+        candidates: list[str] = []
+        if "cement" in nl or "cmt" in nl:
+            candidates.extend(("H", "Cementing job", "Cementing"))
+        elif pr.startswith("CSG") or "run casing" in nl or "running casing" in nl or "r/u casing" in nl:
+            candidates.extend(("G", "Casing job", "Casing"))
+        elif pr.startswith("EVAL") or "wireline" in nl or "logging" in nl or "gyro" in nl:
+            candidates.extend(("J", "Logging"))
+        elif "bop" in nl or "wellhead" in nl or "xmas tree" in nl or "x-mas tree" in nl:
+            candidates.extend(("C", "Wellhead and BOP", "BOP"))
+        elif "slickline" in nl:
+            candidates.extend(("R", "Slickline"))
+        elif "coiled tubing" in nl:
+            candidates.extend(("S", "Coiled tubing"))
+        elif "gravel pack" in nl or "sand control" in nl:
+            candidates.extend(("N", "Sand control"))
+        elif "completion" in nl or pr.startswith("COMP"):
+            candidates.extend(("K", "Well completion", "Completion"))
+        elif "rig move" in nl or "skid" in nl:
+            candidates.extend(("A", "MOVING (Rig up / Rig down)", "B", "Skidding"))
+        elif pr.startswith("DRL") or "drilled" in nl or "drill ahead" in nl or "rotary" in nl or "slide" in nl:
+            candidates.extend(("E", "Drilling"))
+        return next((operations[code_key(c)] for c in candidates if code_key(c) in operations), None)
+
+    def _infer_npt(raw_c: str, raw_m: str, narr: str, cls_name: str, alloc_name: str):
+        direct = trouble.get(code_key(raw_c or raw_m))
+        if direct:
+            return direct
+        if cls_name != "NPT" and alloc_name != "NPT":
+            return None
+        nl = (narr or "").lower()
+        hints = (
+            (("lost circulation", "mud loss", "losses"), "TP01"),
+            (("stuck pipe", "pack off", "packed off", "differentially stuck"), "TP02"),
+            (("kick", "well control", "influx"), "TP03"),
+            (("drawwork",), "TR01"),
+            (("mud pump", "liner wash", "standpipe"), "TR02"),
+            (("engine", "generator", "power", "scr", "vfd"), "TR03"),
+            (("top drive", "tds", "saver sub"), "TR04"),
+            (("bop", "annular", "koomey"), "TR05"),
+            (("mwd", "lwd", "motor", "bha", "washout", "twist off", "fish"), "TD01"),
+            (("wireline", "gyro", "logging tool"), "TD04"),
+            (("coiled tubing",), "TD05"),
+            (("weather", "rain", "storm", "lightning"), "TW01"),
+            (("wait on", "waiting on", "wom", "woe"), "TW02"),
+        )
+        for words, t_code in hints:
+            if any(w in nl for w in words) and code_key(t_code) in trouble:
+                return trouble[code_key(t_code)]
+        return None
+
     zone = ZoneInfo(cfg.operating_timezone)
     unmapped_codes = set()
     for seq, b in enumerate(parsed["blocks"], 1):
         a = b["start"].replace(tzinfo=zone).astimezone(UTC)
         z = b["end"].replace(tzinfo=zone).astimezone(UTC)
         raw_activity = b["code"].strip()
-        activity_family = 'OpenWells code token' if b.get('source_page') else 'Activity'
+        activity_family = "OpenWells code token" if b.get("source_page") else "Activity"
         code = codes.get(code_key(raw_activity))
         elapsed = (
             (a - utc(plan.planned_start_at)).total_seconds() / 3600 if plan and plan.planned_start_at else None
         )
         if elapsed is None and report.scope == "drilling" and report.dfs_days is not None:
             elapsed = float(report.dfs_days) * 24 - (end - a).total_seconds() / 3600
-        raw_mark = b['mark'].strip()
-        raw_cause = b.get('cause', '').strip()
-        raw_operation = b.get('operation', '').strip()
+        raw_mark = b["mark"].strip()
+        raw_cause = b.get("cause", "").strip()
+        raw_operation = b.get("operation", "").strip()
         rule = mark_rules.get(code_key(raw_mark))
         classification = suggest(
-            raw_mark, b['narrative'], code.default_allocation if code else None, timeline, elapsed,
-            mark_rule=rule, printed_allocation=b.get('allocation', ''),
+            raw_mark,
+            b["narrative"],
+            code.default_allocation if code else None,
+            timeline,
+            elapsed,
+            mark_rule=rule,
+            printed_allocation=b.get("allocation", ""),
         )
         evidence = []
         if raw_activity:
-            label = f'{raw_activity} — {code.activity_name}' if code else describe_code(raw_activity, activity_family)
-            evidence.append(f'Activity: {label}')
+            label = f"{raw_activity} — {code.activity_name}" if code else describe_code(raw_activity, activity_family)
+            evidence.append(f"Activity: {label}")
             if not code and raw_activity.isdigit() and not find_code(raw_activity, activity_family):
                 unmapped_codes.add(raw_activity)
-        evidence.append(classification['classification_evidence'])
-        if plan and (timeline or classification['classification_source'] == 'timeline'):
-            evidence.append(f'Programme: {plan.label[:70]} v{plan.version_no}')
-        if b.get('allocation'):
-            evidence.append(f'Summary allocation: {b["allocation"]}')
-        party = b.get('party', '')
+        evidence.append(classification["classification_evidence"])
+        if plan and (timeline or classification["classification_source"] == "timeline"):
+            evidence.append(f"Programme: {plan.label[:70]} v{plan.version_no}")
+        if b.get("allocation"):
+            evidence.append(f"Summary allocation: {b['allocation']}")
+        party = b.get("party", "").strip()
+        matched_vendor = vendor_lookup.get(code_key(party)) if party else None
         if party:
-            evidence.append(f'Source agency: {party[:80]}; choose vendor')
+            if matched_vendor:
+                evidence.append(f"Source agency: {party[:80]} (matched vendor {matched_vendor.vendor_code})")
+            else:
+                evidence.append(f"Source agency: {party[:80]}; choose vendor")
         cause = causes.get(code_key(raw_cause))
-        default_trouble = find_code(raw_cause or raw_mark, 'Trouble / NPT')
-        npt = trouble.get(code_key(raw_cause or raw_mark))
-        operation = operations.get(code_key(raw_operation))
-        classification['classification_evidence'] = ' · '.join(evidence)
-        classification["classification_evidence"] = classification["classification_evidence"][:500]
+        default_trouble = find_code(raw_cause or raw_mark, "Trouble / NPT")
+        npt = _infer_npt(
+            raw_cause,
+            raw_mark,
+            b["narrative"],
+            classification["classification"],
+            classification["allocation"],
+        )
+        operation = _infer_operation(raw_operation, b.get("phase_raw", ""), b["narrative"])
+        classification["classification_evidence"] = " · ".join(evidence)[:500]
+
+        d_from = b.get("depth_from_m")
+        d_to = b.get("depth_to_m")
+        tvd_from = b.get("tvd_from_m")
+        tvd_to = b.get("tvd_to_m")
+        if tvd_from is None and d_from is not None and prior_profile:
+            tvd_from = interpolate_tvd(d_from, prior_profile)
+        if tvd_to is None and d_to is not None and prior_profile:
+            tvd_to = interpolate_tvd(d_to, prior_profile)
+        footage = d_to - d_from if d_from is not None and d_to is not None and d_to >= d_from else None
+        rot_b = b.get("rotating_hours")
+        from app.domain.operations.metrics import compute_rop
+
+        rop_b = compute_rop(footage, rot_b)
+        reason_txt = str(b.get("reason") or "").strip()[:500]
+        if (
+            not reason_txt
+            and (classification["classification"] in ("NPT", "UPA") or classification["allocation"] in ("NPT", "UPA"))
+            and b.get("narrative")
+        ):
+            first_sentence = re.split(r"(?<=[.;])\s+", b["narrative"].strip(), maxsplit=1)[0]
+            reason_txt = first_sentence[:240]
+
         db.add(
             OpsActivityBlock(
                 organization_id=org,
@@ -290,7 +529,7 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None):
                 started_at=a,
                 ended_at=z,
                 duration_minutes=round((z - a).total_seconds() / 60),
-                phase_raw=b['phase_raw'][:20],
+                phase_raw=b["phase_raw"][:20],
                 source_activity_code=raw_activity[:100],
                 source_operation_code=raw_operation[:100],
                 source_cause_code=raw_cause[:50],
@@ -300,10 +539,20 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None):
                 cause_code=cause.cause_code if cause else raw_cause[:50],
                 npt_code_id=npt.id if npt else None,
                 npt_code_snapshot=npt.npt_code if npt else (default_trouble.code if default_trouble else ""),
+                hole_section_id=report.hole_section_id,
+                phase_id=report.phase_id,
+                vendor_id=matched_vendor.id if matched_vendor else None,
+                responsible_party=matched_vendor.vendor_name if matched_vendor else (party[:200] if party else ""),
+                reason=reason_txt,
                 bit_depth_m=b.get("bit_depth_m"),
-                rotating_hours=b.get("rotating_hours"),
-                depth_from_m=b.get("depth_from_m"),
-                depth_to_m=b.get("depth_to_m"),
+                mud_weight_ppg=b.get("mud_weight_ppg") if b.get("mud_weight_ppg") is not None else report.mud_weight_ppg,
+                rotating_hours=rot_b,
+                footage_m=footage,
+                rop_m_per_hr=rop_b,
+                depth_from_m=d_from,
+                depth_to_m=d_to,
+                tvd_from_m=tvd_from,
+                tvd_to_m=tvd_to,
                 source_page=b.get("source_page", 0),
                 source_bbox=b["source"],
                 narrative=b["narrative"],
@@ -344,4 +593,17 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None):
         request=request,
     )
     db.commit()
+    if use_ai:
+        from app.services.operations.ops_ai import refine_report_prefill
+
+        ai_out = refine_report_prefill(db, org, report.id, user, request=request, from_extract=True)
+        if ai_out.get("notes") or ai_out.get("ai_error"):
+            extra = list(ai_out.get("notes") or [])
+            if ai_out.get("ai_error"):
+                extra.append(f"AI prefill notice: {ai_out['ai_error']}")
+            job_row = db.get(OpsExtractionJob, job.id)
+            if job_row and extra:
+                job_row.findings = "\n".join(filter(None, [job_row.findings, *extra]))
+                db.commit()
+        db.refresh(report)
     return report

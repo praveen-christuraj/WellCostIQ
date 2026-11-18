@@ -141,7 +141,7 @@ export function FormDialog({ open, title, subtitle, onClose, onSubmit, busy, bus
     {/* The unsaved-changes prompt. "Save & close" reuses the dialog's own save
         path — a successful save closes the form, a validation problem keeps it
         open with the messages next to the fields. */}
-    <Dialog open={confirmOpen} disableEscapeKeyDown maxWidth="xs" fullWidth aria-labelledby={confirmTitleId} aria-describedby={confirmBodyId}>
+    <Dialog open={confirmOpen} disableEscapeKeyDown maxWidth="xs" fullWidth aria-labelledby={confirmTitleId} aria-describedby={confirmBodyId} sx={{ zIndex: 1400 }}>
       <DialogTitle sx={{ px: 3, pt: 3, pb: 1 }}>
         <Box component="span" sx={{ display: 'block', fontSize: 19, fontWeight: 800, letterSpacing: '-.3px', lineHeight: 1.3 }}>Save the data you entered?</Box>
       </DialogTitle>

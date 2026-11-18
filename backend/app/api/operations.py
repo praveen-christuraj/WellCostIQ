@@ -28,9 +28,12 @@ from app.models.vendor_master import Vendor
 from app.schemas.operations import (
     OpsActivityCodeIn,
     OpsAgencyIn,
+    OpsAiPrefillOut,
+    OpsAiReviewOut,
+    OpsAiReviewRequest,
+    OpsBriefRequest,
     OpsBulkActionOut,
     OpsBulkEdit,
-    OpsBriefRequest,
     OpsCauseIn,
     OpsDashboardOut,
     OpsDefaultCodeOut,
@@ -43,22 +46,27 @@ from app.schemas.operations import (
     OpsImportOut,
     OpsImportRequest,
     OpsMarkRuleIn,
+    OpsNarrativeOut,
+    OpsNarrativeRequest,
     OpsNptCodeIn,
     OpsOperationCodeIn,
     OpsPhaseCodeIn,
     OpsPlanItemIn,
     OpsPlanStudyRequest,
+    OpsPlanUpdateIn,
     OpsPlanVersionIn,
     OpsPlanVersionOut,
     OpsReferenceOut,
     OpsRegisterFolderOut,
     OpsRejectIn,
+    OpsReopenIn,
     OpsReportCreate,
     OpsReportOut,
     OpsReportSaveIn,
     OpsSettingsIn,
     OpsSettingsOut,
     OpsStudyOut,
+    OpsWellSummaryOut,
 )
 from app.services.audit import record as audit_record
 from app.services.operations import analytics as analytics_svc
@@ -66,11 +74,13 @@ from app.services.operations import documents as docs_svc
 from app.services.operations import extraction as extract_svc
 from app.services.operations import guide as guide_svc
 from app.services.operations import masters as masters_svc
+from app.services.operations import ops_ai as ops_ai_svc
 from app.services.operations import plans as plans_svc
 from app.services.operations import register as register_svc
 from app.services.operations import reports as reports_svc
 from app.services.operations import scope as scope_svc
 from app.services.operations import settings as settings_svc
+from app.services.operations import summary as summary_svc
 from app.services.operations.study_ai import with_ai
 from app.services.operations.workbooks import timeline_preview
 
@@ -107,8 +117,11 @@ def guide(user: Current):
     return guide_svc.manual({'*'} if owner(user) else granted(user))
 
 
-@router.get('/ai-status', response_model=AiConnectionStatus,
-            dependencies=[Depends(require_any('ops-report:read', 'ops-plan:read'))])
+@router.get(
+    '/ai-status',
+    response_model=AiConnectionStatus,
+    dependencies=[Depends(require_any('ops-report:read', 'ops-plan:read', 'ops-analytics:read', 'ops-doc:read'))],
+)
 def ai_status(probe: bool = False):
     return ollama.check_status(probe=probe)
 
@@ -347,11 +360,25 @@ def _to_report_out(report):
         "rig_name_snapshot": report.rig_name_snapshot or "",
         "well_code_snapshot": report.well_code_snapshot or "",
         "well_name_snapshot": report.well_name_snapshot or "",
-        "rejection_reason": report.rejection_reason,
+        "rejection_reason": report.rejection_reason or "",
+        "reopened_at": getattr(report, "reopened_at", None),
+        "reopened_by": getattr(report, "reopened_by", "") or "",
+        "reopen_reason": getattr(report, "reopen_reason", "") or "",
+        "submitted_at": report.submitted_at,
+        "submitted_by": report.submitted_by or "",
+        "approved_at": report.approved_at,
+        "approved_by": report.approved_by or "",
         "baseline_plan_id": report.baseline_plan_id,
         "completed_plan_item_id": report.completed_plan_item_id,
         "plan_checkpoints": getattr(report, "_plan_checkpoints", []),
-        "site": report.site,
+        "customer": report.customer or "",
+        "project": report.project or "",
+        "site": report.site or "",
+        "datum": report.datum or "",
+        "supervisor": report.supervisor or "",
+        "engineer": report.engineer or "",
+        "uwi": report.uwi or "",
+        "block_text": report.block_text or "",
         "surveys": getattr(report, "_surveys", []),
         "extraction_notes": getattr(report, "_extraction_notes", ""),
         "sources": getattr(report, "_sources", []),
@@ -370,11 +397,29 @@ def _to_report_out(report):
         "depth_start_m": report.depth_start_m,
         "depth_end_m": report.depth_end_m,
         "depth_unit": report.depth_unit or "m",
+        "tvd_start_m": getattr(report, "tvd_start_m", None),
         "tvd_m": report.tvd_m,
+        "tvd_source": getattr(report, "tvd_source", "") or "",
+        "bit_depth_m": getattr(report, "bit_depth_m", None),
         "progress_m": report.progress_m,
         "rotating_hours": report.rotating_hours,
+        "cum_rotating_hours": getattr(report, "cum_rotating_hours", None),
+        "spud_date": getattr(report, "spud_date", None),
         "dfs_days": report.dfs_days,
         "est_days": report.est_days,
+        "md_auth_m": report.md_auth_m,
+        "last_casing_size_in": report.last_casing_size_in,
+        "last_casing_depth_m": report.last_casing_depth_m,
+        "hole_section_text": getattr(report, "hole_section_text", "") or "",
+        "hole_size_in": getattr(report, "hole_size_in", None),
+        "current_status": getattr(report, "current_status", "") or "",
+        "mud_type": getattr(report, "mud_type", "") or "",
+        "mud_weight_ppg": getattr(report, "mud_weight_ppg", None),
+        "mud_viscosity_sec": getattr(report, "mud_viscosity_sec", None),
+        "mud_pv_cp": getattr(report, "mud_pv_cp", None),
+        "mud_yp_lbf": getattr(report, "mud_yp_lbf", None),
+        "bha_summary": getattr(report, "bha_summary", "") or "",
+        "pob_count": getattr(report, "pob_count", None),
         "operation_summary": report.operation_summary or "",
         "forward_plan": report.forward_plan or "",
         "hse_summary": report.hse_summary or "",
@@ -420,9 +465,12 @@ def _to_report_out(report):
                 "phase_id": b.phase_id,
                 "depth_from_m": b.depth_from_m,
                 "depth_to_m": b.depth_to_m,
+                "tvd_from_m": getattr(b, "tvd_from_m", None),
+                "tvd_to_m": getattr(b, "tvd_to_m", None),
                 "depth_unit": b.depth_unit or "m",
                 "footage_m": b.footage_m,
                 "bit_depth_m": b.bit_depth_m,
+                "mud_weight_ppg": getattr(b, "mud_weight_ppg", None),
                 "rotating_hours": b.rotating_hours,
                 "rop_m_per_hr": b.rop_m_per_hr,
                 "rop_basis": b.rop_basis or "rotating",
@@ -493,7 +541,9 @@ def list_deleted_reports(db: Db, user: Current):
     ],
 )
 def report_from_document(data: OpsExtractIn, request: Request, db: Db, user: Current):
-    report = extract_svc.extract(db, user.organization_id, data.document_id, data.report_date, user, request)
+    report = extract_svc.extract(
+        db, user.organization_id, data.document_id, data.report_date, user, request, use_ai=data.use_ai
+    )
     return _to_report_out(reports_svc.get_report(db, user.organization_id, report.id))
 
 
@@ -509,7 +559,14 @@ def report_from_document(data: OpsExtractIn, request: Request, db: Db, user: Cur
 )
 def add_report_source(report_id: str, data: OpsExtractIn, request: Request, db: Db, user: Current):
     report = extract_svc.extract(
-        db, user.organization_id, data.document_id, data.report_date, user, request, target_id=report_id
+        db,
+        user.organization_id,
+        data.document_id,
+        data.report_date,
+        user,
+        request,
+        target_id=report_id,
+        use_ai=data.use_ai,
     )
     return _to_report_out(reports_svc.get_report(db, user.organization_id, report.id))
 
@@ -610,6 +667,62 @@ def reject_report(report_id: str, data: OpsRejectIn, request: Request, db: Db, u
     r = reports_svc.reject_report(db, user.organization_id, report_id, data.reason, user, request)
     full = reports_svc.get_report(db, user.organization_id, r.id)
     return _to_report_out(full)
+
+
+@router.post(
+    "/reports/{report_id}/reopen",
+    response_model=OpsReportOut,
+    dependencies=[Depends(require("ops-report:reopen"))],
+)
+def reopen_report(report_id: str, data: OpsReopenIn, request: Request, db: Db, user: Current):
+    can_amend = owner(user) or "ops-report:amend" in granted(user)
+    r = reports_svc.reopen_report(
+        db,
+        user.organization_id,
+        report_id,
+        data.remarks,
+        user,
+        request,
+        can_amend=can_amend,
+    )
+    full = reports_svc.get_report(db, user.organization_id, r.id)
+    return _to_report_out(full)
+
+
+@router.post(
+    "/reports/{report_id}/narratives",
+    response_model=OpsNarrativeOut,
+    dependencies=[Depends(require("ops-report:read"))],
+)
+def generate_narratives(report_id: str, data: OpsNarrativeRequest, request: Request, db: Db, user: Current):
+    return ops_ai_svc.generate_report_narratives(
+        db,
+        user.organization_id,
+        report_id,
+        user,
+        use_ai=data.use_ai,
+        focus=data.focus,
+        request=request,
+    )
+
+
+@router.post(
+    "/reports/{report_id}/ai-prefill",
+    response_model=OpsAiPrefillOut,
+    dependencies=[Depends(require("ops-report:read")), Depends(require("ops-report:update"))],
+)
+def ai_prefill_report(report_id: str, request: Request, db: Db, user: Current):
+    result = ops_ai_svc.refine_report_prefill(
+        db,
+        user.organization_id,
+        report_id,
+        user,
+        request=request,
+        from_extract=False,
+    )
+    report_obj = reports_svc.get_report(db, user.organization_id, report_id)
+    result["report"] = _to_report_out(report_obj)
+    return result
 
 
 @router.get("/reports/{report_id}/brief", dependencies=[Depends(require("ops-report:read"))])
@@ -780,6 +893,69 @@ def reference(db: Db, user: Current):
         "npt_codes": active(OpsNptCode),
         "causes": active(OpsCause),
     }
+
+
+# ---------------------------------------------------------------------------
+# Multi-day Well Operation Summary & Offline AI Review
+# ---------------------------------------------------------------------------
+@router.get(
+    "/summary",
+    response_model=OpsWellSummaryOut,
+    dependencies=[Depends(require("ops-report:read"))],
+)
+def well_summary(
+    db: Db,
+    user: Current,
+    well_id: Annotated[str, Query(min_length=1, max_length=36)],
+    scope: Literal["", "drilling", "completion"] = "",
+    date_from: Annotated[date | None, Query(alias="from")] = None,
+    date_to: Annotated[date | None, Query(alias="to")] = None,
+    include_drafts: bool = True,
+):
+    return summary_svc.well_operation_summary(
+        db,
+        user.organization_id,
+        well_id=well_id,
+        scope=scope or None,
+        date_from=date_from,
+        date_to=date_to,
+        include_drafts=include_drafts,
+    )
+
+
+@router.post(
+    "/summary/export-audit",
+    status_code=204,
+    dependencies=[Depends(require_any("ops-report:export", "ops-analytics:export"))],
+)
+def summary_export_audit(data: OpsExportAudit, request: Request, db: Db, user: Current):
+    audit_record(
+        db,
+        organization_id=user.organization_id,
+        actor=user,
+        action="export",
+        entity_type="ops_summary",
+        entity_id=None,
+        entity_label=data.format,
+        summary=f"Exported Well Operation Summary ({data.record_count} rows) as {data.format.upper()}",
+        request=request,
+    )
+    db.commit()
+
+
+@router.post(
+    "/ai-review",
+    response_model=OpsAiReviewOut,
+    dependencies=[Depends(require_any("ops-report:read", "ops-analytics:read"))],
+)
+def operations_ai_review(data: OpsAiReviewRequest, request: Request, db: Db, user: Current):
+    return ops_ai_svc.run_ai_review(
+        db,
+        user.organization_id,
+        user,
+        data,
+        request=request,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +1145,22 @@ def get_plan(plan_id: str, db: Db, user: Current):
 @router.post("/plans", response_model=OpsPlanVersionOut, dependencies=[Depends(require("ops-plan:create"))])
 def create_plan(data: OpsPlanVersionIn, request: Request, db: Db, user: Current):
     return _plan_out(plans_svc.create_plan(db, user.organization_id, data, user, request))
+
+
+@router.put("/plans/{plan_id}", response_model=OpsPlanVersionOut, dependencies=[Depends(require("ops-plan:update"))])
+def update_plan(plan_id: str, data: OpsPlanUpdateIn, request: Request, db: Db, user: Current):
+    updated = plans_svc.update_plan(db, user.organization_id, plan_id, data, user, request)
+    return _plan_out(plans_svc.get_plan(db, user.organization_id, updated.id))
+
+
+@router.post(
+    "/plans/{plan_id}/reopen",
+    response_model=OpsPlanVersionOut,
+    dependencies=[Depends(require("ops-plan:reopen"))],
+)
+def reopen_plan(plan_id: str, data: OpsReopenIn, request: Request, db: Db, user: Current):
+    reopened = plans_svc.reopen_plan(db, user.organization_id, plan_id, data.remarks, user, request)
+    return _plan_out(plans_svc.get_plan(db, user.organization_id, reopened.id))
 
 
 @router.post('/plans/{plan_id}/study', response_model=OpsStudyOut, dependencies=[Depends(require('ops-plan:read'))])

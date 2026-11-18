@@ -199,13 +199,37 @@ def create_report(db: Session, organization_id: str, data, user: User, request=N
         depth_start_m=data.depth_start_m,
         depth_end_m=data.depth_end_m,
         depth_unit=data.depth_unit or "m",
+        tvd_start_m=data.tvd_start_m,
         tvd_m=data.tvd_m,
+        tvd_source=data.tvd_source or ("manual" if data.tvd_m is not None else ""),
+        bit_depth_m=data.bit_depth_m,
         progress_m=data.progress_m,
         rotating_hours=data.rotating_hours,
+        cum_rotating_hours=data.cum_rotating_hours,
+        spud_date=data.spud_date,
         dfs_days=data.dfs_days,
+        est_days=data.est_days,
+        md_auth_m=data.md_auth_m,
+        last_casing_size_in=data.last_casing_size_in,
+        last_casing_depth_m=data.last_casing_depth_m,
+        hole_section_text=data.hole_section_text or "",
+        hole_size_in=data.hole_size_in,
+        current_status=data.current_status or "",
+        mud_type=data.mud_type or "",
+        mud_weight_ppg=data.mud_weight_ppg,
+        mud_viscosity_sec=data.mud_viscosity_sec,
+        mud_pv_cp=data.mud_pv_cp,
+        mud_yp_lbf=data.mud_yp_lbf,
+        bha_summary=data.bha_summary or "",
+        pob_count=data.pob_count,
         customer=data.customer or "",
+        project=data.project or "",
+        site=data.site or "",
+        datum=data.datum or "",
         supervisor=data.supervisor or "",
         engineer=data.engineer or "",
+        uwi=data.uwi or "",
+        block_text=data.block_text or "",
         operation_summary=data.operation_summary or "",
         forward_plan=data.forward_plan or "",
         hse_summary=data.hse_summary or "",
@@ -376,8 +400,38 @@ def save_report(
         raise HTTPException(422, "The rig is assigned by the well configuration.")
     _ref(db, organization_id, HoleSection, upd.hole_section_id)
     _ref(db, organization_id, Phase, upd.phase_id)
+    nullable_report_fields = {
+        "depth_start_m",
+        "depth_end_m",
+        "tvd_start_m",
+        "tvd_m",
+        "bit_depth_m",
+        "progress_m",
+        "rotating_hours",
+        "cum_rotating_hours",
+        "spud_date",
+        "dfs_days",
+        "est_days",
+        "md_auth_m",
+        "last_casing_size_in",
+        "last_casing_depth_m",
+        "hole_size_in",
+        "mud_weight_ppg",
+        "mud_viscosity_sec",
+        "mud_pv_cp",
+        "mud_yp_lbf",
+        "pob_count",
+        "day_number",
+    }
     for field in [
+        "customer",
+        "project",
         "site",
+        "datum",
+        "supervisor",
+        "engineer",
+        "uwi",
+        "block_text",
         "report_no_text",
         "day_number",
         "event_code",
@@ -386,21 +440,38 @@ def save_report(
         "depth_start_m",
         "depth_end_m",
         "depth_unit",
+        "tvd_start_m",
         "tvd_m",
+        "tvd_source",
+        "bit_depth_m",
         "progress_m",
         "rotating_hours",
+        "cum_rotating_hours",
+        "spud_date",
         "dfs_days",
+        "est_days",
+        "md_auth_m",
+        "last_casing_size_in",
+        "last_casing_depth_m",
+        "hole_section_text",
+        "hole_size_in",
+        "current_status",
+        "mud_type",
+        "mud_weight_ppg",
+        "mud_viscosity_sec",
+        "mud_pv_cp",
+        "mud_yp_lbf",
+        "bha_summary",
+        "pob_count",
         "operation_summary",
         "forward_plan",
         "hse_summary",
         "remarks",
     ]:
         val = getattr(upd, field, None)
-        if field in upd.model_fields_set and (
-            val is not None
-            or field
-            in ("depth_start_m", "depth_end_m", "tvd_m", "progress_m", "rotating_hours", "dfs_days", "day_number")
-        ):
+        if field in upd.model_fields_set and (val is not None or field in nullable_report_fields):
+            if field == "tvd_m" and val != report.tvd_m and "tvd_source" not in upd.model_fields_set:
+                report.tvd_source = "manual" if val is not None else ""
             setattr(report, field, val)
     if upd.period_start_at:
         report.period_start_at = utc(upd.period_start_at)
@@ -440,7 +511,7 @@ def save_report(
                     raise HTTPException(422, "Select an active vendor.")
                 bd["responsible_party"] = vendor.vendor_name
             else:
-                bd["responsible_party"] = ""
+                bd["responsible_party"] = str(bd.get("responsible_party") or "").strip()[:200]
             if (bd["classification"] == "NPT" or bd["allocation"] == "NPT") and bd["is_productive"]:
                 raise HTTPException(422, f"Block {i}: NPT cannot be productive.")
 
@@ -489,7 +560,10 @@ def save_report(
                 "phase_id",
                 "depth_from_m",
                 "depth_to_m",
+                "tvd_from_m",
+                "tvd_to_m",
                 "bit_depth_m",
+                "mud_weight_ppg",
                 "rotating_hours",
                 "vendor_id",
                 "responsible_party",
@@ -659,6 +733,60 @@ def approve_report(db: Session, organization_id: str, report_id: str, user: User
     )
     db.commit()
     return report
+
+
+def reopen_report(
+    db: Session,
+    organization_id: str,
+    report_id: str,
+    remarks: str,
+    user: User,
+    request=None,
+    *,
+    can_amend: bool = False,
+):
+    from app.core.time import wat_today
+
+    reason = (remarks or "").strip()
+    if len(reason) < 3:
+        raise HTTPException(422, "Provide remarks (at least 3 characters) explaining why the report is reopened.")
+    report = get_report(db, organization_id, report_id, lock=True)
+    if report.status not in ("submitted", "approved"):
+        raise HTTPException(409, "Only submitted or approved reports can be reopened to draft.")
+    scope.resolve(db, organization_id, report.well_id, report.scope)
+    age_days = (wat_today() - report.report_date).days
+    if age_days > 30 and not can_amend:
+        raise HTTPException(
+            403,
+            "Reopening a report more than 30 days after its report date requires ops-report:amend.",
+        )
+    prior_status = report.status
+    now = datetime.now(UTC)
+    actor = _actor(user)
+    report.status = "draft"
+    report.approved_at = None
+    report.approved_by = ""
+    report.reopened_at = now
+    report.reopened_by = actor
+    report.reopen_reason = reason[:500]
+    report.revision_no = int(report.revision_no or 1) + 1
+    report.updated_by = actor
+    report.updated_at = now
+    _metric_state(db, report)
+    audit_record(
+        db,
+        organization_id=organization_id,
+        actor=user,
+        action="reopen",
+        entity_type="ops_report",
+        entity_id=report.id,
+        entity_label=f"{report.well_code_snapshot} {report.report_date}",
+        summary=f"Reopened {prior_status} report as draft (rev {report.revision_no}): {reason[:200]}",
+        request=request,
+    )
+    db.commit()
+    db.refresh(report)
+    return get_report(db, organization_id, report.id)
 
 
 def reject_report(db: Session, organization_id: str, report_id: str, reason: str, user: User, request=None):

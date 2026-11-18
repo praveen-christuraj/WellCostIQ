@@ -12,9 +12,10 @@ import { gridThemeParams } from '../designSystem'
 import { api, body } from '../lib/api'
 import { addDays, calculateDraft, formatAmount, lineDayFactors, numeric, resolveExchangeRate } from '../lib/invoiceCalculations'
 import { MAX_ATTACHMENT_BYTES, SIGNATURE_LABELS, SIGNATURE_ROLES, SIGNATURE_SPACE, type InvoiceSignature, type SignatureRole, type ConfigItem, type InvoiceDetail, type InvoiceLine, type InvoicePaymentSplit, type InvoiceReference, type InvoiceSaveInput, type InvoiceTax, type PaymentTerm, type TaxDirection, type VendorOption } from '../lib/invoiceProcessing'
+import { watTodayIso } from '../lib/time'
 
 ModuleRegistry.registerModules([AllCommunityModule])
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => watTodayIso()
 const newKey = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
 type EditorLine = InvoiceLine & { key: string }
 type EditorTax = InvoiceTax & { key: string }

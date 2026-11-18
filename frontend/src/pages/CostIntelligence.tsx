@@ -31,6 +31,7 @@ import {
 import { detailSheet, writeWorkbook } from '../lib/matrixWorkbook'
 import type { ReportDocument, ReportFigure, ReportSection } from '../lib/reportPdf'
 import { trackingLabel, WELL_STATUSES } from '../lib/rigWell'
+import { formatWatDateTime } from '../lib/time'
 
 const PAGE_SIZES = [20, 50, 100]
 const FIGURES = [
@@ -493,7 +494,7 @@ export default function CostIntelligence() {
       title: 'Cost Intelligence report',
       subtitle: 'Automated analysis of the cost record: findings are advice and state how they were derived.',
       scope: [from || to ? `Cost dates ${from || 'start'} to ${to || 'latest'}` : 'All cost dates', status ? `Status: ${trackingLabel(status)}` : 'All well statuses'].join(' · '),
-      readAt: data ? new Date(data.generated_at).toLocaleString() : undefined,
+      readAt: data ? formatWatDateTime(data.generated_at) : undefined,
       notices: data?.notes,
       sections: out,
       fileName: 'cost-intelligence-report',

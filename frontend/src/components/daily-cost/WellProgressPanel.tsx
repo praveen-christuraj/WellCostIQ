@@ -4,10 +4,11 @@ import { Alert, Box, Button, Paper, TextField, Typography } from '@mui/material'
 import { Tag } from '../Common'
 import { api, body } from '../../lib/api'
 import type { WellProgressReport, WellProgressScope } from '../../lib/dailyCost'
+import { fromWatDateTimeInput, toWatDateTimeInput, WAT_LABEL } from '../../lib/time'
 
-/** datetime-local inputs work with `YYYY-MM-DDTHH:mm`; the API stores seconds. */
-const toInput = (value: string | null) => (value ? value.slice(0, 16) : '')
-const fromInput = (value: string) => (value ? `${value}:00` : null)
+/** datetime-local inputs display and capture West Africa Time (WAT UTC+1:00). */
+const toInput = (value: string | null) => toWatDateTimeInput(value)
+const fromInput = (value: string) => fromWatDateTimeInput(value)
 
 const formatDays = (value: string | null) =>
   value === null ? '—' : Number(value).toFixed(3)
@@ -156,14 +157,14 @@ export function WellProgressPanel({ wellId, scopes, canEdit, onSaved, asOfLabel,
           />
           <Box display="grid" gap={1.2} mt={1.1} sx={{ gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(5, 1fr)' } }}>
             <TextField
-              size="small" type="datetime-local" label="Well Spud Date & Time"
+              size="small" type="datetime-local" label={`Well Spud Date & Time (${WAT_LABEL})`}
               value={draft.spud} disabled={!canEdit || busy}
               onChange={event => setDraft(scope.scope, { spud: event.target.value })}
               InputLabelProps={{ shrink: true }}
               helperText={scope.spud_at ? 'Entered — edit to recalculate the days; it cannot be cleared.' : 'The instant this progress started counting.'}
             />
             <TextField
-              size="small" type="datetime-local" label="Progress Completed Date & Time"
+              size="small" type="datetime-local" label={`Progress Completed Date & Time (${WAT_LABEL})`}
               value={draft.completed} disabled={!canEdit || busy}
               onChange={event => setDraft(scope.scope, { completed: event.target.value })}
               InputLabelProps={{ shrink: true }}

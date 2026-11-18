@@ -6,9 +6,10 @@ import { api } from '../lib/api'
 import type { AuditEntry, AuditPage } from '../lib/types'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { DataTable } from '../components/DataTable'
+import { formatWatDateTime, WAT_LABEL } from '../lib/time'
 
-const ACTIONS = ['login', 'login_failed', 'logout', 'create', 'update', 'delete', 'soft_delete', 'restore', 'rollback', 'permanent_delete', 'import', 'export', 'assign']
-const ENTITIES = ['auth', 'user', 'role', 'permission', 'master_data', 'rig', 'well', 'well_configuration', 'well_sub_activity', 'rig_well_export', 'rig_well_deleted', 'afe', 'afe_estimate', 'afe_export', 'database_browser']
+const ACTIONS = ['login', 'login_failed', 'logout', 'create', 'update', 'reopen', 'submit', 'approve', 'reject', 'activate', 'extract', 'ai-query', 'ai-prefill', 'delete', 'soft_delete', 'restore', 'rollback', 'permanent_delete', 'import', 'export', 'assign']
+const ENTITIES = ['auth', 'user', 'role', 'permission', 'master_data', 'rig', 'well', 'well_configuration', 'well_sub_activity', 'rig_well_export', 'rig_well_deleted', 'afe', 'afe_estimate', 'afe_export', 'ops_report', 'ops_plan', 'ops_summary', 'ops_document', 'ops_study', 'database_browser']
 
 // Other Managements → Audit Log: read-only action trail with server-side filters and export.
 export default function AuditLog() {
@@ -39,7 +40,7 @@ export default function AuditLog() {
   useEffect(() => { load() }, [load])
 
   const columns = useMemo<ColDef<AuditEntry>[]>(() => [
-    { headerName: 'TIME', field: 'created_at', minWidth: 155, valueFormatter: p => p.value ? new Date(p.value).toLocaleString() : '' },
+    { headerName: 'TIME (WAT)', field: 'created_at', minWidth: 185, valueFormatter: p => p.value ? formatWatDateTime(p.value) : '' },
     { headerName: 'ACTOR', field: 'actor_email', minWidth: 190, cellRenderer: ({ data }: { data: AuditEntry }) => data && <Box display="flex" alignItems="center" height="100%"><Box><Typography fontWeight={700} fontSize={12}>{data.actor_name || 'System'}</Typography><Typography color="text.secondary" fontSize={11}>{data.actor_email}</Typography></Box></Box> },
     { headerName: 'ACTION', field: 'action', width: 130, flex: 0, cellRenderer: ({ value }: { value: string }) => <Box display="flex" alignItems="center" height="100%\"><Tag tone={value.includes('failed') ? 'warning' : 'info'}>{String(value).replace('_', ' ')}</Tag></Box> },
     { headerName: 'ENTITY', field: 'entity_type', minWidth: 170, cellRenderer: ({ data }: { data: AuditEntry }) => data && <Box display="flex" alignItems="center" height="100%" gap={.8}><Tag>{data.entity_type}</Tag><Typography fontSize={11.5} color="text.secondary" noWrap>{data.entity_label}</Typography></Box> },
@@ -50,7 +51,7 @@ export default function AuditLog() {
   return <><PageHeading
     eyebrow="OTHER MANAGEMENTS / AUDIT LOG"
     title="Audit log"
-    subtitle="Every recorded action in this workspace with its actor, object, source address and time. Read-only: nothing on this page changes a record."
+    subtitle={`Every recorded action in this workspace with its actor, object, source address and timestamp (${WAT_LABEL}). Read-only: nothing on this page changes a record.`}
     action={<Button variant="outlined" startIcon={<RefreshRounded/>} onClick={load} disabled={busy}>{busy ? 'Refreshing…' : 'Refresh'}</Button>}
   />
     <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, mb: 2, overflow: 'hidden', bgcolor: 'background.paper' }}>

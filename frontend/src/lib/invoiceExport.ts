@@ -3,6 +3,7 @@ import { formatAmount, formatPrecise } from './invoiceCalculations'
 import { buildIdvsSheet, type IdvsSheet, type SheetCell } from './idvsSheet'
 import { idvsSheet as sheetTokens } from '../designSystem'
 import { INVOICE_STATUS_LABEL, type Invoice, type InvoiceDashboard, type InvoiceDetail } from './invoiceProcessing'
+import { watNowFormatted } from './time'
 
 export const invoiceExportColumns: ExportColumn<Invoice>[] = [
   { header: 'IDVS Number', value: row => row.idvs_number }, { header: 'IDVS Date', value: row => row.idvs_date },
@@ -112,7 +113,7 @@ async function writeIdvsPdf(fileName: string, sheet: IdvsSheet, invoice: Invoice
   const pageHeight = doc.internal.pageSize.getHeight()
   const footerY = Math.min(finalY + 6, pageHeight - margin / 2)
   doc.setFont(font, 'normal'); doc.setFontSize(7)
-  doc.text(`Generated ${new Date().toLocaleString()} · ${invoice.attachment_count} supporting attachment(s) · Amounts shown to two decimals; calculations stored at save-time precision`, margin, footerY)
+  doc.text(`Generated ${watNowFormatted()} · ${invoice.attachment_count} supporting attachment(s) · Amounts shown to two decimals; calculations stored at save-time precision`, margin, footerY)
   doc.save(fileName)
 }
 
@@ -197,7 +198,7 @@ export async function exportInvoiceDashboardPdf(data: InvoiceDashboard, selected
   const autoTable = autoTableModule.default
   const doc = new jsPDF({ orientation: 'landscape' })
   doc.setFont('helvetica', 'bold'); doc.setFontSize(17); doc.text('Invoice Processing Dashboard', 14, 17)
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(`As of ${data.as_of} · Generated ${new Date().toLocaleString()} · Amounts remain separated by currency`, 14, 24)
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(`As of ${data.as_of} · Generated ${watNowFormatted()} · Amounts remain separated by currency`, 14, 24)
   autoTable(doc, { startY: 31, head: [['Active IDVS', 'Verification', 'EPICOR', 'Approved', 'Paid', 'Overdue', 'Attachments']], body: [[data.total_invoices, data.verification_count, data.epicor_count, data.approved_count, data.paid_count, data.overdue_count, data.attachment_count]], headStyles: { fillColor: [21, 81, 91] } })
   autoTable(doc, { startY: (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7, head: [['Currency', 'IDVS', 'Invoice total', 'Verified total', 'IDVS amount', 'Net payable', 'Difference', 'Outstanding', 'Overdue']], body: data.currency_totals.map(row => [row.currency_code, row.invoice_count, row.invoice_total, row.verified_total, row.adjusted_verified_amount, row.net_payable_amount, row.difference_amount, row.outstanding_count, row.overdue_count]), headStyles: { fillColor: [21, 81, 91] } })
   const breakdownY = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7

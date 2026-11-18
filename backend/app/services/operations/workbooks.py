@@ -195,16 +195,102 @@ def daily_workbook(content, day, boundary=0):
         by_name = {s.title.strip().lower(): s for s in wb.worksheets if s.sheet_state == "visible"}
         mud = by_name.get("obm") or by_name.get("wbm") or by_name.get("dmr")
         if mud is not None:
-            # These protected sheets declare >1M rows. The header is a small printed form.
+            # These protected sheets declare >1M rows. The printed header + rheology sit in rows 1..48.
             fields = {}
-            for row in mud.iter_rows(max_row=30, max_col=20, values_only=True):
+            casing_candidates = []
+            casing_labels = {"conductor", "surface", "intermediate", "production", "liner"}
+            rheo = {}
+            for row in mud.iter_rows(max_row=48, max_col=20, values_only=True):
+                first_lbl = key(row[0]) if row and isinstance(row[0], str) else ""
+                if first_lbl in (
+                    "weight",
+                    "funnel viscosity",
+                    "plastic viscosity 120 f",
+                    "plastic viscosity",
+                    "yield point 120 f",
+                    "yield point",
+                    "depth md",
+                    "depth tvd",
+                ):
+                    nums = [n for c in row[5:11] if (n := number(c)) is not None and n > 0]
+                    if nums:
+                        rheo[first_lbl] = nums[-1]
                 for i, v in enumerate(row):
                     if isinstance(v, str):
+                        k_lbl = key(v)
+                        if k_lbl in casing_labels:
+                            sz = number(row[i + 1]) if i + 1 < len(row) else None
+                            dp = number(row[i + 2]) if i + 2 < len(row) else None
+                            if sz is not None and sz > 0 and dp is not None and dp > 0:
+                                casing_candidates.append((sz, dp))
                         val = next((c for c in row[i + 1 : i + 4] if c is not None), None)
                         if val is not None:
-                            fields.setdefault(key(v), val)
+                            fields.setdefault(k_lbl, val)
+
+            unit_len = "ft" if str(fields.get("unit length") or fields.get("unit length m ft") or "m").strip().lower().startswith("ft") else "m"
+            hole_md = number(fields.get("hole depth m"))
+            if hole_md is None and fields.get("hole depth ft") is not None:
+                hole_md = measured_depth(fields.get("hole depth ft"), "ft")
+            if hole_md is None and fields.get("hole depth") is not None:
+                hole_md = measured_depth(fields.get("hole depth"), unit_len)
+
+            tvd_m = number(fields.get("tvd m"))
+            if tvd_m is None and fields.get("tvd ft") is not None:
+                tvd_m = measured_depth(fields.get("tvd ft"), "ft")
+            if tvd_m is None and fields.get("tvd") is not None:
+                tvd_m = measured_depth(fields.get("tvd"), unit_len)
+            if tvd_m is None and rheo.get("depth tvd") is not None:
+                tvd_m = measured_depth(rheo["depth tvd"], unit_len)
+            tvd_source = "header" if tvd_m is not None else ""
+
+            bit_md = number(fields.get("bit depth m"))
+            if bit_md is None and fields.get("bit depth ft") is not None:
+                bit_md = measured_depth(fields.get("bit depth ft"), "ft")
+            if bit_md is None and fields.get("bit depth") is not None:
+                bit_md = measured_depth(fields.get("bit depth"), unit_len)
+
+            # Optional opening depth & daily progress from companion Mud Loss sheet.
+            depth_start_m = None
+            progress_m = None
+            mud_loss = by_name.get("mud loss")
+            if mud_loss is not None:
+                for lrow in mud_loss.iter_rows(max_row=12, max_col=5, values_only=True):
+                    lk = key(lrow[0]) if lrow and lrow[0] else ""
+                    lu = "ft" if len(lrow) > 2 and str(lrow[2] or "").strip().lower().startswith("ft") else "m"
+                    if lk == "previous hole depth" and len(lrow) > 1:
+                        depth_start_m = measured_depth(lrow[1], lu)
+                    elif lk == "daily interval length" and len(lrow) > 1:
+                        progress_m = measured_depth(lrow[1], lu)
+            if depth_start_m is None and hole_md is not None and progress_m is not None and hole_md >= progress_m:
+                depth_start_m = rounded(hole_md - progress_m)
+            elif progress_m is None and hole_md is not None and depth_start_m is not None and hole_md >= depth_start_m:
+                progress_m = rounded(hole_md - depth_start_m)
+
+            csg_size = csg_depth = None
+            if casing_candidates:
+                best_sz, best_dp = max(casing_candidates, key=lambda item: item[1])
+                csg_size = best_sz
+                csg_depth = measured_depth(best_dp, unit_len)
+
+            spud_raw = fields.get("spud date")
+            spud_date = spud_raw.date() if isinstance(spud_raw, datetime) else parse_date_flexible(str(spud_raw or ""))
+            hole_sec_raw = str(fields.get("hole section") or "").strip()
+            hole_size = number(hole_sec_raw.replace('"', "").replace("''", "")) or number(fields.get("bit size inch"))
+            mud_type = str(fields.get("mud type") or mud.title).strip()[:100]
+            mw = rheo.get("weight")
+            fv = rheo.get("funnel viscosity")
+            pv = next((rheo[k] for k in rheo if k.startswith("plastic viscosity")), None)
+            yp = next((rheo[k] for k in rheo if k.startswith("yield point")), None)
+            present_act = str(fields.get("present activity") or "").strip()[:500]
+            field_txt = str(fields.get("field") or "").strip()[:200]
+            block_txt = field_txt[:100] if re.search(r"\bO[MP]L\b", field_txt, re.I) else ""
+            rep_no = str(fields.get("report no") or "").strip()
+            if rep_no.endswith(".0"):
+                rep_no = rep_no[:-2]
+            day_no = int(rep_no) if rep_no.isdigit() and 1 <= int(rep_no) <= 9999 else None
+
             date_val = fields.get("report date")
-            summary = "; ".join(
+            summary_parts = [
                 f"{label}: {fields[k]}"
                 for k, label in [
                     ("mud type", "Mud type"),
@@ -213,23 +299,57 @@ def daily_workbook(content, day, boundary=0):
                     ("total circulating volume", "Circulating volume (bbl)"),
                 ]
                 if fields.get(k) is not None
-            )
+            ]
+            if mw is not None:
+                summary_parts.append(f"Mud weight: {mw} ppg")
+            if fv is not None:
+                summary_parts.append(f"Viscosity: {fv} s/qt")
+            if pv is not None and yp is not None:
+                summary_parts.append(f"PV/YP: {pv} cP / {yp} lbf/100ft²")
+            summary = "; ".join(summary_parts)
             if not summary:
                 raise ValueError("The mud report header was not recognised.")
+            inc_val = number(fields.get("incl"))
+            surveys = []
+            if inc_val is not None:
+                st = {"inc_deg": inc_val, "source": "DMR"}
+                if hole_md is not None:
+                    st["md_m"] = hole_md
+                if tvd_m is not None and (hole_md is None or tvd_m <= hole_md + Decimal("1")):
+                    st["tvd_m"] = tvd_m
+                surveys.append(st)
             return {
-                "report_date": date_val.date() if isinstance(date_val, datetime) else parse_date_flexible(str(date_val or '')),
+                "report_date": date_val.date() if isinstance(date_val, datetime) else parse_date_flexible(str(date_val or "")),
                 "report_type": "DMR",
                 "well_name": str(fields.get("well name no") or ""),
-                "site": str(fields.get("field") or ""),
+                "customer": str(fields.get("report for") or "")[:200],
+                "engineer": str(fields.get("contractor rep") or "")[:200],
+                "site": field_txt,
+                "project": str(fields.get("state") or "")[:200],
+                "block_text": block_txt,
                 "rig_name": str(fields.get("rig") or ""),
-                "report_no_text": str(fields.get("report no") or ""),
-                "depth_end_m": number(fields.get("hole depth m")),
-                "tvd_m": number(fields.get("tvd m")),
+                "report_no_text": rep_no[:50],
+                "day_number": day_no,
+                "spud_date": spud_date,
+                "depth_start_m": depth_start_m,
+                "depth_end_m": hole_md,
+                "tvd_m": tvd_m,
+                "tvd_source": tvd_source,
+                "bit_depth_m": bit_md,
+                "progress_m": progress_m,
+                "last_casing_size_in": csg_size,
+                "last_casing_depth_m": csg_depth,
+                "hole_section_text": (f'{hole_sec_raw}"' if hole_sec_raw and '"' not in hole_sec_raw else hole_sec_raw)[:120],
+                "hole_size_in": hole_size,
+                "current_status": present_act,
+                "mud_type": mud_type,
+                "mud_weight_ppg": mw,
+                "mud_viscosity_sec": fv,
+                "mud_pv_cp": pv,
+                "mud_yp_lbf": yp,
                 "operation_summary": summary,
                 "blocks": [],
-                "surveys": [{"inc_deg": number(fields["incl"]), "source": "DMR"}]
-                if number(fields.get("incl")) is not None
-                else [],
+                "surveys": surveys,
                 "warnings": ["Mud measurements do not allocate any activity hours."],
             }
         ws = by_name.get("summary")
@@ -258,13 +378,17 @@ def daily_workbook(content, day, boundary=0):
         begin = datetime.combine(day, time(boundary))
         finish = begin + timedelta(days=1)
         blocks = []
-        well_name = rig_name = ""
+        well_name = rig_name = block_text = field_name = hole_sec = ""
         warnings = []
         depth_col = col("depth end")
         depth_start_col = col("depth start")
+        tvd_col = next((i for i, k in enumerate(header) if k.startswith(("tvd", "end tvd", "depth tvd"))), None)
+        tvd_start_col = col("start tvd")
         bit_col = col("bit depth")
+        mw_col = next((i for i, k in enumerate(header) if k.startswith(("mud weight", "brine weight"))), None)
         act_code_col = col("activity code")
         rotation_col = col("rotating hours")
+        remarks_col = col("remarks")
 
         def depth_value(row, i):
             return (
@@ -277,29 +401,48 @@ def daily_workbook(content, day, boundary=0):
             warnings.append(
                 "Summary labels depth in feet; converted to metres. Verify the printed unit against the daily report."
             )
+        prev_day_end_md = None
         for idx, row in enumerate(islice(rows, 10000), 2):
             if idx > 10000:
                 raise ValueError("Export the Summary sheet with at most 10,000 rows.")
             a, b = row[start], row[end]
-            if not isinstance(a, datetime) or not isinstance(b, datetime) or b <= begin or a >= finish or b <= a:
+            if not isinstance(a, datetime) or not isinstance(b, datetime) or b <= a:
+                continue
+            if b <= begin:
+                d_prev = depth_value(row, depth_col)
+                if d_prev is not None:
+                    prev_day_end_md = d_prev
+                continue
+            if a >= finish:
                 continue
 
             def cell(label, row=row):
-                idx = col(label)
-                return row[idx] if idx is not None else None
+                idx_c = col(label)
+                return row[idx_c] if idx_c is not None else None
 
-            well_name = str(cell("well name") or well_name)
-            rig_name = str(cell("rig name") or rig_name)
+            well_name = str(cell("well name") or well_name).strip()
+            rig_name = str(cell("rig name") or rig_name).strip()
+            block_text = str(cell("block") or block_text).strip()
+            field_name = str(cell("field") or field_name).strip()
+            phase_txt = str(cell("phase") or "").strip()
+            if phase_txt:
+                hole_sec = phase_txt
             cause = str(cell("cause") or "").strip()
             # 'Plan' and the PT/NPT allocation are distinct in these workbooks. E.g. a U row
             # can carry NPT hours for an equipment failure. Keep both until reviewed.
-            npt = number(cell('npt hrs'), precision=False) or 0
-            pt = number(cell('pt hrs'), precision=False) or 0
-            alloc = cause.upper() if cause.upper() in ('UPA', 'SP') else ''
+            npt = number(cell("npt hrs"), precision=False) or 0
+            pt = number(cell("pt hrs"), precision=False) or 0
+            alloc = cause.upper() if cause.upper() in ("UPA", "SP") else ""
             if npt > 0 and pt > 0:
-                warnings.append(f'Row {idx}: mixed PT and NPT hours. Split or reallocate this block during review.')
+                warnings.append(f"Row {idx}: mixed PT and NPT hours. Split or reallocate this block during review.")
             elif not alloc:
-                alloc = 'NPT' if npt > 0 else 'PT' if pt > 0 else ''
+                alloc = "NPT" if npt > 0 else "PT" if pt > 0 else ""
+            d_to = depth_value(row, depth_col) if b <= finish else None
+            d_from = depth_value(row, depth_start_col) if a >= begin else None
+            if d_from is None and d_to is not None and a >= begin:
+                anchor = blocks[-1]["depth_to_m"] if blocks and blocks[-1].get("depth_to_m") is not None else prev_day_end_md
+                if anchor is not None and anchor <= d_to:
+                    d_from = anchor
             blocks.append(
                 {
                     "start": max(a, begin),
@@ -309,27 +452,48 @@ def daily_workbook(content, day, boundary=0):
                     "allocation": alloc,
                     "cause": cause,
                     "operation": str(cell("operation") or ""),
-                    "depth_to_m": depth_value(row, depth_col) if b <= finish else None,
-                    "depth_from_m": depth_value(row, depth_start_col) if a >= begin else None,
+                    "depth_to_m": d_to,
+                    "depth_from_m": d_from,
+                    "tvd_from_m": depth_value(row, tvd_start_col) if a >= begin else None,
+                    "tvd_to_m": depth_value(row, tvd_col) if b <= finish else None,
+                    "mud_weight_ppg": number(row[mw_col]) if mw_col is not None else None,
                     "rotating_hours": number(row[rotation_col]) if rotation_col is not None and a >= begin and b <= finish else None,
                     "bit_depth_m": depth_value(row, bit_col) if b <= finish else None,
-                    "phase_raw": str(cell("phase") or "")[:20],
-                    "party": str(cell("agency") or ""),
+                    "phase_raw": phase_txt[:20],
+                    "party": str(cell("agency") or "").strip(),
+                    "reason": str(row[remarks_col] or "").strip()[:500] if remarks_col is not None else "",
                     "code": printed_token(row[act_code_col] if act_code_col is not None else cell("activity")),
                     "source": f"Summary row {idx}",
                 }
             )
         if not blocks:
             raise ValueError("No time blocks overlap this report date in Summary.")
+        end_mds = [b["depth_to_m"] for b in blocks if b.get("depth_to_m") is not None]
+        start_mds = [b["depth_from_m"] for b in blocks if b.get("depth_from_m") is not None]
+        end_tvds = [b["tvd_to_m"] for b in blocks if b.get("tvd_to_m") is not None]
+        mws = [b["mud_weight_ppg"] for b in blocks if b.get("mud_weight_ppg") is not None]
+        bits = [b["bit_depth_m"] for b in blocks if b.get("bit_depth_m") is not None]
+        d_start = start_mds[0] if start_mds else prev_day_end_md
+        d_end = blocks[-1]["depth_to_m"] if blocks[-1]["depth_to_m"] is not None else (max(end_mds) if end_mds else None)
+        prog = rounded(d_end - d_start) if d_start is not None and d_end is not None and d_end >= d_start else None
         return {
             "report_date": day,
             "well_name": well_name,
             "rig_name": rig_name,
+            "block_text": block_text[:100],
+            "site": field_name[:200],
+            "hole_section_text": hole_sec[:120],
             "blocks": blocks,
-            "depth_end_m": blocks[-1]["depth_to_m"],
+            "depth_start_m": d_start,
+            "depth_end_m": d_end,
+            "tvd_m": end_tvds[-1] if end_tvds else None,
+            "tvd_source": "header" if end_tvds else "",
+            "bit_depth_m": bits[-1] if bits else None,
+            "progress_m": prog,
+            "mud_weight_ppg": mws[-1] if mws else None,
             "surveys": [],
             "warnings": warnings,
-            "operation_summary": " ".join(b["narrative"][:150] for b in blocks[:3]),
+            "operation_summary": " ".join(b["narrative"][:180] for b in blocks[:4] if b["narrative"]).strip(),
         }
 
 
@@ -348,8 +512,12 @@ def tabular_day(sheet, day, boundary):
                 "description": ("operation", "activity", "description", "narrative"),
                 "date": ("date", "report date"),
                 "mark": ("class", "classification", "plan"),
-                "depth": ("depth m", "depth ft", "end md m", "end md ft", "closing md m", "closing md ft"),
-                "start_depth": ("start md m", "start md ft", "from md m", "from md ft"),
+                "depth": ("depth m", "depth ft", "end md m", "end md ft", "closing md m", "closing md ft", "md to m", "md to ft"),
+                "start_depth": ("start md m", "start md ft", "from md m", "from md ft", "md from m", "md from ft"),
+                "tvd": ("tvd m", "tvd ft", "end tvd m", "end tvd ft", "closing tvd m", "closing tvd ft", "tvd to m", "tvd to ft"),
+                "start_tvd": ("start tvd m", "start tvd ft", "from tvd m", "from tvd ft", "tvd from m", "tvd from ft"),
+                "bit_depth": ("bit depth m", "bit depth ft", "bit md m", "bit md ft"),
+                "mud_weight": ("mud weight ppg", "brine weight ppg", "mw ppg", "mud weight"),
                 "rotation": ("rotating hours", "rotation hours"),
                 "operation": ("operation code",),
                 "cause": ("cause", "cause code"),
@@ -428,6 +596,10 @@ def tabular_day(sheet, day, boundary):
                 "narrative": str(cell("description") or "")[:5000],
                 "depth_to_m": depth('depth') if z <= end else None,
                 "depth_from_m": depth('start_depth') if a >= start else None,
+                "tvd_to_m": depth('tvd') if z <= end else None,
+                "tvd_from_m": depth('start_tvd') if a >= start else None,
+                "bit_depth_m": depth('bit_depth') if z <= end else None,
+                "mud_weight_ppg": number(cell('mud_weight')),
                 "rotating_hours": number(cell('rotation')) if a >= start and z <= end else None,
                 "allocation": allocation,
                 "operation": printed_token(cell('operation')),
@@ -436,10 +608,21 @@ def tabular_day(sheet, day, boundary):
         )
     if not blocks:
         raise ValueError("The time log has no activities in the selected operating day.")
+    t_start = next((b["depth_from_m"] for b in blocks if b.get("depth_from_m") is not None), None)
+    t_end = blocks[-1]["depth_to_m"]
+    t_tvds = [b["tvd_to_m"] for b in blocks if b.get("tvd_to_m") is not None]
+    t_bits = [b["bit_depth_m"] for b in blocks if b.get("bit_depth_m") is not None]
+    t_mws = [b["mud_weight_ppg"] for b in blocks if b.get("mud_weight_ppg") is not None]
     return {
         "report_date": day,
         "blocks": blocks,
-        "depth_end_m": blocks[-1]["depth_to_m"],
+        "depth_start_m": t_start,
+        "depth_end_m": t_end,
+        "progress_m": rounded(t_end - t_start) if t_start is not None and t_end is not None and t_end >= t_start else None,
+        "tvd_m": t_tvds[-1] if t_tvds else None,
+        "tvd_source": "header" if t_tvds else "",
+        "bit_depth_m": t_bits[-1] if t_bits else None,
+        "mud_weight_ppg": t_mws[-1] if t_mws else None,
         "surveys": [],
         "warnings": warnings,
         "operation_summary": "",

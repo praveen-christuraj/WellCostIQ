@@ -4526,8 +4526,10 @@ def _progress_datetime_text(value: datetime | None) -> str:
 
 
 def _progress_now() -> datetime:
-    """Naive UTC now, comparable with the naive site-entered milestone values."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    """Naive WAT (UTC+1:00) now, comparable with the naive site-entered milestone values."""
+    from app.core.time import wat_now
+
+    return wat_now().replace(tzinfo=None)
 
 
 def _reject_future_milestone(value: datetime, label: str) -> None:

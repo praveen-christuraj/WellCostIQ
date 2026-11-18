@@ -1,3 +1,5 @@
+import { formatWatDate, watTodayIso } from './time'
+
 export type DailyCostStatus = 'draft' | 'submitted'
 export type CostClassification = 'Planned' | 'UPA' | 'NPT'
 export type ChargingBasis = 'Day Rate' | 'Per Service Rate' | 'Per Section Rate'
@@ -375,15 +377,11 @@ export function leadLagText(kind: DailyLeadLagKind | undefined, days: string | n
 }
 
 export function localToday(): string {
-  const now = new Date()
-  const offset = now.getTimezoneOffset()
-  return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10)
+  return watTodayIso()
 }
 
 export function displayDate(value: string | null | undefined): string {
-  if (!value) return '—'
-  const parsed = new Date(`${value.slice(0, 10)}T00:00:00`)
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  return formatWatDate(value)
 }
 
 /** Title wording for a scope: "Drilling", "Completions", or both scopes together. */

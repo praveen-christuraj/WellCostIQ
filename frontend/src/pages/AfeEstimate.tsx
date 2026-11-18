@@ -31,6 +31,7 @@ import { defaultCurrencyCode } from '../lib/masterData'
 import { compareServiceCodes, compareServiceGroups } from '../lib/serviceGroups'
 import type { CostingSet, CostingSetGroup } from '../lib/costingSets'
 import { resolveScope, type Template } from '../lib/recordTemplates'
+import { formatWatDateTime } from '../lib/time'
 
 type LineKind = 'service' | 'consumable' | 'tangible'
 type Editor = { kind: LineKind; key: string | null } | null
@@ -867,7 +868,7 @@ export default function AfeEstimate() {
       {!editable && afe.status !== 'draft' && <Tag tone="info">Read-only · {afe.status === 'approval' ? 'approved' : 'under review'}</Tag>}
       {editable && dirty && !previewing && <Tag tone="warning">Unsaved changes</Tag>}
       {editable && previewing && <Tag tone="info">Recalculating preview…</Tag>}
-      {editable && !dirty && saved.persisted && <Tag tone="success">Saved {saved.saved_at ? new Date(saved.saved_at).toLocaleString() : ''}{saved.saved_by ? ` by ${saved.saved_by}` : ''}</Tag>}
+      {editable && !dirty && saved.persisted && <Tag tone="success">Saved {saved.saved_at ? formatWatDateTime(saved.saved_at) : ''}{saved.saved_by ? ` by ${saved.saved_by}` : ''}</Tag>}
       {!saved.persisted && <Tag>No estimate saved yet</Tag>}
       {afe.has_sow_adjustment && afe.adjusted_total != null && <Tag tone="info">SOW Rev {afe.sow_revision} · {amountText(afe.adjusted_total, afe.standard_currency)}</Tag>}
       {showingPreview && <Typography fontSize={12} color="text.secondary">Totals below are a live preview. Save to keep them.</Typography>}

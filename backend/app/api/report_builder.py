@@ -454,7 +454,9 @@ def export_csv(
     store.record_run(db, record)
     _audit(db, user, "report_export", record, f"Exported “{record.name}” as CSV ({result['total_rows']:,} rows)", request)
     db.commit()
-    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    from app.core.time import format_wat, utcnow
+
+    stamp = format_wat(utcnow(), "%Y%m%d_%H%M")
     safe = "".join(character if character.isalnum() or character in "-_ " else "-" for character in record.name).strip() or "report"
     return Response(
         content=payload,

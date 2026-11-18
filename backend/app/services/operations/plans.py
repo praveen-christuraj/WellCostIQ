@@ -178,6 +178,69 @@ def _write_items(db, org, plan, items, existing, user, request):
     db.commit()
 
 
+def update_plan(db: Session, organization_id: str, plan_id: str, data, user: User, request=None):
+    plan = get_plan(db, organization_id, plan_id, lock=True)
+    if plan.status != "draft":
+        raise HTTPException(409, "Only a draft timeline can be edited. Reopen it to draft first.")
+    resolve(db, organization_id, plan.well_id, plan.scope)
+    fields = data.model_fields_set
+    if "label" in fields and data.label is not None:
+        plan.label = data.label
+    if "basis" in fields and data.basis is not None:
+        plan.basis = data.basis
+    if "planned_start_at" in fields:
+        plan.planned_start_at = utc(data.planned_start_at) if data.planned_start_at else None
+    if "notes" in fields and data.notes is not None:
+        plan.notes = data.notes
+    plan.updated_by = user.email or ""
+    plan.updated_at = datetime.now(UTC)
+    audit_record(
+        db,
+        organization_id=organization_id,
+        actor=user,
+        action="update",
+        entity_type="ops_plan",
+        entity_id=plan.id,
+        entity_label=plan.label,
+        summary="Updated draft timeline metadata",
+        request=request,
+    )
+    db.commit()
+    return get_plan(db, organization_id, plan.id)
+
+
+def reopen_plan(db: Session, organization_id: str, plan_id: str, remarks: str, user: User, request=None):
+    reason = (remarks or "").strip()
+    if len(reason) < 3:
+        raise HTTPException(422, "Provide remarks (at least 3 characters) explaining why the timeline is reopened.")
+    plan = get_plan(db, organization_id, plan_id, lock=True)
+    if plan.status not in ("active", "superseded"):
+        raise HTTPException(409, "Only active or superseded timelines can be reopened to draft.")
+    resolve(db, organization_id, plan.well_id, plan.scope)
+    prior_status = plan.status
+    now = datetime.now(UTC)
+    actor = user.full_name or user.email or ""
+    plan.status = "draft"
+    plan.reopened_at = now
+    plan.reopened_by = actor[:255]
+    plan.reopen_reason = reason[:500]
+    plan.updated_by = user.email or ""
+    plan.updated_at = now
+    audit_record(
+        db,
+        organization_id=organization_id,
+        actor=user,
+        action="reopen",
+        entity_type="ops_plan",
+        entity_id=plan.id,
+        entity_label=plan.label,
+        summary=f"Reopened {prior_status} timeline as draft: {reason[:200]}",
+        request=request,
+    )
+    db.commit()
+    return get_plan(db, organization_id, plan.id)
+
+
 def activate_plan(db: Session, organization_id: str, plan_id: str, user: User, request=None):
     candidate = get_plan(db, organization_id, plan_id)
     db.execute(
@@ -208,6 +271,8 @@ def activate_plan(db: Session, organization_id: str, plan_id: str, user: User, r
     for o in others:
         o.status = "superseded"
     plan.status = "active"
+    plan.approved_by = (user.full_name or user.email or "")[:255]
+    plan.updated_by = user.email or ""
     audit_record(
         db,
         organization_id=organization_id,

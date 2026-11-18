@@ -30,6 +30,7 @@ import {
   type WellStatus,
   type WellTransitionOption,
 } from '../lib/rigWell'
+import { formatWatDate } from '../lib/time'
 
 // One tab per well status, in ladder order. Each tab lists the scopes that carry
 // that status, so a well drilling with its completion still planned shows its
@@ -449,7 +450,7 @@ export default function Wells() {
       valueGetter: params => params.data ? scopeState(params.data.well, params.data.scope).sub_activity_count : 0,
       valueFormatter: params => Number(params.value ?? 0).toLocaleString(),
     },
-    { headerName: 'UPDATED', field: 'well.updated_at', minWidth: 135, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'UPDATED', field: 'well.updated_at', minWidth: 135, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 300, minWidth: 300, maxWidth: 300, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: ScopeRow }) => data && <WellActions

@@ -28,6 +28,7 @@ import {
   type CostingSetInput,
   type CostingSetOption,
 } from '../lib/costingSets'
+import { formatWatDate } from '../lib/time'
 
 type SetForm = {
   is_global: boolean
@@ -68,7 +69,7 @@ function labelGroup(group: string) {
 }
 
 function labelDate(value: string) {
-  return value ? new Date(value).toLocaleDateString() : ''
+  return value ? formatWatDate(value) : ''
 }
 
 function normalizeGroup(value: string): CostingSetGroup | null {

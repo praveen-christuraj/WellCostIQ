@@ -13,6 +13,7 @@ import { StatCard } from '../components/ui/StatCard'
 import type { AuditPage } from '../lib/types'
 import type { TableCatalogue } from '../lib/databaseBrowser'
 import type { TaskOverview } from '../lib/workflowTypes'
+import { formatWatDate, formatWatDateTime } from '../lib/time'
 
 // Module dashboard for Other Managements. Each figure comes from an endpoint the user is
 // allowed to call; the API stays the authority, so a missing permission simply hides the card.
@@ -83,7 +84,7 @@ export default function OtherManagementOverview() {
           icon={<TaskAltOutlined fontSize="small"/>}
           tone={tasks && tasks.overdue ? 'error' : tasks && tasks.due_today ? 'warning' : 'default'}
         />}
-        {canBackup && <StatCard label="Backups" value={backup?.completed !== undefined ? backup.completed.toLocaleString() : '—'} hint={backup?.latest_completed_at ? `Last completed ${new Date(backup.latest_completed_at).toLocaleDateString()}` : 'No archive taken yet'} icon={<BackupOutlined fontSize="small"/>}/>}
+        {canBackup && <StatCard label="Backups" value={backup?.completed !== undefined ? backup.completed.toLocaleString() : '—'} hint={backup?.latest_completed_at ? `Last completed ${formatWatDate(backup.latest_completed_at)}` : 'No archive taken yet'} icon={<BackupOutlined fontSize="small"/>}/>}
       </Box>
 
       <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: canAudit ? 'minmax(0, 1.35fr) minmax(0, 1fr)' : '1fr' } }}>
@@ -96,7 +97,7 @@ export default function OtherManagementOverview() {
         >
           {audit && audit.items.length === 0 && <DatasetState compact kind="empty" title="No actions recorded yet" message="Audited actions will appear here as users work in the workspace."/>}
           {audit?.items.slice(0, 8).map(entry => <Box key={entry.id} display="grid" gridTemplateColumns={{ xs: '1fr', md: '170px 1fr 180px' }} gap={1.2} alignItems="center" sx={{ px: 2.25, py: 1.1, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}>
-            <Typography fontSize={11.5} color="text.secondary" className="tnum">{new Date(entry.created_at).toLocaleString()}</Typography>
+            <Typography fontSize={11.5} color="text.secondary" className="tnum">{formatWatDateTime(entry.created_at)}</Typography>
             <Typography fontSize={12.5} noWrap>{entry.summary || `${entry.action} ${entry.entity_type}`}</Typography>
             <Typography fontSize={11.5} color="text.secondary" noWrap>{entry.actor_name || 'System'} · {entry.entity_type.replace(/_/g, ' ')}</Typography>
           </Box>)}

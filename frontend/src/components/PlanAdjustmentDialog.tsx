@@ -12,6 +12,7 @@ import {
   type WellPlanAdjustment,
 } from '../lib/sowAdjustment'
 import { formatDays, isOpenWellStatus, planLabel, trackingLabel, type MasterConfigurationOption, type RigWellConfigurationOptions, type Well, type WellConfiguration } from '../lib/rigWell'
+import { formatWatDateTime } from '../lib/time'
 
 type PhaseInput = {
   key: string
@@ -503,7 +504,7 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
                     <Typography fontWeight={800} fontSize={14}>Revision {adjustment.revision_number}</Typography>
                     <Tag tone={SOW_STATUS_TONE[adjustment.status]}>{SOW_STATUS_LABEL[adjustment.status]}</Tag>
                     <Typography fontSize={12} color="text.secondary">
-                      {new Date(adjustment.created_at).toLocaleString()} by {adjustment.created_by || 'workspace user'}
+                      {formatWatDateTime(adjustment.created_at)} by {adjustment.created_by || 'workspace user'}
                     </Typography>
                   </Box>
                   <Typography fontWeight={800} fontSize={14}>
@@ -550,7 +551,7 @@ export function PlanAdjustmentDialog({ open, well, initialScope, onClose, onChan
                 </Box>}
                 {adjustment.status !== 'draft' && <Typography fontSize={12} color="text.secondary" mt={.4}>
                   {adjustment.status === 'approved' ? 'Approved' : 'Voided'} by {adjustment.approved_by || 'workspace user'}
-                  {adjustment.approved_at ? ` on ${new Date(adjustment.approved_at).toLocaleString()}` : ''}
+                  {adjustment.approved_at ? ` on ${formatWatDateTime(adjustment.approved_at)}` : ''}
                 </Typography>}
                 {canAdjust && <Box display="flex" gap={1} mt={1.2} flexWrap="wrap">
                   {adjustment.status === 'draft' && <Button size="small" variant="outlined" onClick={() => startEdit(adjustment)}>Edit draft</Button>}

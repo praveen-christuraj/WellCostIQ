@@ -1145,6 +1145,78 @@ def build_assistant_dossier(
         if anom:
             sections.append(anom)
 
+    if (_has_cap(capabilities, "ops-report:read") or _has_cap(capabilities, "ops-plan:read")) and (
+        bool(focus_wells)
+        or any(
+            k in lower
+            for k in (
+                "operation",
+                "ddr",
+                "dcr",
+                "dmr",
+                "rmr",
+                "openwells",
+                "depth",
+                "md",
+                "tvd",
+                "bit",
+                "rop",
+                "footage",
+                "drilling",
+                "completion",
+                "survey",
+                "inclination",
+                "dls",
+                "timeline",
+                "lag",
+                "npt",
+                "upa",
+                "mud",
+                "casing",
+                "bha",
+                "pob",
+                "summary",
+                "overview",
+                "compare",
+            )
+        )
+    ):
+        from app.services.operations.ops_ai import build_ops_context_block
+
+        ops_ctx = build_ops_context_block(
+            db,
+            organization_id,
+            question,
+            capabilities,
+            include_dnc_primer=any(
+                k in lower
+                for k in (
+                    "drilling",
+                    "completion",
+                    "md",
+                    "tvd",
+                    "rop",
+                    "mud",
+                    "casing",
+                    "bha",
+                    "survey",
+                    "dls",
+                    "ecd",
+                    "stuck",
+                    "kick",
+                    "lot",
+                    "fit",
+                    "bop",
+                    "packer",
+                    "scssv",
+                    "npt",
+                    "upa",
+                )
+            ),
+        )
+        if ops_ctx:
+            sections.append(ops_ctx)
+
     # Assemble within the token-safe character budget while keeping priority sections intact.
     assembled: list[str] = []
     used_chars = 0

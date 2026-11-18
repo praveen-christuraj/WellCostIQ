@@ -70,7 +70,7 @@ export default function OperationsOverview() {
       <PageHeading
         eyebrow="Well Operations"
         title="Operations Dashboard"
-        subtitle="Report coverage and verified drilling and completion performance. Hours, penetration rates and schedule variance come from operations records only."
+        subtitle="Report coverage and verified drilling and completion performance (WAT UTC+1:00). Hours, penetration rates and schedule variance come from operations records only."
         action={
           <>
             {can('ops-plan:read') && (
@@ -79,9 +79,18 @@ export default function OperationsOverview() {
               </Button>
             )}
             {can('ops-report:read') && (
-              <Button variant="contained" component={Link} to="/operations/reports">
-                Daily reports
-              </Button>
+              <>
+                <Button
+                  variant="outlined"
+                  component={Link}
+                  to={`/operations/summary${well ? `?well=${encodeURIComponent(well)}${scope ? `&scope=${encodeURIComponent(scope)}` : ''}` : ''}`}
+                >
+                  Operation summary
+                </Button>
+                <Button variant="contained" component={Link} to="/operations/reports">
+                  Daily reports
+                </Button>
+              </>
             )}
             {can('ops-analytics:read') && (
               <Button variant="outlined" component={Link} to="/operations/analytics">

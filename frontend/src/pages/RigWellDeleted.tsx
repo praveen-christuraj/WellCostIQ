@@ -8,6 +8,7 @@ import { ErrorMessage, FormDialog, PageHeading, Tag } from '../components/Common
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import { entityLabel, scopeLabel, type DeletedRigWellRecord } from '../lib/rigWell'
+import { formatWatDate, formatWatDateTime } from '../lib/time'
 
 function selectionPayload(target: DeletedRigWellRecord) {
   return target.entity_type === 'well' && target.scope
@@ -109,8 +110,8 @@ export default function RigWellDeleted() {
     { headerName: 'CODE', field: 'code', minWidth: 130, flex: .8 },
     { headerName: 'NAME', field: 'name', minWidth: 190, flex: 1.2 },
     { headerName: 'PARENT / SCOPE', field: 'parent_label', minWidth: 190, flex: 1.2 },
-    { headerName: 'DELETED', field: 'deleted_at', minWidth: 165, valueFormatter: params => params.value ? new Date(params.value).toLocaleString() : '' },
-    { headerName: 'CREATED', field: 'created_at', minWidth: 145, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'DELETED', field: 'deleted_at', minWidth: 165, valueFormatter: params => params.value ? formatWatDateTime(params.value) : '' },
+    { headerName: 'CREATED', field: 'created_at', minWidth: 145, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 240, minWidth: 240, maxWidth: 240, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: DeletedRigWellRecord }) => data && <Box display="flex" alignItems="center" height="100%" gap={.5}>

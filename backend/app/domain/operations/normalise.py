@@ -32,20 +32,18 @@ def parse_date_flexible(value: str) -> date | None:
     for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%m-%d-%Y", "%d.%m.%Y", "%Y-%m-%d", "%d/%m/%y", "%m/%d/%y"):
         try:
             return datetime.strptime(val, fmt).date()
-        except Exception:
-            continue
+        except ValueError:
+            pass
     # dd-mm-yyyy with various separators
     m = re.search(r"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{2,4})", val)
     if m:
         a, b, c = m.groups()
         year = int(c) if len(c) == 4 else 2000 + int(c)
         # Prefer dd/mm/yyyy (as per report-study S1: 00:00 default)
-        try:
-            # try dd/mm first
-            return date(year, int(b), int(a))
-        except Exception:
-            try:
-                return date(year, int(a), int(b))
-            except Exception:
-                pass
+        for month, day in ((int(b), int(a)), (int(a), int(b))):
+            if 1 <= month <= 12 and 1 <= day <= 31:
+                try:
+                    return date(year, month, day)
+                except ValueError:
+                    return None
     return None

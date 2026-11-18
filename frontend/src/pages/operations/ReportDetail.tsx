@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
+import { AutoAwesomeOutlined, LockOpenOutlined } from '@mui/icons-material'
 import {
   Alert,
   Autocomplete,
@@ -6,36 +8,54 @@ import {
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
+  Divider,
   FormControlLabel,
   MenuItem,
+  Stack,
+  Switch,
   Tab,
   Tabs,
   TextField,
   Typography,
 } from '@mui/material'
+import { AiStatusAlert } from '../../components/assistant/AiStatusAlert'
 import { ErrorMessage, FormDialog, PanelDialog, useFormDirty, useUnsavedChangesGuard } from '../../components/Common'
 import { DataTable } from '../../components/DataTable'
-import { SectionCard } from '../../components/ui/SectionCard'
-import { printDailyReport } from '../../lib/operationsPdf'
-import { StudyPanel } from '../../components/operations/StudyPanel'
 import { SourceDialog } from '../../components/operations/SourceDialog'
+import { StudyPanel } from '../../components/operations/StudyPanel'
+import { SectionCard } from '../../components/ui/SectionCard'
 import { useAuth } from '../../context/AuthContext'
 import { downloadFile } from '../../lib/api'
 import {
+  aiPrefillReport,
   approveReport,
   auditExport,
+  generateReportNarratives,
   getBrief,
   getReport,
   opsReference,
   rejectReport,
+  reopenReport,
   reviewBrief,
   saveReport,
   submitReport,
+  type OpsAiPrefill,
   type OpsBlock,
+  type OpsNarratives,
   type OpsReference,
   type OpsReport,
   type OpsSurvey,
 } from '../../lib/operations'
+import { printDailyReport } from '../../lib/operationsPdf'
+import {
+  formatWatDateTime,
+  formatWatShort,
+  fromWatDateTimeInput,
+  parseInstant,
+  toWatDateTimeInput,
+  WAT_LABEL,
+} from '../../lib/time'
 
 const editFields = [
   'sequence_no',
@@ -60,8 +80,13 @@ const editFields = [
   'phase_id',
   'depth_from_m',
   'depth_to_m',
+  'tvd_from_m',
+  'tvd_to_m',
   'bit_depth_m',
+  'mud_weight_ppg',
+  'footage_m',
   'rotating_hours',
+  'rop_m_per_hr',
   'rop_basis',
   'vendor_id',
   'responsible_party',
@@ -70,6 +95,7 @@ const editFields = [
   'confidence',
   'review_state',
 ] as const
+
 type Block = Pick<
   OpsBlock,
   | (typeof editFields)[number]
@@ -80,8 +106,7 @@ type Block = Pick<
   | 'source_mark_label'
   | 'source_cause_label'
 > & { id: string }
-const utc = (s: string) => (/[Zz]|[+-]\d\d:\d\d$/.test(s) ? s : `${s}Z`)
-const dateInput = (s: string | null | undefined) => (s ? new Date(utc(s)).toISOString().slice(0, 16) : '')
+
 const surveyFields = {
   md_m: 'MD (m)',
   tvd_m: 'TVD (m)',
@@ -92,6 +117,7 @@ const surveyFields = {
   vsec_m: 'Vertical section (m)',
   dls_deg_per_30m: 'Dogleg (°/30 m)',
 }
+
 const newSurvey = (): OpsSurvey => ({
   md_m: null,
   tvd_m: null,
@@ -104,6 +130,12 @@ const newSurvey = (): OpsSurvey => ({
   source: 'manual',
   tool: '',
 })
+
+const depthRange = (from: string | null | undefined, to: string | null | undefined) => {
+  if (!from && !to) return '—'
+  if (from && to && from !== to) return `${from}–${to}`
+  return to || from || '—'
+}
 
 export default function OperationsReportDetail({
   id,
@@ -118,24 +150,36 @@ export default function OperationsReportDetail({
 }) {
   const { can } = useAuth()
   const [tab, setTab] = useState<'log' | 'details' | 'sources'>('log')
-  const [report, setReport] = useState<OpsReport | null>(null),
-    [ref, setRef] = useState<OpsReference | null>(null),
-    [brief, setBrief] = useState(''),
-    [briefError, setBriefError] = useState('')
-  const [header, setHeader] = useState<Partial<OpsReport>>({}),
-    [blocks, setBlocks] = useState<Block[]>([]),
-    [surveys, setSurveys] = useState<OpsSurvey[]>([])
-  const [dirty, setDirty] = useState(false),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState(''),
-    [notice, setNotice] = useState('')
-  const [editor, setEditor] = useState<Block | null>(null),
-    [remove, setRemove] = useState<Block | null>(null),
-    [source, setSource] = useState(false),
-    [reject, setReject] = useState(false),
-    [reason, setReason] = useState('')
+  const [report, setReport] = useState<OpsReport | null>(null)
+  const [ref, setRef] = useState<OpsReference | null>(null)
+  const [brief, setBrief] = useState('')
+  const [briefError, setBriefError] = useState('')
+  const [header, setHeader] = useState<Partial<OpsReport>>({})
+  const [blocks, setBlocks] = useState<Block[]>([])
+  const [surveys, setSurveys] = useState<OpsSurvey[]>([])
+  const [dirty, setDirty] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [editor, setEditor] = useState<Block | null>(null)
+  const [remove, setRemove] = useState<Block | null>(null)
+  const [source, setSource] = useState(false)
+  const [reject, setReject] = useState(false)
+  const [reason, setReason] = useState('')
+  const [reopenOpen, setReopenOpen] = useState(false)
+  const [reopenRemarks, setReopenRemarks] = useState('')
   const [confirmed, setConfirmed] = useState(false)
+
+  // Offline AI narrative generator & AI extraction prefill state
+  const [narUseAi, setNarUseAi] = useState(true)
+  const [narFocus, setNarFocus] = useState('')
+  const [narBusy, setNarBusy] = useState(false)
+  const [narratives, setNarratives] = useState<OpsNarratives | null>(null)
+  const [prefillBusy, setPrefillBusy] = useState(false)
+  const [prefillResult, setPrefillResult] = useState<OpsAiPrefill | null>(null)
+
   const editorDirty = useFormDirty(editor, Boolean(editor))
+
   const reset = (r: OpsReport) => {
     setConfirmed(false)
     setReport(r)
@@ -144,11 +188,14 @@ export default function OperationsReportDetail({
     setSurveys(r.surveys)
     setDirty(false)
   }
+
   useEffect(() => {
     let current = true
     setError('')
     setBrief('')
     setBriefError('')
+    setNarratives(null)
+    setPrefillResult(null)
     setReport(null)
     if (id)
       Promise.all([getReport(id, includeDeleted), opsReference()])
@@ -159,34 +206,44 @@ export default function OperationsReportDetail({
           }
         })
         .catch((e) => {
-          if (current) setError(e.message)
+          if (current) setError((e as Error).message)
         })
     void getBrief(id, includeDeleted)
       .then((b) => {
         if (current) setBrief(b.summary)
       })
       .catch((e) => {
-        if (current) setBriefError(e.message)
+        if (current) setBriefError((e as Error).message)
       })
     return () => {
       current = false
     }
   }, [id, includeDeleted])
+
   const refreshBrief = () => {
     setBriefError('')
     return getBrief(id, includeDeleted)
       .then((b) => setBrief(b.summary))
-      .catch((e) => setBriefError(e.message))
+      .catch((e) => setBriefError((e as Error).message))
   }
+
   const editable =
     !!report &&
     !report.is_deleted &&
     ['draft', 'in_review', 'rejected'].includes(report.status) &&
     can('ops-report:update')
+
+  const mayReopen =
+    !!report &&
+    !report.is_deleted &&
+    ['submitted', 'approved'].includes(report.status) &&
+    can('ops-report:reopen')
+
   const updateHeader = (patch: Partial<OpsReport>) => {
     setDirty(true)
-    setHeader({ ...header, ...patch })
+    setHeader((prev) => ({ ...prev, ...patch }))
   }
+
   const persist = async (updatedBlocks = blocks) => {
     if (!report || !editable || busy) return false
     setBusy(true)
@@ -211,7 +268,7 @@ export default function OperationsReportDetail({
       void onChanged()
       setNotice(
         r.extraction_status === 'needs_review'
-          ? 'Draft saved. Source review is still required.'
+          ? 'Draft saved. Confirm remaining extracted suggestions before submitting.'
           : 'Draft saved. Submit when ready.',
       )
       return true
@@ -222,7 +279,8 @@ export default function OperationsReportDetail({
       setBusy(false)
     }
   }
-  const transition = async (action: 'submit' | 'approve' | 'reject') => {
+
+  const transition = async (action: 'submit' | 'approve' | 'reject' | 'reopen') => {
     if (!report || dirty) return
     setBusy(true)
     setError('')
@@ -233,27 +291,91 @@ export default function OperationsReportDetail({
           ? await submitReport(report.id)
           : action === 'approve'
             ? await approveReport(report.id)
-            : await rejectReport(report.id, reason)
+            : action === 'reject'
+              ? await rejectReport(report.id, reason)
+              : await reopenReport(report.id, reopenRemarks.trim())
       reset(r)
       void onChanged()
       void refreshBrief()
       setReject(false)
-      setNotice(`Report ${r.status}.`)
+      setReopenOpen(false)
+      setNotice(
+        action === 'reopen'
+          ? 'Report reopened to editable draft. Update any fields or activity blocks, save, and submit when ready.'
+          : `Report ${r.status}.`,
+      )
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setBusy(false)
     }
   }
+
+  const runAiPrefill = async () => {
+    if (!report || !editable || dirty || prefillBusy) return
+    setPrefillBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const res = await aiPrefillReport(report.id)
+      setPrefillResult(res)
+      reset(res.report)
+      void refreshBrief()
+      void onChanged()
+      if (res.ai_used) {
+        const parts = []
+        if (res.updated_header_fields.length) parts.push(`${res.updated_header_fields.length} header field(s)`)
+        if (res.updated_block_count) parts.push(`${res.updated_block_count} activity block(s)`)
+        setNotice(
+          parts.length
+            ? `Offline AI refined ${parts.join(' and ')}. Review all suggestions and save when satisfied.`
+            : 'Offline AI checked the extracted draft — all available fields are already populated.',
+        )
+      }
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setPrefillBusy(false)
+    }
+  }
+
+  const runNarratives = async (withAi = narUseAi) => {
+    if (!report || narBusy) return
+    setNarBusy(true)
+    setError('')
+    try {
+      setNarratives(await generateReportNarratives(report.id, withAi, narFocus.trim()))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setNarBusy(false)
+    }
+  }
+
+  const applyNarratives = () => {
+    if (!narratives || !editable) return
+    const patch: Partial<OpsReport> = {}
+    if (narratives.operation_summary) patch.operation_summary = narratives.operation_summary
+    if (narratives.forward_plan) patch.forward_plan = narratives.forward_plan
+    if (narratives.hse_summary) patch.hse_summary = narratives.hse_summary
+    updateHeader(patch)
+    setNotice('Generated D&C narratives applied to the draft fields — review, edit as needed, and click Save draft.')
+  }
+
   const h = (field: keyof OpsReport) => (field in header ? header[field] : report?.[field])
+
   const addBlock = () => {
-    const start = blocks.at(-1)?.ended_at ?? report?.period_start_at
-    if (!start) return
+    const startRaw = blocks.at(-1)?.ended_at ?? report?.period_start_at
+    const startDate = parseInstant(startRaw)
+    if (!startDate) return
+    const endDate = new Date(startDate.getTime() + 3600000)
+    const startLocal = toWatDateTimeInput(startDate.toISOString())
+    const endLocal = toWatDateTimeInput(endDate.toISOString())
     setEditor({
       id: `new-${Date.now()}`,
       sequence_no: blocks.length + 1,
-      started_at: utc(start),
-      ended_at: new Date(Date.parse(utc(start)) + 3600000).toISOString(),
+      started_at: fromWatDateTimeInput(startLocal) || startDate.toISOString(),
+      ended_at: fromWatDateTimeInput(endLocal) || endDate.toISOString(),
       duration_minutes: 60,
       phase_raw: '',
       operation_code_id: null,
@@ -270,8 +392,13 @@ export default function OperationsReportDetail({
       phase_id: null,
       depth_from_m: null,
       depth_to_m: null,
+      tvd_from_m: null,
+      tvd_to_m: null,
       bit_depth_m: null,
+      mud_weight_ppg: null,
+      footage_m: null,
       rotating_hours: null,
+      rop_m_per_hr: null,
       rop_basis: 'rotating',
       vendor_id: null,
       responsible_party: '',
@@ -281,14 +408,21 @@ export default function OperationsReportDetail({
       review_state: 'edited',
     })
   }
-  const duration = editor
-    ? Math.round((Date.parse(utc(editor.ended_at)) - Date.parse(utc(editor.started_at))) / 60000)
-    : 0
+
+  const duration = (() => {
+    if (!editor) return 0
+    const a = parseInstant(editor.started_at)
+    const b = parseInstant(editor.ended_at)
+    if (!a || !b) return 0
+    return Math.round((b.getTime() - a.getTime()) / 60000)
+  })()
+
   const withEditor = () => {
     if (!editor || !(duration > 0 && duration <= 1440)) return null
     const b: Block = { ...editor, review_state: 'edited', duration_minutes: duration }
     return blocks.some((x) => x.id === b.id) ? blocks.map((x) => (x.id === b.id ? b : x)) : [...blocks, b]
   }
+
   const apply = () => {
     const updated = withEditor()
     if (!updated) return
@@ -296,6 +430,7 @@ export default function OperationsReportDetail({
     setEditor(null)
     setDirty(true)
   }
+
   const guard = useUnsavedChangesGuard({
     when: dirty || editorDirty,
     onSave: async () => {
@@ -305,12 +440,14 @@ export default function OperationsReportDetail({
     },
     title: 'Close with unsaved report changes?',
   })
+
   if (!report)
     return (
       <PanelDialog open title="Daily report" maxWidth={false} onClose={() => onClose(null)}>
         {error ? <ErrorMessage message={error} /> : <Typography role="status">Loading daily report…</Typography>}
       </PanelDialog>
     )
+
   const print = async () => {
     setBusy(true)
     try {
@@ -321,9 +458,42 @@ export default function OperationsReportDetail({
       setBusy(false)
     }
   }
+
   const totals = { Planned: 0, UPA: 0, NPT: 0 }
   for (const b of blocks) totals[b.classification] += b.duration_minutes
   const gap = report.period_minutes - totals.Planned - totals.UPA - totals.NPT
+
+  const numField = (k: keyof OpsReport, label: string, helper?: string) => (
+    <TextField
+      key={k}
+      size="small"
+      label={label}
+      helperText={helper}
+      disabled={!editable}
+      value={h(k) ?? ''}
+      onChange={(e) => {
+        const raw = e.target.value
+        if (k === 'day_number' || k === 'pob_count') {
+          updateHeader({ [k]: raw ? Number(raw) : null })
+        } else {
+          updateHeader({ [k]: raw || null })
+        }
+      }}
+    />
+  )
+
+  const textField = (k: keyof OpsReport, label: string, full = false) => (
+    <TextField
+      key={k}
+      size="small"
+      sx={full ? { gridColumn: '1 / -1' } : undefined}
+      label={label}
+      disabled={!editable}
+      value={h(k) ?? ''}
+      onChange={(e) => updateHeader({ [k]: e.target.value })}
+    />
+  )
+
   return (
     <>
       <PanelDialog
@@ -331,15 +501,38 @@ export default function OperationsReportDetail({
         maxWidth={false}
         onClose={() => onClose(report)}
         title={`${report.is_deleted ? 'Deleted daily report' : report.extraction_status === 'needs_review' ? 'Review extracted report' : 'Daily report'} · ${report.well_code_snapshot} · ${report.report_date}`}
-        subtitle={`${report.rig_code_snapshot} / ${report.scope} · ${report.report_type} ${report.report_no_text} · ${report.status}`}
+        subtitle={`${report.rig_code_snapshot || 'Rig —'} / ${report.scope} · ${report.report_type} ${report.report_no_text} · ${report.status} · ${WAT_LABEL}`}
         footer={
           <Box display="flex" gap={1} alignItems="center" flexWrap="wrap" width="100%" justifyContent="flex-end">
             <Button onClick={() => onClose(report)} disabled={busy} color="inherit">
               {editable ? 'Cancel' : 'Close'}
             </Button>
+            {!dirty && (
+              <Button
+                component={RouterLink}
+                to={`/operations/summary?well=${encodeURIComponent(report.well_id)}&scope=${encodeURIComponent(report.scope)}`}
+              >
+                Well summary
+              </Button>
+            )}
             {can('ops-report:print') && (
               <Button onClick={print} disabled={busy || dirty}>
                 Report PDF
+              </Button>
+            )}
+            {mayReopen && (
+              <Button
+                variant="outlined"
+                color="warning"
+                startIcon={<LockOpenOutlined />}
+                disabled={busy}
+                onClick={() => {
+                  setReopenRemarks('')
+                  setError('')
+                  setReopenOpen(true)
+                }}
+              >
+                Reopen as draft
               </Button>
             )}
             {editable && (
@@ -378,52 +571,121 @@ export default function OperationsReportDetail({
           </Box>
         }
       >
-        {error && <ErrorMessage message={error} />}
-        {notice && <Alert severity="success">{notice}</Alert>}
-        {report.status === 'rejected' && (
-          <Alert severity="warning">Returned for correction: {report.rejection_reason}</Alert>
-        )}
-        {report.is_deleted && (
-          <Alert severity="info">This report is read-only. Restore it from the register before making changes.</Alert>
-        )}
-        {!report.is_deleted && report.extraction_status === 'needs_review' && (
-          <Alert severity="info">
-            These are suggestions. Check the dates, measurements and time classifications, then save the reviewed draft.
-          </Alert>
-        )}
-        {editable && report.current_extraction_id && can('ops-report:review') && (
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={confirmed}
-                onChange={(e) => {
-                  setConfirmed(e.target.checked)
-                  setDirty(true)
-                }}
-              />
-            }
-            label="I checked the source, scope, measurements and time allocations. Accept the remaining suggestions when I save."
-          />
-        )}
+        <Stack spacing={1.25} mb={1}>
+          {error && <ErrorMessage message={error} />}
+          {notice && (
+            <Alert severity="success" onClose={() => setNotice('')}>
+              {notice}
+            </Alert>
+          )}
+          {prefillResult?.ai_error && (
+            <AiStatusAlert
+              message={prefillResult.ai_error}
+              errorCode={prefillResult.ai_error_code}
+              model={prefillResult.ai_model}
+              busy={prefillBusy}
+              fallbackNote="All deterministically extracted MDs, TVDs, wellbore parameters, surveys and time blocks remain intact below."
+              onRetry={() => void runAiPrefill()}
+              onDismiss={() => setPrefillResult(null)}
+            />
+          )}
+          {report.status === 'rejected' && (
+            <Alert severity="warning">Returned for correction: {report.rejection_reason}</Alert>
+          )}
+          {report.reopened_at && (
+            <Alert severity="info">
+              Last reopened by <strong>{report.reopened_by || 'workspace user'}</strong> on{' '}
+              <strong>{formatWatDateTime(report.reopened_at)}</strong>
+              {report.reopen_reason ? ` — Reason: ${report.reopen_reason}` : ''}.
+            </Alert>
+          )}
+          {['submitted', 'approved'].includes(report.status) && !report.is_deleted && (
+            <Alert severity="success">
+              This report is <strong>{report.status}</strong>
+              {report.approved_at
+                ? ` (approved by ${report.approved_by || 'approver'} on ${formatWatDateTime(report.approved_at)})`
+                : report.submitted_at
+                  ? ` (submitted by ${report.submitted_by || 'engineer'} on ${formatWatDateTime(report.submitted_at)})`
+                  : ''}
+              . {mayReopen ? 'Click “Reopen as draft” with remarks if you need to revise any entry.' : 'Read-only.'}
+            </Alert>
+          )}
+          {report.is_deleted && (
+            <Alert severity="info">This report is read-only. Restore it from the register before making changes.</Alert>
+          )}
+          {!report.is_deleted && report.extraction_status === 'needs_review' && (
+            <Alert severity="info">
+              Extracted fields and blocks are prefilled as suggestions — including Measured Depths (MD), True Vertical
+              Depths (TVD), bit depth, casing, mud, BHA, surveys, narratives and WAT activity blocks. Verify, adjust any
+              value, and save the reviewed draft.
+            </Alert>
+          )}
+          {editable &&
+            (report.current_extraction_id || blocks.some((b) => b.review_state === 'suggested')) &&
+            can('ops-report:review') && (
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={confirmed}
+                  onChange={(e) => {
+                    setConfirmed(e.target.checked)
+                    setDirty(true)
+                  }}
+                />
+              }
+              label="I checked the source, scope, MD/TVD depths, wellbore parameters and WAT time allocations. Accept the remaining suggestions when I save."
+            />
+          )}
+        </Stack>
+
         <Tabs value={tab} onChange={(_, v) => setTab(v)} aria-label="Report editor sections" sx={{ mb: 1.5 }}>
-          <Tab value="log" label="Activity log" />
-          <Tab value="details" label="Brief & report details" />
-          <Tab value="sources" label="Sources & surveys" />
+          <Tab value="log" label={`Activity log (${blocks.length})`} />
+          <Tab value="details" label="Measurements, wellbore & narratives" />
+          <Tab value="sources" label={`Sources & surveys (${surveys.length})`} />
         </Tabs>
+
         {tab === 'log' && (
           <SectionCard
             title="Activity log"
-            subtitle="Times are UTC. Durations are calculated from the entered times."
-            action={editable && <Button onClick={addBlock}>Add block</Button>}
+            subtitle={`Times are entered and displayed in ${WAT_LABEL}. Durations are calculated directly from the start and end clocks.`}
+            action={
+              editable && (
+                <Stack direction="row" gap={1} flexWrap="wrap">
+                  {(report.source_document_id || blocks.length > 0) && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={prefillBusy ? <CircularProgress size={13} /> : <AutoAwesomeOutlined fontSize="small" />}
+                      disabled={dirty || busy || prefillBusy}
+                      onClick={() => void runAiPrefill()}
+                    >
+                      {prefillBusy ? 'Refining…' : 'AI Prefill Gaps'}
+                    </Button>
+                  )}
+                  <Button variant="contained" size="small" onClick={addBlock}>
+                    Add block
+                  </Button>
+                </Stack>
+              )
+            }
           >
             <Box display="flex" alignItems="center" gap={1} flexWrap="wrap" mb={1.5}>
               {Object.entries(totals).map(([k, v]) => (
-                <Chip key={k} label={`${k}: ${(v / 60).toFixed(3)} h · ${(v / 1440).toFixed(3)} d`} />
+                <Chip key={k} size="small" label={`${k}: ${(v / 60).toFixed(3)} h · ${(v / 1440).toFixed(3)} d`} />
               ))}
               <Chip
+                size="small"
                 label={`Productive ${(blocks.reduce((n, b) => n + (b.is_productive ? b.duration_minutes : 0), 0) / 60).toFixed(3)} h · Nonproductive ${(blocks.reduce((n, b) => n + (b.is_productive ? 0 : b.duration_minutes), 0) / 60).toFixed(3)} h`}
               />
-              <Chip label={`Period balance: ${gap} min`} />
+              <Chip size="small" label={`Period balance: ${gap} min`} />
+              {(report.depth_end_m || report.tvd_m) && (
+                <Chip
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  label={`MD: ${report.depth_start_m ?? '—'}→${report.depth_end_m ?? '—'} m · TVD: ${report.tvd_m ?? '—'} m${report.bit_depth_m ? ` · Bit: ${report.bit_depth_m} m` : ''}`}
+                />
+              )}
             </Box>
             <DataTable
               rows={blocks}
@@ -433,21 +695,36 @@ export default function OperationsReportDetail({
               columns={[
                 {
                   field: 'started_at',
-                  headerName: 'From (UTC)',
-                  valueFormatter: (p) => dateInput(p.value).replace('T', ' '),
+                  headerName: 'From (WAT)',
+                  minWidth: 145,
+                  valueFormatter: (p) => formatWatShort(p.value),
                 },
                 {
                   field: 'ended_at',
-                  headerName: 'To (UTC)',
-                  valueFormatter: (p) => dateInput(p.value).replace('T', ' '),
+                  headerName: 'To (WAT)',
+                  minWidth: 145,
+                  valueFormatter: (p) => formatWatShort(p.value),
                 },
-                { field: 'duration_minutes', headerName: 'Minutes' },
+                { field: 'duration_minutes', headerName: 'Min', minWidth: 80 },
+                {
+                  field: 'depth_to_m',
+                  headerName: 'MD (m)',
+                  minWidth: 120,
+                  valueGetter: ({ data }) => (data ? depthRange(data.depth_from_m, data.depth_to_m) : '—'),
+                },
+                {
+                  field: 'tvd_to_m',
+                  headerName: 'TVD (m)',
+                  minWidth: 120,
+                  valueGetter: ({ data }) => (data ? depthRange(data.tvd_from_m, data.tvd_to_m) : '—'),
+                },
+                { field: 'bit_depth_m', headerName: 'Bit (m)', minWidth: 95 },
                 { field: 'narrative', headerName: 'Operation', minWidth: 260, tooltipField: 'narrative' },
-                { field: 'source_phase_label', headerName: 'Phase', minWidth: 165, tooltipField: 'source_phase_label' },
+                { field: 'source_phase_label', headerName: 'Phase', minWidth: 155, tooltipField: 'source_phase_label' },
                 {
                   field: 'source_activity_label',
                   headerName: 'Activity code',
-                  minWidth: 220,
+                  minWidth: 205,
                   tooltipField: 'source_activity_label',
                   valueGetter: ({ data }) => {
                     const workspace = ref?.activity_codes.find((c) => c.id === data?.activity_code_id)
@@ -456,16 +733,16 @@ export default function OperationsReportDetail({
                       : data?.source_activity_label || ''
                   },
                 },
-                { field: 'classification', headerName: 'Class' },
-                { field: 'allocation', headerName: 'Allocation' },
-                { field: 'responsible_party', headerName: 'Agency' },
+                { field: 'classification', headerName: 'Class', minWidth: 98 },
+                { field: 'allocation', headerName: 'Alloc', minWidth: 90 },
+                { field: 'responsible_party', headerName: 'Agency', minWidth: 135 },
                 {
                   field: 'classification_evidence',
                   headerName: 'Evidence',
-                  minWidth: 240,
+                  minWidth: 220,
                   tooltipField: 'classification_evidence',
                 },
-                { field: 'review_state', headerName: 'Review' },
+                { field: 'review_state', headerName: 'Review', minWidth: 105 },
                 {
                   headerName: 'Actions',
                   minWidth: 150,
@@ -488,155 +765,335 @@ export default function OperationsReportDetail({
             />
           </SectionCard>
         )}
+
         {tab === 'details' && (
           <Box display="grid" gap={2} gridTemplateColumns={{ xs: 'minmax(0,1fr)', lg: 'minmax(0,3fr) minmax(0,2fr)' }}>
-            <SectionCard title="Daily measurements & narrative">
-              <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={2}>
-                {(
-                  [
-                    ['report_no_text', 'Report no.'],
-                    ['site', 'Site / well position'],
-                    ['depth_start_m', 'Starting MD (m)'],
-                    ['depth_end_m', 'Closing MD (m)'],
-                    ['tvd_m', 'TVD (m)'],
-                    ['rotating_hours', 'Rotating hours'],
-                    ['dfs_days', 'Days from spud'],
-                    ['day_number', 'Day number'],
-                  ] as const
-                ).map(([k, label]) => (
+            <Stack spacing={2}>
+              <SectionCard
+                title="Depths (MD & TVD) & Drilling Performance"
+                subtitle="All depths stored in metres (source ft automatically converted on extraction). Edit any prefilled value before saving."
+              >
+                <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(3,minmax(0,1fr))' }} gap={1.5}>
+                  {numField('depth_start_m', 'Starting MD (m)')}
+                  {numField('depth_end_m', 'Closing MD (m)')}
+                  {numField('progress_m', 'Daily progress (m)')}
+                  {numField('tvd_start_m', 'Starting TVD (m)')}
+                  {numField(
+                    'tvd_m',
+                    'Closing TVD (m)',
+                    report.tvd_source ? `Basis: ${report.tvd_source}` : undefined,
+                  )}
+                  {numField('bit_depth_m', 'Bit depth (m)')}
+                  {numField('md_auth_m', 'Authorized TD MD (m)')}
+                  {numField('rotating_hours', 'Rotating hours (h)')}
+                  {numField('cum_rotating_hours', 'Cum. rotating hours (h)')}
                   <TextField
-                    key={k}
                     size="small"
-                    label={label}
+                    type="date"
+                    label="Spud date"
+                    slotProps={{ inputLabel: { shrink: true } }}
                     disabled={!editable}
-                    value={h(k) ?? ''}
-                    onChange={(e) =>
-                      updateHeader({
-                        [k]:
-                          k === 'day_number'
-                            ? e.target.value
-                              ? Number(e.target.value)
-                              : null
-                            : e.target.value || (k === 'site' || k === 'report_no_text' ? '' : null),
-                      })
-                    }
+                    value={h('spud_date') ?? ''}
+                    onChange={(e) => updateHeader({ spud_date: e.target.value || null })}
                   />
-                ))}
-                {report.plan_checkpoints.length > 0 && (
+                  {numField('dfs_days', 'Days from spud (DFS)')}
+                  {numField('est_days', 'Authorized / est. days')}
+                  {numField('day_number', 'Day number')}
+                  {textField('datum', 'Depth datum (e.g. RKB/RT)')}
+                  {numField('pob_count', 'Personnel on board (POB)')}
+                </Box>
+              </SectionCard>
+
+              <SectionCard
+                title="Wellbore, Casing, Drilling Fluid & BHA"
+                subtitle="Prefilled from OpenWells casing/section/fluid/BHA blocks and DMR/Summary sheets."
+              >
+                <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(3,minmax(0,1fr))' }} gap={1.5}>
+                  {textField('hole_section_text', 'Hole section')}
+                  {numField('hole_size_in', 'Hole size (in)')}
+                  {numField('last_casing_size_in', 'Last casing OD (in)')}
+                  {numField('last_casing_depth_m', 'Last casing shoe MD (m)')}
+                  {textField('mud_type', 'Mud / fluid type')}
+                  {numField('mud_weight_ppg', 'Mud weight (ppg)')}
+                  {numField('mud_viscosity_sec', 'Funnel viscosity (s/qt)')}
+                  {numField('mud_pv_cp', 'Plastic viscosity PV (cP)')}
+                  {numField('mud_yp_lbf', 'Yield point YP (lbf/100ft²)')}
+                  {textField('bha_summary', 'BHA / completion string summary', true)}
+                  {textField('current_status', 'Current status at report cut-off', true)}
+                </Box>
+              </SectionCard>
+
+              <SectionCard
+                title={`Report Metadata, Period (${WAT_LABEL}) & Engineer Narratives`}
+                subtitle="Verify header identifiers, WAT period boundaries, 24-hr operation summary, forecast and HSE notes."
+              >
+                <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={1.5}>
+                  {textField('report_no_text', 'Report no.')}
+                  {textField('event_code', 'Event code')}
+                  {textField('customer', 'Operator / customer')}
+                  {textField('project', 'Project')}
+                  {textField('block_text', 'Block / concession')}
+                  {textField('site', 'Site / field / well position')}
+                  {textField('uwi', 'UWI')}
+                  {textField('supervisor', 'Rig supervisor')}
+                  {textField('engineer', 'Well engineer')}
+                  <Box />
+                  {(['period_start_at', 'period_end_at'] as const).map((k) => (
+                    <TextField
+                      key={k}
+                      label={k === 'period_start_at' ? `Period start (${WAT_LABEL})` : `Period end (${WAT_LABEL})`}
+                      type="datetime-local"
+                      size="small"
+                      slotProps={{ inputLabel: { shrink: true } }}
+                      disabled={!editable}
+                      value={toWatDateTimeInput(h(k) as string)}
+                      onChange={(e) => {
+                        const iso = fromWatDateTimeInput(e.target.value)
+                        if (iso) updateHeader({ [k]: iso })
+                      }}
+                    />
+                  ))}
+                  {report.plan_checkpoints.length > 0 && (
+                    <TextField
+                      sx={{ gridColumn: '1 / -1' }}
+                      select
+                      size="small"
+                      label="Last completed programme activity"
+                      value={h('completed_plan_item_id') ?? ''}
+                      disabled={!editable}
+                      onChange={(e) => updateHeader({ completed_plan_item_id: e.target.value || null })}
+                      helperText="Confirm a checkpoint for lead/lag when depth stays constant (e.g. casing, testing or completion work)."
+                    >
+                      <MenuItem value="">Compare at measured depth</MenuItem>
+                      {report.plan_checkpoints.map((c) => (
+                        <MenuItem key={c.id} value={c.id}>
+                          {c.description}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  )}
+                  {(
+                    [
+                      ['operation_summary', '24-hour operation summary'],
+                      ['forward_plan', '24-hour forecast / planned operations'],
+                      ['hse_summary', 'HSE & safety summary'],
+                      ['remarks', 'Engineer remarks'],
+                    ] as const
+                  ).map(([k, l]) => (
+                    <TextField
+                      key={k}
+                      sx={{ gridColumn: '1 / -1' }}
+                      label={l}
+                      multiline
+                      minRows={2}
+                      disabled={!editable}
+                      value={h(k) ?? ''}
+                      onChange={(e) => updateHeader({ [k]: e.target.value })}
+                    />
+                  ))}
+                </Box>
+              </SectionCard>
+            </Stack>
+
+            <Stack spacing={2}>
+              <SectionCard
+                title="AI D&C Narrative Generator"
+                subtitle="Generate concise, engineering-grade 24-hr operation summary, forecast and HSE text strictly from this report’s saved data using your offline LAN Ollama model (with instant rule-based fallback)."
+              >
+                <Stack spacing={1.25}>
                   <TextField
-                    sx={{ gridColumn: '1 / -1' }}
-                    select
-                    label="Last completed programme activity"
-                    value={h('completed_plan_item_id') ?? ''}
-                    disabled={!editable}
-                    onChange={(e) => updateHeader({ completed_plan_item_id: e.target.value || null })}
-                    helperText="Confirm a checkpoint for lead/lag when depth stays constant (e.g. completion work)."
-                  >
-                    <MenuItem value="">Compare at measured depth</MenuItem>
-                    {report.plan_checkpoints.map((c) => (
-                      <MenuItem key={c.id} value={c.id}>
-                        {c.description}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                )}
-                {(['period_start_at', 'period_end_at'] as const).map((k) => (
-                  <TextField
-                    key={k}
-                    label={k === 'period_start_at' ? 'Period start (UTC)' : 'Period end (UTC)'}
-                    type="datetime-local"
                     size="small"
-                    disabled={!editable}
-                    value={dateInput(h(k) as string)}
-                    onChange={(e) => {
-                      if (e.target.value) updateHeader({ [k]: `${e.target.value}:00Z` })
-                    }}
+                    label="Optional focus (e.g. highlight casing run, mud conditioning, NPT recovery)"
+                    value={narFocus}
+                    onChange={(e) => setNarFocus(e.target.value)}
+                    disabled={narBusy || dirty}
                   />
-                ))}
-                {(
-                  [
-                    ['operation_summary', '24-hour summary'],
-                    ['forward_plan', 'Forward plan'],
-                    ['hse_summary', 'HSE summary'],
-                    ['remarks', 'Remarks'],
-                  ] as const
-                ).map(([k, l]) => (
-                  <TextField
-                    key={k}
-                    label={l}
-                    multiline
-                    minRows={2}
-                    disabled={!editable}
-                    value={h(k) ?? ''}
-                    onChange={(e) => updateHeader({ [k]: e.target.value })}
-                  />
-                ))}
-              </Box>
-            </SectionCard>
-            <SectionCard
-              title="Daily brief"
-              subtitle={dirty ? 'Based on the last saved draft.' : 'Based on the saved report.'}
-            >
-              {briefError && <ErrorMessage message={briefError} />}
-              <StudyPanel
-                key={report.updated_at}
-                summary={brief}
-                disabled={dirty || busy}
-                runLabel="Generate brief"
-                run={(useAi) => reviewBrief(report.id, useAi, includeDeleted)}
-              />
-            </SectionCard>
+                  <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          size="small"
+                          checked={narUseAi}
+                          onChange={(_, v) => setNarUseAi(v)}
+                          disabled={narBusy}
+                        />
+                      }
+                      label={<Typography fontSize={12.5}>Offline AI (Ollama)</Typography>}
+                    />
+                    <Button
+                      variant="contained"
+                      size="small"
+                      startIcon={
+                        narBusy ? <CircularProgress size={13} color="inherit" /> : <AutoAwesomeOutlined fontSize="small" />
+                      }
+                      disabled={narBusy || dirty || busy}
+                      onClick={() => void runNarratives(narUseAi)}
+                    >
+                      {narBusy ? 'Drafting…' : 'Generate narratives'}
+                    </Button>
+                  </Stack>
+                  {dirty && (
+                    <Typography variant="caption" color="text.secondary">
+                      Save current edits first so the generator reads your latest measurements and blocks.
+                    </Typography>
+                  )}
+                  {narratives?.ai_error && (
+                    <AiStatusAlert
+                      message={narratives.ai_error}
+                      errorCode={narratives.ai_error_code}
+                      model={narratives.ai_model}
+                      busy={narBusy}
+                      fallbackNote="Rule-based engineer narratives drafted from saved figures are shown below."
+                      onRetry={() => void runNarratives(true)}
+                    />
+                  )}
+                  {narratives && (
+                    <Box
+                      sx={{
+                        p: 1.5,
+                        borderRadius: 1.5,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        bgcolor: 'background.default',
+                        display: 'grid',
+                        gap: 1,
+                      }}
+                    >
+                      <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">
+                        <Chip
+                          size="small"
+                          color={narratives.ai_used ? 'primary' : 'default'}
+                          label={narratives.ai_used ? `Offline AI · ${narratives.ai_model}` : 'Rule-based D&C draft'}
+                        />
+                        {editable && (
+                          <Button size="small" variant="outlined" sx={{ ml: 'auto' }} onClick={applyNarratives}>
+                            Apply to draft fields
+                          </Button>
+                        )}
+                      </Stack>
+                      {narratives.operation_summary && (
+                        <Box>
+                          <Typography variant="caption" fontWeight={700} color="text.secondary">
+                            24-HR SUMMARY
+                          </Typography>
+                          <Typography fontSize={12.5}>{narratives.operation_summary}</Typography>
+                        </Box>
+                      )}
+                      {narratives.forward_plan && (
+                        <Box>
+                          <Typography variant="caption" fontWeight={700} color="text.secondary">
+                            24-HR FORECAST
+                          </Typography>
+                          <Typography fontSize={12.5}>{narratives.forward_plan}</Typography>
+                        </Box>
+                      )}
+                      {narratives.hse_summary && (
+                        <Box>
+                          <Typography variant="caption" fontWeight={700} color="text.secondary">
+                            HSE SUMMARY
+                          </Typography>
+                          <Typography fontSize={12.5}>{narratives.hse_summary}</Typography>
+                        </Box>
+                      )}
+                      {narratives.engineering_brief && (
+                        <>
+                          <Divider />
+                          <Box>
+                            <Typography variant="caption" fontWeight={700} color="text.secondary">
+                              ENGINEERING BRIEF
+                            </Typography>
+                            <Typography fontSize={12.5}>{narratives.engineering_brief}</Typography>
+                          </Box>
+                        </>
+                      )}
+                    </Box>
+                  )}
+                </Stack>
+              </SectionCard>
+
+              <SectionCard
+                title="Daily brief"
+                subtitle={dirty ? 'Based on the last saved draft.' : 'Based on the saved report.'}
+              >
+                {briefError && <ErrorMessage message={briefError} />}
+                <StudyPanel
+                  key={report.updated_at}
+                  summary={brief}
+                  disabled={dirty || busy}
+                  runLabel="Generate brief"
+                  run={(useAi) => reviewBrief(report.id, useAi, includeDeleted)}
+                />
+              </SectionCard>
+            </Stack>
           </Box>
         )}
+
         {tab === 'sources' && (
-          <>
+          <Stack spacing={2}>
             <SectionCard
-              title="Source documents"
+              title="Source documents & extraction notes"
               action={
-                editable &&
-                report.status === 'draft' &&
-                can('ops-doc:read') &&
-                can('ops-doc:extract') && (
-                  <Button disabled={dirty || busy} onClick={() => setSource(true)}>
-                    Extract PDF / Excel
-                  </Button>
-                )
+                <Stack direction="row" gap={1} flexWrap="wrap">
+                  {editable && (report.source_document_id || report.sources.length > 0) && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={prefillBusy ? <CircularProgress size={13} /> : <AutoAwesomeOutlined fontSize="small" />}
+                      disabled={dirty || busy || prefillBusy}
+                      onClick={() => void runAiPrefill()}
+                    >
+                      {prefillBusy ? 'Refining…' : 'AI Prefill from Source'}
+                    </Button>
+                  )}
+                  {editable && report.status === 'draft' && can('ops-doc:read') && can('ops-doc:extract') && (
+                    <Button variant="contained" size="small" disabled={dirty || busy} onClick={() => setSource(true)}>
+                      Extract PDF / Excel
+                    </Button>
+                  )}
+                </Stack>
               }
             >
               {report.sources.length ? (
-                report.sources.map((s) =>
-                  can('ops-doc:download') ? (
-                    <Button
-                      key={s.id}
-                      onClick={() =>
-                        downloadFile(`/operations/documents/${s.id}/download`, s.file_name).catch((e) =>
-                          setError(e.message),
-                        )
-                      }
-                    >
-                      {s.file_name}
-                    </Button>
-                  ) : (
-                    <Typography key={s.id}>{s.file_name}</Typography>
-                  ),
-                )
+                <Stack direction="row" gap={1} flexWrap="wrap" mb={report.extraction_notes ? 1 : 0}>
+                  {report.sources.map((s) =>
+                    can('ops-doc:download') ? (
+                      <Button
+                        key={s.id}
+                        variant="outlined"
+                        size="small"
+                        onClick={() =>
+                          downloadFile(`/operations/documents/${s.id}/download`, s.file_name).catch((e) =>
+                            setError((e as Error).message),
+                          )
+                        }
+                      >
+                        {s.file_name}
+                      </Button>
+                    ) : (
+                      <Typography key={s.id}>{s.file_name}</Typography>
+                    ),
+                  )}
+                </Stack>
               ) : (
                 <Typography variant="body2">
                   {report.source_document_id ? 'Previously filed source' : 'Manual entry · no source attached'}
                 </Typography>
               )}
               {report.extraction_notes && (
-                <Typography whiteSpace="pre-line" variant="body2" color="text.secondary">
+                <Typography whiteSpace="pre-line" variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   {report.extraction_notes}
                 </Typography>
               )}
             </SectionCard>
+
             <SectionCard
-              title="Survey stations"
-              subtitle="Reported offsets are relative to the survey datum. A blank value is unknown, not zero."
+              title="Directional survey stations"
+              subtitle="Reported MD, TVD, inclination, azimuth, offsets and dogleg severity relative to the survey datum. Blank means unrecorded, never zero."
               action={
                 editable && (
                   <Button
+                    size="small"
+                    variant="outlined"
                     onClick={() => {
                       setSurveys([...surveys, newSurvey()])
                       setDirty(true)
@@ -649,15 +1106,15 @@ export default function OperationsReportDetail({
             >
               {!surveys.length && <Typography variant="body2">No survey measurements reported.</Typography>}
               {surveys.map((s, i) => (
-                <Box key={i} display="flex" gap={1} flexWrap="wrap" mb={1}>
-                  <Typography variant="body2">
+                <Box key={i} display="flex" gap={1} alignItems="center" flexWrap="wrap" mb={1.25}>
+                  <Typography variant="body2" sx={{ minWidth: 110, fontWeight: 600 }}>
                     Station {i + 1} · {s.tool || s.source}
                   </Typography>
                   {(Object.keys(surveyFields) as (keyof typeof surveyFields)[]).map((k) => (
                     <TextField
                       size="small"
                       key={k}
-                      sx={{ width: 130 }}
+                      sx={{ width: 132 }}
                       label={surveyFields[k]}
                       value={s[k] ?? ''}
                       disabled={!editable}
@@ -669,6 +1126,7 @@ export default function OperationsReportDetail({
                   ))}
                   {editable && (
                     <Button
+                      size="small"
                       color="error"
                       onClick={() => {
                         setSurveys(surveys.filter((_, j) => i !== j))
@@ -681,8 +1139,9 @@ export default function OperationsReportDetail({
                 </Box>
               ))}
             </SectionCard>
-          </>
+          </Stack>
         )}
+
         {source && ref && (
           <SourceDialog
             extract
@@ -701,10 +1160,12 @@ export default function OperationsReportDetail({
             }}
           />
         )}
+
         {editor && (
           <FormDialog
             open
             title={`Activity block ${editor.sequence_no}`}
+            subtitle={`Duration: ${duration > 0 ? `${duration} min (${(duration / 60).toFixed(2)} h)` : 'Invalid range'} · Timestamps in ${WAT_LABEL}`}
             maxWidth={false}
             dirty={editorDirty}
             onClose={() => setEditor(null)}
@@ -712,15 +1173,21 @@ export default function OperationsReportDetail({
             submitLabel={editable ? 'Apply to draft' : 'Done'}
             submitDisabled={editable && !(duration > 0 && duration <= 1440)}
           >
-            <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={2} pt={1}>
+            <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr', md: 'repeat(3,minmax(0,1fr))' }} gap={2} pt={1}>
               {(['started_at', 'ended_at'] as const).map((k) => (
                 <TextField
                   key={k}
                   type="datetime-local"
-                  label={k === 'started_at' ? 'From (UTC)' : 'To (UTC)'}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                  label={k === 'started_at' ? `From (${WAT_LABEL})` : `To (${WAT_LABEL})`}
                   disabled={!editable}
-                  value={dateInput(editor[k])}
-                  onChange={(e) => setEditor({ ...editor, [k]: e.target.value ? `${e.target.value}:00Z` : '' })}
+                  value={toWatDateTimeInput(editor[k])}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      [k]: fromWatDateTimeInput(e.target.value) ?? '',
+                    })
+                  }
                 />
               ))}
               <TextField
@@ -766,44 +1233,6 @@ export default function OperationsReportDetail({
               </TextField>
               <TextField
                 select
-                label="NPT code"
-                disabled={!editable}
-                value={editor.npt_code_id ?? ''}
-                onChange={(e) => setEditor({ ...editor, npt_code_id: e.target.value || null })}
-              >
-                <MenuItem value="">Not assigned</MenuItem>
-                {ref?.npt_codes.map((n) => (
-                  <MenuItem key={n.id} value={n.id}>
-                    {n.npt_name} ({n.npt_code})
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                label="NPT / UPA agency (vendor)"
-                disabled={
-                  !editable || (editor.classification === 'Planned' && !['UPA', 'NPT'].includes(editor.allocation))
-                }
-                value={editor.vendor_id ?? ''}
-                onChange={(e) => {
-                  const v = ref?.vendors.find((v) => v.id === e.target.value)
-                  setEditor({
-                    ...editor,
-                    vendor_id: v?.id ?? null,
-                    responsible_party: v?.vendor_name ?? '',
-                    agency_id: null,
-                  })
-                }}
-              >
-                <MenuItem value="">Not assigned</MenuItem>
-                {ref?.vendors.map((v) => (
-                  <MenuItem key={v.id} value={v.id}>
-                    {v.vendor_name} ({v.vendor_code})
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
                 label="Operation code"
                 value={editor.operation_code_id ?? ''}
                 disabled={!editable}
@@ -832,6 +1261,20 @@ export default function OperationsReportDetail({
               </TextField>
               <TextField
                 select
+                label="NPT code"
+                disabled={!editable}
+                value={editor.npt_code_id ?? ''}
+                onChange={(e) => setEditor({ ...editor, npt_code_id: e.target.value || null })}
+              >
+                <MenuItem value="">Not assigned</MenuItem>
+                {ref?.npt_codes.map((n) => (
+                  <MenuItem key={n.id} value={n.id}>
+                    {n.npt_name} ({n.npt_code})
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select
                 label="Cause"
                 value={editor.cause_code}
                 disabled={!editable}
@@ -847,6 +1290,34 @@ export default function OperationsReportDetail({
                   </MenuItem>
                 ))}
               </TextField>
+              <TextField
+                select
+                label="Agency / service vendor"
+                disabled={!editable}
+                value={editor.vendor_id ?? ''}
+                onChange={(e) => {
+                  const v = ref?.vendors.find((item) => item.id === e.target.value)
+                  setEditor({
+                    ...editor,
+                    vendor_id: v?.id ?? null,
+                    responsible_party: v?.vendor_name ?? editor.responsible_party,
+                    agency_id: null,
+                  })
+                }}
+              >
+                <MenuItem value="">Custom / not linked</MenuItem>
+                {ref?.vendors.map((v) => (
+                  <MenuItem key={v.id} value={v.id}>
+                    {v.vendor_name} ({v.vendor_code})
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="Responsible agency label"
+                disabled={!editable}
+                value={editor.responsible_party}
+                onChange={(e) => setEditor({ ...editor, responsible_party: e.target.value })}
+              />
               <Autocomplete
                 freeSolo
                 disabled={!editable}
@@ -874,8 +1345,13 @@ export default function OperationsReportDetail({
                 [
                   ['depth_from_m', 'From MD (m)'],
                   ['depth_to_m', 'To MD (m)'],
+                  ['tvd_from_m', 'From TVD (m)'],
+                  ['tvd_to_m', 'To TVD (m)'],
                   ['bit_depth_m', 'Bit depth (m)'],
-                  ['rotating_hours', 'Rotating hours'],
+                  ['mud_weight_ppg', 'Mud weight (ppg)'],
+                  ['footage_m', 'Footage (m)'],
+                  ['rotating_hours', 'Rotating hours (h)'],
+                  ['rop_m_per_hr', 'ROP (m/hr)'],
                 ] as const
               ).map(([k, l]) => (
                 <TextField
@@ -887,7 +1363,8 @@ export default function OperationsReportDetail({
                 />
               ))}
               <TextField
-                label="Reason"
+                sx={{ gridColumn: '1 / -1' }}
+                label="NPT / delay reason"
                 disabled={!editable}
                 value={editor.reason}
                 onChange={(e) => setEditor({ ...editor, reason: e.target.value })}
@@ -921,7 +1398,7 @@ export default function OperationsReportDetail({
                     .join(' · ')}
                 </Typography>
               )}
-              <Typography variant="body2" sx={{ gridColumn: '1 / -1' }}>
+              <Typography variant="body2" color="text.secondary" sx={{ gridColumn: '1 / -1' }}>
                 Source: {editor.source_bbox || 'Manual entry'} ·{' '}
                 {editor.classification_evidence || editor.classification_source} · Confidence{' '}
                 {Number(editor.confidence).toFixed(3)}
@@ -929,6 +1406,7 @@ export default function OperationsReportDetail({
             </Box>
           </FormDialog>
         )}
+
         {remove && (
           <FormDialog
             open
@@ -945,6 +1423,7 @@ export default function OperationsReportDetail({
             The stored log will change only when you save.
           </FormDialog>
         )}
+
         {reject && (
           <FormDialog
             open
@@ -953,10 +1432,40 @@ export default function OperationsReportDetail({
             submitLabel="Reject"
             busy={busy}
             submitDisabled={!reason.trim()}
-            onSubmit={() => transition('reject')}
+            onSubmit={() => void transition('reject')}
           >
             <TextField fullWidth label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
             {error && <ErrorMessage message={error} />}
+          </FormDialog>
+        )}
+
+        {reopenOpen && (
+          <FormDialog
+            open
+            title={`Reopen ${report.report_type} ${report.report_no_text} (${report.report_date})?`}
+            subtitle="Moves this submitted or approved daily report back to editable draft so you can revise measurements, MD/TVD depths, time blocks, surveys or narratives, then save and re-submit. Reports older than 30 days require ops-report:amend. Logged permanently in the Audit Log."
+            onClose={() => setReopenOpen(false)}
+            submitLabel="Reopen as draft"
+            busyLabel="Reopening…"
+            busy={busy}
+            submitDisabled={reopenRemarks.trim().length < 3}
+            onSubmit={() => void transition('reopen')}
+            maxWidth="sm"
+          >
+            <Box display="grid" gap={2} pt={1}>
+              <TextField
+                required
+                fullWidth
+                multiline
+                minRows={3}
+                label="Reason for reopening (audit log)"
+                value={reopenRemarks}
+                onChange={(e) => setReopenRemarks(e.target.value)}
+                slotProps={{ htmlInput: { maxLength: 500 } }}
+                helperText="Minimum 3 characters. Describe the correction or update required."
+              />
+              {error && <ErrorMessage message={error} />}
+            </Box>
           </FormDialog>
         )}
       </PanelDialog>

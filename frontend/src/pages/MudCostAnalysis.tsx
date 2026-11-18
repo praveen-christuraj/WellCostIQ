@@ -30,6 +30,7 @@ import {
   type MudCostReconciliationRow, type MudCostReconciliationSection, type MudCostReference,
   type MudCostSectionSetting, type MudCostSectionSettingPayload,
 } from '../lib/mudCost'
+import { watTodayIso } from '../lib/time'
 
 const ALL_SECTIONS = '__all_sections__'
 
@@ -609,7 +610,7 @@ export default function MudCostAnalysis() {
         well_id: wellId,
         section_id: entrySectionId === ALL_SECTIONS ? '' : entrySectionId,
       })
-      const filename = `mud-cost-${deletedView ? 'deleted-' : ''}detail-${new Date().toISOString().slice(0, 10)}.${format}`
+      const filename = `mud-cost-${deletedView ? 'deleted-' : ''}detail-${watTodayIso()}.${format}`
       if (format === 'csv') exportCsv(filename, tableRows, detailedExportColumns)
       else await exportXlsx(filename, tableRows, detailedExportColumns)
     } catch (caught) {

@@ -23,6 +23,7 @@ import {
   type OrderRevision,
   type PoSoOrder,
 } from '../lib/vendorMaster'
+import { formatWatDateTime } from '../lib/time'
 
 // The attachment workspace for one PO/SO revision: attach the scanned copies, keep
 // the older revisions' files, and recover anything that was removed by mistake.
@@ -282,7 +283,7 @@ export function OrderDocumentsDialog({ open, order, onClose, onChanged }: {
                   <TableCell sx={{ fontSize: 12 }}>{formatBytes(document.size_bytes)}</TableCell>
                   <TableCell sx={{ fontSize: 12 }}>
                     {document.uploaded_by_name || '—'}
-                    <Typography fontSize={11} color="text.secondary">{new Date(document.created_at).toLocaleString()}</Typography>
+                    <Typography fontSize={11} color="text.secondary">{formatWatDateTime(document.created_at)}</Typography>
                   </TableCell>
                   <TableCell className="sticky-action-cell">
                     <Box display="flex" gap={.2}>
@@ -315,7 +316,7 @@ export function OrderDocumentsDialog({ open, order, onClose, onChanged }: {
               <DescriptionOutlined sx={{ fontSize: 16, color: 'text.secondary' }}/>
               <Box flex={1} minWidth={0}>
                 <Typography fontSize={12} fontWeight={700} noWrap>{document.file_name}</Typography>
-                <Typography fontSize={11} color="text.secondary">Removed {document.deleted_at ? new Date(document.deleted_at).toLocaleString() : ''}</Typography>
+                <Typography fontSize={11} color="text.secondary">Removed {document.deleted_at ? formatWatDateTime(document.deleted_at) : ''}</Typography>
               </Box>
               {canDownload && <Button size="small" onClick={() => void download(document)} aria-label={`Download removed ${document.file_name}`}>Download</Button>}
               {can('master-data:restore') && <Button size="small" onClick={() => void restore(document)} startIcon={<RestoreOutlined sx={{ fontSize: 15 }}/>} aria-label={`Restore ${document.file_name}`}>Restore</Button>}

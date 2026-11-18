@@ -6,6 +6,7 @@ import { AllCommunityModule, ModuleRegistry, themeQuartz, type ColDef, type Grid
 import { useColorMode } from '../context/ThemeContext'
 import { control, gridThemeParams } from '../designSystem'
 import { exportColumns, exportCsv, exportPdf, exportXlsx } from '../lib/export'
+import { watTodayIso } from '../lib/time'
 ModuleRegistry.registerModules([AllCommunityModule])
 
 type FieldDef = { field: string; label: string; kind: 'text' | 'date' | 'boolean' }
@@ -196,7 +197,7 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
   const doExport = async (kind: 'csv' | 'xlsx' | 'pdf') => {
     setExportAnchor(null)
     setExportError('')
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = watTodayIso()
     const name = `${exportName}-${stamp}`
     try {
       const checked = exportSelected ? new Set(gridApi.current?.getSelectedRows()) : null

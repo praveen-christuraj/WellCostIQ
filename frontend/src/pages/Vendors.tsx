@@ -21,6 +21,7 @@ import {
   type VendorFormState,
   type VendorPayload,
 } from '../lib/vendorMaster'
+import { formatWatDate } from '../lib/time'
 
 export default function Vendors() {
   const { can } = useAuth()
@@ -162,7 +163,7 @@ export default function Vendors() {
     { headerName: 'PO/SO', field: 'order_count', minWidth: 85, maxWidth: 110 },
     { headerName: 'FILES', field: 'document_count', minWidth: 85, maxWidth: 110 },
     { headerName: 'LATEST ORDER', field: 'latest_order_date', minWidth: 125, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '—' },
-    { headerName: 'UPDATED', field: 'updated_at', minWidth: 125, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'UPDATED', field: 'updated_at', minWidth: 125, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 250, minWidth: 250, maxWidth: 250, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: Vendor }) => <Box display="flex" alignItems="center" height="100%" gap={.2}>

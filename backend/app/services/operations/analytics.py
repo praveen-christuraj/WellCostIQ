@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
+from app.core.time import as_wat
 from app.domain.operations.durations import utc
 from app.domain.operations.metrics import compute_rop, penetration, period_balance
 from app.models.operations import (
@@ -249,8 +250,8 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
             if b.allocation == "NPT":
                 npt.append(
                     {
-                        "from": b.started_at.isoformat(),
-                        "to": b.ended_at.isoformat(),
+                        "from": (as_wat(b.started_at) or b.started_at).isoformat(),
+                        "to": (as_wat(b.ended_at) or b.ended_at).isoformat(),
                         "reason": b.reason or b.narrative[:100],
                     }
                 )

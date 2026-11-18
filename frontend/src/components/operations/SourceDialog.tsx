@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Box, Button, MenuItem, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, FormControlLabel, MenuItem, Switch, TextField, Typography } from '@mui/material'
 import { FormDialog } from '../Common'
 import { useAuth } from '../../context/AuthContext'
 import {
@@ -34,6 +34,7 @@ export function SourceDialog({
   const [day, setDay] = useState(report?.report_date ?? '')
   const [files, setFiles] = useState<File[]>([])
   const [mode, setMode] = useState(extract ? 'vault' : 'upload')
+  const [useAi, setUseAi] = useState(false)
   const [docs, setDocs] = useState<OpsDocument[]>([]),
     [docId, setDocId] = useState('')
   const [loading, setLoading] = useState(false)
@@ -75,7 +76,7 @@ export function SourceDialog({
         for (const file of files)
           uploaded = await uploadDocument(file, { ...folder, document_type: type, document_date: day })
       }
-      if (extract) onSaved(await extractReport(uploaded?.id ?? docId, day, report?.id))
+      if (extract) onSaved(await extractReport(uploaded?.id ?? docId, day, report?.id, useAi))
       else onSaved(undefined, uploaded)
     } catch (e) {
       setError((e as Error).message)
@@ -175,10 +176,25 @@ export function SourceDialog({
           slotProps={{ inputLabel: { shrink: true } }}
           helperText={
             extract
-              ? 'Choose a day for a multi-day Summary workbook. Leave blank to use the PDF or mud report date.'
+              ? 'Choose a day for a multi-day Summary workbook. Leave blank to use the PDF or mud report date. Timestamps use WAT (UTC+1:00).'
               : undefined
           }
         />
+        {extract && (
+          <Box sx={{ gridColumn: '1 / -1' }}>
+            <FormControlLabel
+              control={<Switch size="small" checked={useAi} onChange={(_, v) => setUseAi(v)} disabled={busy} />}
+              label={
+                <Typography fontSize={12.5} fontWeight={600}>
+                  Refine &amp; prefill missing fields with Offline AI (Ollama)
+                </Typography>
+              }
+            />
+            <Typography variant="caption" color="text.secondary" display="block">
+              Captures all MDs, TVDs, bit depth, casing, mud properties, BHA, surveys, codes and narratives deterministically first, then asks your local LAN AI model to fill any remaining header or block classification gaps for your review.
+            </Typography>
+          </Box>
+        )}
         {busy && (
           <Typography role="status">
             {extract

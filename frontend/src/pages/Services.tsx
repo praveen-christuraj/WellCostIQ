@@ -23,6 +23,7 @@ import {
 } from '../lib/serviceMaster'
 import { SERVICE_GROUPS, compareServiceGroups, type ServiceGroup } from '../lib/serviceGroups'
 import type { VendorOption } from '../lib/vendorMaster'
+import { formatWatDate } from '../lib/time'
 
 function StatCard({ label, value, hint }: { label: string; value: number; hint: string }) {
   return <Paper className="stat-card" variant="outlined" sx={{ p: 2.2 }}>
@@ -206,7 +207,7 @@ export default function Services() {
         : 'Vendor assignment required',
     },
     { headerName: 'DESCRIPTION', field: 'description', minWidth: 190, flex: 1.2, valueFormatter: params => params.value || '—' },
-    { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 185, minWidth: 185, maxWidth: 185, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: Service }) => <Box display="flex" alignItems="center" height="100%" gap={.3}>

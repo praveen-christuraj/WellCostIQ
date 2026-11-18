@@ -8,6 +8,7 @@ import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
+import { formatWatDateTime } from '../lib/time'
 
 // Vendors and PO/SO Orders have their own pages; the reference lists share one.
 const CONSUMABLE_KEYS = ['mud-chemicals', 'cement-additives', 'fuel-types', 'drill-bits']
@@ -35,7 +36,7 @@ function RecentActivity({ entries }: { entries: MasterDataActivity[] }) {
       <Box flex={1} minWidth={0}>
         <Typography fontSize={12.5} fontWeight={650} noWrap>{entry.entity_label}</Typography>
         <Typography color="text.secondary" fontSize={11.5}>{entry.summary}</Typography>
-        <Typography color="text.disabled" fontSize={10.5} mt={.35}>{new Date(entry.created_at).toLocaleString()}</Typography>
+        <Typography color="text.disabled" fontSize={10.5} mt={.35}>{formatWatDateTime(entry.created_at)}</Typography>
       </Box>
     </Box>)}
   </Box>

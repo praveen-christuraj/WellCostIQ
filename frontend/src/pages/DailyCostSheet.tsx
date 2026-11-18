@@ -44,6 +44,7 @@ import type { NdtEntry } from '../lib/ndtInspection'
 import { formatDepthMeters } from '../lib/units'
 import { COSTING_SET_ITEM_KIND_LABEL, type CostingSet, type CostingSetGroup } from '../lib/costingSets'
 import type { Template } from '../lib/recordTemplates'
+import { formatWatDateTime } from '../lib/time'
 
 /** Where each dialog kind lives inside the save payload. */
 type LineGroupKey = 'services' | 'consumables' | 'tangibles' | 'other_expenses'
@@ -1391,7 +1392,7 @@ export default function DailyCostSheet() {
     <ErrorMessage message={saveError}/>
     {previewError && <Alert severity="error" sx={{ mb: 1.5 }} action={can('daily-cost:update') ? <Button color="inherit" size="small" onClick={() => { setPreviewError(''); setPreview(null); setPreviewRetry(value => value + 1) }}>Retry preview</Button> : undefined}>{previewError}</Alert>}
     {entry.status === 'submitted' && <Alert severity="info" icon={<LockOutlined/>} sx={{ mb: 1.5 }}>
-      Submitted by {entry.submitted_by || 'workspace user'}{entry.submitted_at ? ` on ${new Date(entry.submitted_at).toLocaleString()}` : ''}. The daily sheet is read-only{entry.status_remarks ? ` · ${entry.status_remarks}` : ''}.
+      Submitted by {entry.submitted_by || 'workspace user'}{entry.submitted_at ? ` on ${formatWatDateTime(entry.submitted_at)}` : ''}. The daily sheet is read-only{entry.status_remarks ? ` · ${entry.status_remarks}` : ''}.
     </Alert>}
     {!editable && entry.status === 'draft' && <Alert severity="info" sx={{ mb: 1.5 }}>You can view this Draft. Editing requires the Daily Cost update permission.</Alert>}
     {entry.status === 'draft' && editable && previousDay && <Alert severity="info" icon={<ContentCopyOutlined/>} sx={{ mb: 1.5 }}
@@ -1494,7 +1495,7 @@ export default function DailyCostSheet() {
     </Box>
     {amendments.length > 0 && <Alert severity="info" sx={{ mb: 1.5 }}>
       Amended {amendments.length} time{amendments.length === 1 ? '' : 's'} after its cost date
-      {amendments[amendments.length - 1] ? ` — latest by ${amendments[amendments.length - 1].reopened_by || 'workspace user'} on ${new Date(amendments[amendments.length - 1].reopened_at).toLocaleString()}: ${amendments[amendments.length - 1].reason}` : ''}.
+      {amendments[amendments.length - 1] ? ` — latest by ${amendments[amendments.length - 1].reopened_by || 'workspace user'} on ${formatWatDateTime(amendments[amendments.length - 1].reopened_at)}: ${amendments[amendments.length - 1].reason}` : ''}.
     </Alert>}
 
     <Paper variant="outlined" sx={{ p: 1.8, borderRadius: 2, mb: 1.7 }}>
@@ -1502,7 +1503,7 @@ export default function DailyCostSheet() {
         <Box>
           <Typography fontWeight={800} fontSize={14}>Immutable daily cost baseline</Typography>
           <Typography color="text.secondary" fontSize={11.5} mt={.3}>
-            AFE budget and exchange rates locked {new Date(baseline.locked_at).toLocaleString()} · Well catalogue prices locked {new Date(entry.rate_baseline_locked_at).toLocaleString()} · AFE status when started: {entry.afe_status}.
+            AFE budget and exchange rates locked {formatWatDateTime(baseline.locked_at)} · Well catalogue prices locked {formatWatDateTime(entry.rate_baseline_locked_at)} · AFE status when started: {entry.afe_status}.
           </Typography>
         </Box>
         <Box display="flex" gap={1} flexWrap="wrap">

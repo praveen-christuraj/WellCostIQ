@@ -11,9 +11,10 @@ import { api, body } from '../lib/api'
 import { readActiveScope, requestedScope, resolveRequestedScope, writeActiveScope, type ActiveScope } from '../lib/activeScope'
 import type { ImportRow } from '../lib/export'
 import { NDT_IMPORT_HEADERS, NDT_IMPORT_OPTIONAL, NDT_IMPORT_SAMPLE, importNdtRow, newNdtLine, quantity, type NdtEntry, type NdtLine, type NdtReference, type NdtScope } from '../lib/ndtInspection'
+import { formatWatDateTime } from '../lib/time'
 
 const numericFields = ['quantity_received', 'quantity_consumed', 'quantity_backloaded_good', 'quantity_backloaded_bad'] as const
-const dateText = (value: string) => new Date(value).toLocaleString()
+const dateText = (value: string) => formatWatDateTime(value)
 
 export default function NdtInspectionRegister() {
   const { can, user } = useAuth()

@@ -93,9 +93,12 @@ CAPABILITIES = {resource: actions for resource, actions in {
     "template": ("read", "create", "update", "delete", "export"),
     "ops-dashboard": ("read",),
     "ops-doc": ("read", "upload", "update", "delete", "restore", "permanent-delete", "download", "extract", "export"),
-    "ops-report": ("read", "create", "update", "delete", "restore", "permanent-delete", "import", "export", "submit", "approve", "amend", "print", "review"),
+    "ops-report": (
+        "read", "create", "update", "delete", "restore", "permanent-delete", "import", "export",
+        "submit", "approve", "reopen", "amend", "print", "review",
+    ),
     "ops-master": ("read", "create", "update", "delete", "restore", "import", "export"),
-    "ops-plan": ("read", "create", "update", "delete", "restore", "activate", "import", "export"),
+    "ops-plan": ("read", "create", "update", "delete", "restore", "activate", "reopen", "import", "export"),
     "ops-analytics": ("read", "export"),
     "ops-settings": ("read", "update"),
 }.items()}

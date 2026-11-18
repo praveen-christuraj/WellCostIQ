@@ -14,6 +14,7 @@ import { exportCsv, exportPdf, exportXlsx, type ExportColumn } from '../lib/expo
 import type { TaskEvent, TaskOverview, TaskPage, TaskPriority, TaskStatus, WorkflowTask } from '../lib/workflowTypes'
 import type { User } from '../lib/types'
 import { useAuth } from '../context/AuthContext'
+import { formatWatClock, formatWatDate, formatWatDateTime, fromWatDateTimeInput, WAT_LABEL, watTodayIso } from '../lib/time'
 
 const PAGE_SIZES = [20, 50, 100]
 const PRIORITY_TONE: Record<TaskPriority, Tone> = { low: 'neutral', normal: 'info', high: 'warning', critical: 'error' }
@@ -34,9 +35,9 @@ function dueLabel(value: string | null): { text: string; tone: Tone } {
   if (!value) return { text: 'No due date', tone: 'neutral' }
   const due = new Date(value)
   const diff = Math.ceil((due.getTime() - Date.now()) / 86400000)
-  const text = due.toLocaleDateString()
+  const text = formatWatDate(value)
   if (diff < 0) return { text: `Overdue · ${text}`, tone: 'error' }
-  if (diff === 0) return { text: `Due today · ${due.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, tone: 'warning' }
+  if (diff === 0) return { text: `Due today · ${formatWatClock(due, true)}`, tone: 'warning' }
   return { text, tone: diff <= 2 ? 'warning' : 'neutral' }
 }
 
@@ -172,7 +173,7 @@ export default function TaskManager() {
           description: form.description.trim(),
           priority: form.priority,
           assignee_user_id: form.assignee_user_id || null,
-          due_at: form.due_at ? new Date(form.due_at).toISOString() : null,
+          due_at: fromWatDateTimeInput(form.due_at),
           action_path: form.action_path.trim(),
         }),
       })
@@ -220,14 +221,14 @@ export default function TaskManager() {
     { header: 'Status', value: row => row.status },
     { header: 'Assignee', value: row => row.assignee_name },
     { header: 'Raised by', value: row => row.created_by_name },
-    { header: 'Due', value: row => row.due_at ? new Date(row.due_at).toLocaleString() : '' },
+    { header: 'Due', value: row => row.due_at ? formatWatDateTime(row.due_at) : '' },
     { header: 'Overdue', value: row => row.overdue ? 'Yes' : 'No' },
-    { header: 'Created', value: row => new Date(row.created_at).toLocaleString() },
+    { header: 'Created', value: row => formatWatDateTime(row.created_at) },
     { header: 'Related record', value: row => row.related_entity_label || row.related_entity_type },
   ], [])
 
   const exportWith = (format: 'csv' | 'xlsx' | 'pdf') => {
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = watTodayIso()
     if (format === 'csv') exportCsv(`task-queue-${stamp}.csv`, rows, columns)
     else if (format === 'xlsx') void exportXlsx(`task-queue-${stamp}.xlsx`, rows, columns)
     else void exportPdf(`task-queue-${stamp}.pdf`, 'Task queue', rows, columns)
@@ -386,7 +387,7 @@ export default function TaskManager() {
           <MenuItem value="">Unassigned</MenuItem>
           {people.map(person => <MenuItem key={person.id} value={person.id}>{person.full_name} · {person.email}</MenuItem>)}
         </TextField>
-        <TextField label="Due date and time" type="datetime-local" InputLabelProps={{ shrink: true }} value={form.due_at}
+        <TextField label={`Due date and time (${WAT_LABEL})`} type="datetime-local" InputLabelProps={{ shrink: true }} value={form.due_at}
           onChange={event => setForm(value => ({ ...value, due_at: event.target.value }))}/>
         <TextField label="Application path (optional)" placeholder="/afe/register" value={form.action_path}
           onChange={event => setForm(value => ({ ...value, action_path: event.target.value }))}
@@ -414,8 +415,8 @@ export default function TaskManager() {
         </Box>
         {detail.description && <Typography fontSize={13} sx={{ lineHeight: 1.6 }}>{detail.description}</Typography>}
         <Box display="grid" gap={.5} sx={{ gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' } }}>
-          <Typography fontSize={12} color="text.secondary">Created: <strong>{new Date(detail.created_at).toLocaleString()}</strong></Typography>
-          <Typography fontSize={12} color="text.secondary">Updated: <strong>{new Date(detail.updated_at).toLocaleString()}</strong></Typography>
+          <Typography fontSize={12} color="text.secondary">Created: <strong>{formatWatDateTime(detail.created_at)}</strong></Typography>
+          <Typography fontSize={12} color="text.secondary">Updated: <strong>{formatWatDateTime(detail.updated_at)}</strong></Typography>
           <Typography fontSize={12} color="text.secondary">Related record: <strong>{detail.related_entity_label || '—'}</strong></Typography>
           <Typography fontSize={12} color="text.secondary">Required capability: <strong>{detail.required_permission || 'None'}</strong></Typography>
         </Box>
@@ -430,7 +431,7 @@ export default function TaskManager() {
                 {event.new_status && event.old_status && event.old_status !== event.new_status ? ` · ${event.old_status} → ${event.new_status}` : ''}
               </Typography>
               {event.notes && <Typography fontSize={12} color="text.secondary" sx={{ lineHeight: 1.5 }}>{event.notes}</Typography>}
-              <Typography fontSize={11} color="text.secondary">{event.actor_name} · {new Date(event.created_at).toLocaleString()}</Typography>
+              <Typography fontSize={11} color="text.secondary">{event.actor_name} · {formatWatDateTime(event.created_at)}</Typography>
             </Box>)}
           </Box>}
         </Box>

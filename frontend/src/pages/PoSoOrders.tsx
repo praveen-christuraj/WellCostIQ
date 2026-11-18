@@ -27,6 +27,7 @@ import {
   type PoSoOrder,
   type VendorOption,
 } from '../lib/vendorMaster'
+import { formatWatDate } from '../lib/time'
 
 export default function PoSoOrders() {
   const { can } = useAuth()
@@ -186,7 +187,7 @@ export default function PoSoOrders() {
     { headerName: 'STATUS', field: 'status', minWidth: 105, maxWidth: 130, valueFormatter: params => orderStatusLabel(params.value) },
     { headerName: 'FILES', field: 'document_count', minWidth: 80, maxWidth: 105 },
     { headerName: 'SCOPE', field: 'description', minWidth: 180, flex: 1.1, valueFormatter: params => params.value || '—' },
-    { headerName: 'UPDATED', field: 'updated_at', minWidth: 120, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'UPDATED', field: 'updated_at', minWidth: 120, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 300, minWidth: 300, maxWidth: 300, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: PoSoOrder }) => <Box display="flex" alignItems="center" height="100%" gap={.1}>

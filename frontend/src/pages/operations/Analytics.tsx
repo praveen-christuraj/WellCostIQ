@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Box, MenuItem, TextField } from '@mui/material'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
+import { Box, Button, MenuItem, TextField } from '@mui/material'
 import { ErrorMessage, PageHeading } from '../../components/Common'
+import { OpsAiReviewPanel } from '../../components/operations/OpsAiReviewPanel'
 import { ChartPanel } from '../../components/ui/ChartPanel'
 import { InteractiveChart, type ChartClickEvent } from '../../components/ui/InteractiveChart'
 import { DataTable } from '../../components/DataTable'
@@ -98,7 +99,18 @@ export default function OperationsAnalytics() {
       <PageHeading
         eyebrow="Well Operations"
         title="Operations analytics"
-        subtitle="Compare submitted or approved measurements with the active programme. Select an actual point to inspect its report."
+        subtitle="Compare submitted or approved measurements with the active programme (WAT UTC+1:00). Select an actual point to inspect its report, or open Operation Summary for the full multi-day export."
+        action={
+          can('ops-report:read') && well ? (
+            <Button
+              component={RouterLink}
+              to={`/operations/summary?well=${encodeURIComponent(well)}&scope=${encodeURIComponent(scope)}`}
+              variant="outlined"
+            >
+              Operation summary
+            </Button>
+          ) : undefined
+        }
       />
       {error && <ErrorMessage message={error} />}
       <Box display="flex" gap={2} flexWrap="wrap" mb={2}>
@@ -207,6 +219,7 @@ export default function OperationsAnalytics() {
             { field: 'comparison', headerName: 'Comparison basis' },
           ]}
         />
+        <OpsAiReviewPanel wellId={well || undefined} scope={scope || undefined} />
       </Box>
     </Box>
   )

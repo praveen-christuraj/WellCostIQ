@@ -13,6 +13,7 @@ import type { ImportRow } from '../../lib/export'
 import { afeTotalText, type Afe, type AfeReference, type ImportResponse } from '../../lib/afe'
 import { AfeFormDialog } from './AfeFormDialog'
 import { ErrorDetails, StatusTag } from './AfeShared'
+import { formatWatDate, formatWatDateTime } from '../../lib/time'
 
 export const AFE_IMPORT_HEADERS = ['rig_code', 'well_code', 'afe_code', 'afe_name', 'afe_type', 'configuration_scope']
 export const AFE_IMPORT_OPTIONAL_HEADERS = ['remarks']
@@ -148,8 +149,8 @@ export function AfeRegisterTab({ reference, onReferenceChanged }: {
     { headerName: 'ITEMS', field: 'service_count', minWidth: 120, maxWidth: 150, valueFormatter: params => params.data ? `${params.data.service_count} svc · ${params.data.consumable_count} cons · ${params.data.tangible_count} tang` : '' },
     { headerName: 'ESTIMATE TOTAL', field: 'total_cost', minWidth: 170, flex: .9, valueFormatter: params => params.data ? afeTotalText(params.data) : '' },
     { headerName: 'WARNINGS', field: 'warning_count', minWidth: 115, maxWidth: 130, cellRenderer: ({ value }: { value: number }) => <Box display="flex" alignItems="center" height="100%">{value > 0 ? <Tag tone="warning">{value} to review</Tag> : <Tag>None</Tag>}</Box> },
-    { headerName: 'ESTIMATE SAVED', field: 'estimate_saved_at', minWidth: 150, valueFormatter: params => params.value ? new Date(params.value).toLocaleString() : 'Not saved' },
-    { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '' },
+    { headerName: 'ESTIMATE SAVED', field: 'estimate_saved_at', minWidth: 150, valueFormatter: params => params.value ? formatWatDateTime(params.value) : 'Not saved' },
+    { headerName: 'UPDATED', field: 'updated_at', minWidth: 135, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 300, minWidth: 300, maxWidth: 300, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: Afe }) => data && <RowActions

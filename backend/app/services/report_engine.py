@@ -734,8 +734,13 @@ def format_value(value, column: dict) -> str:
         moment = value if isinstance(value, (date, datetime)) else formula.to_date(value)
         if moment is None:
             return formula.to_text(value)
-        if isinstance(moment, datetime) and (moment.hour or moment.minute):
-            return moment.strftime("%Y-%m-%d %H:%M")
+        if isinstance(moment, datetime):
+            from app.core.time import as_wat
+
+            wat_moment = as_wat(moment) or moment
+            if wat_moment.hour or wat_moment.minute:
+                return f"{wat_moment.strftime('%Y-%m-%d %H:%M')} WAT"
+            return wat_moment.strftime("%Y-%m-%d")
         return moment.strftime("%Y-%m-%d")
     if data_type == "boolean":
         if isinstance(value, bool):
@@ -1156,8 +1161,14 @@ def run_report(db: Session, design: dict, raw_params: dict, organization_id: str
         "date_from": params["date_from"].isoformat() if params["date_from"] else "",
         "date_to": params["date_to"].isoformat() if params["date_to"] else "",
         "notes": describe_definition(design),
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": _wat_iso_now(),
     }
+
+
+def _wat_iso_now() -> str:
+    from app.core.time import wat_now
+
+    return wat_now().isoformat(timespec="seconds")
 
 
 def _cell_value(row: dict, column: dict) -> str:

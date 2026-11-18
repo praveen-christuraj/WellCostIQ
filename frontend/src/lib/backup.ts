@@ -183,13 +183,13 @@ export function fileSize(bytes: number | null | undefined): string {
   return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
+import { formatWatDateTime } from './time'
+
 export function stamp(value: string | null | undefined, withTime = true): string {
   if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString(undefined, withTime
-    ? { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }
-    : { year: 'numeric', month: 'short', day: '2-digit' })
+  const full = formatWatDateTime(value)
+  if (!full) return '—'
+  return withTime ? full : full.slice(0, 10)
 }
 
 export function relative(value: string | null | undefined): string {
@@ -249,12 +249,30 @@ export function scopeLabel(scope: string): string {
   return scope === 'full' ? 'Whole database' : 'This workspace'
 }
 
-/** The schedule in one sentence, so the setting never needs decoding. */
+/** Convert stored HH:MM UTC schedule clock to HH:MM WAT (UTC+1:00) and back. */
+export function utcClockToWat(clock: string | null | undefined): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((clock || '').trim())
+  if (!m) return clock || '03:00'
+  const h = (Number(m[1]) + 1) % 24
+  return `${String(h).padStart(2, '0')}:${m[2]}`
+}
+
+export function watClockToUtc(clock: string | null | undefined): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((clock || '').trim())
+  if (!m) return (clock || '').trim()
+  const h = Number(m[1])
+  const min = Number(m[2])
+  if (h > 23 || min > 59) return (clock || '').trim()
+  return `${String((h + 23) % 24).padStart(2, '0')}:${m[2]}`
+}
+
+/** The schedule in one sentence (in WAT UTC+1:00), so the setting never needs decoding. */
 export function scheduleText(settings: BackupSettings | null): string {
   if (!settings) return 'Not configured'
   if (!settings.enabled) return 'Scheduled backups are off'
   if (settings.schedule_mode === 'minutes') return `Every ${settings.interval_value} minute${settings.interval_value === 1 ? '' : 's'}`
   if (settings.schedule_mode === 'hours') return `Every ${settings.interval_value} hour${settings.interval_value === 1 ? '' : 's'}`
-  if (settings.schedule_mode === 'weekly') return `Every ${settings.interval_value} week${settings.interval_value === 1 ? '' : 's'} at ${settings.run_time} UTC`
-  return `Daily at ${settings.run_time} UTC`
+  const watClock = utcClockToWat(settings.run_time)
+  if (settings.schedule_mode === 'weekly') return `Every ${settings.interval_value} week${settings.interval_value === 1 ? '' : 's'} at ${watClock} WAT`
+  return `Daily at ${watClock} WAT`
 }

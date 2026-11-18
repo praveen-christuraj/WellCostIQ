@@ -8,6 +8,7 @@ import { useAuth } from '../../context/AuthContext'
 import { api, body } from '../../lib/api'
 import { afeTotalText, type Afe } from '../../lib/afe'
 import { ErrorDetails, StatusTag } from './AfeShared'
+import { formatWatDateTime } from '../../lib/time'
 
 type PendingAction = { kind: 'restore' | 'purge'; targets: Afe[] }
 
@@ -68,7 +69,7 @@ export function AfeDeletedTab() {
     { headerName: 'RIG · WELL', field: 'well_name', minWidth: 210, flex: 1.2, valueFormatter: params => params.data ? `${params.data.rig_code} · ${params.data.well_code}` : '' },
     { headerName: 'STATUS AT DELETION', field: 'status', minWidth: 150, cellRenderer: ({ data }: { data: Afe }) => data && <Box display="flex" alignItems="center" height="100%"><StatusTag status={data.status}/></Box> },
     { headerName: 'ESTIMATE', field: 'total_cost', minWidth: 170, valueFormatter: params => params.data ? afeTotalText(params.data) : '' },
-    { headerName: 'DELETED AT', field: 'deleted_at', minWidth: 160, valueFormatter: params => params.value ? new Date(params.value).toLocaleString() : '' },
+    { headerName: 'DELETED AT', field: 'deleted_at', minWidth: 160, valueFormatter: params => params.value ? formatWatDateTime(params.value) : '' },
     {
       headerName: 'ACTIONS', width: 230, minWidth: 230, maxWidth: 230, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: Afe }) => data && <Box display="flex" alignItems="center" height="100%" gap={.2}>

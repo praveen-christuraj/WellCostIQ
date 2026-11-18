@@ -22,7 +22,6 @@ import { APP_NAME, pageTitle } from '../lib/appInfo'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import NotificationBell from './NotificationBell'
-import AssistantLauncher from './assistant/AssistantLauncher'
 import { layout as shell } from '../designSystem'
 
 type NavItem = { label: string; path: string; icon: typeof DashboardOutlined; permission?: string; anyOf?: string[]; requires?: string[] }
@@ -83,6 +82,7 @@ const modules: NavModule[] = [
     { label: 'Operations Dashboard', path: '/operations', icon: DashboardOutlined, permission: 'ops-dashboard:read' },
     { label: 'Plans & timeline', path: '/operations/plans', icon: AssessmentOutlined, permission: 'ops-plan:read' },
     { label: 'Daily reports', path: '/operations/reports', icon: ScheduleRounded, permission: 'ops-report:read' },
+    { label: 'Operation summary', path: '/operations/summary', icon: TableChartOutlined, permission: 'ops-report:read' },
     { label: 'Analytics', path: '/operations/analytics', icon: InsightsOutlined, permission: 'ops-analytics:read' },
     { label: 'Documents', path: '/operations/documents', icon: DescriptionOutlined, permission: 'ops-doc:read' },
     { label: 'Code library', path: '/operations/library', icon: ListAltOutlined, permission: 'ops-master:read' },
@@ -113,8 +113,7 @@ const modules: NavModule[] = [
     // button inside is separately gated by its own capability.
     { label: 'Backup & Recovery', path: '/other-management/backup', icon: BackupOutlined, anyOf: ['backup:read', 'backup:create', 'backup:delete', 'backup:settings', 'backup:restore-request', 'backup:restore-approve', 'backup:restore-execute'] },
   ] },
-  // The guide is help, not administration: it sits in its own module so the
-  // breadcrumb names it and the floating entry point has somewhere to land.
+  // The guide sits in its own sidebar module so the breadcrumb names it cleanly.
   { label: 'Help & Guide', icon: SupportAgentOutlined, items: [
     { label: 'Ask the guide', path: '/assistant', icon: SupportAgentOutlined, permission: 'assistant:read' },
   ] },
@@ -393,8 +392,6 @@ export default function Layout() {
         <Box className="page-shell" sx={{ px: { xs: 2, sm: 3, lg: 4 }, py: { xs: 2.5, sm: 3.5 } }}><Outlet/></Box>
       </Box>
     </Box>
-
-    <AssistantLauncher/>
 
     <Snackbar open={!!apiNotice} onClose={() => setApiNotice(null)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} sx={{ mt: 7, maxWidth: 480 }}>
       <Alert severity={apiNotice && apiNotice.status === 403 ? 'warning' : 'error'} variant="filled" onClose={() => setApiNotice(null)}
