@@ -130,6 +130,7 @@ digraph WellCostIQ {
   "backend/app/services/__init__.py";
   "backend/app/services/afe.py";
   "backend/app/services/ai_context.py";
+  "backend/app/services/ai_knowledge.py";
   "backend/app/services/assistant.py";
   "backend/app/services/audit.py";
   "backend/app/services/backup.py";
@@ -728,6 +729,7 @@ digraph WellCostIQ {
   "backend/app/services/assistant.py" -> "backend/app/models/assistant.py";
   "backend/app/services/assistant.py" -> "backend/app/schemas/assistant.py";
   "backend/app/services/assistant.py" -> "backend/app/services/__init__.py";
+  "backend/app/services/assistant.py" -> "backend/app/services/ai_context.py";
   "backend/app/services/assistant.py" -> "backend/app/services/daily_cost.py";
   "backend/app/services/assistant.py" -> "backend/app/services/operations/guide.py";
   "backend/app/services/assistant.py" -> "backend/app/services/operations/ops_ai.py";

@@ -1,0 +1,12 @@
+# Optional PDF reference library; mount derived indexes only, not the source PDFs.
+services:
+  api:
+    environment:
+      AI_KNOWLEDGE_DIRECTORY: /app/ai-knowledge
+    volumes:
+      - type: bind
+        source: ${AI_KNOWLEDGE_HOST_DIRECTORY:-./ai-knowledge}
+        target: /app/ai-knowledge
+        read_only: true
+        bind:
+          create_host_path: false

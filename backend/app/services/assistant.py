@@ -2243,6 +2243,26 @@ def _default_ai_sources(question: str, permissions: set[str]) -> list[AssistantS
     return out
 
 
+def _matching_ai_memories(
+    db: Session, organization_id: str, question: str, route: str, permissions: set[str], *, workspace_only: bool = False,
+) -> list[AssistantMemory]:
+    stmt = select(AssistantMemory).where(
+        AssistantMemory.organization_id == organization_id,
+        AssistantMemory.is_active.is_(True),
+    )
+    if workspace_only:
+        stmt = stmt.where(AssistantMemory.is_system.is_(False))
+    mem_rows = db.scalars(stmt).all()
+    return [
+        row
+        for score, row in sorted(
+            ((_knowledge_score(r, question, route, permissions), r) for r in mem_rows if _can(permissions, r.permission)),
+            key=lambda item: (-item[0], item[1].sort_order),
+        )
+        if score >= 1.5
+    ][:5]
+
+
 def _enrich_with_ollama(
     db: Session,
     organization_id: str,
@@ -2257,25 +2277,13 @@ def _enrich_with_ollama(
     comparison: Any,
 ) -> AssistantAnswer:
     """Invoke the configured LAN Ollama model over verified workspace context."""
-    from app.services import ai_context, ollama as ollama_service
+    from app.core.config import get_settings
+    from app.services import ai_context, ai_knowledge, ollama as ollama_service
 
     if base.intent == "permission":
         return base
 
-    mem_rows = db.scalars(
-        select(AssistantMemory).where(
-            AssistantMemory.organization_id == organization_id,
-            AssistantMemory.is_active.is_(True),
-        )
-    ).all()
-    top_memories = [
-        row
-        for score, row in sorted(
-            ((_knowledge_score(r, question, route, permissions), r) for r in mem_rows if _can(permissions, r.permission)),
-            key=lambda item: (-item[0], item[1].sort_order),
-        )
-        if score >= 1.5
-    ][:5]
+    top_memories = _matching_ai_memories(db, organization_id, question, route, permissions)
 
     dossier = ai_context.build_assistant_dossier(
         db,
@@ -2289,16 +2297,19 @@ def _enrich_with_ollama(
         unmatched_wells=unmatched_wells,
         comparison=comparison,
     )
+    cfg = get_settings()
+    references = ai_knowledge.retrieve(cfg.ai_knowledge_directory, organization_id, question)
     user_prompt = (
-        f"VERIFIED WORKSPACE DATABASE CONTEXT & WELLCOSTIQ WORKFLOW & MEMORY:\n"
-        f"{dossier}\n\n"
-        f"USER QUESTION:\n{question}\n\n"
-        "Provide a clear, accurate answer strictly from the verified records and workflow rules above."
+        f"USER QUESTION: {question}\n\n"
+        f"{ai_knowledge.verified_context(base)}"
+        f"{ai_knowledge.prompt_context(references)}\n"
+        f"VERIFIED WORKSPACE DATABASE CONTEXT & WELLCOSTIQ WORKFLOW & MEMORY:\n{dossier}"
     )
     try:
         reply = ollama_service.chat(
             system_prompt=ai_context.ASSISTANT_SYSTEM_PROMPT,
             user_prompt=user_prompt,
+            settings=cfg,
         )
     except ollama_service.OllamaCommunicationError as exc:
         return base.model_copy(
@@ -2311,6 +2322,7 @@ def _enrich_with_ollama(
         )
 
     sources = list(base.sources) or _default_ai_sources(question, permissions)
+    sources.extend(AssistantSource(label=p.citation, route="") for p in references)
     facts = list(base.facts)
     tables = list(base.tables)
     if comparison is not None and not tables and base.intent not in ("price_lookup", "cost_search"):
@@ -2325,6 +2337,7 @@ def _enrich_with_ollama(
     return base.model_copy(
         update={
             "answer": reply.content,
+            "verified_answer": base.answer if base.facts or base.tables else "",
             "confidence": confidence,
             "facts": facts,
             "tables": tables,
@@ -2438,10 +2451,15 @@ def ask(
     if use_ai and operations is not None:
         from app.core.config import get_settings
 
-        if get_settings().ollama_enabled and answer.intent != "permission":
+        if answer.intent != "permission":
             try:
+                from app.services.ai_context import workflow_memory_context
                 from app.services.operations.ops_ai import enrich_operations_answer
 
+                cfg = get_settings()
+                notes = workflow_memory_context(_matching_ai_memories(
+                    db, organization_id, text, route, permissions, workspace_only=True,
+                )) if cfg.ollama_enabled else ""
                 answer = enrich_operations_answer(
                     db,
                     organization_id,
@@ -2449,6 +2467,7 @@ def ask(
                     question=text,
                     permissions=permissions,
                     base=answer,
+                    workspace_notes=notes,
                 )
             except Exception:  # noqa: BLE001
                 import logging

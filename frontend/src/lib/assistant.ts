@@ -42,6 +42,7 @@ export type AssistantTable = {
 
 export type AssistantAnswer = {
   answer: string
+  verified_answer?: string
   intent: string
   confidence: AssistantConfidence
   category: AssistantMemoryCategory

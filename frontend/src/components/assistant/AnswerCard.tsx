@@ -26,6 +26,8 @@ export function AnswerCard({ answer, onAsk, onRetryAi, onCheckAi }: {
   onCheckAi?: () => void
 }) {
   const refused = isPermissionAnswer(answer)
+  const pageSources = answer.sources.filter(source => source.route)
+  const referenceSources = answer.sources.filter(source => !source.route)
   const aiTiming = answer.ai_used ? formatAiDuration(answer.ai_duration_ms) : ''
   return <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.4 }, borderRadius: 2, bgcolor: 'background.paper' }}>
     {answer.ai_error && <Box sx={{ mb: 1.6 }}>
@@ -33,7 +35,7 @@ export function AnswerCard({ answer, onAsk, onRetryAi, onCheckAi }: {
         message={answer.ai_error}
         errorCode={answer.ai_error_code}
         model={answer.ai_model}
-        fallbackNote="Showing the verified local database and memory answer below while the AI host is unavailable."
+        fallbackNote="Showing the local database and memory answer below."
         onRetry={onRetryAi}
         onCheckConnection={onCheckAi}
       />
@@ -52,6 +54,11 @@ export function AnswerCard({ answer, onAsk, onRetryAi, onCheckAi }: {
       {answer.category === 'calculation' && <Tag tone="info">Calculation</Tag>}
     </Box>
 
+    {answer.verified_answer && <Box sx={{ mb: 1.5 }}>
+      <Typography className="eyebrow" sx={{ mb: .6 }}>Verified workspace result</Typography>
+      <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>{answer.verified_answer}</Typography>
+    </Box>}
+    {answer.ai_used && <Typography className="eyebrow" sx={{ mb: .6 }}>AI interpretation · verify against sources</Typography>}
     <Typography sx={{ whiteSpace: 'pre-line', fontSize: 13.6, lineHeight: 1.65, color: 'text.primary' }}>
       {answer.answer}
     </Typography>
@@ -130,11 +137,11 @@ export function AnswerCard({ answer, onAsk, onRetryAi, onCheckAi }: {
       </List>
     </Box>}
 
-    {answer.sources.length > 0 && <Box sx={{ mt: 1.6 }}>
+    {pageSources.length > 0 && <Box sx={{ mt: 1.6 }}>
       <Divider sx={{ mb: 1 }}/>
       <Box display="flex" alignItems="center" gap={.7} flexWrap="wrap">
         <Typography fontSize={10.5} fontWeight={800} letterSpacing={.6} textTransform="uppercase" color="text.secondary">Open</Typography>
-        {answer.sources.map((source, index) => <Link
+        {pageSources.map((source, index) => <Link
           key={`${source.route}-${index}`} component={RouterLink} to={source.route} underline="hover"
           sx={{ display: 'inline-flex', alignItems: 'center', gap: .4, fontSize: 12, fontWeight: 600 }}
         >
@@ -142,6 +149,13 @@ export function AnswerCard({ answer, onAsk, onRetryAi, onCheckAi }: {
           <ArrowForwardRounded sx={{ fontSize: 13 }}/>
         </Link>)}
       </Box>
+    </Box>}
+
+    {referenceSources.length > 0 && <Box sx={{ mt: 1.6 }}>
+      <Typography className="eyebrow" sx={{ mb: .6 }}>PDF reference excerpts provided to AI</Typography>
+      {referenceSources.map(source => <Typography key={source.label} variant="caption" display="block">
+        {source.label}
+      </Typography>)}
     </Box>}
 
     {answer.follow_ups.length > 0 && onAsk && <Box sx={{ mt: 1.6 }}>

@@ -48,3 +48,7 @@ vscode-ext*.txt
 pg-ext*.txt
 
 .security-tools/
+
+# Operator-managed local AI reference indexes and source PDFs
+/ai-knowledge/
+/ai-reference-pdfs/

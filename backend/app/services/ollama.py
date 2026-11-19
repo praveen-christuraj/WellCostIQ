@@ -549,13 +549,18 @@ def _build_payload(
     max_tokens: int | None,
     temperature: float | None,
     include_think: bool = True,
+    think: bool | None = None,
 ) -> tuple[str, dict[str, Any]]:
     api_path = cfg.ollama_api_path
     lower_path = api_path.lower()
     temp = cfg.ollama_temperature if temperature is None else max(0.0, min(1.0, float(temperature)))
     tokens = cfg.ollama_max_tokens if max_tokens is None else max(64, min(8192, int(max_tokens)))
 
+    thinking = cfg.ollama_think if think is None else think
+    qwen3 = cfg.ollama_model.lower().rsplit("/", 1)[-1].startswith("qwen3")
     if lower_path.endswith("/v1/chat/completions"):
+        if qwen3 and not thinking:
+            user_prompt += "\n/no_think"
         payload: dict[str, Any] = {
             "model": cfg.ollama_model,
             "stream": False,
@@ -586,7 +591,7 @@ def _build_payload(
             "options": options,
         }
         if include_think:
-            gen_payload["think"] = bool(cfg.ollama_think)
+            gen_payload["think"] = thinking
         if cfg.ollama_keep_alive:
             gen_payload["keep_alive"] = cfg.ollama_keep_alive
         if json_mode:
@@ -603,7 +608,7 @@ def _build_payload(
         "options": options,
     }
     if include_think:
-        chat_payload["think"] = bool(cfg.ollama_think)
+        chat_payload["think"] = thinking
     if cfg.ollama_keep_alive:
         chat_payload["keep_alive"] = cfg.ollama_keep_alive
     if json_mode:
@@ -643,6 +648,7 @@ def chat(
     max_tokens: int | None = None,
     temperature: float | None = None,
     settings: Settings | None = None,
+    think: bool | None = None,
 ) -> OllamaReply:
     """Send a single-turn grounded request to the configured LAN Ollama model."""
     cfg = ensure_enabled(settings)
@@ -654,6 +660,7 @@ def chat(
         max_tokens=max_tokens,
         temperature=temperature,
         include_think=True,
+        think=think,
     )
     status_code, raw, elapsed_ms, target, full_path = _request_json(
         cfg,
@@ -666,19 +673,18 @@ def chat(
     # native `/no_think` control token when thinking is disabled so compact models
     # like qwen3:1.7b spend their full token budget on the grounded answer.
     if status_code == 400 and "think" in payload and "think" in _extract_remote_error(raw).lower():
-        fallback_sys = (
-            f"{system_prompt}\n/no_think"
-            if not cfg.ollama_think and cfg.ollama_model.lower().startswith("qwen3")
-            else system_prompt
-        )
+        thinking = cfg.ollama_think if think is None else think
+        is_qwen3 = cfg.ollama_model.lower().rsplit("/", 1)[-1].startswith("qwen3")
+        fallback_user = f"{user_prompt}\n/no_think" if not thinking and is_qwen3 else user_prompt
         protocol, fallback_payload = _build_payload(
             cfg,
-            system_prompt=fallback_sys,
-            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            user_prompt=fallback_user,
             json_mode=json_mode,
             max_tokens=max_tokens,
             temperature=temperature,
             include_think=False,
+            think=think,
         )
         status_code, raw, retry_ms, target, full_path = _request_json(
             cfg,

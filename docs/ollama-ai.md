@@ -1,11 +1,14 @@
-# Offline LAN Ollama AI (`qwen3:1.7b` / `qwen3:4b-q4_K_M`)
+# Offline LAN Ollama AI
 
 WellCostIQ supports an optional, fully offline local-area-network (LAN) AI model
-served by **Ollama** (compact models such as `qwen3:1.7b` as well as
+served by **Ollama** (compact models such as `qwen3:0.6b` or `qwen3:1.7b` as well as
 `qwen3:4b-q4_K_M`) running on another PC on the same network (or locally). No
 data is ever sent to any public cloud API, and everything continues to work
 deterministically when `OLLAMA_ENABLED=false` (the default) or when the remote
 AI host is temporarily offline.
+
+To add drilling, completion or well-costing PDFs independently of the model, see
+[Teach the WellCostIQ assistant](ai-knowledge.md).
 
 ## What it does
 
