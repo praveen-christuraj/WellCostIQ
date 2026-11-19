@@ -255,11 +255,19 @@ export default function OperationsAnalytics() {
             setScope(ref?.wells.find((w) => w.id === e.target.value)?.drilling_available ? 'drilling' : 'completion')
           }}
         >
-          {ref?.wells.map((w) => (
+          {/* Always one option: the menu is empty before the reference loads and in
+              a workspace with no configured well, and an empty select cannot show
+              what it is waiting for. */}
+          {(ref?.wells ?? []).map((w) => (
             <MenuItem key={w.id} value={w.id}>
               {w.display_name}
             </MenuItem>
           ))}
+          {(ref?.wells ?? []).length === 0 && (
+            <MenuItem value="" disabled>
+              {ref ? 'No well is configured yet' : 'Loading wells…'}
+            </MenuItem>
+          )}
         </TextField>
         <TextField
           select

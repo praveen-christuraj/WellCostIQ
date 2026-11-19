@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Autocomplete,
@@ -55,6 +55,9 @@ import {
   printedKey,
   type CriterionKey,
 } from './codeCriteria'
+
+/** The server accepts at most 200 rows in one batch save (`OpsCodeLinkBatchIn`). */
+const LINK_BATCH_LIMIT = 200
 
 type Printed = OpsCorrelationReference['printed'][number]
 type Selections = Partial<Record<CriterionKey, string[]>>
@@ -167,34 +170,34 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
     | null
   >(null)
 
+  // One fetch path: the tab, a filter change and every save all read the same
+  // three endpoints, and a save must never fire them twice. Each filter change
+  // takes a ticket; a response that belongs to a filter the user has already left
+  // is dropped instead of painting another tab's rows over this one.
+  const requestTicket = useRef(0)
   const load = useCallback(async () => {
-    const [r, c, l] = await Promise.all([
-      opsCorrelationReference(),
-      opsCorrelations({ kind: kind || undefined, deleted }),
-      opsCodeLinks({ deleted }),
-    ])
-    setRef(r)
-    setRows(c)
-    setLinks(l)
+    const ticket = ++requestTicket.current
+    setError('')
+    try {
+      const [reference, correlations, codeLinks] = await Promise.all([
+        opsCorrelationReference(),
+        opsCorrelations({ kind: kind || undefined, deleted }),
+        opsCodeLinks({ deleted }),
+      ])
+      if (ticket !== requestTicket.current) return
+      setRef(reference)
+      setRows(correlations)
+      setLinks(codeLinks)
+    } catch (e) {
+      if (ticket === requestTicket.current) setError((e as Error).message)
+      throw e
+    }
   }, [kind, deleted])
 
   useEffect(() => {
-    let current = true
-    setError('')
-    Promise.all([opsCorrelationReference(), opsCorrelations({ kind: kind || undefined, deleted }), opsCodeLinks({ deleted })])
-      .then(([r, c, l]) => {
-        if (!current) return
-        setRef(r)
-        setRows(c)
-        setLinks(l)
-      })
-      .catch((e) => {
-        if (current) setError((e as Error).message)
-      })
-    return () => {
-      current = false
-    }
-  }, [kind, deleted])
+    // Failures are already shown by load(); this keeps them out of the console.
+    load().catch(() => undefined)
+  }, [load])
 
   const run = async (fn: () => Promise<unknown>, message = '') => {
     setBusy(true)
@@ -324,14 +327,24 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
     let combos: Selections[] = [{}]
     for (const criterion of chosen) {
       const values = linkForm.selections[criterion.key] ?? []
+      // Grow the product a criterion at a time and stop once it cannot fit, so a
+      // selection that lands exactly on the cap is still saved rather than
+      // silently becoming "no combinations".
+      if (combos.length * values.length > LINK_BATCH_LIMIT) return []
       const next: Selections[] = []
       for (const combo of combos) {
         for (const value of values) next.push({ ...combo, [criterion.key]: [value] })
-        if (next.length > 200) return []
       }
       combos = next
     }
     return combos
+  }, [linkForm])
+
+  const selectedCombinationCount = useMemo(() => {
+    if (!linkForm) return 0
+    const sizes = CRITERIA.map((c) => (linkForm.selections[c.key] ?? []).length).filter((n) => n > 0)
+    if (sizes.length < 2) return 0
+    return sizes.reduce((total, n) => total * n, 1)
   }, [linkForm])
 
   const describeSelections = (selections: Selections) =>
@@ -355,7 +368,10 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
       return
     }
     if (!linkForm.rowId && fanOut.length === 0) {
-      setLinkError('This selection would create more than 200 links at once. Narrow it down or save in smaller batches.')
+      setLinkError(
+        `This selection would create ${selectedCombinationCount.toLocaleString()} links at once, and one save ` +
+          `accepts at most ${LINK_BATCH_LIMIT}. Narrow the selection or save it in smaller batches.`,
+      )
       return
     }
     if (!linkForm.rowId && fanOut.length > 1) {

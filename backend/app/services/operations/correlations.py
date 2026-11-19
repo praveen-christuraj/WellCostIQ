@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException, Request
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.domain.operations.default_codes import catalogue_rows
@@ -424,22 +425,36 @@ def create_correlations_batch(
     created: list[OpsCodeCorrelation] = []
     for idx, item in enumerate(data.items, start=1):
         prefix = f"Row {idx} ({item.source_code.strip() or item.kind}): "
-        dup_key = (item.kind, code_key(item.source_code))
-        if dup_key in seen:
-            db.rollback()
-            raise HTTPException(
-                409, f"{prefix}Printed code '{item.source_code.strip()}' appears more than once in this batch."
-            )
-        seen.add(dup_key)
         try:
             row = _prepare_correlation_row(db, organization_id, item, actor, prefix=prefix)
         except HTTPException:
             db.rollback()
             raise
+        # The stored code is canonicalised (trimmed, and upper-cased for catalogue
+        # families), and the unique constraint is on that stored value. Keying the
+        # in-batch check on the raw request text would let "tp02" and "TP02" both
+        # pass and then fail at the flush, so compare what will actually be written.
+        dup_key = (row.kind, row.source_code)
+        if dup_key in seen:
+            db.rollback()
+            raise HTTPException(
+                409, f"{prefix}Printed code '{row.source_code}' appears more than once in this batch."
+            )
+        seen.add(dup_key)
         db.add(row)
         created.append(row)
 
-    db.flush()
+    try:
+        # One transaction: a uniqueness race with another session rolls every row
+        # back and reads as a conflict rather than a server error.
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "A printed code in this batch was correlated by another session at the same time. "
+            "Reload the correlations tab and retry the rows that are missing.",
+        ) from exc
     audit_record(
         db,
         organization_id=organization_id,
@@ -859,7 +874,17 @@ def create_code_links_batch(
         db.add(row)
         created.append(row)
 
-    db.flush()
+    try:
+        # The batch is one transaction: a uniqueness race with another session must
+        # roll every row back and read as a conflict, not as a server error.
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "An identical multi-criteria code link was saved at the same moment. "
+            "Reload the correlations tab and retry the rows that are missing.",
+        ) from exc
     audit_record(
         db,
         organization_id=organization_id,

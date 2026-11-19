@@ -212,7 +212,13 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
   }
 
   const updateRule = (id: number, patch: Partial<Rule>) => setRules(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r))
-  const addRule = () => setRules(rs => [...rs, { id: Date.now(), field: fields[0]?.field || '', op: 'contains', value: '' }])
+  // A filter needs a real column. Tables whose cells are all computed expose no
+  // field, so the button is disabled below rather than adding a rule whose column
+  // select would have nothing to offer.
+  const addRule = () => setRules(rs => [
+    ...rs,
+    { id: Date.now(), field: fields[0]?.field ?? '', op: 'contains', value: '' },
+  ])
   const clearFilters = () => { setRules([]); setDateField(''); setDateFrom(''); setDateTo('') }
 
   const searchActive = Boolean(search.trim())
@@ -276,6 +282,12 @@ export function DataTable<T extends object>({ rows, columns, rowKey = 'id', sear
           {rules.map(rule => (
             <Box key={rule.id} display="flex" gap={1} alignItems="center" flexWrap="wrap" mb={1}>
               <TextField select size="small" label="Column" value={rule.field} onChange={e => updateRule(rule.id, { field: e.target.value })} sx={{ minWidth: 150 }}>
+                {/* A stored rule can outlive the column it named (a tab change, a
+                    narrower table). Offer the current columns plus that stale value,
+                    so the select is never empty and the rule stays removable. */}
+                {!fields.some(f => f.field === rule.field) && rule.field && (
+                  <MenuItem value={rule.field}>{rule.field}</MenuItem>
+                )}
                 {fields.map(f => <MenuItem key={f.field} value={f.field}>{f.label}</MenuItem>)}
               </TextField>
               <TextField select size="small" label="Operator" value={rule.op} onChange={e => updateRule(rule.id, { op: e.target.value })} sx={{ minWidth: 130 }}>

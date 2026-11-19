@@ -74,7 +74,11 @@ export function linkCriteria(link: Record<string, unknown>): { key: CriterionKey
 /** A printed catalogue token is unique per family, so the option key is composite. */
 export const printedKey = (family: string, code: string) => `${family}::${code}`
 
-/** Client-side mirror of the server's classification matrix, so the dialog can refuse early. */
+/**
+ * Client-side mirror of the server's `_check_classification_matrix`, so the dialog
+ * can refuse early with the same sentence. Keep the three rules in the server's
+ * order: the first violated rule is the one the engineer should read.
+ */
 export function classificationProblem(classification: string, allocation: string, nptSelected: boolean): string {
   if ((classification === 'Planned' || classification === 'UPA') && nptSelected) {
     return 'An NPT code applies only when the classification is NPT (or unset).'

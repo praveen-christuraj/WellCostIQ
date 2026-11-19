@@ -250,15 +250,30 @@ def restore_masters(
     return {"affected_count": len(rows)}
 
 
-def _string_block_reference_count(db: Session, organization_id: str, kind: str, code_val: str) -> int:
+# A daily block keeps three codes as printed text instead of a foreign key, so the
+# purge guard has to read them by name. Each name is only matched while the code is
+# the one that name belongs to: the same text can be printed by a code from another
+# library (a cause "06" beside an activity "06"), and a code that was deleted and
+# re-created starts a new id whose history must not inherit the old one.
+STRING_REFERENCE_COLUMNS = {
+    "causes": (OpsActivityBlock.cause_code, ("cause_code",)),
+    "phase-codes": (OpsActivityBlock.phase_raw, ("phase_code",)),
+    "source-marks": (OpsActivityBlock.source_mark, ("mark_code", "mark_name")),
+}
+
+
+def _string_block_reference_count(db: Session, organization_id: str, kind: str, row: Any) -> int:
     """Count daily report blocks that store this code by string rather than foreign key."""
-    if kind == "causes":
-        col = OpsActivityBlock.cause_code
-    elif kind == "phase-codes":
-        col = OpsActivityBlock.phase_raw
-    elif kind == "source-marks":
-        col = OpsActivityBlock.source_mark
-    else:
+    spec = STRING_REFERENCE_COLUMNS.get(kind)
+    if spec is None:
+        return 0
+    column, fields = spec
+    values = {
+        str(getattr(row, name)).strip().upper()
+        for name in fields
+        if getattr(row, name, None)
+    }
+    if not values:
         return 0
     return int(
         db.scalar(
@@ -266,7 +281,7 @@ def _string_block_reference_count(db: Session, organization_id: str, kind: str, 
             .select_from(OpsActivityBlock)
             .where(
                 OpsActivityBlock.organization_id == organization_id,
-                func.upper(col) == code_val.strip().upper(),
+                func.upper(column).in_(values),
             )
         )
         or 0
@@ -313,7 +328,7 @@ def purge_masters(
             )
 
         deps = dependency_counts(db, row, organization_id)
-        str_blocks = _string_block_reference_count(db, organization_id, kind, code_val)
+        str_blocks = _string_block_reference_count(db, organization_id, kind, row)
         if str_blocks:
             block_label = "daily operations report block(s)"
             deps[block_label] = deps.get(block_label, 0) + str_blocks
@@ -325,25 +340,30 @@ def purge_masters(
                 "Keep it in Deleted entries or deactivate it so historical records remain intact.",
             )
 
-    try:
-        for row in rows:
-            code_val = getattr(row, code_field)
-            audit_record(
-                db,
-                organization_id=organization_id,
-                actor=user,
-                action="permanent_delete",
-                entity_type=entity_type,
-                entity_id=row.id,
-                entity_label=code_val,
-                summary=f"Permanently deleted {kind.replace('-', ' ')} {code_val}",
-                request=request,
-            )
-            db.delete(row)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            409, "Cannot permanently delete code because operational records still reference it."
-        ) from exc
+    for row in rows:
+        code_val = getattr(row, code_field)
+        audit_record(
+            db,
+            organization_id=organization_id,
+            actor=user,
+            action="permanent_delete",
+            entity_type=entity_type,
+            entity_id=row.id,
+            entity_label=code_val,
+            summary=f"Permanently deleted {kind.replace('-', ' ')} {code_val}",
+            request=request,
+        )
+        db.delete(row)
+        try:
+            # Flush per code so a database that still holds a reference names the
+            # exact code that could not go, instead of failing the whole batch blind.
+            db.flush()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                409,
+                f"Cannot permanently delete code '{code_val}': operational records still reference it. "
+                "Keep it in Deleted entries so history stays intact.",
+            ) from exc
+    db.commit()
     return {"affected_count": len(rows)}

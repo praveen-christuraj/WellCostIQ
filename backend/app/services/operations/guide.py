@@ -196,7 +196,7 @@ def answers(question, route, permissions, *, db=None, organization_id=None):
             intent='knowledge',
             confidence='high',
             category='workflow',
-            memory_key='operations-correlations',
+            memory_key='ops-code-correlations',  # the seeded assistant memory this answer expands
             steps=list(corr_topic['steps']),
             sources=[
                 AssistantSource(label='Code library — Correlations', route='/operations/library?tab=correlations'),
