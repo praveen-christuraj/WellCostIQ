@@ -1468,7 +1468,7 @@ export default function DailyCostSheet() {
         value={(() => {
           const base = Number(day.comparison.has_adjustment && day.comparison.adjusted_planned_total != null
             ? day.comparison.adjusted_planned_total : day.comparison.planned_total)
-          return base > 0 ? `${(((actualToDate + lihToDate) / base) * 100).toFixed(1)}%` : '—'
+          return base > 0 ? `${(((actualToDate + lihToDate) / base) * 100).toFixed(0)}%` : '—'
         })()}
         hint="(Actual ÷ AFE) × 100"
         tone={(() => {
