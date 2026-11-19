@@ -142,11 +142,11 @@ const serviceBodyRows = [...servicePanel.querySelectorAll('.dcr-cost-item-row')]
 assert.equal(serviceBodyRows[0].cells.length, 10, 'a service row prints all ten cost columns')
 const mudLoggingSplit = serviceBodyRows.find(row => row.cells[0].textContent === 'Mud logging')
 assert.deepEqual([...mudLoggingSplit.cells].map(cell => cell.textContent),
-  ['Mud logging', '€1,000', '€250', '€50', '€250', '-', '€50', '€300', '€700', '30.000%'],
+  ['Mud logging', '€1,000', '€250', '€50', '€250', '-', '€50', '€300', '€700', '30%'],
   'a service row prints planned, NPT and UPA activity costs beside its cumulative total, showing "-" when nil')
 const serviceFooter = [...servicePanel.querySelectorAll('tfoot tr:last-child th')].map(cell => cell.textContent)
 assert.deepEqual(serviceFooter,
-  ['Services + consumables total', '€19,000', '€2,375', '€300', '€2,625', '-', '€50', '€2,675', '€16,325', '14.079%'],
+  ['Services + consumables total', '€19,000', '€2,375', '€300', '€2,625', '-', '€50', '€2,675', '€16,325', '14%'],
   'the merged footer totals every service and consumable value, showing "-" when nil')
 const fuelRow = combinedRows.find(row => row.cells[0].textContent === 'Fuel')
 assert.deepEqual([...fuelRow.cells].map(cell => cell.textContent).slice(2, 8), ['-', '€100', '€100', '-', '-', '€100'],
@@ -265,7 +265,7 @@ assert.deepEqual(afeSummaryRows[1], ['Consumables', '€16,000', '€100'],
 assert.deepEqual(afeSummaryRows[2], ['Tangibles', '€4,000', '-'],
   'AFE vs actual summary retains the locked tangible AFE amount')
 const afeSummaryNote = sheet.querySelector('.dcr-overall p').textContent
-assert.equal(afeSummaryNote, 'AFE available = €6,900 · 1.429% used', 'AFE summary labels the final balance as the available amount')
+assert.equal(afeSummaryNote, 'AFE available = €6,900 · 1% used', 'AFE summary labels the final balance as the available amount')
 assert.ok(!afeSummaryNote.includes('after LIH') && !afeSummaryNote.includes('Balance'), 'AFE summary removes the old after-LIH and duplicate balance wording')
 for (const code of ['DC-1', 'DC-2', 'AFE-1', 'AFE-2', 'WELL-1', 'RIG-1', 'SVC', 'SURFACE', 'DRL', 'DRILL', 'SA1', 'V1', 'T1', 'BAR']) {
   assert.ok(!sheet.textContent.includes(code), `${code} is omitted in favour of its name`)

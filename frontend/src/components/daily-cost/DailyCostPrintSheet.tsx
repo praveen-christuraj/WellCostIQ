@@ -377,8 +377,19 @@ function dailyCoverCostGroups(services: DailyCostComparisonLine[], consumables: 
     : groups
 }
 
+/**
+ * Percentages against the AFE round to whole numbers (0 decimals) in the
+ * printed report. Days, depths and meterage keep decimalText()'s three
+ * decimals; only the AFE usage percentages use this formatter.
+ */
+function percentText(value: number) {
+  return Number.isFinite(value)
+    ? value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+    : '—'
+}
+
 function percent(actual: number, planned: number) {
-  return planned > 0 ? `${decimalText(actual / planned * 100)}%` : '—'
+  return planned > 0 ? `${percentText(actual / planned * 100)}%` : '—'
 }
 
 /**
