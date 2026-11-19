@@ -1,19 +1,29 @@
-"""Operations code correlations and multi-criteria workspace code links.
+"""Operations Code Library correlations and multi-criteria code links.
 
 Two complementary, auditable rule sets live in ``Well Operations -> Code library``:
 
-1. **Printed-to-workspace correlations (``OpsCodeCorrelation``)** map an exact printed
-   token from the reference dictionary (or a printed source agency token) to a primary
-   workspace code — plus any optional companion criteria (phase, operation, activity,
-   NPT, cause, agency, source mark, scope, classification, allocation).
+1. **Printed-to-workspace correlations (``OpsCodeCorrelation``)** map an exact
+   printed token from the reference dictionary (or a printed source agency token)
+   to a primary workspace record — the Code Library Operations list, a cause, a
+   sub-phase, a responsible agency label or an agency/service vendor — plus any
+   optional companion criteria (hole section, phase, activity, allocation, scope).
 2. **Multi-criteria workspace code links (``OpsCodeLink``)** connect two or more
-   workspace codes across Phase, Operation, Activity, NPT, Cause, Agency, Source Mark,
-   Scope, Classification, and Allocation in typed relational columns (no JSON).
+   workspace records across Hole Section, Phase, Sub-phase, Activity, Operations,
+   Cause, Responsible agency label, Agency / service vendor and Source mark in
+   typed relational columns (no JSON). One rule carries as many criteria as the
+   user needs: ``DRLSUR`` can say "this section, phase, sub-phase, activity,
+   operation, cause and vendor" in a single row.
 
-Extraction applies exact printed correlations first, then fills any remaining empty
-fields only when active workspace code links agree on one unambiguous value. Every
-mapped block keeps ``review_state = "suggested"`` until an engineer confirms it.
-Correlated or linked codes cannot be deleted until their correlation rules are removed.
+Hole Section, Phase and Activity are **Master Data** registers; Operations,
+Sub-phase, Cause and the Responsible agency label are configured in the Code
+Library; the vendor list is also Master Data. Correlations read all of them
+without creating a dependency on any costing table.
+
+Extraction applies exact printed correlations first, then fills any remaining
+empty fields only when active workspace code links agree on one unambiguous
+value. Every mapped block keeps ``review_state = "suggested"`` until an engineer
+confirms it. Correlated or linked records cannot be deleted until their rules
+are removed.
 """
 
 from __future__ import annotations
@@ -27,19 +37,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.domain.operations.default_codes import catalogue_rows
-from app.models.master_data import Phase
+from app.models.master_data import Activity, HoleSection, Phase
 from app.models.operations import (
     OpsActivityBlock,
-    OpsActivityCode,
     OpsAgency,
     OpsCause,
     OpsCodeCorrelation,
     OpsCodeLink,
     OpsMarkRule,
-    OpsNptCode,
-    OpsOperationCode,
-    OpsPhaseCode,
+    OpsOperation,
+    OpsSubPhase,
 )
+from app.models.vendor_master import Vendor
 from app.models import User
 from app.schemas.operations import (
     OpsCodeLinkBatchIn,
@@ -49,129 +58,6 @@ from app.schemas.operations import (
     OpsCorrelationUpdate,
 )
 from app.services.audit import record as audit_record
-
-# kind -> (model, code column, name column, correlation target column, allowed printed families)
-KINDS: dict[str, tuple[type, str, str, str, tuple[str, ...]]] = {
-    "operation": (
-        OpsOperationCode,
-        "operation_code",
-        "operation_name",
-        "target_operation_code_id",
-        ("Operation", "OpenWells operation code"),
-    ),
-    "activity": (
-        OpsActivityCode,
-        "activity_code",
-        "activity_name",
-        "target_activity_code_id",
-        ("Activity", "OpenWells code token"),
-    ),
-    "npt": (
-        OpsNptCode,
-        "npt_code",
-        "npt_name",
-        "target_npt_code_id",
-        ("Trouble / NPT",),
-    ),
-    "cause": (
-        OpsCause,
-        "cause_code",
-        "cause_name",
-        "target_cause_id",
-        ("Cause", "Trouble / NPT"),
-    ),
-    "phase": (
-        OpsPhaseCode,
-        "phase_code",
-        "phase_name",
-        "target_phase_code_id",
-        ("OpenWells phase", "Programme phase"),
-    ),
-    "agency": (
-        OpsAgency,
-        "agency_code",
-        "agency_name",
-        "target_agency_id",
-        (),
-    ),
-}
-
-# All 7 workspace code criteria supported in multi-criteria links & companion fields.
-# criterion_key -> (master_kind, model, code_col, name_col, corr_col, link_col, short_label, sig_prefix)
-CRITERIA_SPECS: dict[str, tuple[str, type, str, str, str, str, str, str]] = {
-    "phase": (
-        "phase-codes",
-        OpsPhaseCode,
-        "phase_code",
-        "phase_name",
-        "target_phase_code_id",
-        "phase_code_id",
-        "Phase",
-        "ph",
-    ),
-    "operation": (
-        "operation-codes",
-        OpsOperationCode,
-        "operation_code",
-        "operation_name",
-        "target_operation_code_id",
-        "operation_code_id",
-        "Operation",
-        "op",
-    ),
-    "activity": (
-        "activity-codes",
-        OpsActivityCode,
-        "activity_code",
-        "activity_name",
-        "target_activity_code_id",
-        "activity_code_id",
-        "Activity",
-        "ac",
-    ),
-    "npt": (
-        "npt-codes",
-        OpsNptCode,
-        "npt_code",
-        "npt_name",
-        "target_npt_code_id",
-        "npt_code_id",
-        "NPT",
-        "np",
-    ),
-    "cause": (
-        "causes",
-        OpsCause,
-        "cause_code",
-        "cause_name",
-        "target_cause_id",
-        "cause_id",
-        "Cause",
-        "ca",
-    ),
-    "agency": (
-        "agencies",
-        OpsAgency,
-        "agency_code",
-        "agency_name",
-        "target_agency_id",
-        "agency_id",
-        "Agency",
-        "ag",
-    ),
-    "mark": (
-        "source-marks",
-        OpsMarkRule,
-        "mark_code",
-        "mark_name",
-        "target_mark_rule_id",
-        "mark_rule_id",
-        "Mark",
-        "mk",
-    ),
-}
-
-MASTER_TO_CRITERION = {spec[0]: key for key, spec in CRITERIA_SPECS.items()}
 
 
 def code_key(code: str) -> str:
@@ -184,6 +70,122 @@ def _format_code_label(row, code_col: str, name_col: str) -> str:
     if name and name != code:
         return f"{code} — {name}"
     return code
+
+
+# Criterion spec: (library key, model, code column, name column, correlation
+# column, link column, human label, signature prefix).
+#
+# The library key is what the Code Library page addresses the list by; Master
+# Data criteria use their Master Data module name so the page can deep-link.
+CRITERIA_SPECS: dict[str, tuple[str, type, str, str, str, str, str, str]] = {
+    "hole_section": (
+        "hole-sections",
+        HoleSection,
+        "section_code",
+        "section_name",
+        "target_hole_section_id",
+        "hole_section_id",
+        "Hole section",
+        "hs",
+    ),
+    "phase": (
+        "phases",
+        Phase,
+        "phase_code",
+        "phase_name",
+        "target_phase_id",
+        "phase_id",
+        "Phase",
+        "ph",
+    ),
+    "sub_phase": (
+        "sub-phases",
+        OpsSubPhase,
+        "sub_phase_code",
+        "sub_phase_name",
+        "target_sub_phase_id",
+        "sub_phase_id",
+        "Sub-phase",
+        "sp",
+    ),
+    "activity": (
+        "activities",
+        Activity,
+        "activity_code",
+        "activity_name",
+        "target_activity_id",
+        "activity_id",
+        "Activity",
+        "ac",
+    ),
+    "operation": (
+        "operations",
+        OpsOperation,
+        "operation_code",
+        "operation_name",
+        "target_operation_id",
+        "operation_id",
+        "Operations",
+        "op",
+    ),
+    "cause": (
+        "causes",
+        OpsCause,
+        "cause_code",
+        "cause_name",
+        "target_cause_id",
+        "cause_id",
+        "Cause",
+        "ca",
+    ),
+    "responsible_agency": (
+        "agencies",
+        OpsAgency,
+        "agency_code",
+        "agency_name",
+        "target_responsible_agency_id",
+        "responsible_agency_id",
+        "Responsible agency label",
+        "ra",
+    ),
+    "vendor": (
+        "vendors",
+        Vendor,
+        "vendor_code",
+        "vendor_name",
+        "target_vendor_id",
+        "vendor_id",
+        "Agency / service vendor",
+        "vn",
+    ),
+    "mark": (
+        "source-marks",
+        OpsMarkRule,
+        "mark_code",
+        "mark_name",
+        "target_mark_rule_id",
+        "mark_rule_id",
+        "Source mark",
+        "mk",
+    ),
+}
+
+MASTER_TO_CRITERION = {spec[0]: key for key, spec in CRITERIA_SPECS.items()}
+
+#: The criterion a correlation's printed token belongs to, and the printed
+#: reference families it may be read from. Hole Section, Phase and Activity are
+#: deliberately absent: they are Master Data, so a printed token is correlated
+#: *to* them rather than configured *as* them.
+KINDS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "operation": ("operation", ("Trouble / NPT", "Operation", "OpenWells operation code")),
+    "cause": ("cause", ("Cause", "Trouble / NPT")),
+    "sub-phase": ("sub_phase", ("OpenWells phase", "Programme phase")),
+    "responsible-party": ("responsible_agency", ()),
+    "agency": ("vendor", ()),
+}
+
+#: Correlation kind -> criterion key, for callers that only know the kind.
+KIND_CRITERION = {kind: spec[0] for kind, spec in KINDS.items()}
 
 
 def _printed_index() -> dict[tuple[str, str], dict]:
@@ -210,45 +212,64 @@ def _resolve_target(
         )
     )
     if row is None:
-        raise HTTPException(404, f"{short_label} code not found in this workspace.")
+        raise HTTPException(404, f"{short_label} not found in this workspace.")
     if require_active and hasattr(row, "is_active") and not row.is_active:
         raise HTTPException(
-            422, f"{short_label} code '{getattr(row, code_col)}' is inactive; activate it before linking."
+            422, f"{short_label} '{getattr(row, code_col)}' is inactive; activate it before linking."
         )
+    if criterion == "vendor" and getattr(row, "status", "") not in ("", "active"):
+        raise HTTPException(422, "Select an active vendor as the agency / service vendor.")
     return row, _format_code_label(row, code_col, name_col)
 
 
-def _check_classification_matrix(
-    classification: str,
-    allocation: str,
-    npt_code_id: str | None,
-    *,
-    prefix: str = "",
-) -> None:
-    if classification in ("Planned", "UPA") and npt_code_id:
-        raise HTTPException(422, f"{prefix}NPT code applies only when classification is NPT (or unset).")
-    if allocation == "NPT" and classification in ("Planned", "UPA"):
-        raise HTTPException(422, f"{prefix}NPT allocation requires NPT classification.")
-    if classification == "NPT" and allocation == "PT":
-        raise HTTPException(422, f"{prefix}NPT classification cannot be paired with PT allocation.")
+def _check_allocation_matrix(allocation: str, *, prefix: str = "") -> None:
+    if allocation and allocation not in ("PT", "UPA", "NPT", "SP"):
+        raise HTTPException(422, f"{prefix}Allocation must be PT, UPA, NPT or SP.")
+
+
+def _check_cause_matrix(db: Session, organization_id: str, activity_id: str | None, cause_id: str | None,
+                       *, prefix: str = "") -> None:
+    """Refuse a rule that would force a cause onto Planned work.
+
+    Cause is mandatory only when the Activity type is NPT or UPA. A link or
+    correlation that pairs a cause with a Planned Activity would contradict that
+    rule on every extracted block, so it is refused when the rule is saved rather
+    than quietly ignored later. Without an Activity the rule is allowed: the
+    cause then only ever fills a block the engineer typed NPT or UPA.
+    """
+    if not cause_id or not activity_id:
+        return
+    activity = db.scalar(
+        select(Activity).where(Activity.organization_id == organization_id, Activity.id == activity_id)
+    )
+    if activity is None:
+        return
+    if (activity.activity_type or "Planned") == "Planned":
+        raise HTTPException(
+            422,
+            f"{prefix}Activity '{activity.activity_code}' is {activity.activity_type}, so it never carries a "
+            "cause. Select the cause on an NPT or UPA activity, or leave the cause out of this rule.",
+        )
 
 
 def _validate_printed(kind: str, source_code: str, source_family: str, *, prefix: str = "") -> tuple[str, str, str]:
     """Verify the printed code belongs to the built-in catalogue for ``kind``.
 
-    Agency rules are the explicit exception: ``default_codes.py`` intentionally holds
-    no operator or contractor names, so ``agency`` accepts any non-empty printed source
-    agency token found on a daily report.
+    Responsible agency and vendor rules are the explicit exception:
+    ``default_codes.py`` intentionally holds no operator or contractor names, so
+    those kinds accept any non-empty printed source token found on a report.
     """
     spec = KINDS.get(kind)
     if not spec:
         raise HTTPException(422, f"{prefix}Unsupported correlation kind '{kind}'.")
-    _model, _c, _n, _col, families = spec
+    _criterion, families = spec
     raw_code = (source_code or "").strip()
     if not raw_code:
         raise HTTPException(422, f"{prefix}Printed source code cannot be empty.")
-    if kind == "agency":
-        fam = (source_family or "").strip() or "Source agency"
+    if not families:
+        fam = (source_family or "").strip() or (
+            "Source agency" if kind == "agency" else "Source responsible party"
+        )
         return raw_code.upper(), fam, raw_code
 
     key = code_key(raw_code)
@@ -263,8 +284,17 @@ def _validate_printed(kind: str, source_code: str, source_family: str, *, prefix
             return entry["code"], entry["family"], entry["name"]
     raise HTTPException(
         422,
-        f"{prefix}'{source_code}' is not in the printed reference catalogue for {kind} codes.",
+        f"{prefix}'{source_code}' is not in the printed reference catalogue for {kind} correlations.",
     )
+
+
+def _companion_criteria(primary_kind: str) -> dict[str, tuple]:
+    """Every criterion except the one the printed token itself is correlated as."""
+    return {
+        criterion: spec
+        for criterion, spec in CRITERIA_SPECS.items()
+        if criterion != KIND_CRITERION[primary_kind]
+    }
 
 
 def _build_companion_targets(
@@ -276,19 +306,18 @@ def _build_companion_targets(
     *,
     prefix: str = "",
 ) -> tuple[dict[str, str | None], str, str]:
-    """Resolve primary target plus any companion multi-criteria target columns."""
+    """Resolve the primary target plus every companion multi-criteria column."""
     values: dict[str, str | None] = {}
     extra_parts: list[str] = []
+    allocation = (getattr(data, "target_allocation", "") or "").strip()
 
     if data.scope:
         extra_parts.append(f"Scope: {data.scope.title()}")
-    if data.target_classification:
-        extra_parts.append(f"Class: {data.target_classification}")
-    if data.target_allocation:
-        extra_parts.append(f"Alloc: {data.target_allocation}")
+    if allocation:
+        extra_parts.append(f"Alloc: {allocation}")
 
-    _primary_row, primary_label = _resolve_target(db, organization_id, primary_kind, primary_id)
-    primary_corr_col = CRITERIA_SPECS[primary_kind][4]
+    _primary_row, primary_label = _resolve_target(db, organization_id, KIND_CRITERION[primary_kind], primary_id)
+    primary_corr_col = CRITERIA_SPECS[KIND_CRITERION[primary_kind]][4]
 
     for criterion, spec in CRITERIA_SPECS.items():
         corr_col = spec[4]
@@ -299,16 +328,17 @@ def _build_companion_targets(
         raw_id = (getattr(data, corr_col, None) or "").strip() or None
         if raw_id:
             row, _label = _resolve_target(db, organization_id, criterion, raw_id)
-            code_val = getattr(row, spec[2])
             values[corr_col] = raw_id
-            extra_parts.append(f"{short_label}: {code_val}")
+            extra_parts.append(f"{short_label}: {getattr(row, spec[2])}")
         else:
             values[corr_col] = None
 
-    _check_classification_matrix(
-        data.target_classification,
-        data.target_allocation,
-        values.get("target_npt_code_id"),
+    _check_allocation_matrix(allocation, prefix=prefix)
+    _check_cause_matrix(
+        db,
+        organization_id,
+        values.get("target_activity_id"),
+        values.get("target_cause_id"),
         prefix=prefix,
     )
     summary = " · ".join(extra_parts)[:300]
@@ -374,7 +404,6 @@ def _prepare_correlation_row(
         source_label=source_label[:200],
         target_label=label[:200],
         scope=data.scope,
-        target_classification=data.target_classification,
         target_allocation=data.target_allocation,
         extra_criteria_summary=extra_summary,
         note=(data.note or "").strip(),
@@ -494,7 +523,6 @@ def update_correlation(
         setattr(row, col, val)
     row.target_label = label[:200]
     row.scope = data.scope
-    row.target_classification = data.target_classification
     row.target_allocation = data.target_allocation
     row.extra_criteria_summary = extra_summary
     row.is_active = data.is_active
@@ -654,9 +682,6 @@ def _build_link_payload(
     if data.scope:
         sig_parts.append(f"sc={data.scope}")
         label_parts.append(f"Scope: {data.scope.title()}")
-    if data.default_classification:
-        sig_parts.append(f"cl={data.default_classification}")
-        label_parts.append(f"Class: {data.default_classification}")
     if data.default_allocation:
         sig_parts.append(f"al={data.default_allocation}")
         label_parts.append(f"Alloc: {data.default_allocation}")
@@ -681,15 +706,13 @@ def _build_link_payload(
     if code_count < 2:
         raise HTTPException(
             422,
-            f"{prefix}Select at least two workspace code criteria (for example Operation + Activity, "
-            "or NPT + Cause + Agency) to form a multi-criteria code link.",
+            f"{prefix}Select at least two criteria (for example Hole section + Phase, or "
+            "Activity + Cause + Operations) to form a multi-criteria code link.",
         )
 
-    _check_classification_matrix(
-        data.default_classification,
-        data.default_allocation,
-        link_cols.get("npt_code_id"),
-        prefix=prefix,
+    _check_allocation_matrix(data.default_allocation, prefix=prefix)
+    _check_cause_matrix(
+        db, organization_id, link_cols.get("activity_id"), link_cols.get("cause_id"), prefix=prefix
     )
 
     criteria_count = len(sig_parts)
@@ -713,38 +736,51 @@ def _hydrate_links(db: Session, organization_id: str, rows: list[OpsCodeLink]) -
         else:
             lookups[criterion] = {}
 
+    def label(criterion: str, record_id: str | None) -> str:
+        if not record_id:
+            return ""
+        row = lookups[criterion].get(record_id)
+        if row is None:
+            return ""
+        _mk, _m, code_col, name_col, _cc, _lc, _sl, _sig = CRITERIA_SPECS[criterion]
+        return _format_code_label(row, code_col, name_col)
+
+    def code_of(criterion: str, record_id: str | None) -> str:
+        if not record_id:
+            return ""
+        row = lookups[criterion].get(record_id)
+        return (getattr(row, CRITERIA_SPECS[criterion][2], "") or "") if row is not None else ""
+
     out: list[dict] = []
     for row in rows:
-        phase = lookups["phase"].get(row.phase_code_id or "")
-        op = lookups["operation"].get(row.operation_code_id or "")
-        act = lookups["activity"].get(row.activity_code_id or "")
-        npt = lookups["npt"].get(row.npt_code_id or "")
-        cause = lookups["cause"].get(row.cause_id or "")
-        agency = lookups["agency"].get(row.agency_id or "")
-        mark = lookups["mark"].get(row.mark_rule_id or "")
+        activity = lookups["activity"].get(row.activity_id or "")
         out.append(
             {
                 "id": row.id,
                 "rule_name": row.rule_name or "",
                 "scope": row.scope or "",
-                "default_classification": row.default_classification or "",
                 "default_allocation": row.default_allocation or "",
-                "phase_code_id": row.phase_code_id,
-                "phase_label": _format_code_label(phase, "phase_code", "phase_name") if phase else "",
-                "operation_code_id": row.operation_code_id,
-                "operation_label": _format_code_label(op, "operation_code", "operation_name") if op else "",
-                "activity_code_id": row.activity_code_id,
-                "activity_label": _format_code_label(act, "activity_code", "activity_name") if act else "",
-                "npt_code_id": row.npt_code_id,
-                "npt_label": _format_code_label(npt, "npt_code", "npt_name") if npt else "",
+                "hole_section_id": row.hole_section_id,
+                "hole_section_label": label("hole_section", row.hole_section_id),
+                "phase_id": row.phase_id,
+                "phase_code": code_of("phase", row.phase_id),
+                "phase_label": label("phase", row.phase_id),
+                "sub_phase_id": row.sub_phase_id,
+                "sub_phase_label": label("sub_phase", row.sub_phase_id),
+                "activity_id": row.activity_id,
+                "activity_label": label("activity", row.activity_id),
+                "activity_type": getattr(activity, "activity_type", "") if activity else "",
+                "operation_id": row.operation_id,
+                "operation_label": label("operation", row.operation_id),
                 "cause_id": row.cause_id,
-                "cause_code": getattr(cause, "cause_code", "") if cause else "",
-                "cause_label": _format_code_label(cause, "cause_code", "cause_name") if cause else "",
-                "agency_id": row.agency_id,
-                "agency_name": getattr(agency, "agency_name", "") if agency else "",
-                "agency_label": _format_code_label(agency, "agency_code", "agency_name") if agency else "",
+                "cause_code": code_of("cause", row.cause_id),
+                "cause_label": label("cause", row.cause_id),
+                "responsible_agency_id": row.responsible_agency_id,
+                "responsible_agency_label": label("responsible_agency", row.responsible_agency_id),
+                "vendor_id": row.vendor_id,
+                "vendor_label": label("vendor", row.vendor_id),
                 "mark_rule_id": row.mark_rule_id,
-                "mark_label": _format_code_label(mark, "mark_code", "mark_name") if mark else "",
+                "mark_label": label("mark", row.mark_rule_id),
                 "criteria_count": row.criteria_count,
                 "summary_label": row.summary_label or "",
                 "note": row.note or "",
@@ -812,7 +848,6 @@ def _prepare_code_link(
         rule_name=data.rule_name,
         rule_signature=signature,
         scope=data.scope,
-        default_classification=data.default_classification,
         default_allocation=data.default_allocation,
         criteria_count=criteria_count,
         summary_label=summary_label,
@@ -941,7 +976,6 @@ def update_code_link(
     row.rule_name = data.rule_name
     row.rule_signature = signature
     row.scope = data.scope
-    row.default_classification = data.default_classification
     row.default_allocation = data.default_allocation
     row.criteria_count = criteria_count
     row.summary_label = summary_label
@@ -1184,8 +1218,6 @@ def refresh_labels_for_code(db: Session, organization_id: str, master_kind: str,
         parts: list[str] = []
         if corr.scope:
             parts.append(f"Scope: {corr.scope.title()}")
-        if corr.target_classification:
-            parts.append(f"Class: {corr.target_classification}")
         if corr.target_allocation:
             parts.append(f"Alloc: {corr.target_allocation}")
         primary_col = CRITERIA_SPECS.get(corr.kind, CRITERIA_SPECS[criterion])[4]
@@ -1209,8 +1241,6 @@ def refresh_labels_for_code(db: Session, organization_id: str, master_kind: str,
         parts = []
         if link.scope:
             parts.append(f"Scope: {link.scope.title()}")
-        if link.default_classification:
-            parts.append(f"Class: {link.default_classification}")
         if link.default_allocation:
             parts.append(f"Alloc: {link.default_allocation}")
         for c_key, c_spec in CRITERIA_SPECS.items():
@@ -1249,49 +1279,80 @@ def _code_from_label(label: str) -> str:
     return (label or "").split(" — ", 1)[0].strip()
 
 
-def _apply_phase_code(db: Session | None, block: OpsActivityBlock, phase_code_id: str, fallback_code: str = "") -> bool:
-    """Apply an ``OpsPhaseCode`` safely without writing its ID to ``phases.id``."""
-    phase_code = db.get(OpsPhaseCode, phase_code_id) if db is not None else None
-    code_txt = ""
-    name_txt = ""
-    if phase_code is not None and not phase_code.is_deleted:
-        code_txt = phase_code.phase_code
-        name_txt = phase_code.phase_name
-    elif fallback_code:
-        code_txt = fallback_code
-    if not code_txt:
+def _apply_sub_phase(db: Session | None, block: OpsActivityBlock, sub_phase_id: str, fallback_code: str = "") -> bool:
+    """Pre-select a Code Library sub-phase without ever writing its id into ``phases.id``."""
+    if block.sub_phase_id:
         return False
-    block.phase_raw = code_txt[:20]
-    if db is not None and not block.phase_id:
-        conds = [Phase.phase_code == code_txt]
-        if name_txt:
-            conds.append(Phase.phase_name == name_txt)
-        master_phase = db.scalar(
-            select(Phase).where(
-                Phase.organization_id == block.organization_id,
-                Phase.is_deleted.is_(False),
-                or_(*conds),
-            )
-        )
-        if master_phase is not None:
-            block.phase_id = master_phase.id
+    row = db.get(OpsSubPhase, sub_phase_id) if db is not None else None
+    if db is not None and (row is None or row.is_deleted):
+        return False
+    block.sub_phase_id = sub_phase_id
     return True
 
 
-def _apply_agency_code(
+def _apply_operation(db: Session | None, block: OpsActivityBlock, operation_id: str, *, fallback_code: str = "") -> bool:
+    if block.operation_id:
+        return False
+    row = db.get(OpsOperation, operation_id) if db is not None else None
+    if db is not None and (row is None or row.is_deleted):
+        return False
+    block.operation_id = operation_id
+    if not (block.operation_snapshot or "").strip():
+        code_txt = row.operation_code if row is not None else fallback_code
+        if code_txt:
+            block.operation_snapshot = code_txt[:50]
+    return True
+
+
+def _apply_responsible_agency(
     db: Session | None, block: OpsActivityBlock, agency_id: str, *, fallback_name: str = ""
 ) -> bool:
-    if block.agency_id:
+    """Set the responsible agency label, keeping its text beside the link."""
+    if block.responsible_agency_id:
         return False
     agency = db.get(OpsAgency, agency_id) if db is not None else None
     if db is not None and (agency is None or agency.is_deleted):
         return False
-    block.agency_id = agency_id
+    block.responsible_agency_id = agency_id
     if not (block.responsible_party or "").strip():
         name_txt = agency.agency_name if agency is not None else fallback_name
         if name_txt:
             block.responsible_party = name_txt[:200]
     return True
+
+
+def _apply_vendor(db: Session | None, block: OpsActivityBlock, vendor_id: str, *, fallback_name: str = "") -> bool:
+    """Set the agency / service vendor, keeping its name in ``responsible_party``."""
+    if block.vendor_id:
+        return False
+    vendor = db.get(Vendor, vendor_id) if db is not None else None
+    if db is not None and (vendor is None or vendor.is_deleted):
+        return False
+    block.vendor_id = vendor_id
+    if not (block.responsible_party or "").strip():
+        name_txt = vendor.vendor_name if vendor is not None else fallback_name
+        if name_txt:
+            block.responsible_party = name_txt[:200]
+    return True
+
+
+def _apply_activity(db: Session | None, block: OpsActivityBlock, activity_id: str) -> bool:
+    """Pre-select the Master Data Activity and take its type as the block's Activity."""
+    row = db.get(Activity, activity_id) if db is not None else None
+    if db is not None and (row is None or row.is_deleted):
+        return False
+    changed = False
+    if block.activity_id != activity_id:
+        block.activity_id = activity_id
+        changed = True
+    activity_type = getattr(row, "activity_type", "") if row is not None else ""
+    if activity_type and block.classification_source != "source_mark" and block.classification != activity_type:
+        block.classification = activity_type
+        block.is_productive = activity_type != "NPT"
+        if activity_type != "NPT" and block.allocation == "NPT":
+            block.allocation = activity_type
+        changed = True
+    return changed
 
 
 def _apply_single_rule(
@@ -1304,39 +1365,27 @@ def _apply_single_rule(
     """Apply a matched ``OpsCodeCorrelation`` and any empty companion criteria."""
     changed = False
 
-    # Explicit classification / allocation overrides apply when the block has no explicit source mark.
-    if rule.target_classification and block.classification_source != "source_mark":
-        if block.classification != rule.target_classification:
-            block.classification = rule.target_classification
-            block.is_productive = rule.target_classification != "NPT"
-            if not rule.target_allocation:
-                block.allocation = {
-                    "Planned": "PT",
-                    "UPA": "UPA",
-                    "NPT": "NPT",
-                }.get(rule.target_classification, block.allocation)
-            changed = True
     if rule.target_allocation and block.classification_source != "source_mark":
-        if not (rule.target_allocation == "NPT" and block.classification != "NPT"):
-            if block.allocation != rule.target_allocation:
-                block.allocation = rule.target_allocation
-                if rule.target_allocation == "NPT":
-                    block.is_productive = False
-                changed = True
+        if block.allocation != rule.target_allocation:
+            block.allocation = rule.target_allocation
+            if rule.target_allocation == "NPT":
+                block.is_productive = False
+            if block.classification == "Planned" and rule.target_allocation in ("UPA", "NPT"):
+                block.classification = rule.target_allocation
+            changed = True
 
-    if rule.target_operation_code_id and not block.operation_code_id:
-        block.operation_code_id = rule.target_operation_code_id
+    if rule.target_hole_section_id and not block.hole_section_id:
+        block.hole_section_id = rule.target_hole_section_id
         changed = True
-    if rule.target_activity_code_id and not block.activity_code_id:
-        block.activity_code_id = rule.target_activity_code_id
+    if rule.target_phase_id and not block.phase_id:
+        block.phase_id = rule.target_phase_id
         changed = True
-    if rule.target_npt_code_id and block.classification == "NPT" and not block.npt_code_id:
-        block.npt_code_id = rule.target_npt_code_id
-        if not block.npt_code_snapshot:
-            if db is not None and (npt_row := db.get(OpsNptCode, rule.target_npt_code_id)) is not None:
-                block.npt_code_snapshot = npt_row.npt_code
-            elif kind == "npt":
-                block.npt_code_snapshot = _code_from_label(rule.target_label)[:50]
+    if rule.target_sub_phase_id and not block.sub_phase_id:
+        if _apply_sub_phase(db, block, rule.target_sub_phase_id, fallback_code=_code_from_label(rule.target_label)):
+            changed = True
+    if rule.target_activity_id and _apply_activity(db, block, rule.target_activity_id):
+        changed = True
+    if rule.target_operation_id and _apply_operation(db, block, rule.target_operation_id):
         changed = True
     if rule.target_cause_id and not (block.cause_code or "").strip():
         cause_code = ""
@@ -1350,7 +1399,7 @@ def _apply_single_rule(
             block.cause_code = cause_code[:50]
             changed = True
     elif rule.target_cause_id and kind == "cause" and code_key(block.cause_code) == code_key(rule.source_code):
-        # Replace raw printed cause token with correlated workspace cause code.
+        # Replace the raw printed cause token with the correlated workspace cause code.
         cause_code = ""
         if db is not None:
             cause = db.get(OpsCause, rule.target_cause_id)
@@ -1361,23 +1410,29 @@ def _apply_single_rule(
         if cause_code and cause_code != block.cause_code:
             block.cause_code = cause_code[:50]
             changed = True
-    if rule.target_phase_code_id and (
-        not (block.phase_raw or "").strip()
-        or (kind == "phase" and code_key(block.phase_raw) == code_key(rule.source_code))
-    ):
-        fallback_code = _code_from_label(rule.target_label) if kind == "phase" else ""
-        if _apply_phase_code(db, block, rule.target_phase_code_id, fallback_code=fallback_code):
-            changed = True
-    if rule.target_agency_id and not block.vendor_id:
-        fallback_name = ""
-        if kind == "agency" and " — " in (rule.target_label or ""):
-            fallback_name = rule.target_label.split(" — ", 1)[1].strip()
-        if _apply_agency_code(db, block, rule.target_agency_id, fallback_name=fallback_name):
+    if rule.target_responsible_agency_id and _apply_responsible_agency(db, block, rule.target_responsible_agency_id):
+        changed = True
+    if rule.target_vendor_id and _apply_vendor(db, block, rule.target_vendor_id):
+        changed = True
+    if rule.target_mark_rule_id and not (block.source_mark or "").strip():
+        mark = db.get(OpsMarkRule, rule.target_mark_rule_id) if db is not None else None
+        if mark is not None and not mark.is_deleted:
+            block.source_mark = mark.mark_code[:30]
             changed = True
 
     if changed:
         block.review_state = "suggested"
     return changed
+
+
+#: Correlation kind -> the printed-token groups a block offers that kind.
+TOKEN_KINDS = (
+    "operation",
+    "cause",
+    "sub-phase",
+    "responsible-party",
+    "agency",
+)
 
 
 def apply_to_block(
@@ -1387,29 +1442,34 @@ def apply_to_block(
     db: Session | None = None,
     report_scope: str = "",
     operation_tokens: tuple[str, ...] = (),
-    activity_tokens: tuple[str, ...] = (),
-    npt_tokens: tuple[str, ...] = (),
     cause_tokens: tuple[str, ...] = (),
-    phase_tokens: tuple[str, ...] = (),
+    sub_phase_tokens: tuple[str, ...] = (),
+    responsible_party_tokens: tuple[str, ...] = (),
     agency_tokens: tuple[str, ...] = (),
+    tokens_by_kind: dict[str, tuple[str, ...]] | None = None,
 ) -> list[str]:
     """Apply matching printed-code correlations (plus companion criteria) to ``block``.
 
-    Fills only what the source left empty (or translates raw printed cause/phase tokens),
-    never overrides a direct library hit, keeps ``review_state == 'suggested'``, and
-    returns auditable evidence lines for ``block.classification_evidence``.
+    Fills only what the source left empty (or translates a raw printed token),
+    never overrides a direct library hit, keeps ``review_state == 'suggested'``,
+    and returns auditable evidence lines for ``block.classification_evidence``.
     """
     if not rules:
         return []
     evidence: list[str] = []
-    token_groups = (
-        ("operation", operation_tokens),
-        ("activity", activity_tokens),
-        ("npt", npt_tokens),
-        ("cause", cause_tokens),
-        ("phase", phase_tokens),
-        ("agency", agency_tokens),
-    )
+    if tokens_by_kind is not None:
+        token_groups = tuple(
+            (kind, tuple(tokens_by_kind.get(kind, ())))
+            for kind in TOKEN_KINDS
+        )
+    else:
+        token_groups = (
+            ("operation", operation_tokens),
+            ("cause", cause_tokens),
+            ("sub-phase", sub_phase_tokens),
+            ("responsible-party", responsible_party_tokens),
+            ("agency", agency_tokens),
+        )
     for kind, tokens in token_groups:
         for raw in tokens:
             if not raw:
@@ -1438,28 +1498,18 @@ def apply_code_links_to_block(
     """Fill remaining empty block fields when active multi-criteria links agree unambiguously.
 
     A link matches a block when (a) its scope is empty or equals ``report_scope``,
-    (b) at least one workspace code criterion on the link matches a code already set on
-    the block, and (c) no criterion set on the link conflicts with a non-empty criterion
-    on the block. An empty field is filled ONLY when every matching link that specifies
-    that field supplies the exact same single value — never guessed.
+    (b) at least one criterion on the link matches a value already set on the
+    block, and (c) no criterion set on the link conflicts with a non-empty
+    criterion on the block. An empty field is filled ONLY when every matching
+    link that specifies that field supplies the exact same single value — never
+    guessed.
     """
     if not links:
         return []
 
-    phase_code_by_id = {
-        link["phase_code_id"]: code_key(_code_from_label(link["phase_label"]))
-        for link in links
-        if link.get("phase_code_id") and link.get("phase_label")
-    }
-    mark_by_id = {
-        link["mark_rule_id"]: code_key(_code_from_label(link["mark_label"]))
-        for link in links
-        if link.get("mark_rule_id") and link.get("mark_label")
-    }
-
-    block_phase = code_key(block.phase_raw)
     block_cause = code_key(block.cause_code)
     block_mark = code_key(block.source_mark)
+    block_phase_raw = code_key(block.phase_raw)
 
     compatible: list[dict] = []
     for link in links:
@@ -1468,50 +1518,34 @@ def apply_code_links_to_block(
         matched = 0
         conflict = False
 
-        if link.get("operation_code_id"):
-            if block.operation_code_id:
-                if block.operation_code_id == link["operation_code_id"]:
+        def compare(link_id: str | None, block_value: str | None) -> None:
+            nonlocal matched, conflict
+            if conflict or not link_id:
+                return
+            if block_value:
+                if block_value == link_id:
                     matched += 1
                 else:
                     conflict = True
-        if not conflict and link.get("activity_code_id"):
-            if block.activity_code_id:
-                if block.activity_code_id == link["activity_code_id"]:
-                    matched += 1
-                else:
-                    conflict = True
-        if not conflict and link.get("npt_code_id"):
-            if block.npt_code_id:
-                if block.npt_code_id == link["npt_code_id"]:
-                    matched += 1
-                else:
-                    conflict = True
+
+        compare(link.get("hole_section_id"), block.hole_section_id)
+        compare(link.get("phase_id"), block.phase_id)
+        compare(link.get("sub_phase_id"), block.sub_phase_id)
+        compare(link.get("activity_id"), block.activity_id)
+        compare(link.get("operation_id"), block.operation_id)
+        compare(link.get("responsible_agency_id"), block.responsible_agency_id)
+        compare(link.get("vendor_id"), block.vendor_id)
+        compare(link.get("mark_rule_id"), block.source_mark or None)
         if not conflict and link.get("cause_code"):
             if block_cause:
                 if block_cause == code_key(link["cause_code"]):
                     matched += 1
                 else:
                     conflict = True
-        if not conflict and link.get("agency_id"):
-            if block.agency_id:
-                if block.agency_id == link["agency_id"]:
-                    matched += 1
-                else:
-                    conflict = True
-        if not conflict and link.get("phase_code_id"):
-            lp = phase_code_by_id.get(link["phase_code_id"], "")
-            if block_phase and lp:
-                if block_phase == lp:
-                    matched += 1
-                else:
-                    conflict = True
-        if not conflict and link.get("mark_rule_id"):
-            lm = mark_by_id.get(link["mark_rule_id"], "")
-            if block_mark and lm:
-                if block_mark == lm:
-                    matched += 1
-                else:
-                    conflict = True
+        if not conflict and link.get("phase_code"):
+            # A printed phase token on the source may stand in for the phase link.
+            if block_phase_raw and code_key(link["phase_code"]) == block_phase_raw:
+                matched += 1
 
         if matched >= 1 and not conflict:
             compatible.append(link)
@@ -1525,44 +1559,40 @@ def apply_code_links_to_block(
 
     applied_fields: list[str] = []
 
-    cls_val = _unique("default_classification")
+    if not block.hole_section_id and (section_id := _unique("hole_section_id")):
+        block.hole_section_id = section_id
+        applied_fields.append("hole section")
+    if not block.phase_id and (phase_id := _unique("phase_id")):
+        block.phase_id = phase_id
+        applied_fields.append("phase")
+    if not block.sub_phase_id and (sub_phase_id := _unique("sub_phase_id")):
+        if _apply_sub_phase(db, block, sub_phase_id):
+            applied_fields.append("sub-phase")
+    if activity_id := _unique("activity_id"):
+        if block.activity_id != activity_id and _apply_activity(db, block, activity_id):
+            applied_fields.append("activity")
     alloc_val = _unique("default_allocation")
-    if cls_val and block.classification_source != "source_mark" and block.classification == "Planned":
-        if cls_val != block.classification:
-            block.classification = cls_val
-            block.is_productive = cls_val != "NPT"
-            block.allocation = alloc_val or {"Planned": "PT", "UPA": "UPA", "NPT": "NPT"}.get(
-                cls_val, block.allocation
-            )
-            applied_fields.append(f"classification={cls_val}")
-    if alloc_val and block.classification_source != "source_mark":
-        if not (alloc_val == "NPT" and block.classification != "NPT") and block.allocation != alloc_val:
-            if not (block.classification == "NPT" and alloc_val == "PT"):
-                block.allocation = alloc_val
-                if alloc_val == "NPT":
-                    block.is_productive = False
-                applied_fields.append(f"allocation={alloc_val}")
-
-    if not block.operation_code_id and (op_id := _unique("operation_code_id")):
-        block.operation_code_id = op_id
-        applied_fields.append("operation")
-    if not block.activity_code_id and (act_id := _unique("activity_code_id")):
-        block.activity_code_id = act_id
-        applied_fields.append("activity")
-    if block.classification == "NPT" and not block.npt_code_id and (npt_id := _unique("npt_code_id")):
-        block.npt_code_id = npt_id
-        if not block.npt_code_snapshot and (npt_row := db.get(OpsNptCode, npt_id)) is not None:
-            block.npt_code_snapshot = npt_row.npt_code
-        applied_fields.append("NPT")
-    if not block_cause and block.classification in ("NPT", "UPA") and (cause_code := _unique("cause_code")):
+    if alloc_val and block.classification_source != "source_mark" and block.allocation != alloc_val:
+        block.allocation = alloc_val
+        if alloc_val == "NPT":
+            block.is_productive = False
+        applied_fields.append(f"allocation={alloc_val}")
+    if (
+        not block_cause
+        and block.classification in ("NPT", "UPA")
+        and (cause_code := _unique("cause_code"))
+    ):
         block.cause_code = cause_code[:50]
         applied_fields.append(f"cause={cause_code}")
-    if not block.vendor_id and not block.agency_id and (agency_id := _unique("agency_id")):
-        if _apply_agency_code(db, block, agency_id):
-            applied_fields.append("agency")
-    if not block_phase and (phase_id := _unique("phase_code_id")):
-        if _apply_phase_code(db, block, phase_id):
-            applied_fields.append("phase")
+    if not block.operation_id and (operation_id := _unique("operation_id")):
+        if _apply_operation(db, block, operation_id):
+            applied_fields.append("operations")
+    if not block.responsible_agency_id and (agency_id := _unique("responsible_agency_id")):
+        if _apply_responsible_agency(db, block, agency_id):
+            applied_fields.append("responsible agency")
+    if not block.vendor_id and (vendor_id := _unique("vendor_id")):
+        if _apply_vendor(db, block, vendor_id):
+            applied_fields.append("agency / service vendor")
 
     if not applied_fields:
         return []

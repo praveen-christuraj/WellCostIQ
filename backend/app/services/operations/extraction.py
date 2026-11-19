@@ -12,17 +12,18 @@ from app.domain.operations.classify import suggest
 from app.domain.operations.default_codes import describe_code, find_code
 from app.domain.operations.durations import resolve_period, utc
 from app.domain.operations.taxonomy import code_key
+from app.models.master_data import Activity, HoleSection, Phase
 from app.models.operations import (
     OpsActivityBlock,
-    OpsActivityCode,
+    OpsAgency,
     OpsCause,
     OpsDailyReport,
     OpsExtractionJob,
     OpsMarkRule,
-    OpsNptCode,
-    OpsOperationCode,
+    OpsOperation,
     OpsPlanItem,
     OpsPlanVersion,
+    OpsSubPhase,
     OpsSurvey,
 )
 from app.models.rig_well import Well
@@ -364,18 +365,39 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             hours = end_hour
 
     def lookup(model, *keys):
-        rows = db.scalars(
-            select(model).where(
-                model.organization_id == org, model.is_active.is_(True), model.is_deleted.is_(False)
-            )
-        )
-        return {code_key(getattr(row, k)): row for row in rows for k in keys}
+        query = select(model).where(model.organization_id == org, model.is_deleted.is_(False))
+        if hasattr(model, "is_active"):
+            query = query.where(model.is_active.is_(True))
+        rows = db.scalars(query)
+        return {code_key(getattr(row, k)): row for row in rows for k in keys if getattr(row, k, None)}
 
-    codes = lookup(OpsActivityCode, "activity_code", "activity_name")
-    operations = lookup(OpsOperationCode, "operation_code", "operation_name")
+    # Master Data: Activities carry their own type, which becomes the block's
+    # Activity; Hole Sections and Phases are the shared registers the costing
+    # module also reads (no FK, no dependency — simply the same definitions).
+    activities = lookup(Activity, "activity_code", "activity_name")
+    hole_sections = lookup(HoleSection, "section_code", "section_name")
+    phases = lookup(Phase, "phase_code", "phase_name")
+    # Code Library lists.
+    operations = lookup(OpsOperation, "operation_code", "operation_name")
     causes = lookup(OpsCause, "cause_code", "cause_name")
-    trouble = lookup(OpsNptCode, "npt_code", "npt_name")
+    sub_phases = lookup(OpsSubPhase, "sub_phase_code", "sub_phase_name")
+    agencies = lookup(OpsAgency, "agency_code", "agency_name")
     mark_rules = lookup(OpsMarkRule, "mark_code")
+
+    def _master_by_label(rows, raw: str, *fields: str):
+        """Pick a Master Data record from printed text, preferring the code."""
+        key = code_key(raw)
+        if not key:
+            return None
+        for field in fields:
+            row = rows.get(key) if field == "code" else None
+            if row is not None:
+                return row
+        for row in rows.values():
+            for field in fields:
+                if code_key(getattr(row, field, "") or "") == key:
+                    return row
+        return None
     # Workspace correlations and multi-criteria code links pre-select the
     # organisation's own codes. They never override a printed code and never approve the block.
     correlation_map = correlation_svc.correlation_map(db, org)
@@ -394,7 +416,8 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
         if k
     }
 
-    def _infer_operation(raw_op: str, phase_raw: str, narr: str):
+    def _infer_printed_operation(raw_op: str, phase_raw: str, narr: str):
+        """A printed operation token is interpreted by its own printed vocabulary."""
         if raw_op and (direct := operations.get(code_key(raw_op))):
             return direct
         pr = (phase_raw or "").upper()
@@ -422,8 +445,9 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             candidates.extend(("E", "Drilling"))
         return next((operations[code_key(c)] for c in candidates if code_key(c) in operations), None)
 
-    def _infer_npt(raw_c: str, raw_m: str, narr: str, cls_name: str, alloc_name: str):
-        direct = trouble.get(code_key(raw_c or raw_m))
+    def _infer_operation_code(raw_c: str, raw_m: str, narr: str, cls_name: str, alloc_name: str):
+        """Guided Operations pre-selection for downtime; never an approval."""
+        direct = operations.get(code_key(raw_c or raw_m))
         if direct:
             return direct
         if cls_name != "NPT" and alloc_name != "NPT":
@@ -445,8 +469,8 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             (("wait on", "waiting on", "wom", "woe"), "TW02"),
         )
         for words, t_code in hints:
-            if any(w in nl for w in words) and code_key(t_code) in trouble:
-                return trouble[code_key(t_code)]
+            if any(w in nl for w in words) and code_key(t_code) in operations:
+                return operations[code_key(t_code)]
         return None
 
     zone = ZoneInfo(cfg.operating_timezone)
@@ -457,7 +481,7 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
         z = b["end"].replace(tzinfo=zone).astimezone(UTC)
         raw_activity = b["code"].strip()
         activity_family = "OpenWells code token" if b.get("source_page") else "Activity"
-        code = codes.get(code_key(raw_activity))
+        code = activities.get(code_key(raw_activity))
         elapsed = (
             (a - utc(plan.planned_start_at)).total_seconds() / 3600 if plan and plan.planned_start_at else None
         )
@@ -495,15 +519,25 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             else:
                 evidence.append(f"Source agency: {party[:80]}; choose vendor")
         cause = causes.get(code_key(raw_cause))
-        default_trouble = find_code(raw_cause or raw_mark, "Trouble / NPT")
-        npt = _infer_npt(
+        default_operation = find_code(raw_cause or raw_mark, "Trouble / NPT")
+        operation = _infer_operation_code(
             raw_cause,
             raw_mark,
             b["narrative"],
             classification["classification"],
             classification["allocation"],
+        ) or _infer_printed_operation(raw_operation, b.get("phase_raw", ""), b["narrative"])
+        printed_activity = activities.get(code_key(raw_activity))
+        hole_section = (
+            _master_by_label(hole_sections, b.get("hole_section_raw", ""), "code", "name")
+            or (db.get(HoleSection, report.hole_section_id) if report.hole_section_id else None)
         )
-        operation = _infer_operation(raw_operation, b.get("phase_raw", ""), b["narrative"])
+        phase = (
+            _master_by_label(phases, b.get("phase_raw", ""), "code", "name")
+            or (db.get(Phase, report.phase_id) if report.phase_id else None)
+        )
+        sub_phase = sub_phases.get(code_key(b.get("phase_raw", "")))
+        responsible_agency = agencies.get(code_key(party)) if party else None
         classification["classification_evidence"] = " · ".join(evidence)[:500]
 
         d_from = b.get("depth_from_m")
@@ -540,13 +574,14 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             source_operation_code=raw_operation[:100],
             source_cause_code=raw_cause[:50],
             source_mark=raw_mark[:30],
-            activity_code_id=code.id if code else None,
-            operation_code_id=operation.id if operation else None,
+            activity_id=printed_activity.id if printed_activity else None,
+            operation_id=operation.id if operation else None,
+            operation_snapshot=operation.operation_code if operation else (default_operation.code if default_operation else ""),
             cause_code=cause.cause_code if cause else raw_cause[:50],
-            npt_code_id=npt.id if npt else None,
-            npt_code_snapshot=npt.npt_code if npt else (default_trouble.code if default_trouble else ""),
-            hole_section_id=report.hole_section_id,
-            phase_id=report.phase_id,
+            hole_section_id=hole_section.id if hole_section else None,
+            phase_id=phase.id if phase else None,
+            sub_phase_id=sub_phase.id if sub_phase else None,
+            responsible_agency_id=responsible_agency.id if responsible_agency else None,
             vendor_id=matched_vendor.id if matched_vendor else None,
             responsible_party=matched_vendor.vendor_name if matched_vendor else (party[:200] if party else ""),
             reason=reason_txt,
@@ -569,11 +604,10 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
         # evidence names the correlation so the engineer can tell a pre-selection
         # from a printed code, and the block stays a suggestion.
         correlation_tokens = {
-            "operation": (raw_operation,),
-            "activity": (raw_activity,),
+            "operation": (raw_operation, raw_cause, raw_mark),
             "cause": (raw_cause, raw_mark),
-            "phase": (b.get("phase_raw", ""),),
-            "npt": (raw_cause, raw_mark),
+            "sub-phase": (b.get("phase_raw", ""),),
+            "responsible-party": (party,),
             "agency": (party,),
         }
         correlation_evidence = correlation_svc.apply_to_block(
@@ -581,7 +615,7 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             correlation_map,
             db=db,
             report_scope=doc.scope,
-            **{f"{kind}_tokens": tokens for kind, tokens in correlation_tokens.items()},
+            tokens_by_kind=correlation_tokens,
         )
         link_evidence = correlation_svc.apply_code_links_to_block(
             db, block, code_links, report_scope=doc.scope

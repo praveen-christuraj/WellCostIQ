@@ -1,9 +1,9 @@
 export const MASTER_DATA_MODULES = [
-  { key: 'uom', label: 'UOM', title: 'Units of Measurement', hasSymbol: true },
-  { key: 'currencies', label: 'Currency', title: 'Currencies', hasSymbol: true },
-  { key: 'phases', label: 'Phases', title: 'Phases', hasSymbol: false },
-  { key: 'hole-sections', label: 'Hole Sections', title: 'Hole Sections', hasSymbol: false },
-  { key: 'activities', label: 'Activities', title: 'Activities', hasSymbol: false },
+  { key: 'uom', label: 'UOM', title: 'Units of Measurement', hasSymbol: true, hasActivityType: false },
+  { key: 'currencies', label: 'Currency', title: 'Currencies', hasSymbol: true, hasActivityType: false },
+  { key: 'phases', label: 'Phases', title: 'Phases', hasSymbol: false, hasActivityType: false },
+  { key: 'hole-sections', label: 'Hole Sections', title: 'Hole Sections', hasSymbol: false, hasActivityType: false },
+  { key: 'activities', label: 'Activities', title: 'Activities', hasSymbol: false, hasActivityType: true },
 ] as const
 
 export type MasterDataModuleKey = (typeof MASTER_DATA_MODULES)[number]['key']
@@ -14,6 +14,8 @@ export type MasterDataRecord = {
   code: string
   name: string
   symbol: string | null
+  /** Planned / UPA / NPT on an Activity; null for every other module. */
+  activity_type?: string | null
   description: string
   // True only for the workspace's default currency; null for modules without a default concept.
   is_default: boolean | null

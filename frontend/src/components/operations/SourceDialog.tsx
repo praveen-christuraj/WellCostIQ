@@ -191,7 +191,7 @@ export function SourceDialog({
               }
             />
             <Typography variant="caption" color="text.secondary" display="block">
-              Captures all MDs, TVDs, bit depth, casing, mud properties, BHA, surveys, codes and narratives deterministically first, then asks your local LAN AI model to fill any remaining header or block classification gaps for your review.
+              Captures all MDs, TVDs, bit depth, casing, mud properties, BHA, surveys, codes and narratives deterministically first, then asks your local LAN AI model to fill any remaining header or Activity-type gaps on a block for your review.
             </Typography>
           </Box>
         )}

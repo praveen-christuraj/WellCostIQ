@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, Index, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -92,10 +92,24 @@ class HoleSection(MasterDataRecord):
 
 
 class Activity(MasterDataRecord):
-    """Standardized well activity."""
+    """Standardized well activity.
+
+    ``activity_type`` is what the Operations daily report derives its own time
+    classification from: the activity an engineer selects *is* the record that
+    says whether the work was planned, unplanned but productive (UPA) or
+    non-productive (NPT). The costing modules read the activity code and name and
+    ignore the type, so one register serves both modules without a link between
+    their tables.
+    """
 
     __tablename__ = "activities"
-    __table_args__ = (UniqueConstraint("organization_id", "activity_code", name="uq_activities_org_code"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "activity_code", name="uq_activities_org_code"),
+        CheckConstraint("activity_type IN ('Planned', 'UPA', 'NPT')", name="ck_activities_type"),
+    )
 
     activity_code: Mapped[str] = mapped_column(String(50), nullable=False)
     activity_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    activity_type: Mapped[str] = mapped_column(
+        String(10), default="Planned", server_default="Planned", nullable=False
+    )

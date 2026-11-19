@@ -93,6 +93,11 @@ MODULES: dict[str, dict[str, Any]] = {
         "code_max": 50,
         "name_max": 150,
         "symbol_max": 0,
+        # The Activity type is what Well Operations reads as a block's Activity:
+        # Planned, UPA (unplanned but productive) or NPT (non-productive).
+        "type_field": "activity_type",
+        "type_values": ("Planned", "UPA", "NPT"),
+        "type_default": "Planned",
     },
 }
 
@@ -170,6 +175,17 @@ def _normalize_payload(config: dict[str, Any], payload: dict[str, Any], *, parti
         if config["symbol_field"] is not None and len(symbol) > config["symbol_max"]:
             raise ValueError(f"Symbol must be {config['symbol_max']} characters or fewer")
         result["symbol"] = symbol or None
+    if config.get("type_field") and "activity_type" in result:
+        value = result["activity_type"]
+        allowed = config["type_values"]
+        canonical = {item.casefold(): item for item in allowed}
+        if value is None or not isinstance(value, str) or not value.strip():
+            result["activity_type"] = config["type_default"]
+        elif value.strip().casefold() not in canonical:
+            raise ValueError(f"Activity type must be one of {', '.join(allowed)}")
+        else:
+            # Stored as Planned / UPA / NPT whatever case the caller used.
+            result["activity_type"] = canonical[value.strip().casefold()]
     if "is_default" in result:
         if result["is_default"] is None:
             # Absent and null are the same: no default was requested.
@@ -189,6 +205,8 @@ def _model_values(config: dict[str, Any], payload: dict[str, Any]) -> dict[str, 
     }
     if config["symbol_field"]:
         values[config["symbol_field"]] = payload.get("symbol") or payload["code"]
+    if config.get("type_field"):
+        values[config["type_field"]] = payload.get("activity_type") or config["type_default"]
     return values
 
 
@@ -202,6 +220,9 @@ def _output(config: dict[str, Any], record: Any) -> MasterDataRecordOut:
         symbol=getattr(record, symbol_field) if symbol_field else None,
         description=record.description or "",
         is_default=bool(getattr(record, default_field)) if default_field else None,
+        activity_type=(
+            getattr(record, config["type_field"]) if config.get("type_field") else None
+        ),
         is_deleted=record.is_deleted,
         deleted_at=record.deleted_at,
         created_at=record.created_at,
@@ -396,6 +417,11 @@ def _import_row(config: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
     }
     if config["symbol_field"]:
         canonical["symbol"] = normalized.get("symbol", normalized.get(config["symbol_field"]))
+    if config.get("type_field"):
+        # Accept "activity type", "activity_type" or the model's own column name.
+        canonical["activity_type"] = normalized.get(
+            "activity_type", normalized.get(config["type_field"])
+        )
     return canonical
 
 
@@ -694,6 +720,11 @@ def update_record(
         if record.description != value:
             record.description = value
             changed_fields.append("description")
+    if config.get("type_field") and "activity_type" in payload:
+        value = payload["activity_type"] or config["type_default"]
+        if getattr(record, config["type_field"]) != value:
+            setattr(record, config["type_field"], value)
+            changed_fields.append("activity type")
 
     default_note = ""
     if _default_supported(config) and payload.get("is_default") is not None:

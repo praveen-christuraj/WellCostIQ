@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import { AddRounded, DeleteOutlineRounded, EditOutlined, StarOutlineRounded } from '@mui/icons-material'
-import { Alert, Box, Button, Checkbox, CircularProgress, FormControlLabel, Paper, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Checkbox, CircularProgress, FormControlLabel, MenuItem, Paper, TextField, Typography } from '@mui/material'
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag } from '../components/Common'
@@ -17,7 +17,7 @@ const moduleFor = (key: string | null): MasterDataModule =>
   MASTER_DATA_MODULES.find(module => module.key === key) ?? MASTER_DATA_MODULES[0]
 
 const isCurrencyModule = (module: MasterDataModule) => module.key === 'currencies'
-const emptyForm = () => ({ code: '', name: '', symbol: '', description: '', isDefault: false })
+const emptyForm = () => ({ code: '', name: '', symbol: '', description: '', isDefault: false, activityType: 'Planned' })
 
 export default function MasterDataRecords() {
   const { can } = useAuth()
@@ -72,6 +72,7 @@ export default function MasterDataRecords() {
     const initial = {
       code: record.code, name: record.name, symbol: record.symbol ?? '',
       description: record.description ?? '', isDefault: isCurrencyModule(currentModule) && Boolean(record.is_default),
+      activityType: record.activity_type || 'Planned',
     }
     setFormRecord(record)
     setForm(initial)
@@ -91,6 +92,9 @@ export default function MasterDataRecords() {
       ...(currentModule.hasSymbol ? { symbol: form.symbol.trim() || form.code.trim() } : {}),
       description: form.description.trim(),
       ...(defaultChanged ? { is_default: form.isDefault } : {}),
+      // The Activity type is what Well Operations reads as a block's Activity;
+      // it is set here once, on the Master Data record, never per report.
+      ...(currentModule.hasActivityType ? { activity_type: form.activityType } : {}),
     }
     try {
       if (formMode === 'create') {
@@ -179,6 +183,12 @@ export default function MasterDataRecords() {
     { headerName: 'CODE', field: 'code', minWidth: 130, flex: .8 },
     { headerName: 'NAME', field: 'name', minWidth: 190, flex: 1.2 },
     ...(currentModule.hasSymbol ? [{ headerName: 'SYMBOL', field: 'symbol', minWidth: 100, flex: .6 } as ColDef<MasterDataRecord>] : []),
+    ...(currentModule.hasActivityType ? [{
+      headerName: 'ACTIVITY TYPE', field: 'activity_type', minWidth: 130, flex: .6,
+      cellRenderer: ({ data }: { data: MasterDataRecord }) => data?.activity_type
+        ? <Tag tone={data.activity_type === 'Planned' ? 'success' : data.activity_type === 'NPT' ? 'error' : 'warning'}>{data.activity_type}</Tag>
+        : null,
+    } as ColDef<MasterDataRecord>] : []),
     ...(isCurrencyModule(currentModule) ? [{
       headerName: 'DEFAULT', field: 'is_default', minWidth: 110, flex: .5,
       cellRenderer: ({ data }: { data: MasterDataRecord }) => data?.is_default ? <Tag tone="success">Default</Tag> : null,
@@ -197,11 +207,18 @@ export default function MasterDataRecords() {
     },
   ], [can, currentModule, settingDefault])
 
-  const importHeaders = ['code', 'name', ...(currentModule.hasSymbol ? ['symbol'] : []), 'description']
+  const importHeaders = [
+    'code',
+    'name',
+    ...(currentModule.hasSymbol ? ['symbol'] : []),
+    ...(currentModule.hasActivityType ? ['activity_type'] : []),
+    'description',
+  ]
   const importSample: ImportRow = {
     code: currentModule.hasSymbol ? 'SAMPLE' : 'PHASE1',
     name: currentModule.hasSymbol ? `Sample ${currentModule.label}` : 'Sample record',
     ...(currentModule.hasSymbol ? { symbol: 'SMP' } : {}),
+    ...(currentModule.hasActivityType ? { activity_type: 'Planned' } : {}),
     description: 'Optional description',
   }
 
@@ -266,6 +283,11 @@ export default function MasterDataRecords() {
       <Box display="grid" gap={2} pt={.5}>
         <TextField label="Code" required fullWidth value={form.code} onChange={event => setForm({ ...form, code: event.target.value })} inputProps={{ maxLength: currentModule.key === 'currencies' ? 10 : 50 }}/>
         <TextField label="Name" required fullWidth value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} inputProps={{ maxLength: currentModule.key === 'currencies' ? 100 : 150 }}/>
+        {currentModule.hasActivityType && <TextField select label="Activity type" required fullWidth
+          value={form.activityType} onChange={event => setForm({ ...form, activityType: event.target.value })}
+          helperText="Well Operations reads this as the block's Activity: Planned, UPA (unplanned productive) or NPT (nonproductive time). Cause is only required for UPA and NPT.">
+          {['Planned', 'UPA', 'NPT'].map(option => <MenuItem key={option} value={option}>{option}</MenuItem>)}
+        </TextField>}
         {currentModule.hasSymbol && <TextField label="Symbol" required fullWidth helperText="If left blank, the code is used as the symbol." value={form.symbol} onChange={event => setForm({ ...form, symbol: event.target.value })} inputProps={{ maxLength: currentModule.key === 'currencies' ? 20 : 50 }}/>}
         <TextField label="Description" fullWidth multiline minRows={2} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} inputProps={{ maxLength: 500 }}/>
         {isCurrencyModule(currentModule) && <FormControlLabel

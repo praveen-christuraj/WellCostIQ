@@ -486,6 +486,7 @@ digraph WellCostIQ {
   "backend/app/api/operations.py" -> "backend/app/domain/operations/default_codes.py";
   "backend/app/api/operations.py" -> "backend/app/domain/operations/requirements.py";
   "backend/app/api/operations.py" -> "backend/app/domain/operations/study.py";
+  "backend/app/api/operations.py" -> "backend/app/models/master_data.py";
   "backend/app/api/operations.py" -> "backend/app/models/operations.py";
   "backend/app/api/operations.py" -> "backend/app/models/rig_well.py";
   "backend/app/api/operations.py" -> "backend/app/models/vendor_master.py";
@@ -578,7 +579,6 @@ digraph WellCostIQ {
   "backend/app/domain/operations/reference_knowledge.py" -> "backend/app/domain/operations/data/abbreviations.py";
   "backend/app/domain/operations/reference_knowledge.py" -> "backend/app/domain/operations/data/glossary.py";
   "backend/app/domain/operations/reference_knowledge.py" -> "backend/app/domain/operations/default_codes.py";
-  "backend/app/domain/operations/requirements.py" -> "backend/app/models/operations.py";
   "backend/app/domain/operations/study.py" -> "backend/app/core/precision.py";
   "backend/app/domain/operations/study.py" -> "backend/app/domain/operations/drilling.py";
   "backend/app/main.py" -> "backend/app/api/__init__.py";
@@ -842,6 +842,7 @@ digraph WellCostIQ {
   "backend/app/services/operations/correlations.py" -> "backend/app/models/__init__.py";
   "backend/app/services/operations/correlations.py" -> "backend/app/models/master_data.py";
   "backend/app/services/operations/correlations.py" -> "backend/app/models/operations.py";
+  "backend/app/services/operations/correlations.py" -> "backend/app/models/vendor_master.py";
   "backend/app/services/operations/correlations.py" -> "backend/app/schemas/operations.py";
   "backend/app/services/operations/correlations.py" -> "backend/app/services/audit.py";
   "backend/app/services/operations/documents.py" -> "backend/app/models/__init__.py";
@@ -869,7 +870,9 @@ digraph WellCostIQ {
   "backend/app/services/operations/guide.py" -> "backend/app/domain/operations/reference_knowledge.py";
   "backend/app/services/operations/guide.py" -> "backend/app/schemas/assistant.py";
   "backend/app/services/operations/guide.py" -> "backend/app/services/operations/ops_ai.py";
+  "backend/app/services/operations/masters.py" -> "backend/app/domain/operations/default_codes.py";
   "backend/app/services/operations/masters.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/operations/masters.py" -> "backend/app/models/master_data.py";
   "backend/app/services/operations/masters.py" -> "backend/app/models/operations.py";
   "backend/app/services/operations/masters.py" -> "backend/app/services/audit.py";
   "backend/app/services/operations/masters.py" -> "backend/app/services/dependencies.py";
@@ -886,6 +889,7 @@ digraph WellCostIQ {
   "backend/app/services/operations/ops_ai.py" -> "backend/app/domain/operations/reference_knowledge.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/domain/operations/taxonomy.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/models/__init__.py";
+  "backend/app/services/operations/ops_ai.py" -> "backend/app/models/master_data.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/models/operations.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/models/rig_well.py";
   "backend/app/services/operations/ops_ai.py" -> "backend/app/models/vendor_master.py";
@@ -929,6 +933,7 @@ digraph WellCostIQ {
   "backend/app/services/operations/summary.py" -> "backend/app/core/time.py";
   "backend/app/services/operations/summary.py" -> "backend/app/domain/operations/default_codes.py";
   "backend/app/services/operations/summary.py" -> "backend/app/domain/operations/metrics.py";
+  "backend/app/services/operations/summary.py" -> "backend/app/models/master_data.py";
   "backend/app/services/operations/summary.py" -> "backend/app/models/operations.py";
   "backend/app/services/operations/summary.py" -> "backend/app/models/rig_well.py";
   "backend/app/services/operations/summary.py" -> "backend/app/models/vendor_master.py";

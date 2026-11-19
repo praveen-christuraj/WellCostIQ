@@ -595,6 +595,8 @@ class RigWellMasterDataOption(BaseModel):
     id: str
     code: str
     name: str
+    #: Activities carry the type they stand for; other options leave it empty.
+    activity_type: str = ""
 
 
 class RigWellVendorOption(BaseModel):

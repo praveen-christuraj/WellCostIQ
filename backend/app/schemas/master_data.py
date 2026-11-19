@@ -13,6 +13,9 @@ class MasterDataCreate(BaseModel):
     description: str = Field(default="", max_length=500)
     # Only honoured by the Currency module; rejected for every other module.
     is_default: bool | None = None
+    # Only honoured by the Activities module: Planned, UPA or NPT. Well
+    # Operations reads it as a daily block's Activity type.
+    activity_type: str | None = Field(default=None, max_length=10)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -34,6 +37,7 @@ class MasterDataUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     # Only honoured by the Currency module; rejected for every other module.
     is_default: bool | None = None
+    activity_type: str | None = Field(default=None, max_length=10)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +60,8 @@ class MasterDataRecordOut(BaseModel):
     description: str
     # True only for the workspace's default currency; None for modules without a default concept.
     is_default: bool | None = None
+    # Activities only: Planned, UPA or NPT. None for every other module.
+    activity_type: str | None = None
     is_deleted: bool
     deleted_at: datetime | None = None
     created_at: datetime

@@ -130,6 +130,17 @@ export type OpsReport = {
   total_block_minutes: number
 }
 
+export type OpsActivityType = 'Planned' | 'UPA' | 'NPT'
+
+/**
+ * One time block of a daily report.
+ *
+ * The criteria are listed in review order: Hole Section, Phase, Sub-phase,
+ * Activity, Allocation, Cause, Operations, Agency / service vendor, responsible
+ * agency label. Hole Section, Phase and Activity are Master Data; Sub-phase,
+ * Operations, Cause and the responsible agency label are Code Library lists.
+ * The Activity carries its own type, which is what ``classification`` stores.
+ */
 export type OpsBlock = {
   id: string
   organization_id: string
@@ -139,10 +150,11 @@ export type OpsBlock = {
   ended_at: string
   duration_minutes: number
   phase_raw: string
-  operation_code_id: string | null
-  activity_code_id: string | null
+  hole_section_id: string | null
+  phase_id: string | null
+  sub_phase_id: string | null
   activity_id: string | null
-  classification: 'Planned' | 'UPA' | 'NPT'
+  classification: OpsActivityType
   allocation: 'PT' | 'NPT' | 'UPA' | 'SP'
   is_productive: boolean
   source_activity_code?: string
@@ -155,12 +167,10 @@ export type OpsBlock = {
   source_page?: number
   source_bbox?: string
   classification_source: string
-  npt_code_id: string | null
-  npt_code_snapshot: string
-  agency_id: string | null
+  operation_id: string | null
+  operation_snapshot: string
+  responsible_agency_id: string | null
   cause_code: string
-  hole_section_id: string | null
-  phase_id: string | null
   bit_depth_m: string | null
   mud_weight_ppg: string | null
   depth_from_m: string | null
@@ -174,6 +184,16 @@ export type OpsBlock = {
   rop_basis: string
   responsible_party: string
   vendor_id: string | null
+  // Labels resolved by the API so a page never guesses how a code is displayed.
+  hole_section_label?: string
+  phase_label?: string
+  sub_phase_label?: string
+  activity_label?: string
+  activity_type?: OpsActivityType | ''
+  operation_code?: string | null
+  operation_name?: string | null
+  cause_label?: string
+  responsible_agency_label?: string
   reason: string
   narrative: string
   confidence: string
@@ -219,7 +239,9 @@ export type OpsKpi = {
 
 export type OpsDashboard = {
   kpis: OpsKpi
+  /** Downtime grouped by the Code Library Operations code on the block. */
   npt_by_code: { code: string; minutes: number; hours: number; name: string }[]
+  npt_by_operation: { operation_code: string; minutes: number; hours: number }[]
   npt_by_agency: { agency: string; minutes: number; hours: number }[]
   daily_trend: { date: string; logged_hours: number; npt_hours: number; planned_hours: number; upa_hours: number }[]
   recent_reports: OpsReport[]
@@ -275,33 +297,55 @@ export type OpsScopeReference = {
   }[]
 }
 
+export type OpsMasterOption = {
+  id: string
+  code: string
+  name: string
+  label: string
+  activity_type?: OpsActivityType
+}
+
 export type OpsReference = OpsScopeReference & {
   vendors: { id: string; vendor_code: string; vendor_name: string }[]
-  phase_codes: { id: string; phase_code: string; phase_name: string }[]
-  activity_codes: { id: string; activity_code: string; activity_name: string; default_allocation: string }[]
-  operation_codes: {
+  /** Master Data Hole Sections. */
+  hole_sections: OpsMasterOption[]
+  /** Master Data Phases. */
+  phases: OpsMasterOption[]
+  /** Master Data Activities; each carries the Activity type it stands for. */
+  activities: OpsMasterOption[]
+  /** Code Library sub-phases, filtered by the selected phase on the report. */
+  sub_phases: {
+    id: string
+    phase_id: string
+    sub_phase_code: string
+    sub_phase_name: string
+    description: string
+    sort_order: number
+    is_active: boolean
+  }[]
+  /** Code Library Operations list (the downtime work list). */
+  operations: {
     id: string
     operation_code: string
     operation_name: string
-    default_classification: string
-    is_productive_default: boolean
-    category: string
-    description: string
-    sort_order: number
-  }[]
-  npt_codes: {
-    id: string
-    npt_code: string
-    npt_name: string
     family: string
     category: string
     description: string
     sort_order: number
+    is_active: boolean
   }[]
-  causes: { id: string; cause_code: string; cause_name: string; sort_order: number }[]
-  agencies: { id: string; agency_code: string; agency_name: string; category: string; sort_order: number }[]
+  causes: { id: string; cause_code: string; cause_name: string; sort_order: number; is_active: boolean }[]
+  /** Code Library responsible agency labels. */
+  agencies: {
+    id: string
+    agency_code: string
+    agency_name: string
+    category: string
+    sort_order: number
+    is_active: boolean
+  }[]
   code_links?: OpsCodeLink[]
-  /** Which code fields each classification makes mandatory, in display order. */
+  /** Which criteria each Activity type makes mandatory, in display order. */
   classification_rules: Record<string, string[]>
 }
 
@@ -309,14 +353,16 @@ export type OpsBulkAssignInput = {
   report_ids?: string[]
   block_ids?: string[]
   block_kind?: '' | 'drilling' | 'completion'
-  operation_code_id?: string | null
-  activity_code_id?: string | null
-  npt_code_id?: string | null
+  hole_section_id?: string | null
+  phase_id?: string | null
+  sub_phase_id?: string | null
+  activity_id?: string | null
+  operation_id?: string | null
   cause_code?: string | null
   cause_id?: string | null
-  agency_id?: string | null
+  responsible_agency_id?: string | null
   vendor_id?: string | null
-  classification?: 'Planned' | 'UPA' | 'NPT' | null
+  allocation?: 'PT' | 'NPT' | 'UPA' | 'SP' | null
 }
 
 export type OpsBulkAssignPreview = {
@@ -339,9 +385,25 @@ export type OpsBulkAssignResult = {
   summary: string
 }
 
-export type OpsCorrelationKind = 'operation' | 'activity' | 'npt' | 'cause' | 'phase' | 'agency'
+/** A printed token is correlated into a Code Library list; Hole Section, Phase
+ * and Activity are Master Data targets, so they are companion criteria only. */
+export type OpsCorrelationKind = 'operation' | 'cause' | 'sub-phase' | 'responsible-party' | 'agency'
 
-export type OpsCorrelation = {
+export type OpsCorrelationTargets = {
+  scope?: '' | 'drilling' | 'completion'
+  target_allocation?: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
+  target_hole_section_id?: string | null
+  target_phase_id?: string | null
+  target_sub_phase_id?: string | null
+  target_activity_id?: string | null
+  target_operation_id?: string | null
+  target_cause_id?: string | null
+  target_responsible_agency_id?: string | null
+  target_vendor_id?: string | null
+  target_mark_rule_id?: string | null
+}
+
+export type OpsCorrelation = OpsCorrelationTargets & {
   id: string
   kind: OpsCorrelationKind
   source_family: string
@@ -349,16 +411,6 @@ export type OpsCorrelation = {
   source_label: string
   target_label: string
   target_id: string | null
-  scope?: string
-  target_classification?: string
-  target_allocation?: string
-  target_operation_code_id?: string | null
-  target_activity_code_id?: string | null
-  target_npt_code_id?: string | null
-  target_cause_id?: string | null
-  target_phase_code_id?: string | null
-  target_agency_id?: string | null
-  target_mark_rule_id?: string | null
   extra_criteria_summary?: string
   note: string
   is_active: boolean
@@ -369,61 +421,47 @@ export type OpsCorrelation = {
   updated_at: string | null
 }
 
-export type OpsCorrelationInput = {
+export type OpsCorrelationInput = OpsCorrelationTargets & {
   kind: OpsCorrelationKind
   source_family?: string
   source_code: string
   source_label?: string
   target_id: string
-  scope?: '' | 'drilling' | 'completion'
-  target_classification?: '' | 'Planned' | 'UPA' | 'NPT'
-  target_allocation?: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
-  target_operation_code_id?: string | null
-  target_activity_code_id?: string | null
-  target_npt_code_id?: string | null
-  target_cause_id?: string | null
-  target_phase_code_id?: string | null
-  target_agency_id?: string | null
-  target_mark_rule_id?: string | null
   note?: string
 }
 
-export type OpsCorrelationUpdateInput = {
+export type OpsCorrelationUpdateInput = OpsCorrelationTargets & {
   target_id: string
-  scope?: '' | 'drilling' | 'completion'
-  target_classification?: '' | 'Planned' | 'UPA' | 'NPT'
-  target_allocation?: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
-  target_operation_code_id?: string | null
-  target_activity_code_id?: string | null
-  target_npt_code_id?: string | null
-  target_cause_id?: string | null
-  target_phase_code_id?: string | null
-  target_agency_id?: string | null
-  target_mark_rule_id?: string | null
   is_active?: boolean
   note?: string
 }
 
+/** One row may carry as many criteria as the user needs; every criterion is a
+ * typed relational column, so a rule is auditable without parsing free text. */
 export type OpsCodeLink = {
   id: string
   rule_name: string
   scope: string
-  default_classification: string
   default_allocation: string
-  phase_code_id: string | null
+  hole_section_id: string | null
+  hole_section_label: string
+  phase_id: string | null
+  phase_code: string
   phase_label: string
-  operation_code_id: string | null
-  operation_label: string
-  activity_code_id: string | null
+  sub_phase_id: string | null
+  sub_phase_label: string
+  activity_id: string | null
   activity_label: string
-  npt_code_id: string | null
-  npt_label: string
+  activity_type: string
+  operation_id: string | null
+  operation_label: string
   cause_id: string | null
   cause_code: string
   cause_label: string
-  agency_id: string | null
-  agency_name: string
-  agency_label: string
+  responsible_agency_id: string | null
+  responsible_agency_label: string
+  vendor_id: string | null
+  vendor_label: string
   mark_rule_id: string | null
   mark_label: string
   criteria_count: number
@@ -440,14 +478,15 @@ export type OpsCodeLink = {
 export type OpsCodeLinkInput = {
   rule_name?: string
   scope?: '' | 'drilling' | 'completion'
-  default_classification?: '' | 'Planned' | 'UPA' | 'NPT'
   default_allocation?: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
-  phase_code_id?: string | null
-  operation_code_id?: string | null
-  activity_code_id?: string | null
-  npt_code_id?: string | null
+  hole_section_id?: string | null
+  phase_id?: string | null
+  sub_phase_id?: string | null
+  activity_id?: string | null
+  operation_id?: string | null
   cause_id?: string | null
-  agency_id?: string | null
+  responsible_agency_id?: string | null
+  vendor_id?: string | null
   mark_rule_id?: string | null
   is_active?: boolean
   note?: string
@@ -458,7 +497,8 @@ export type OpsCorrelationLibraryItem = {
   code: string
   name: string
   correlation_count?: number
-  default_classification?: string
+  /** Present on Activity options: the type a block becomes when it is selected. */
+  activity_type?: OpsActivityType | ''
   default_allocation?: string
 }
 
@@ -473,7 +513,11 @@ export type OpsCorrelationReference = {
     classification: string
     allocation?: string
   }[]
-  library: Record<string, OpsCorrelationLibraryItem[]>
+  /** Master Data criterion lists. */
+  library: Record<
+    'hole_section' | 'phase' | 'activity' | 'vendor' | 'sub_phase' | 'operation' | 'cause' | 'responsible_agency' | 'mark',
+    OpsCorrelationLibraryItem[]
+  >
 }
 
 export type OpsSettings = {
@@ -483,7 +527,7 @@ export type OpsSettings = {
   day_boundary_hour: number
   operating_timezone: string
   tour_pattern: string
-  require_npt_code: boolean
+  require_operations: boolean
   require_npt_agency: boolean
   require_npt_reason: boolean
   max_daily_hours: number
@@ -1230,6 +1274,7 @@ export type OpsSummaryActivity = {
   scope: string
   day_number: number | null
   hole_section: string
+  hole_section_label: string
   start_wat: string
   end_wat: string
   duration_minutes: number
@@ -1238,14 +1283,22 @@ export type OpsSummaryActivity = {
   cum_days: number
   phase_code: string
   phase_label: string
+  sub_phase: string
+  sub_phase_label: string
+  /** The Activity, with the Activity type it stands for. */
+  activity_label: string
+  activity_type: string
+  /** The Code Library Operations code and its full label. */
+  operation_label: string
   operation_code: string
-  activity_code: string
+  operation_name: string
+  operations: string
   classification: string
   allocation: string
   is_productive: boolean
-  npt_code: string
   cause_code: string
   responsible_party: string
+  responsible_agency_label: string
   depth_from_m: number | null
   depth_to_m: number | null
   tvd_from_m: number | null

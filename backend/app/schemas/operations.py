@@ -35,7 +35,7 @@ class OpsSettingsIn(_Strict):
     day_boundary_hour: int = Field(ge=0, le=23)
     operating_timezone: str = Field(min_length=1, max_length=64)
     tour_pattern: str = Field(min_length=1, max_length=20)
-    require_npt_code: bool = True
+    require_operations: bool = True
     require_npt_agency: bool = False
     require_npt_reason: bool = True
     max_daily_hours: int = Field(ge=1, le=48)
@@ -85,88 +85,11 @@ class OpsSettingsOut(OpsSettingsIn):
 # ---------------------------------------------------------------------------
 # Code library
 # ---------------------------------------------------------------------------
-class OpsPhaseCodeIn(_Strict):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    phase_code: str = Field(min_length=1, max_length=20)
-    phase_name: str = Field(min_length=1, max_length=150)
-    description: str = Field(default="", max_length=500)
-    is_active: bool = True
+class OpsOperationIn(_Strict):
+    """One Operations code — the downtime work list of the Code Library."""
 
-
-class OpsMarkRuleIn(_Strict):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    mark_code: str = Field(min_length=1, max_length=20)
-    mark_name: str = Field(min_length=1, max_length=150)
-    default_classification: Classification = "Planned"
-    default_allocation: Allocation = "PT"
-    description: str = Field(default="", max_length=500)
-    is_active: bool = True
-
-
-class OpsOperationCodeIn(_Strict):
     operation_code: str = Field(min_length=1, max_length=50)
     operation_name: str = Field(min_length=1, max_length=150)
-    category: str = Field(default="other", max_length=50)
-    default_classification: Classification = "Planned"
-    is_productive_default: bool = True
-    counts_as_on_bottom: bool = False
-    requires_npt_code: bool = False
-    phase_applicable: str = Field(default="both", max_length=20)
-    description: str = Field(default="", max_length=500)
-    sort_order: int = Field(default=0)
-    is_active: bool = True
-
-    @field_validator("operation_code", mode="before")
-    @classmethod
-    def upper_code(cls, value: Any) -> Any:
-        return _trim(value).upper() if isinstance(value, str) else value
-
-    @field_validator("operation_name", "category", "description", mode="before")
-    @classmethod
-    def trim_text(cls, value: Any) -> Any:
-        return _trim(value)
-
-
-class OpsOperationCodeOut(OpsOperationCodeIn):
-    id: str
-    organization_id: str
-    is_deleted: bool
-    created_at: datetime
-    updated_at: datetime
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-
-class OpsActivityCodeIn(_Strict):
-    activity_code: str = Field(min_length=1, max_length=50)
-    activity_name: str = Field(min_length=1, max_length=150)
-    default_allocation: Allocation = "PT"
-    description: str = Field(default="", max_length=500)
-    sort_order: int = Field(default=0)
-    is_active: bool = True
-
-    @field_validator("activity_code", mode="before")
-    @classmethod
-    def upper_code(cls, value: Any) -> Any:
-        return _trim(value).upper() if isinstance(value, str) else value
-
-    @field_validator("activity_name", "description", mode="before")
-    @classmethod
-    def trim_text(cls, value: Any) -> Any:
-        return _trim(value)
-
-
-class OpsActivityCodeOut(OpsActivityCodeIn):
-    id: str
-    organization_id: str
-    is_deleted: bool
-    created_at: datetime
-    updated_at: datetime
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-
-class OpsNptCodeIn(_Strict):
-    npt_code: str = Field(min_length=1, max_length=50)
-    npt_name: str = Field(min_length=1, max_length=150)
     family: str = Field(default="other", max_length=30)
     category: str = Field(default="other", max_length=50)
     default_responsible_party: str = Field(default="", max_length=200)
@@ -177,24 +100,66 @@ class OpsNptCodeIn(_Strict):
     sort_order: int = Field(default=0)
     is_active: bool = True
 
-    @field_validator("npt_code", mode="before")
+    @field_validator("operation_code", mode="before")
     @classmethod
     def upper_code(cls, value: Any) -> Any:
         return _trim(value).upper() if isinstance(value, str) else value
 
-    @field_validator("npt_name", "description", mode="before")
+    @field_validator("operation_name", "family", "category", "default_responsible_party", "description", mode="before")
     @classmethod
     def trim_text(cls, value: Any) -> Any:
         return _trim(value)
 
 
-class OpsNptCodeOut(OpsNptCodeIn):
+class OpsOperationOut(OpsOperationIn):
     id: str
     organization_id: str
     is_deleted: bool
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+
+class OpsSubPhaseIn(_Strict):
+    """A sub-phase of one Master Data phase, configured in the Code Library."""
+
+    phase_id: str = Field(min_length=1, max_length=36)
+    sub_phase_code: str = Field(min_length=1, max_length=50)
+    sub_phase_name: str = Field(min_length=1, max_length=150)
+    description: str = Field(default="", max_length=500)
+    sort_order: int = Field(default=0)
+    is_active: bool = True
+
+    @field_validator("sub_phase_code", mode="before")
+    @classmethod
+    def upper_code(cls, value: Any) -> Any:
+        return _trim(value).upper() if isinstance(value, str) else value
+
+    @field_validator("sub_phase_name", "description", mode="before")
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OpsSubPhaseOut(OpsSubPhaseIn):
+    id: str
+    organization_id: str
+    phase_code_snapshot: str = ""
+    phase_name_snapshot: str = ""
+    is_deleted: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+
+class OpsMarkRuleIn(_Strict):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    mark_code: str = Field(min_length=1, max_length=20)
+    mark_name: str = Field(min_length=1, max_length=150)
+    default_classification: Classification = "Planned"
+    default_allocation: Allocation = "PT"
+    description: str = Field(default="", max_length=500)
+    is_active: bool = True
 
 
 class OpsAgencyIn(_Strict):
@@ -321,8 +286,11 @@ class OpsActivityBlockIn(_Strict):
     ended_at: datetime
     duration_minutes: int = Field(ge=1, le=1440)
     phase_raw: str = Field(default="", max_length=20)
-    operation_code_id: str | None = None
-    activity_code_id: str | None = None
+    # Review order: Hole Section -> Phase -> Sub-phase -> Activity -> Allocation
+    # -> Cause -> Operations -> Agency / service vendor -> Responsible agency label.
+    hole_section_id: str | None = None
+    phase_id: str | None = None
+    sub_phase_id: str | None = None
     activity_id: str | None = None
     classification: Classification = "Planned"
     allocation: Allocation = "PT"
@@ -331,11 +299,9 @@ class OpsActivityBlockIn(_Strict):
     source_page: int = Field(default=0, ge=0)
     source_bbox: str = Field(default="", max_length=200)
     classification_source: str = Field(default="keyword", max_length=20)
-    npt_code_id: str | None = None
-    agency_id: str | None = None
     cause_code: str = Field(default="", max_length=50)
-    hole_section_id: str | None = None
-    phase_id: str | None = None
+    operation_id: str | None = None
+    responsible_agency_id: str | None = None
     depth_from_m: Decimal3 | None = None
     depth_to_m: Decimal3 | None = None
     tvd_from_m: Decimal3 | None = None
@@ -368,7 +334,7 @@ class OpsActivityBlockOut(OpsActivityBlockIn):
     id: str
     organization_id: str
     report_id: str
-    npt_code_snapshot: str
+    operation_snapshot: str = ""
     source_page: int
     source_bbox: str
     reviewer_user_id: str | None
@@ -383,12 +349,15 @@ class OpsActivityBlockOut(OpsActivityBlockIn):
     source_mark_label: str = ''
     source_cause_label: str = ''
     # enriched
+    hole_section_label: str = ""
+    phase_label: str = ""
+    sub_phase_label: str = ""
+    activity_label: str = ""
+    activity_type: str = ""
     operation_code: str | None = None
     operation_name: str | None = None
-    activity_code: str | None = None
-    activity_name: str | None = None
-    npt_code: str | None = None
-    npt_name: str | None = None
+    cause_label: str = ""
+    responsible_agency_label: str = ""
     timeline_variance_days: Decimal | None = None
     timeline_planned_days: Decimal | None = None
     timeline_actual_days: Decimal | None = None
@@ -629,14 +598,16 @@ class OpsBulkAssign(_Strict):
     report_ids: list[str] = Field(default_factory=list, max_length=100)
     block_ids: list[str] = Field(default_factory=list, max_length=2000)
     block_kind: Literal["", "drilling", "completion"] = ""
-    operation_code_id: str | None = None
-    activity_code_id: str | None = None
-    npt_code_id: str | None = None
+    hole_section_id: str | None = None
+    phase_id: str | None = None
+    sub_phase_id: str | None = None
+    activity_id: str | None = None
+    operation_id: str | None = None
     cause_id: str | None = None
     cause_code: str | None = Field(default=None, max_length=50)
-    agency_id: str | None = None
+    responsible_agency_id: str | None = None
     vendor_id: str | None = None
-    classification: Classification | None = None
+    allocation: Allocation | None = None
 
 
 class OpsBulkAssignOut(_Strict):
@@ -669,25 +640,51 @@ class OpsTimelineReviewOut(_Strict):
     summary: str = ""
 
 
-CORRELATION_KINDS = ("operation", "activity", "npt", "cause", "phase", "agency")
+# The criterion a printed reference token can be correlated *as*. Hole Section,
+# Phase and Activity belong to Master Data and therefore travel as companion
+# criteria; the rest are configured in the Code Library.
+CORRELATION_KINDS = ("operation", "cause", "sub-phase", "responsible-party", "agency")
+
+CorrelationKind = Literal["operation", "cause", "sub-phase", "responsible-party", "agency"]
+
+_COMPANION_FIELDS = (
+    # (request/response field, max length)
+    ("target_hole_section_id", 36),
+    ("target_phase_id", 36),
+    ("target_sub_phase_id", 36),
+    ("target_activity_id", 36),
+    ("target_operation_id", 36),
+    ("target_cause_id", 36),
+    ("target_agency_id", 36),
+    ("target_responsible_agency_id", 36),
+    ("target_vendor_id", 36),
+    ("target_mark_rule_id", 36),
+)
 
 
-class OpsCorrelationIn(_Strict):
-    kind: Literal["operation", "activity", "npt", "cause", "phase", "agency"]
+class OpsCorrelationFields(_Strict):
+    """Every workspace criterion one correlation rule may pre-select."""
+
+    scope: Literal["", "drilling", "completion"] = ""
+    target_allocation: Literal["", "PT", "UPA", "NPT", "SP"] = ""
+    target_hole_section_id: str | None = Field(default=None, max_length=36)
+    target_phase_id: str | None = Field(default=None, max_length=36)
+    target_sub_phase_id: str | None = Field(default=None, max_length=36)
+    target_activity_id: str | None = Field(default=None, max_length=36)
+    target_operation_id: str | None = Field(default=None, max_length=36)
+    target_cause_id: str | None = Field(default=None, max_length=36)
+    target_agency_id: str | None = Field(default=None, max_length=36)
+    target_responsible_agency_id: str | None = Field(default=None, max_length=36)
+    target_vendor_id: str | None = Field(default=None, max_length=36)
+    target_mark_rule_id: str | None = Field(default=None, max_length=36)
+
+
+class OpsCorrelationIn(OpsCorrelationFields):
+    kind: CorrelationKind
     source_family: str = Field(default="", max_length=60)
     source_code: str = Field(min_length=1, max_length=100)
     source_label: str = Field(default="", max_length=200)
     target_id: str = Field(min_length=1, max_length=36)
-    scope: Literal["", "drilling", "completion"] = ""
-    target_classification: Literal["", "Planned", "UPA", "NPT"] = ""
-    target_allocation: Literal["", "PT", "UPA", "NPT", "SP"] = ""
-    target_operation_code_id: str | None = Field(default=None, max_length=36)
-    target_activity_code_id: str | None = Field(default=None, max_length=36)
-    target_npt_code_id: str | None = Field(default=None, max_length=36)
-    target_cause_id: str | None = Field(default=None, max_length=36)
-    target_phase_code_id: str | None = Field(default=None, max_length=36)
-    target_agency_id: str | None = Field(default=None, max_length=36)
-    target_mark_rule_id: str | None = Field(default=None, max_length=36)
     note: str = Field(default="", max_length=500)
 
 
@@ -695,23 +692,13 @@ class OpsCorrelationBatchIn(_Strict):
     items: list[OpsCorrelationIn] = Field(min_length=1, max_length=200)
 
 
-class OpsCorrelationUpdate(_Strict):
+class OpsCorrelationUpdate(OpsCorrelationFields):
     target_id: str = Field(min_length=1, max_length=36)
-    scope: Literal["", "drilling", "completion"] = ""
-    target_classification: Literal["", "Planned", "UPA", "NPT"] = ""
-    target_allocation: Literal["", "PT", "UPA", "NPT", "SP"] = ""
-    target_operation_code_id: str | None = Field(default=None, max_length=36)
-    target_activity_code_id: str | None = Field(default=None, max_length=36)
-    target_npt_code_id: str | None = Field(default=None, max_length=36)
-    target_cause_id: str | None = Field(default=None, max_length=36)
-    target_phase_code_id: str | None = Field(default=None, max_length=36)
-    target_agency_id: str | None = Field(default=None, max_length=36)
-    target_mark_rule_id: str | None = Field(default=None, max_length=36)
     is_active: bool = True
     note: str = Field(default="", max_length=500)
 
 
-class OpsCorrelationOut(_Strict):
+class OpsCorrelationOut(OpsCorrelationFields):
     id: str
     kind: str
     source_family: str = ""
@@ -719,16 +706,6 @@ class OpsCorrelationOut(_Strict):
     source_label: str = ""
     target_label: str = ""
     target_id: str | None = None
-    scope: str = ""
-    target_classification: str = ""
-    target_allocation: str = ""
-    target_operation_code_id: str | None = None
-    target_activity_code_id: str | None = None
-    target_npt_code_id: str | None = None
-    target_cause_id: str | None = None
-    target_phase_code_id: str | None = None
-    target_agency_id: str | None = None
-    target_mark_rule_id: str | None = None
     extra_criteria_summary: str = ""
     note: str = ""
     is_active: bool = True
@@ -748,14 +725,15 @@ class OpsCorrelationBatchOut(_Strict):
 class OpsCodeLinkIn(_Strict):
     rule_name: str = Field(default="", max_length=160)
     scope: Literal["", "drilling", "completion"] = ""
-    default_classification: Literal["", "Planned", "UPA", "NPT"] = ""
     default_allocation: Literal["", "PT", "UPA", "NPT", "SP"] = ""
-    phase_code_id: str | None = Field(default=None, max_length=36)
-    operation_code_id: str | None = Field(default=None, max_length=36)
-    activity_code_id: str | None = Field(default=None, max_length=36)
-    npt_code_id: str | None = Field(default=None, max_length=36)
+    hole_section_id: str | None = Field(default=None, max_length=36)
+    phase_id: str | None = Field(default=None, max_length=36)
+    sub_phase_id: str | None = Field(default=None, max_length=36)
+    activity_id: str | None = Field(default=None, max_length=36)
+    operation_id: str | None = Field(default=None, max_length=36)
     cause_id: str | None = Field(default=None, max_length=36)
-    agency_id: str | None = Field(default=None, max_length=36)
+    responsible_agency_id: str | None = Field(default=None, max_length=36)
+    vendor_id: str | None = Field(default=None, max_length=36)
     mark_rule_id: str | None = Field(default=None, max_length=36)
     is_active: bool = True
     note: str = Field(default="", max_length=500)
@@ -774,22 +752,26 @@ class OpsCodeLinkOut(_Strict):
     id: str
     rule_name: str = ""
     scope: str = ""
-    default_classification: str = ""
     default_allocation: str = ""
-    phase_code_id: str | None = None
+    hole_section_id: str | None = None
+    hole_section_label: str = ""
+    phase_id: str | None = None
+    phase_code: str = ""
     phase_label: str = ""
-    operation_code_id: str | None = None
-    operation_label: str = ""
-    activity_code_id: str | None = None
+    sub_phase_id: str | None = None
+    sub_phase_label: str = ""
+    activity_id: str | None = None
     activity_label: str = ""
-    npt_code_id: str | None = None
-    npt_label: str = ""
+    activity_type: str = ""
+    operation_id: str | None = None
+    operation_label: str = ""
     cause_id: str | None = None
     cause_code: str = ""
     cause_label: str = ""
-    agency_id: str | None = None
-    agency_name: str = ""
-    agency_label: str = ""
+    responsible_agency_id: str | None = None
+    responsible_agency_label: str = ""
+    vendor_id: str | None = None
+    vendor_label: str = ""
     mark_rule_id: str | None = None
     mark_label: str = ""
     criteria_count: int = 0
@@ -944,16 +926,24 @@ class OpsDefaultCodeOut(_Strict):
 
 
 class OpsReferenceOut(_Strict):
+    """Every dropdown the daily report needs, in one payload.
+
+    Master Data supplies Hole Sections, Phases, Activities and vendors; the Code
+    Library supplies sub-phases, Operations, causes and responsible agency
+    labels. ``classification_rules`` is keyed by Activity type.
+    """
+
     document_types: list[str]
     vendors: list[dict[str, str]]
     rigs: list[dict[str, Any]]
     wells: list[dict[str, Any]]
-    phase_codes: list[dict[str, str]]
-    activity_codes: list[OpsActivityCodeOut]
-    operation_codes: list[OpsOperationCodeOut]
-    npt_codes: list[OpsNptCodeOut]
-    causes: list[OpsCauseOut]
-    agencies: list[OpsAgencyOut] = []
+    hole_sections: list[dict[str, Any]] = Field(default_factory=list)
+    phases: list[dict[str, Any]] = Field(default_factory=list)
+    activities: list[dict[str, Any]] = Field(default_factory=list)
+    sub_phases: list[OpsSubPhaseOut] = Field(default_factory=list)
+    operations: list[OpsOperationOut] = Field(default_factory=list)
+    causes: list[OpsCauseOut] = Field(default_factory=list)
+    agencies: list[OpsAgencyOut] = Field(default_factory=list)
     code_links: list[OpsCodeLinkOut] = Field(default_factory=list)
     classification_rules: dict[str, list[str]] = {}
 
@@ -987,7 +977,7 @@ class OpsPlanItemIn(_Strict):
     sequence_no: int = Field(ge=1)
     hole_section_id: str | None = None
     phase_id: str | None = None
-    operation_code_id: str | None = None
+    operation_id: str | None = None
     description: str = Field(min_length=1, max_length=500)
     target_depth_m: Decimal3 | None = Field(default=None, ge=0)
     delta_depth_m: Decimal3 | None = None

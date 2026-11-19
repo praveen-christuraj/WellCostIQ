@@ -74,12 +74,10 @@ REFERENCE_LABELS: dict[str, str] = {
     "ops_plan_items": "operations timeline item(s)",
     "ops_plan_versions": "operations timeline version(s)",
     "ops_documents": "operations source document(s)",
-    "ops_operation_codes": "operations code(s)",
-    "ops_activity_codes": "operations activity code(s)",
-    "ops_npt_codes": "operations NPT code(s)",
+    "ops_operations": "operations code(s)",
     "ops_causes": "operations cause code(s)",
-    "ops_phase_codes": "operations phase code(s)",
-    "ops_agencies": "operations agency code(s)",
+    "ops_sub_phases": "operations sub-phase(s)",
+    "ops_agencies": "responsible agency label(s)",
     "ops_mark_rules": "operations source-mark rule(s)",
 }
 

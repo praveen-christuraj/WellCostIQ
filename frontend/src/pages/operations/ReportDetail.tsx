@@ -65,8 +65,12 @@ const editFields = [
   'ended_at',
   'duration_minutes',
   'phase_raw',
-  'operation_code_id',
-  'activity_code_id',
+  // Criteria in review order. Hole Section, Phase and Activity are Master Data;
+  // Sub-phase, Operations, Cause and the responsible agency label are Code
+  // Library lists. The Activity decides ``classification``.
+  'hole_section_id',
+  'phase_id',
+  'sub_phase_id',
   'activity_id',
   'classification',
   'allocation',
@@ -75,11 +79,9 @@ const editFields = [
   'classification_evidence',
   'source_page',
   'source_bbox',
-  'npt_code_id',
-  'agency_id',
   'cause_code',
-  'hole_section_id',
-  'phase_id',
+  'operation_id',
+  'responsible_agency_id',
   'depth_from_m',
   'depth_to_m',
   'tvd_from_m',
@@ -112,6 +114,16 @@ type Block = Pick<
   | 'source_phase_label'
   | 'source_mark_label'
   | 'source_cause_label'
+  // Labels the API resolves, so the register prints the criterion's own text.
+  | 'hole_section_label'
+  | 'phase_label'
+  | 'sub_phase_label'
+  | 'activity_label'
+  | 'activity_type'
+  | 'operation_code'
+  | 'operation_name'
+  | 'cause_label'
+  | 'responsible_agency_label'
   | 'timeline_variance_days'
   | 'timeline_planned_days'
   | 'timeline_actual_days'
@@ -408,18 +420,17 @@ export default function OperationsReportDetail({
       ended_at: fromWatDateTimeInput(endLocal) || endDate.toISOString(),
       duration_minutes: 60,
       phase_raw: '',
-      operation_code_id: null,
-      activity_code_id: null,
+      hole_section_id: null,
+      phase_id: null,
+      sub_phase_id: null,
       activity_id: null,
       classification: 'Planned',
       allocation: 'PT',
       is_productive: true,
       classification_source: 'reviewer',
-      npt_code_id: null,
-      agency_id: null,
       cause_code: '',
-      hole_section_id: null,
-      phase_id: null,
+      operation_id: null,
+      responsible_agency_id: null,
       depth_from_m: null,
       depth_to_m: null,
       tvd_from_m: null,
@@ -783,22 +794,51 @@ export default function OperationsReportDetail({
                 },
                 { field: 'bit_depth_m', headerName: 'Bit (m)', minWidth: 95 },
                 { field: 'narrative', headerName: 'Operation', minWidth: 260, tooltipField: 'narrative' },
-                { field: 'source_phase_label', headerName: 'Phase', minWidth: 155, tooltipField: 'source_phase_label' },
+                // Criteria in review order: Hole Section -> Phase -> Sub-phase ->
+                // Activity -> Allocation -> Cause -> Operations -> Agency / service
+                // vendor -> responsible agency label.
                 {
-                  field: 'source_activity_label',
-                  headerName: 'Activity code',
-                  minWidth: 205,
-                  tooltipField: 'source_activity_label',
-                  valueGetter: ({ data }) => {
-                    const workspace = ref?.activity_codes.find((c) => c.id === data?.activity_code_id)
-                    return workspace
-                      ? `${workspace.activity_code} — ${workspace.activity_name}`
-                      : data?.source_activity_label || ''
-                  },
+                  field: 'hole_section_label',
+                  headerName: 'Hole Section',
+                  minWidth: 165,
+                  tooltipField: 'hole_section_label',
+                  valueGetter: ({ data }) => data?.hole_section_label || '',
                 },
-                { field: 'classification', headerName: 'Class', minWidth: 98 },
-                { field: 'allocation', headerName: 'Alloc', minWidth: 90 },
-                { field: 'responsible_party', headerName: 'Agency', minWidth: 135 },
+                {
+                  field: 'phase_label',
+                  headerName: 'Phase',
+                  minWidth: 155,
+                  tooltipField: 'phase_label',
+                  valueGetter: ({ data }) => data?.phase_label || data?.source_phase_label || '',
+                },
+                { field: 'sub_phase_label', headerName: 'Sub-Phase', minWidth: 165, tooltipField: 'sub_phase_label' },
+                {
+                  field: 'activity_label',
+                  headerName: 'Activity',
+                  minWidth: 200,
+                  tooltipField: 'activity_label',
+                  valueGetter: ({ data }) =>
+                    data?.activity_label ||
+                    [data?.source_activity_label, data?.classification].filter(Boolean).join(' · '),
+                },
+                { field: 'allocation', headerName: 'Allocation', minWidth: 110 },
+                { field: 'cause_label', headerName: 'Cause', minWidth: 175, tooltipField: 'cause_label' },
+                {
+                  field: 'operation_code',
+                  headerName: 'Operations',
+                  minWidth: 175,
+                  valueGetter: ({ data }) =>
+                    data?.operation_code
+                      ? `${data.operation_code}${data.operation_name ? ` — ${data.operation_name}` : ''}`
+                      : '',
+                },
+                { field: 'responsible_party', headerName: 'Agency / Service Vendor', minWidth: 200 },
+                {
+                  field: 'responsible_agency_label',
+                  headerName: 'responsible Agency',
+                  minWidth: 200,
+                  tooltipField: 'responsible_agency_label',
+                },
                 {
                   field: 'timeline_comparison',
                   headerName: 'Lead (+/−)',
@@ -1340,23 +1380,122 @@ export default function OperationsReportDetail({
               ))}
               <TextField
                 select
-                label="Classification"
+                label="Hole Section"
                 disabled={!editable}
-                value={editor.classification}
+                value={editor.hole_section_id ?? ''}
+                onChange={(e) => setEditor({ ...editor, hole_section_id: e.target.value || null })}
+              >
+                <MenuItem value="">Not assigned</MenuItem>
+                {ref?.hole_sections.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select
+                label="Phase"
+                disabled={!editable}
+                value={editor.phase_id ?? ''}
                 onChange={(e) => {
-                  const c = e.target.value as Block['classification']
+                  const nextPhase = e.target.value || null
+                  // Sub-phases belong to a phase, so a phase change clears a
+                  // sub-phase that no longer belongs to the new phase.
+                  const keepSub =
+                    nextPhase &&
+                    ref?.sub_phases.some((sp) => sp.id === editor.sub_phase_id && sp.phase_id === nextPhase)
                   setEditor({
                     ...editor,
-                    classification: c,
-                    classification_source: 'reviewer',
-                    allocation: c === 'Planned' ? 'PT' : c,
-                    is_productive: c !== 'NPT',
+                    phase_id: nextPhase,
+                    sub_phase_id: keepSub ? editor.sub_phase_id : null,
                   })
                 }}
               >
-                {['Planned', 'UPA', 'NPT'].map((c) => (
-                  <MenuItem key={c} value={c}>
-                    {c}
+                <MenuItem value="">Not assigned</MenuItem>
+                {ref?.phases.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select
+                label="Sub-Phase"
+                disabled={!editable || !editor.phase_id}
+                value={editor.sub_phase_id ?? ''}
+                helperText={editor.phase_id ? undefined : 'Select a phase first.'}
+                onChange={(e) => setEditor({ ...editor, sub_phase_id: e.target.value || null })}
+              >
+                <MenuItem value="">Not assigned</MenuItem>
+                {(ref?.sub_phases ?? [])
+                  .filter((sp) => !editor.phase_id || sp.phase_id === editor.phase_id)
+                  .map((sp) => (
+                    <MenuItem key={sp.id} value={sp.id}>
+                      {sp.sub_phase_code} — {sp.sub_phase_name}
+                    </MenuItem>
+                  ))}
+              </TextField>
+              <TextField
+                select
+                label="Activity"
+                disabled={!editable}
+                value={editor.activity_id ?? ''}
+                helperText={editor.activity_type ? `Activity type: ${editor.activity_type}` : undefined}
+                onChange={(e) => {
+                  const nextAct = e.target.value || null
+                  const chosen = ref?.activities.find((c) => c.id === nextAct)
+                  // The Master Data Activity's own type is the block's Activity
+                  // type, so picking the Activity replaces the old classification.
+                  const nextType = chosen?.activity_type
+                  let next: Block = { ...editor, activity_id: nextAct }
+                  if (nextType) {
+                    next = {
+                      ...next,
+                      classification: nextType,
+                      activity_type: nextType,
+                      classification_source: 'reviewer',
+                      is_productive: nextType !== 'NPT',
+                      allocation:
+                        nextType === 'Planned'
+                          ? next.allocation === 'PT'
+                            ? next.allocation
+                            : 'PT'
+                          : next.allocation === nextType
+                            ? next.allocation
+                            : nextType,
+                    }
+                  }
+                  // A new Activity may carry its own correlations; fill only what
+                  // the engineer has left empty.
+                  if (nextAct && ref?.code_links?.length) {
+                    const hits = ref.code_links.filter(
+                      (l) => l.is_active && (!l.scope || l.scope === report.scope) && l.activity_id === nextAct,
+                    )
+                    const unique = (k: keyof (typeof hits)[number]) => {
+                      const vals = Array.from(new Set(hits.map((h) => h[k]).filter(Boolean)))
+                      return vals.length === 1 ? (vals[0] as string) : null
+                    }
+                    // Every criterion a link pins is offered, but only where the
+                    // engineer has left the field empty: a manual choice always wins.
+                    if (!next.hole_section_id) next = { ...next, hole_section_id: unique('hole_section_id') }
+                    if (!next.phase_id) next = { ...next, phase_id: unique('phase_id') }
+                    if (!next.sub_phase_id) next = { ...next, sub_phase_id: unique('sub_phase_id') }
+                    if (!next.operation_id) next = { ...next, operation_id: unique('operation_id') }
+                    if (!next.responsible_agency_id) {
+                      next = { ...next, responsible_agency_id: unique('responsible_agency_id') }
+                    }
+                    if (!next.cause_code && (next.classification === 'NPT' || next.classification === 'UPA')) {
+                      next = { ...next, cause_code: unique('cause_code') ?? next.cause_code }
+                    }
+                  }
+                  setEditor(next)
+                }}
+              >
+                <MenuItem value="">Not assigned</MenuItem>
+                {ref?.activities.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.label}
+                    {c.activity_type && c.activity_type !== 'Planned' ? ` · ${c.activity_type}` : ''}
                   </MenuItem>
                 ))}
               </TextField>
@@ -1381,111 +1520,15 @@ export default function OperationsReportDetail({
               </TextField>
               <TextField
                 select
-                label="Operation code"
-                value={editor.operation_code_id ?? ''}
-                disabled={!editable}
-                onChange={(e) => {
-                  const nextOp = e.target.value || null
-                  let next = { ...editor, operation_code_id: nextOp }
-                  if (nextOp && ref?.code_links?.length) {
-                    const hits = ref.code_links.filter(
-                      (l) => l.is_active && (!l.scope || l.scope === report.scope) && l.operation_code_id === nextOp,
-                    )
-                    const unique = <K extends keyof (typeof hits)[number]>(k: K) => {
-                      const vals = Array.from(new Set(hits.map((h) => h[k]).filter(Boolean)))
-                      return vals.length === 1 ? (vals[0] as string) : null
-                    }
-                    if (!next.activity_code_id) next = { ...next, activity_code_id: unique('activity_code_id') }
-                    if (!next.phase_raw) {
-                      const pl = unique('phase_label')
-                      if (pl) next = { ...next, phase_raw: pl.split(' — ')[0].trim() }
-                    }
-                    if (next.classification === 'NPT' && !next.npt_code_id) {
-                      next = { ...next, npt_code_id: unique('npt_code_id') }
-                    }
-                    if ((next.classification === 'NPT' || next.classification === 'UPA') && !next.cause_code) {
-                      const cc = unique('cause_code')
-                      if (cc) next = { ...next, cause_code: cc }
-                    }
-                  }
-                  setEditor(next)
-                }}
-              >
-                <MenuItem value="">Not assigned</MenuItem>
-                {ref?.operation_codes.map((c) => (
-                  <MenuItem key={c.id} value={c.id}>
-                    {c.operation_name} ({c.operation_code})
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                label="Activity code"
-                value={editor.activity_code_id ?? ''}
-                disabled={!editable}
-                onChange={(e) => {
-                  const nextAct = e.target.value || null
-                  let next = { ...editor, activity_code_id: nextAct }
-                  if (nextAct && ref?.code_links?.length) {
-                    const hits = ref.code_links.filter(
-                      (l) =>
-                        l.is_active &&
-                        (!l.scope || l.scope === report.scope) &&
-                        l.activity_code_id === nextAct &&
-                        (!next.operation_code_id || !l.operation_code_id || l.operation_code_id === next.operation_code_id),
-                    )
-                    const ops = Array.from(new Set(hits.map((h) => h.operation_code_id).filter(Boolean)))
-                    if (!next.operation_code_id && ops.length === 1) next = { ...next, operation_code_id: ops[0] as string }
-                  }
-                  setEditor(next)
-                }}
-              >
-                <MenuItem value="">Not assigned</MenuItem>
-                {ref?.activity_codes.map((c) => (
-                  <MenuItem key={c.id} value={c.id}>
-                    {c.activity_name} ({c.activity_code})
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                label="NPT code"
-                disabled={!editable}
-                value={editor.npt_code_id ?? ''}
-                onChange={(e) => {
-                  const nextNpt = e.target.value || null
-                  let next = { ...editor, npt_code_id: nextNpt }
-                  if (nextNpt && ref?.code_links?.length) {
-                    const hits = ref.code_links.filter(
-                      (l) => l.is_active && (!l.scope || l.scope === report.scope) && l.npt_code_id === nextNpt,
-                    )
-                    const causes = Array.from(new Set(hits.map((h) => h.cause_code).filter(Boolean)))
-                    if (!next.cause_code && causes.length === 1) next = { ...next, cause_code: causes[0] }
-                    const agencies = Array.from(new Set(hits.map((h) => h.agency_id).filter(Boolean)))
-                    if (!next.vendor_id && !next.agency_id && agencies.length === 1) {
-                      const ag = hits.find((h) => h.agency_id === agencies[0])
-                      next = {
-                        ...next,
-                        agency_id: agencies[0] as string,
-                        responsible_party: next.responsible_party || ag?.agency_name || '',
-                      }
-                    }
-                  }
-                  setEditor(next)
-                }}
-              >
-                <MenuItem value="">Not assigned</MenuItem>
-                {ref?.npt_codes.map((n) => (
-                  <MenuItem key={n.id} value={n.id}>
-                    {n.npt_name} ({n.npt_code})
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
                 label="Cause"
                 value={editor.cause_code}
                 disabled={!editable}
+                required={editor.classification === 'NPT' || editor.classification === 'UPA'}
+                helperText={
+                  editor.classification === 'NPT' || editor.classification === 'UPA'
+                    ? `Required for ${editor.classification} time.`
+                    : 'Not needed for Planned time.'
+                }
                 onChange={(e) => setEditor({ ...editor, cause_code: e.target.value })}
               >
                 <MenuItem value="">Not assigned</MenuItem>
@@ -1500,7 +1543,47 @@ export default function OperationsReportDetail({
               </TextField>
               <TextField
                 select
-                label="Agency / service vendor"
+                label="Operations"
+                value={editor.operation_id ?? ''}
+                disabled={!editable}
+                onChange={(e) => {
+                  const nextOp = e.target.value || null
+                  let next: Block = { ...editor, operation_id: nextOp }
+                  if (nextOp && ref?.code_links?.length) {
+                    const hits = ref.code_links.filter(
+                      (l) => l.is_active && (!l.scope || l.scope === report.scope) && l.operation_id === nextOp,
+                    )
+                    const unique = (k: keyof (typeof hits)[number]) => {
+                      const vals = Array.from(new Set(hits.map((h) => h[k]).filter(Boolean)))
+                      return vals.length === 1 ? (vals[0] as string) : null
+                    }
+                    if (!next.phase_id) next = { ...next, phase_id: unique('phase_id') }
+                    if (!next.sub_phase_id) next = { ...next, sub_phase_id: unique('sub_phase_id') }
+                    if (!next.activity_id) next = { ...next, activity_id: unique('activity_id') }
+                    if (
+                      (next.classification === 'NPT' || next.classification === 'UPA') &&
+                      !next.cause_code
+                    ) {
+                      next = { ...next, cause_code: unique('cause_code') ?? next.cause_code }
+                    }
+                    if (!next.responsible_agency_id) {
+                      const agency = unique('responsible_agency_id')
+                      if (agency) next = { ...next, responsible_agency_id: agency }
+                    }
+                  }
+                  setEditor(next)
+                }}
+              >
+                <MenuItem value="">Not assigned</MenuItem>
+                {ref?.operations.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.operation_name} ({c.operation_code})
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select
+                label="Agency / Service Vendor"
                 disabled={!editable}
                 value={editor.vendor_id ?? ''}
                 onChange={(e) => {
@@ -1509,7 +1592,7 @@ export default function OperationsReportDetail({
                     ...editor,
                     vendor_id: v?.id ?? null,
                     responsible_party: v?.vendor_name ?? editor.responsible_party,
-                    agency_id: null,
+                    responsible_agency_id: null,
                   })
                 }}
               >
@@ -1521,23 +1604,47 @@ export default function OperationsReportDetail({
                 ))}
               </TextField>
               <TextField
-                label="Responsible agency label"
+                select
+                label="responsible Agency"
                 disabled={!editable}
-                value={editor.responsible_party}
-                onChange={(e) => setEditor({ ...editor, responsible_party: e.target.value })}
-              />
+                value={editor.responsible_agency_id ?? ''}
+                helperText="Configured in Code library → Responsible agency labels."
+                onChange={(e) => {
+                  // The label keeps its own value on the block; the vendor link
+                  // stays separate, so picking a label never clears the vendor.
+                  const agency = ref?.agencies.find((a) => a.id === e.target.value)
+                  setEditor({
+                    ...editor,
+                    responsible_agency_id: agency?.id ?? null,
+                    responsible_party: agency?.agency_name ?? editor.responsible_party,
+                  })
+                }}
+              >
+                <MenuItem value="">Not assigned</MenuItem>
+                {editor.responsible_agency_id &&
+                  !ref?.agencies.some((a) => a.id === editor.responsible_agency_id) && (
+                    <MenuItem value={editor.responsible_agency_id}>
+                      {editor.responsible_party || 'Source label'}
+                    </MenuItem>
+                  )}
+                {ref?.agencies.map((a) => (
+                  <MenuItem key={a.id} value={a.id}>
+                    {a.agency_name} ({a.agency_code})
+                  </MenuItem>
+                ))}
+              </TextField>
               <Autocomplete
                 freeSolo
                 disabled={!editable}
-                options={(ref?.phase_codes ?? []).map((c) => c.phase_code)}
+                options={(ref?.phases ?? []).map((c) => c.code)}
                 value={editor.phase_raw}
                 onInputChange={(_, val) => setEditor((b) => (b ? { ...b, phase_raw: val } : b))}
                 renderOption={(props, val) => (
                   <li {...props} key={val}>
-                    {ref?.phase_codes.find((c) => c.phase_code === val)?.phase_name} ({val})
+                    {ref?.phases.find((c) => c.code === val)?.name} ({val})
                   </li>
                 )}
-                renderInput={(params) => <TextField {...params} label="Source phase" />}
+                renderInput={(params) => <TextField {...params} label="Printed phase token" />}
               />
               <FormControlLabel
                 label="Productive time"
@@ -1613,7 +1720,7 @@ export default function OperationsReportDetail({
               )}
               <Typography variant="body2" color="text.secondary" sx={{ gridColumn: '1 / -1' }}>
                 Source: {editor.source_bbox || 'Manual entry'} ·{' '}
-                {editor.classification_evidence || editor.classification_source} · Confidence{' '}
+                Evidence: {editor.classification_evidence || editor.classification_source} · Confidence{' '}
                 {Number(editor.confidence).toFixed(3)}
               </Typography>
             </Box>

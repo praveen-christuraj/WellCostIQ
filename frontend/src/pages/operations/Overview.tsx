@@ -207,7 +207,11 @@ export default function OperationsOverview() {
           />
         </ChartPanel>
         <Box display="grid" gap={2} gridTemplateColumns={{ xs: 'minmax(0,1fr)', lg: 'repeat(2,minmax(0,1fr))' }}>
-          <ChartPanel title="NPT by code" empty={!codes.length} emptyMessage="No verified NPT in this period.">
+          <ChartPanel
+            title="NPT by Operations"
+            empty={!codes.length}
+            emptyMessage="No verified NPT in this period."
+          >
             <InteractiveChart
               style={{ height: '100%' }}
               option={bars(
@@ -216,7 +220,7 @@ export default function OperationsOverview() {
               )}
             />
           </ChartPanel>
-          <ChartPanel title="NPT by responsible party" empty={!parties.length} emptyMessage="No verified NPT in this period.">
+          <ChartPanel title="NPT by responsible agency" empty={!parties.length} emptyMessage="No verified NPT in this period.">
             <InteractiveChart
               style={{ height: '100%' }}
               option={bars(
@@ -229,7 +233,7 @@ export default function OperationsOverview() {
         {k && (
           <SectionCard
             title="Productivity & allocation"
-            subtitle="Allocation is separate from the Planned / UPA / NPT time classification."
+            subtitle="Allocation is separate from the Activity type (Planned / UPA / NPT)."
           >
             <Typography>
               {k.productive_hours} productive hours · {k.nonproductive_hours} nonproductive hours · {k.unaccounted_hours}{' '}

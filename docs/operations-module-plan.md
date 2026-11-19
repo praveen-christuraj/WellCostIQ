@@ -1,6 +1,10 @@
 # Well Operations: architecture decision and plan
 
-**Status:** proposal only. No code, schema, migration or configuration has been changed.
+**Status:** proposal only. No code, schema, migration or configuration has been changed. The NPT-code list
+and the operations/activity/phase code families named below were superseded on 2026-11-19: Activities
+live in Master Data with an Activity type (Planned / UPA / NPT), and the Code Library holds Operations,
+Sub-Phases, Cause Codes, Responsible Agency labels and source marks. See
+[docs/operations/daily-workflow.md](operations/daily-workflow.md).
 **Date:** 2026-11-17
 **Question asked:** should drilling/completion operations (DDR, DCR, rig operations and
 activities, NPT/UPA, productive vs non-productive time) live in a *separate workspace* or in

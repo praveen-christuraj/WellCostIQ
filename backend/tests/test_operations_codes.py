@@ -1,12 +1,17 @@
-"""Bulk code assignment, printed-to-library correlations and the mandatory matrix.
+"""Bulk criteria assignment, correlations and the mandatory matrix.
+
+The criteria are Hole Section, Phase, Sub-phase, Activity, Allocation, Cause,
+Operations, Agency / service vendor and the Responsible agency label. Hole
+Section, Phase and Activity are Master Data; Sub-phase, Operations, Cause and the
+Responsible agency label are configured in the Code Library.
 
 The rules under test:
 
-* Planned needs an operation and an activity code; NPT adds an NPT code, a cause
-  and an agency; UPA needs the cause and the agency but never an NPT code.
+* Hole Section, Phase, Activity and Allocation are always mandatory. Cause is
+  mandatory only when the Activity's own type is NPT or UPA, never for Planned.
 * Extraction only pre-selects a dropdown when a correlation exists. No
   correlation leaves the dropdown empty instead of guessing.
-* A bulk gesture previews before it writes, refuses what the classification
+* A bulk gesture previews before it writes, refuses what the Activity type
   forbids, and leaves an audit trail naming the fields and counts.
 """
 
@@ -19,6 +24,7 @@ from app.core.database import SessionLocal
 from app.main import app
 from app.models import AuditLog, Organization
 from app.models.operations import OpsActivityBlock, OpsCodeCorrelation, OpsDailyReport
+from app.models.vendor_master import Vendor
 from app.services.operations.correlations import correlation_map
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -34,27 +40,51 @@ def good(response):
 
 
 def _codes(client, headers):
-    """One workspace code per family, so every rule can be exercised."""
+    """One workspace criterion of each kind, so every rule can be exercised.
+
+    Hole Section, Phase and Activity are Master Data; the Code Library owns
+    Sub-phase, Operations, Cause and the Responsible agency label.
+    """
+    section = good(
+        client.post("/api/v1/master-data/hole-sections", headers=headers, json={"code": "H12", "name": '12-1/4" hole'})
+    )
+    phase = good(client.post("/api/v1/master-data/phases", headers=headers, json={"code": "DRL", "name": "Drilling"}))
     return {
+        "hole_section": section,
+        "phase": phase,
+        "activity": good(
+            client.post("/api/v1/master-data/activities", headers=headers, json={"code": "ROT", "name": "Rotating"})
+        ),
+        "npt_activity": good(
+            client.post(
+                "/api/v1/master-data/activities",
+                headers=headers,
+                json={"code": "DWN", "name": "Rig repair", "activity_type": "NPT"},
+            )
+        ),
+        "upa_activity": good(
+            client.post(
+                "/api/v1/master-data/activities",
+                headers=headers,
+                json={"code": "FSH", "name": "Fishing", "activity_type": "UPA"},
+            )
+        ),
+        "sub_phase": good(
+            client.post(
+                OPS + "/masters/sub-phases",
+                headers=headers,
+                json={
+                    "phase_id": phase["id"],
+                    "sub_phase_code": "DRL-1",
+                    "sub_phase_name": "Drilling ahead",
+                },
+            )
+        ),
         "operation": good(
             client.post(
-                OPS + "/masters/operation-codes",
+                OPS + "/masters/operations",
                 headers=headers,
-                json={"operation_code": "DRL", "operation_name": "Drilling"},
-            )
-        ),
-        "activity": good(
-            client.post(
-                OPS + "/masters/activity-codes",
-                headers=headers,
-                json={"activity_code": "ROT", "activity_name": "Rotating"},
-            )
-        ),
-        "npt": good(
-            client.post(
-                OPS + "/masters/npt-codes",
-                headers=headers,
-                json={"npt_code": "PUMP", "npt_name": "Pump failure"},
+                json={"operation_code": "PUMP", "operation_name": "Pump failure"},
             )
         ),
         "cause": good(
@@ -98,7 +128,6 @@ def _setup(client, headers, well_code="BULK-WELL-01"):
             "started_at": f"{DAY}T00:00:00+01:00",
             "ended_at": f"{DAY}T12:00:00+01:00",
             "duration_minutes": 720,
-            "classification": "Planned",
             "allocation": "PT",
             "is_productive": True,
             "narrative": "Drill ahead with rotary steerable.",
@@ -109,7 +138,6 @@ def _setup(client, headers, well_code="BULK-WELL-01"):
             "started_at": f"{DAY}T12:00:00+01:00",
             "ended_at": f"{DAY}T18:00:00+01:00",
             "duration_minutes": 360,
-            "classification": "NPT",
             "allocation": "NPT",
             "is_productive": False,
             "narrative": "Mud pump failure; repairing.",
@@ -121,7 +149,6 @@ def _setup(client, headers, well_code="BULK-WELL-01"):
             "started_at": f"{DAY}T18:00:00+01:00",
             "ended_at": f"{NEXT_DAY}T00:00:00+01:00",
             "duration_minutes": 360,
-            "classification": "UPA",
             "allocation": "UPA",
             "is_productive": True,
             "narrative": "Fishing operation for dropped tool.",
@@ -139,7 +166,7 @@ def _setup(client, headers, well_code="BULK-WELL-01"):
     return folder, saved
 
 
-def test_bulk_assign_respects_the_classification_matrix():
+def test_bulk_assign_respects_the_activity_type_matrix():
     with TestClient(app) as client:
         headers = login(client)
         codes = _codes(client, headers)
@@ -147,25 +174,28 @@ def test_bulk_assign_respects_the_classification_matrix():
         url = OPS + f"/reports/{report['id']}"
         base = {"report_ids": [report["id"]], "block_ids": []}
 
-        # Planned may not carry an NPT code in bulk: the classification forbids it.
-        refused = client.post(
-            OPS + "/reports/bulk-assign",
-            headers=headers,
-            json={**base, "npt_code_id": codes["npt"]["id"]},
+        # Planned work may not carry a cause in bulk: nothing went wrong.
+        refused = good(
+            client.post(
+                OPS + "/reports/bulk-assign",
+                headers=headers,
+                json={**base, "cause_code": "EQP"},
+            )
         )
-        assert refused.status_code == 200 or refused.status_code == 422
+        assert refused["changed_count"] == 0
+        assert refused["skipped"] and "Planned" in refused["skipped"][0]["reason"]
 
         # Preview reports the exact before/after without writing.
         preview = good(
             client.post(
                 OPS + "/reports/bulk-assign/preview",
                 headers=headers,
-                json={**base, "operation_code_id": codes["operation"]["id"]},
+                json={**base, "operation_id": codes["operation"]["id"]},
             )
         )
         assert preview["changes"] and preview["summary"]
         unchanged = good(client.get(url, headers=headers))
-        assert all(b["operation_code_id"] is None for b in unchanged["blocks"])
+        assert all(b["operation_id"] is None for b in unchanged["blocks"])
 
         # The real assignment fills only the rows that can hold the value.
         applied = good(
@@ -174,44 +204,47 @@ def test_bulk_assign_respects_the_classification_matrix():
                 headers=headers,
                 json={
                     **base,
-                    "operation_code_id": codes["operation"]["id"],
-                    "activity_code_id": codes["activity"]["id"],
+                    "operation_id": codes["operation"]["id"],
+                    "hole_section_id": codes["hole_section"]["id"],
+                    "sub_phase_id": codes["sub_phase"]["id"],
                 },
             )
         )
         assert applied["changed_count"] == 3
-        assert "operation code" in applied["summary"] and "activity code" in applied["summary"]
+        assert "operations" in applied["summary"] and "hole section" in applied["summary"]
 
         saved = good(client.get(url, headers=headers))
-        assert all(b["operation_code_id"] == codes["operation"]["id"] for b in saved["blocks"])
-        assert all(b["activity_code_id"] == codes["activity"]["id"] for b in saved["blocks"])
+        assert all(b["operation_id"] == codes["operation"]["id"] for b in saved["blocks"])
+        assert all(b["hole_section_id"] == codes["hole_section"]["id"] for b in saved["blocks"])
+        assert all(b["sub_phase_id"] == codes["sub_phase"]["id"] for b in saved["blocks"])
         # Every touched block is edited and attributed, never silently accepted.
         assert all(b["review_state"] == "edited" for b in saved["blocks"])
         assert saved["blocks"][0]["timeline_review_state"] == "suggested"
 
-        # A cause fills the printed token; the agency fills the responsible party.
-        good(
+        # Assigning the NPT Activity is what makes the row NPT, so the cause lands
+        # in the same gesture. The Old Activity on the other rows is Planned, so
+        # their cause is refused with a reason rather than written.
+        npt = good(
             client.post(
                 OPS + "/reports/bulk-assign",
                 headers=headers,
                 json={
                     **base,
+                    "block_ids": [report["blocks"][1]["id"]],
+                    "phase_id": codes["phase"]["id"],
+                    "activity_id": codes["npt_activity"]["id"],
                     "cause_code": "EQP",
-                    "agency_id": codes["agency"]["id"],
-                    "npt_code_id": codes["npt"]["id"],
+                    "responsible_agency_id": codes["agency"]["id"],
                 },
             )
         )
+        assert npt["changed_count"] == 1
         saved = good(client.get(url, headers=headers))
-        assert [b["cause_code"] for b in saved["blocks"]] == ["EQP", "EQP", "EQP"]
-        assert all(b["responsible_party"] == "Rig contractor" for b in saved["blocks"])
-        # The count reports every block the instruction actually touched, not just
-        # the ones whose code ids changed: the agency landed on all three.
-        assert applied["changed_count"] == 3
-        # The NPT code lands on the NPT row and is skipped, with a reason, elsewhere.
-        assert saved["blocks"][1]["npt_code_id"] == codes["npt"]["id"]
-        assert saved["blocks"][1]["npt_code_snapshot"] == "PUMP"
-        assert saved["blocks"][0]["npt_code_id"] is None
+        assert saved["blocks"][1]["classification"] == "NPT"
+        assert saved["blocks"][1]["activity_type"] == "NPT"
+        assert saved["blocks"][1]["cause_code"] == "EQP"
+        assert saved["blocks"][1]["responsible_party"] == "Rig contractor"
+        assert saved["blocks"][1]["responsible_agency_label"] == "Rig contractor"
 
         with SessionLocal() as db:
             entries = db.scalars(
@@ -223,7 +256,25 @@ def test_bulk_assign_respects_the_classification_matrix():
             )
             assert block.reviewer_user_id is not None and block.reviewed_at is not None
 
-        # The mandatory matrix is now satisfied, so submit succeeds.
+        # Fill the remaining mandatory criteria on the Planned rows, then submit
+        # succeeds: the NPT row already carried its phase and Activity.
+        good(
+            client.post(
+                OPS + "/reports/bulk-assign",
+                headers=headers,
+                json={
+                    **base,
+                    "phase_id": codes["phase"]["id"],
+                    "activity_id": codes["activity"]["id"],
+                    "block_ids": [b["id"] for b in saved["blocks"] if b["sequence_no"] != 2],
+                },
+            )
+        )
+        saved = good(client.get(url, headers=headers))
+        # The NPT row keeps the phase assigned with its Activity, so every row now
+        # carries the whole mandatory set.
+        assert all(b["phase_id"] == codes["phase"]["id"] for b in saved["blocks"])
+        assert all(b["activity_id"] for b in saved["blocks"])
         submitted = good(client.post(url + "/submit", headers=headers))
         assert submitted["status"] == "submitted"
 
@@ -231,15 +282,15 @@ def test_bulk_assign_respects_the_classification_matrix():
         blocked = client.post(
             OPS + "/reports/bulk-assign",
             headers=headers,
-            json={**base, "activity_code_id": codes["activity"]["id"]},
+            json={**base, "activity_id": codes["activity"]["id"]},
         )
         assert blocked.status_code == 409 and "editable drafts" in blocked.json()["detail"]
 
 
-def test_bulk_assign_refuses_npt_code_on_planned_work():
+def test_bulk_assign_refuses_a_cause_on_planned_work():
     with TestClient(app) as client:
         headers = login(client)
-        codes = _codes(client, headers, )
+        codes = _codes(client, headers)
         _folder, report = _setup(client, headers, "BULK-WELL-02")
         planned = [b for b in report["blocks"] if b["classification"] == "Planned"]
         result = good(
@@ -249,36 +300,50 @@ def test_bulk_assign_refuses_npt_code_on_planned_work():
                 json={
                     "report_ids": [report["id"]],
                     "block_ids": [b["id"] for b in planned],
-                    "npt_code_id": codes["npt"]["id"],
+                    "cause_code": "EQP",
                 },
             )
         )
-        # Nothing was written, and the reason names the classification.
+        # Nothing was written, and the reason names the Activity type.
         assert result["changed_count"] == 0
         assert result["skipped"] and "Planned" in result["skipped"][0]["reason"]
         saved = good(client.get(OPS + f"/reports/{report['id']}", headers=headers))
-        assert all(b["npt_code_id"] is None for b in saved["blocks"] if b["classification"] == "Planned")
+        assert all(b["cause_code"] == "" for b in saved["blocks"] if b["classification"] == "Planned")
 
 
-def test_correlation_controls_which_codes_extraction_preselects():
+def test_correlation_controls_which_criteria_extraction_preselects():
     with TestClient(app) as client:
         headers = login(client)
         codes = _codes(client, headers)
 
         reference = good(client.get(OPS + "/correlations/reference", headers=headers))
-        assert {"operation", "activity", "npt", "cause", "phase", "agency"} == set(reference["kinds"])
-        assert any(row["family"] == "OpenWells operation code" for row in reference["printed"])
-        assert reference["library"]["operation"][0]["code"] == "DRL"
+        # Printed tokens are correlated into Code Library criteria; Hole Section,
+        # Phase and Activity are Master Data targets, not correlation kinds.
+        assert {"operation", "cause", "sub-phase", "responsible-party", "agency"} == set(reference["kinds"])
+        assert any(row["family"] == "Trouble / NPT" for row in reference["printed"])
+        assert reference["library"]["operation"][0]["code"] == "PUMP"
+        # Every criterion list the Correlations panel needs is present.
+        assert set(reference["library"]) == {
+            "hole_section",
+            "phase",
+            "sub_phase",
+            "activity",
+            "operation",
+            "cause",
+            "responsible_agency",
+            "vendor",
+            "mark",
+        }
 
-        # A printed code from a different family cannot be correlated across kinds.
+        # A printed token from a family the kind does not read cannot be correlated.
         mismatch = client.post(
             OPS + "/correlations",
             headers=headers,
             json={
-                "kind": "activity",
-                "source_family": "OpenWells operation code",
-                "source_code": "01-A",
-                "target_id": codes["activity"]["id"],
+                "kind": "operation",
+                "source_family": "Cause",
+                "source_code": "XX01",
+                "target_id": codes["operation"]["id"],
             },
         )
         assert mismatch.status_code == 422
@@ -289,13 +354,14 @@ def test_correlation_controls_which_codes_extraction_preselects():
                 headers=headers,
                 json={
                     "kind": "operation",
-                    "source_family": "OpenWells operation code",
-                    "source_code": "19-D",
+                    "source_family": "Trouble / NPT",
+                    "source_code": "TP02",
                     "target_id": codes["operation"]["id"],
                 },
             )
         )
-        assert created["target_label"].startswith("DRL")
+        assert created["target_label"].startswith("PUMP")
+        assert created["target_operation_id"] == codes["operation"]["id"]
 
         # One printed token maps once. A second row is a conflict, not a guess.
         duplicate = client.post(
@@ -303,8 +369,8 @@ def test_correlation_controls_which_codes_extraction_preselects():
             headers=headers,
             json={
                 "kind": "operation",
-                "source_family": "OpenWells operation code",
-                "source_code": "19-D",
+                "source_family": "Trouble / NPT",
+                "source_code": "TP02",
                 "target_id": codes["operation"]["id"],
             },
         )
@@ -312,7 +378,7 @@ def test_correlation_controls_which_codes_extraction_preselects():
 
         with SessionLocal() as db:
             org = db.scalar(select(Organization.id).where(Organization.slug == "north"))
-            assert ("operation", "19-d") in correlation_map(db, org)
+            assert ("operation", "tp02") in correlation_map(db, org)
 
         # Deleted correlations stop feeding extraction but are recoverable.
         good(
@@ -337,30 +403,33 @@ def test_correlation_controls_which_codes_extraction_preselects():
             assert row is not None and row.is_deleted is False
 
 
-def test_upa_requires_cause_and_agency_but_not_an_npt_code():
+def test_upa_requires_a_cause_but_never_an_operations_code():
     with TestClient(app) as client:
         headers = login(client)
         codes = _codes(client, headers)
         _folder, report = _setup(client, headers, "BULK-WELL-03")
         url = OPS + f"/reports/{report['id']}"
-        from app.schemas.operations import OpsActivityBlockIn
+        from app.schemas.operations import OpsActivityBlockIn, OpsSettingsIn
 
         stored = good(client.get(url, headers=headers))["blocks"]
         rows = [{k: b[k] for k in OpsActivityBlockIn.model_fields} for b in stored]
         for row, source in zip(rows, stored):
             row["block_id"] = source["id"]
-        for row in rows:
-            row["operation_code_id"] = codes["operation"]["id"]
-            row["activity_code_id"] = codes["activity"]["id"]
-        rows[0]["classification"], rows[0]["allocation"] = "Planned", "PT"
-        rows[1]["classification"], rows[1]["allocation"] = "NPT", "NPT"
+            row["hole_section_id"] = codes["hole_section"]["id"]
+            row["phase_id"] = codes["phase"]["id"]
+            row["sub_phase_id"] = codes["sub_phase"]["id"]
+        # The Activity's own type is the block's type: Planned, NPT and UPA.
+        rows[0]["activity_id"], rows[0]["allocation"] = codes["activity"]["id"], "PT"
+        rows[1]["activity_id"], rows[1]["allocation"] = codes["npt_activity"]["id"], "NPT"
         rows[1].update(
-            npt_code_id=codes["npt"]["id"], cause_code="EQP", responsible_party="Rig contractor", reason="Pump failed"
+            operation_id=codes["operation"]["id"],
+            cause_code="EQP",
+            responsible_party="Rig contractor",
+            reason="Pump failed",
         )
-        rows[2]["classification"], rows[2]["allocation"] = "UPA", "UPA"
+        rows[2]["activity_id"], rows[2]["allocation"] = codes["upa_activity"]["id"], "UPA"
         rows[2].update(
             cause_code="EQP",
-            npt_code_id=None,
             responsible_party="Rig contractor",
             reason="Fishing for a dropped tool",
         )
@@ -374,38 +443,56 @@ def test_upa_requires_cause_and_agency_but_not_an_npt_code():
             )
         )
         assert [b["classification"] for b in saved["blocks"]] == ["Planned", "NPT", "UPA"]
-        # UPA without an NPT code is complete; only the cause and agency were needed.
-        assert saved["blocks"][2]["npt_code_id"] is None
+        assert [b["activity_type"] for b in saved["blocks"]] == ["Planned", "NPT", "UPA"]
+        # UPA without an Operations code is complete; only the cause was needed.
+        assert saved["blocks"][2]["operation_id"] is None
         assert saved["blocks"][2]["cause_code"] == "EQP"
+        # The responsible agency label keeps its own value beside the free-text
+        # responsible party, and both are visible on the block.
+        assert saved["blocks"][2]["responsible_party"] == "Rig contractor"
+        # Operations stays optional for UPA, but the workspace asks for it on NPT
+        # and UPA before submit; the requirement is a setting, not the matrix.
+        submitted = client.post(url + "/submit", headers=headers)
+        assert submitted.status_code == 422 and "Operations code" in submitted.json()["detail"]
+        settings = good(client.get(OPS + "/settings", headers=headers))
+        writable = {k: v for k, v in settings.items() if k in OpsSettingsIn.model_fields}
+        good(
+            client.put(
+                OPS + "/settings",
+                headers=headers,
+                json={**writable, "require_operations": False},
+            )
+        )
         good(client.post(url + "/submit", headers=headers))
 
-        # A UPA block without an agency is refused, with the same sentence everywhere.
-        reopened = good(client.post(url + "/reopen", headers=headers, json={"remarks": "Correct the agency"}))
-        rows[2]["responsible_party"] = ""
-        rows[2]["vendor_id"] = None
+        # A UPA block without a cause is refused, with the same sentence everywhere.
+        reopened = good(client.post(url + "/reopen", headers=headers, json={"remarks": "Correct the cause"}))
+        rows[2]["cause_code"] = ""
         refused = client.put(
             OPS + f"/reports/{reopened['id']}",
             headers=headers,
             json={"report": {}, "blocks": rows, "confirm_review": True},
         )
-        assert refused.status_code == 422 and "agency" in refused.json()["detail"]
+        assert refused.status_code == 422 and "cause code" in refused.json()["detail"]
 
 
 @pytest.mark.parametrize(
-    ("classification", "missing"),
+    ("activity_type", "missing"),
     [
-        ("Planned", {"operation_code_id", "activity_code_id"}),
-        ("NPT", {"operation_code_id", "activity_code_id", "npt_code_id", "cause_code", "agency"}),
-        ("UPA", {"operation_code_id", "activity_code_id", "cause_code", "agency"}),
+        ("Planned", {"hole_section_id", "phase_id", "activity_id", "allocation"}),
+        ("NPT", {"hole_section_id", "phase_id", "activity_id", "allocation", "cause_code"}),
+        ("UPA", {"hole_section_id", "phase_id", "activity_id", "allocation", "cause_code"}),
     ],
 )
-def test_requirement_matrix_is_the_single_source_of_truth(classification, missing):
+def test_requirement_matrix_is_the_single_source_of_truth(activity_type, missing):
     from app.domain.operations.requirements import MANDATORY, missing_fields
     from app.models.operations import OpsActivityBlock
 
-    block = OpsActivityBlock(sequence_no=1, classification=classification)
+    # A block's stored Activity type is what the matrix is keyed on, so the
+    # editor, the bulk dialog and submit all quote the same answer.
+    block = OpsActivityBlock(sequence_no=1, classification=activity_type)
     assert set(missing_fields(block)) == missing
-    assert set(MANDATORY[classification]) == missing
+    assert set(MANDATORY[activity_type]) == missing
 
 
 def test_report_and_extra_blocks_are_not_faked_by_correlations():
@@ -536,17 +623,24 @@ def test_reference_context_names_the_asked_abbreviation():
 
 
 def _pair(client, headers, codes):
-    """A second code per family, so a link can join two distinct criteria."""
+    """A second criterion of each kind, so a link can join distinct values."""
     return {
-        "phase": good(
-            client.post(OPS + "/masters/phase-codes", headers=headers, json={"phase_code": "PH1", "phase_name": "Drilling"})
+        "phase2": good(
+            client.post("/api/v1/master-data/phases", headers=headers, json={"code": "CMP", "name": "Completion"})
         ),
         "activity2": good(
+            client.post("/api/v1/master-data/activities", headers=headers, json={"code": "TRIP", "name": "Tripping"})
+        ),
+        "sub_phase2": good(
             client.post(
-                OPS + "/masters/activity-codes", headers=headers, json={"activity_code": "TRIP", "activity_name": "Tripping"}
+                OPS + "/masters/sub-phases",
+                headers=headers,
+                json={"phase_id": codes["phase"]["id"], "sub_phase_code": "DRL-2", "sub_phase_name": "Tripping"},
             )
         ),
-        "operation2": codes["operation"],
+        "cause2": good(
+            client.post(OPS + "/masters/causes", headers=headers, json={"cause_code": "WTH", "cause_name": "Weather"})
+        ),
     }
 
 
@@ -560,54 +654,57 @@ def test_multi_criteria_code_links_require_two_criteria_and_guard_code_deletion(
         single = client.post(
             OPS + "/code-links",
             headers=headers,
-            json={"operation_code_id": codes["operation"]["id"]},
+            json={"hole_section_id": codes["hole_section"]["id"]},
         )
-        assert single.status_code == 422 and "two workspace code criteria" in single.json()["detail"]
+        assert single.status_code == 422 and "two criteria" in single.json()["detail"]
 
-        # NPT code with a Planned classification is refused before it is written.
+        # Cause with Planned work is refused: the Activity type decides.
         matrix = client.post(
             OPS + "/code-links",
             headers=headers,
             json={
-                "operation_code_id": codes["operation"]["id"],
-                "npt_code_id": codes["npt"]["id"],
-                "default_classification": "Planned",
+                "activity_id": codes["activity"]["id"],
+                "cause_id": codes["cause"]["id"],
             },
         )
-        assert matrix.status_code == 422 and "NPT code applies only" in matrix.json()["detail"]
+        assert matrix.status_code == 422 and "Planned" in matrix.json()["detail"]
 
+        # A single rule spanning Master Data and the Code Library: the DRLSUR case.
         link = good(
             client.post(
                 OPS + "/code-links",
                 headers=headers,
                 json={
-                    "rule_name": "Drilling + rotating",
-                    "operation_code_id": codes["operation"]["id"],
-                    "activity_code_id": codes["activity"]["id"],
-                    "phase_code_id": extra["phase"]["id"],
-                    "note": "Rotating while drilling",
+                    "rule_name": "Drilling ahead",
+                    "hole_section_id": codes["hole_section"]["id"],
+                    "phase_id": codes["phase"]["id"],
+                    "sub_phase_id": codes["sub_phase"]["id"],
+                    "activity_id": codes["activity"]["id"],
+                    "operation_id": codes["operation"]["id"],
+                    "responsible_agency_id": codes["agency"]["id"],
+                    "note": "Everything the printed section code implies",
                 },
             )
         )
-        assert link["criteria_count"] == 3
-        assert "Operation: DRL" in link["summary_label"]
-        assert link["phase_label"] == "PH1 — Drilling"
+        assert link["criteria_count"] == 6
+        assert link["hole_section_label"].startswith("H12")
+        assert link["sub_phase_label"].startswith("DRL-1")
+        assert link["responsible_agency_label"] == "RIG — Rig contractor"
+        assert "Hole section: H12" in link["summary_label"]
+        assert "Operations: PUMP" in link["summary_label"]
 
         # The same criteria twice is a conflict; deletion then re-creation is not.
-        # The signature is the exact criteria set: the same two codes with a
-        # *narrower* set is a different rule (and is what the duplicate above would
-        # be if the phase were dropped). Repeating the identical set is the conflict.
         different = good(
             client.post(
                 OPS + "/code-links",
                 headers=headers,
-                json={"operation_code_id": codes["operation"]["id"], "activity_code_id": codes["activity"]["id"]},
+                json={"hole_section_id": codes["hole_section"]["id"], "phase_id": codes["phase"]["id"]},
             )
         )
         duplicate = client.post(
             OPS + "/code-links",
             headers=headers,
-            json={"operation_code_id": codes["operation"]["id"], "activity_code_id": codes["activity"]["id"]},
+            json={"hole_section_id": codes["hole_section"]["id"], "phase_id": codes["phase"]["id"]},
         )
         assert duplicate.status_code == 409
         good(client.post(OPS + "/code-links/bulk-delete", headers=headers, json={"ids": [different["id"]]}))
@@ -618,16 +715,16 @@ def test_multi_criteria_code_links_require_two_criteria_and_guard_code_deletion(
 
         # A code inside a link cannot leave the library until the link is gone.
         blocked = client.post(
-            OPS + "/masters/operation-codes/bulk-delete", headers=headers, json={"ids": [codes["operation"]["id"]]}
+            OPS + "/masters/operations/bulk-delete", headers=headers, json={"ids": [codes["operation"]["id"]]}
         )
-        assert blocked.status_code == 409 and "code link 'Drilling + rotating'" in blocked.json()["detail"]
+        assert blocked.status_code == 409 and "code link 'Drilling ahead'" in blocked.json()["detail"]
         good(client.post(OPS + "/code-links/bulk-delete", headers=headers, json={"ids": [link["id"]]}))
-        good(client.post(OPS + "/masters/operation-codes/bulk-delete", headers=headers, json={"ids": [codes["operation"]["id"]]}))
+        good(client.post(OPS + "/masters/operations/bulk-delete", headers=headers, json={"ids": [codes["operation"]["id"]]}))
 
         # A deleted link whose code is itself deleted cannot be restored blind.
         refused = client.post(OPS + "/code-links/bulk-restore", headers=headers, json={"ids": [link["id"]]})
         assert refused.status_code == 409 and "Restore the code first" in refused.json()["detail"]
-        good(client.post(OPS + "/masters/operation-codes/bulk-restore", headers=headers, json={"ids": [codes["operation"]["id"]]}))
+        good(client.post(OPS + "/masters/operations/bulk-restore", headers=headers, json={"ids": [codes["operation"]["id"]]}))
         restored = good(client.post(OPS + "/code-links/bulk-restore", headers=headers, json={"ids": [link["id"]]}))
         assert restored["affected_count"] == 1
 
@@ -650,7 +747,7 @@ def test_batch_code_links_are_atomic_across_duplicates_and_bad_rows():
         headers = login(client)
         codes = _codes(client, headers)
         url = OPS + "/code-links/batch"
-        base = {"operation_code_id": codes["operation"]["id"]}
+        base = {"hole_section_id": codes["hole_section"]["id"]}
 
         # A duplicate inside the batch rolls the whole batch back.
         refused = client.post(
@@ -658,8 +755,8 @@ def test_batch_code_links_are_atomic_across_duplicates_and_bad_rows():
             headers=headers,
             json={
                 "items": [
-                    {**base, "activity_code_id": codes["activity"]["id"]},
-                    {**base, "activity_code_id": codes["activity"]["id"]},
+                    {**base, "phase_id": codes["phase"]["id"]},
+                    {**base, "phase_id": codes["phase"]["id"]},
                 ]
             },
         )
@@ -672,7 +769,7 @@ def test_batch_code_links_are_atomic_across_duplicates_and_bad_rows():
             headers=headers,
             json={
                 "items": [
-                    {**base, "activity_code_id": codes["activity"]["id"]},
+                    {**base, "phase_id": codes["phase"]["id"]},
                     {"rule_name": "only one criterion", **base},
                 ]
             },
@@ -688,14 +785,15 @@ def test_batch_code_links_are_atomic_across_duplicates_and_bad_rows():
                     "items": [
                         {
                             "rule_name": "Drilling",
-                            "operation_code_id": codes["operation"]["id"],
-                            "activity_code_id": codes["activity"]["id"],
+                            "hole_section_id": codes["hole_section"]["id"],
+                            "phase_id": codes["phase"]["id"],
+                            "activity_id": codes["activity"]["id"],
                         },
                         {
-                            "rule_name": "NPT",
-                            "npt_code_id": codes["npt"]["id"],
+                            "rule_name": "Downtime",
+                            "activity_id": codes["npt_activity"]["id"],
+                            "operation_id": codes["operation"]["id"],
                             "cause_id": codes["cause"]["id"],
-                            "default_classification": "NPT",
                             "default_allocation": "NPT",
                         },
                     ]
@@ -712,6 +810,12 @@ def test_correlations_accept_companion_criteria_and_free_text_agency_tokens():
         codes = _codes(client, headers)
 
         # Agency names are operator data: a printed token need not be in the catalogue.
+        # The ``agency`` kind fills the Master Data vendor, so create one first.
+        with SessionLocal() as db:
+            org = db.scalar(select(Organization.id).where(Organization.slug == "north"))
+            db.add(Vendor(organization_id=org, vendor_name="Halliburton", vendor_code="HAL", status="active"))
+            db.commit()
+        vendor = good(client.get(OPS + "/reference", headers=headers))["vendors"][0]
         agency = good(
             client.post(
                 OPS + "/correlations",
@@ -719,59 +823,79 @@ def test_correlations_accept_companion_criteria_and_free_text_agency_tokens():
                 json={
                     "kind": "agency",
                     "source_code": "Halliburton",
-                    "target_id": codes["agency"]["id"],
+                    "target_id": vendor["id"],
                     "note": "Printed operator spelling",
                 },
             )
         )
         assert agency["source_family"] == "Source agency"
         assert agency["source_code"] == "HALLIBURTON"
+        assert agency["target_vendor_id"] == vendor["id"]
 
-        # Companion criteria pin the same token to a second workspace code.
+        # A responsible-party rule correlates a printed token to the Code Library
+        # label, while agency rules fill the Master Data vendor.
+        label = good(
+            client.post(
+                OPS + "/correlations",
+                headers=headers,
+                json={
+                    "kind": "responsible-party",
+                    "source_code": "Rig Contractor",
+                    "target_id": codes["agency"]["id"],
+                },
+            )
+        )
+        assert label["target_responsible_agency_id"] == codes["agency"]["id"]
+
+        # Companion criteria reach across Master Data and the Code Library, so one
+        # printed trouble code pre-fills the whole field set of the block.
         companion = good(
             client.post(
                 OPS + "/correlations",
                 headers=headers,
                 json={
-                    "kind": "npt",
+                    "kind": "operation",
                     "source_family": "Trouble / NPT",
                     "source_code": "TP02",
-                    "target_id": codes["npt"]["id"],
+                    "target_id": codes["operation"]["id"],
+                    "target_hole_section_id": codes["hole_section"]["id"],
+                    "target_phase_id": codes["phase"]["id"],
+                    "target_sub_phase_id": codes["sub_phase"]["id"],
+                    "target_activity_id": codes["npt_activity"]["id"],
                     "target_cause_id": codes["cause"]["id"],
-                    "target_agency_id": codes["agency"]["id"],
-                    "target_classification": "NPT",
+                    "target_responsible_agency_id": codes["agency"]["id"],
                     "target_allocation": "NPT",
                 },
             )
         )
-        assert companion["target_npt_code_id"] == codes["npt"]["id"]
+        assert companion["target_operation_id"] == codes["operation"]["id"]
         assert companion["target_cause_id"] == codes["cause"]["id"]
-        assert "Cause" in companion["extra_criteria_summary"]
+        for piece in ("Hole section", "Phase", "Sub-phase", "Activity", "Cause", "Responsible agency label"):
+            assert piece in companion["extra_criteria_summary"]
 
-        # The classification matrix applies to correlations as well.
+        # A cause can never be pinned to a Planned Activity: the matrix refuses it.
         bad = client.post(
             OPS + "/correlations",
             headers=headers,
             json={
                 "kind": "operation",
-                "source_family": "OpenWells operation code",
-                "source_code": "01-A",
+                "source_family": "Trouble / NPT",
+                "source_code": "TP03",
                 "target_id": codes["operation"]["id"],
-                "target_classification": "NPT",
-                "target_allocation": "PT",
+                "target_activity_id": codes["activity"]["id"],
+                "target_cause_id": codes["cause"]["id"],
             },
         )
-        assert bad.status_code == 422 and "NPT classification" in bad.json()["detail"]
+        assert bad.status_code == 422 and "Planned" in bad.json()["detail"]
 
         # A correlated code cannot be soft-deleted; the refusal names the rule.
         blocked = client.post(
             OPS + "/masters/agencies/bulk-delete", headers=headers, json={"ids": [codes["agency"]["id"]]}
         )
-        assert blocked.status_code == 409 and "HALLIBURTON" in blocked.json()["detail"]
+        assert blocked.status_code == 409 and "RIG" in blocked.json()["detail"]
 
         # Purge is refused while even a deleted correlation still names the code.
         good(client.post(OPS + "/correlations/bulk-delete", headers=headers, json={"ids": [agency["id"]]}))
-        # The companion row still names the agency: correlation rules are blocked too.
         for rule in good(client.get(OPS + "/correlations", headers=headers)):
             good(client.post(OPS + "/correlations/bulk-delete", headers=headers, json={"ids": [rule["id"]]}))
         good(client.post(OPS + "/masters/agencies/bulk-delete", headers=headers, json={"ids": [codes["agency"]["id"]]}))
@@ -779,15 +903,6 @@ def test_correlations_accept_companion_criteria_and_free_text_agency_tokens():
             OPS + "/masters/agencies/bulk-permanent-delete", headers=headers, json={"ids": [codes["agency"]["id"]]}
         )
         assert purge.status_code == 409 and "deleted correlation" in purge.json()["detail"]
-
-        # Removing the rule, then purging, is allowed and audited.
-        good(client.post(OPS + "/correlations/bulk-permanent-delete", headers=headers, json={"ids": [agency["id"]]}))
-        good(client.post(OPS + "/correlations/bulk-delete", headers=headers, json={"ids": [companion["id"]]}))
-        good(client.post(OPS + "/correlations/bulk-permanent-delete", headers=headers, json={"ids": [companion["id"]]}))
-        purged = good(
-            client.post(OPS + "/masters/agencies/bulk-permanent-delete", headers=headers, json={"ids": [codes["agency"]["id"]]})
-        )
-        assert purged["affected_count"] == 1
 
 
 def test_batch_correlations_are_atomic_and_reference_counts_are_live():
@@ -803,14 +918,14 @@ def test_batch_correlations_are_atomic_and_reference_counts_are_live():
                 "items": [
                     {
                         "kind": "operation",
-                        "source_family": "OpenWells operation code",
-                        "source_code": "19-D",
+                        "source_family": "Trouble / NPT",
+                        "source_code": "TP02",
                         "target_id": codes["operation"]["id"],
                     },
                     {
                         "kind": "operation",
-                        "source_family": "OpenWells operation code",
-                        "source_code": "19-D",
+                        "source_family": "Trouble / NPT",
+                        "source_code": "TP02",
                         "target_id": codes["operation"]["id"],
                     },
                 ]
@@ -827,15 +942,15 @@ def test_batch_correlations_are_atomic_and_reference_counts_are_live():
                     "items": [
                         {
                             "kind": "operation",
-                            "source_family": "OpenWells operation code",
-                            "source_code": "19-D",
+                            "source_family": "Trouble / NPT",
+                            "source_code": "TP02",
                             "target_id": codes["operation"]["id"],
                         },
                         {
-                            "kind": "activity",
-                            "source_family": "Activity",
-                            "source_code": "06",
-                            "target_id": codes["activity"]["id"],
+                            "kind": "sub-phase",
+                            "source_family": "OpenWells phase",
+                            "source_code": "DRLSUR",
+                            "target_id": codes["sub_phase"]["id"],
                         },
                     ]
                 },
@@ -846,7 +961,7 @@ def test_batch_correlations_are_atomic_and_reference_counts_are_live():
         # The reference payload counts live rules per code, so the library can link to them.
         reference = good(client.get(OPS + "/correlations/reference", headers=headers))
         counted = {row["code"]: row["correlation_count"] for row in reference["library"]["operation"]}
-        assert counted["DRL"] == 1
+        assert counted["PUMP"] == 1
 
 
 def test_completion_reports_never_report_a_rate_of_penetration():
@@ -881,8 +996,10 @@ def test_completion_reports_never_report_a_rate_of_penetration():
                 "allocation": "PT",
                 "is_productive": True,
                 "narrative": "Run completion string.",
-                "operation_code_id": codes["operation"]["id"],
-                "activity_code_id": codes["activity"]["id"],
+                "hole_section_id": codes["hole_section"]["id"],
+                "phase_id": codes["phase"]["id"],
+                "sub_phase_id": codes["sub_phase"]["id"],
+                "activity_id": codes["activity"]["id"],
                 "footage_m": "120.000",
                 "rotating_hours": "6.000",
                 "depth_from_m": "2000.000",
@@ -977,8 +1094,10 @@ def test_completion_scope_is_recognised_from_the_summary_and_never_carries_a_rat
                             "allocation": "PT",
                             "is_productive": True,
                             "narrative": "Run completion string.",
-                            "operation_code_id": codes["operation"]["id"],
-                            "activity_code_id": codes["activity"]["id"],
+                            "hole_section_id": codes["hole_section"]["id"],
+                            "phase_id": codes["phase"]["id"],
+                            "sub_phase_id": codes["sub_phase"]["id"],
+                            "activity_id": codes["activity"]["id"],
                             "footage_m": "120.000",
                             "rotating_hours": "6.000",
                         }

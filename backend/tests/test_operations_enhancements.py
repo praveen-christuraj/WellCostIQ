@@ -201,27 +201,31 @@ def test_reopen_submitted_and_approved_reports_30day_guard_and_summary(fresh_dat
     with TestClient(app) as client:
         headers = login(client)
         target = configured_well(client, headers, "OML-WELL-07")
-        npt_code = good(
-            client.post(
-                OPS + "/masters/npt-codes",
-                headers=headers,
-                json={"npt_code": "RIG-EQ", "npt_name": "Rig Equipment Failure"},
-            )
-        )
-        npt_code_id = npt_code["id"]
-        # Every block now needs the codes its classification makes mandatory.
+        # Every block now needs the criteria its Activity type makes mandatory:
+        # Hole Section, Phase, Activity and Allocation from Master Data.
         operation = good(
             client.post(
-                OPS + "/masters/operation-codes",
+                OPS + "/masters/operations",
                 headers=headers,
-                json={"operation_code": "DRL", "operation_name": "Drilling"},
+                json={"operation_code": "RIG-EQ", "operation_name": "Rig equipment failure"},
             )
         )
+        section = good(
+            client.post("/api/v1/master-data/hole-sections", headers=headers, json={"code": "H12", "name": '12-1/4" hole'})
+        )
+        phase = good(
+            client.post("/api/v1/master-data/phases", headers=headers, json={"code": "DRL", "name": "Drilling"})
+        )
         activity = good(
+            client.post("/api/v1/master-data/activities", headers=headers, json={"code": "ROT", "name": "Rotating"})
+        )
+        # The Activity carries its own type; picking the NPT activity is what makes
+        # a block non-productive time.
+        downtime = good(
             client.post(
-                OPS + "/masters/activity-codes",
+                "/api/v1/master-data/activities",
                 headers=headers,
-                json={"activity_code": "ROT", "activity_name": "Rotating"},
+                json={"code": "DWN", "name": "Rig repair", "activity_type": "NPT"},
             )
         )
         cause = good(
@@ -232,8 +236,10 @@ def test_reopen_submitted_and_approved_reports_30day_guard_and_summary(fresh_dat
             )
         )
         code_ids = {
-            "operation_code_id": operation["id"],
-            "activity_code_id": activity["id"],
+            "hole_section_id": section["id"],
+            "phase_id": phase["id"],
+            "activity_id": activity["id"],
+            "operation_id": operation["id"],
             "cause_code": cause["cause_code"],
         }
         recent_day = (wat_today() - timedelta(days=5)).isoformat()
@@ -307,7 +313,7 @@ def test_reopen_submitted_and_approved_reports_30day_guard_and_summary(fresh_dat
                             "classification": "NPT",
                             "allocation": "NPT",
                             "is_productive": False,
-                            "npt_code_id": npt_code_id,
+                            "operation_id": operation["id"],
                             "depth_from_m": "1450.500",
                             "depth_to_m": "1450.500",
                             "tvd_from_m": "1410.250",
@@ -317,7 +323,7 @@ def test_reopen_submitted_and_approved_reports_30day_guard_and_summary(fresh_dat
                             "reason": "Top drive washpipe packing leak",
                             "narrative": "Replace top drive washpipe packing and pressure test.",
                             "review_state": "edited",
-                            **code_ids,
+                            **{**code_ids, "activity_id": downtime["id"]},
                         },
                     ],
                     "surveys": [
@@ -564,21 +570,25 @@ def test_offline_ai_qwen3_1_7b_narratives_prefill_review_and_guides(fresh_databa
         next_day = (wat_today() + timedelta(days=1)).isoformat()
         operation = good(
             client.post(
-                OPS + "/masters/operation-codes",
+                OPS + "/masters/operations",
                 headers=headers,
                 json={"operation_code": "DRL", "operation_name": "Drilling"},
             )
         )
+        section = good(
+            client.post("/api/v1/master-data/hole-sections", headers=headers, json={"code": "H85", "name": '8-1/2" hole'})
+        )
+        phase = good(
+            client.post("/api/v1/master-data/phases", headers=headers, json={"code": "DRL", "name": "Drilling"})
+        )
         activity = good(
-            client.post(
-                OPS + "/masters/activity-codes",
-                headers=headers,
-                json={"activity_code": "DRL", "activity_name": "Drill ahead"},
-            )
+            client.post("/api/v1/master-data/activities", headers=headers, json={"code": "DRL", "name": "Drill ahead"})
         )
         typed_code_ids = {
-            "operation_code_id": operation["id"],
-            "activity_code_id": activity["id"],
+            "hole_section_id": section["id"],
+            "phase_id": phase["id"],
+            "activity_id": activity["id"],
+            "operation_id": operation["id"],
         }
 
         r = good(
@@ -708,8 +718,9 @@ def test_offline_ai_qwen3_1_7b_narratives_prefill_review_and_guides(fresh_databa
                             "phase_raw": b0["phase_raw"],
                             "narrative": b0["narrative"],
                             "review_state": "accepted",
-                            "operation_code_id": b0.get("operation_code_id") or typed_code_ids["operation_code_id"],
-                            "activity_code_id": b0.get("activity_code_id") or typed_code_ids["activity_code_id"],
+                            "hole_section_id": b0.get("hole_section_id") or typed_code_ids["hole_section_id"],
+                            "phase_id": b0.get("phase_id") or typed_code_ids["phase_id"],
+                            "activity_id": b0.get("activity_id") or typed_code_ids["activity_id"],
                         }
                     ],
                 },

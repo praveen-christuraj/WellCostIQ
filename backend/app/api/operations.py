@@ -28,7 +28,6 @@ from app.services import ollama
 from app.models.vendor_master import Vendor
 from app.schemas.operations import (
     CORRELATION_KINDS,
-    OpsActivityCodeIn,
     OpsAgencyIn,
     OpsAiPrefillOut,
     OpsAiReviewOut,
@@ -62,9 +61,8 @@ from app.schemas.operations import (
     OpsMarkRuleIn,
     OpsNarrativeOut,
     OpsNarrativeRequest,
-    OpsNptCodeIn,
-    OpsOperationCodeIn,
-    OpsPhaseCodeIn,
+    OpsOperationIn,
+    OpsSubPhaseIn,
     OpsPlanItemIn,
     OpsPlanStudyRequest,
     OpsPlanUpdateIn,
@@ -127,7 +125,7 @@ def register_records(
     if resource == 'plans':
         return [_plan_out(row) for row in rows]
     if resource == 'reports':
-        return [_to_report_out(row) for row in rows]
+        return [_to_report_out(row, db) for row in rows]
     return rows
 
 
@@ -366,8 +364,133 @@ def _block_source_codes(block):
     }
 
 
-def _to_report_out(report):
+def _label_maps(db, organization_id: str) -> dict[str, dict[str, str]]:
+    """id -> "code — name" for every criterion a block prints.
+
+    One query per register per request keeps the register payload readable
+    without N+1 lookups, and every page shows the same label text. The cache
+    lives on the session (one session per request), so a rename in Master Data
+    or the Code Library is visible on the very next response.
+    """
+    from app.models.master_data import Activity, HoleSection, Phase
+    from app.models.operations import OpsAgency, OpsCause, OpsOperation, OpsSubPhase
+
+    cache = db.info.setdefault("ops_label_maps", {})
+    if organization_id in cache:
+        return cache[organization_id]
+
+    def load(model, code_field: str, name_field: str) -> dict[str, str]:
+        rows = db.scalars(select(model).where(model.organization_id == organization_id)).all()
+        return {row.id: f"{getattr(row, code_field)} — {getattr(row, name_field)}" for row in rows}
+
+    maps = {
+        "hole_section": load(HoleSection, "section_code", "section_name"),
+        "phase": load(Phase, "phase_code", "phase_name"),
+        "sub_phase": load(OpsSubPhase, "sub_phase_code", "sub_phase_name"),
+        "activity": load(Activity, "activity_code", "activity_name"),
+        "operation": load(OpsOperation, "operation_code", "operation_name"),
+        "cause": {row.id: f"{row.cause_code} — {row.cause_name}" for row in db.scalars(
+            select(OpsCause).where(OpsCause.organization_id == organization_id)
+        )},
+        "agency": {row.id: row.agency_name for row in db.scalars(
+            select(OpsAgency).where(OpsAgency.organization_id == organization_id)
+        )},
+        "activity_type": {row.id: row.activity_type for row in db.scalars(
+            select(Activity).where(Activity.organization_id == organization_id)
+        )},
+    }
+    cache[organization_id] = maps
+    return maps
+
+
+def _block_out(b, db=None, organization_id: str | None = None) -> dict:
+    labels = _label_maps(db, organization_id) if db is not None and organization_id else None
+
+    def lookup(kind: str, ident: str | None) -> str:
+        return (labels or {}).get(kind, {}).get(ident or "", "") if ident else ""
+
+    cause_label = ""
+    if b.cause_code and labels:
+        for label in labels["cause"].values():
+            if label.split(" — ")[0].strip().upper() == (b.cause_code or "").strip().upper():
+                cause_label = label
+                break
+    return {
+        "id": b.id,
+        "organization_id": b.organization_id,
+        "report_id": b.report_id,
+        "sequence_no": b.sequence_no,
+        "started_at": b.started_at,
+        "ended_at": b.ended_at,
+        "duration_minutes": b.duration_minutes,
+        "phase_raw": b.phase_raw or "",
+        **_block_source_codes(b),
+        # Criteria in review order.
+        "hole_section_id": b.hole_section_id,
+        "phase_id": b.phase_id,
+        "sub_phase_id": b.sub_phase_id,
+        "activity_id": b.activity_id,
+        "classification": b.classification,
+        "allocation": b.allocation,
+        "is_productive": b.is_productive,
+        "cause_code": b.cause_code or "",
+        "operation_id": b.operation_id,
+        "operation_snapshot": b.operation_snapshot or "",
+        "responsible_agency_id": b.responsible_agency_id,
+        "responsible_party": b.responsible_party or "",
+        "vendor_id": b.vendor_id,
+        # Resolved labels so a page never guesses how a code is displayed.
+        "hole_section_label": lookup("hole_section", b.hole_section_id),
+        "phase_label": lookup("phase", b.phase_id),
+        "sub_phase_label": lookup("sub_phase", b.sub_phase_id),
+        "activity_label": lookup("activity", b.activity_id),
+        "activity_type": lookup("activity_type", b.activity_id),
+        "operation_code": (b.operation_snapshot or lookup("operation", b.operation_id).split(" — ")[0].strip() or None),
+        "operation_name": lookup("operation", b.operation_id).split(" — ", 1)[-1] if b.operation_id else None,
+        "cause_label": cause_label,
+        "responsible_agency_label": lookup("agency", b.responsible_agency_id),
+        "classification_evidence": b.classification_evidence or "",
+        "classification_source": b.classification_source or "keyword",
+        "depth_from_m": b.depth_from_m,
+        "depth_to_m": b.depth_to_m,
+        "tvd_from_m": getattr(b, "tvd_from_m", None),
+        "tvd_to_m": getattr(b, "tvd_to_m", None),
+        "depth_unit": b.depth_unit or "m",
+        "footage_m": b.footage_m,
+        "bit_depth_m": b.bit_depth_m,
+        "mud_weight_ppg": getattr(b, "mud_weight_ppg", None),
+        "rotating_hours": b.rotating_hours,
+        "rop_m_per_hr": b.rop_m_per_hr,
+        "rop_basis": b.rop_basis or "rotating",
+        "reason": b.reason or "",
+        "narrative": b.narrative or "",
+        "source_page": b.source_page or 0,
+        "source_bbox": b.source_bbox or "",
+        "confidence": b.confidence,
+        "review_state": b.review_state or "suggested",
+        # The generated comparison is part of the block the user reviews.
+        "timeline_comparison": getattr(b, "timeline_comparison", "on") or "on",
+        "timeline_review_state": getattr(b, "timeline_review_state", "suggested") or "suggested",
+        "timeline_note": getattr(b, "timeline_note", "") or "",
+        "timeline_variance_days": getattr(b, "timeline_variance_days", None),
+        "timeline_planned_days": getattr(b, "timeline_planned_days", None),
+        "timeline_actual_days": getattr(b, "timeline_actual_days", None),
+        "timeline_basis": getattr(b, "timeline_basis", "") or "",
+        "timeline_reviewed_by": getattr(b, "timeline_reviewed_by", "") or "",
+        "timeline_reviewed_at": getattr(b, "timeline_reviewed_at", None),
+        "reviewer_user_id": b.reviewer_user_id,
+        "reviewed_at": b.reviewed_at,
+        "is_deleted": b.is_deleted,
+        "created_at": b.created_at,
+        "updated_at": b.updated_at,
+    }
+
+
+def _to_report_out(report, db=None):
     blocks = getattr(report, "_blocks", []) or []
+    # A register list passes no session: labels are then blank rather than a
+    # per-row query, and the detail view (which has the session) fills them.
+    organization_id = getattr(report, "organization_id", None)
     unacc = getattr(report, "_unaccounted_minutes", 0) or 0
     total = getattr(report, "_total_block_minutes", 0) or sum(getattr(b, "duration_minutes", 0) for b in blocks)
     return {
@@ -457,68 +580,7 @@ def _to_report_out(report):
         "updated_at": report.updated_at,
         "created_by": report.created_by or "",
         "updated_by": report.updated_by or "",
-        "blocks": [
-            {
-                "id": b.id,
-                "organization_id": b.organization_id,
-                "report_id": b.report_id,
-                "sequence_no": b.sequence_no,
-                "started_at": b.started_at,
-                "ended_at": b.ended_at,
-                "duration_minutes": b.duration_minutes,
-                "phase_raw": b.phase_raw or "",
-                **_block_source_codes(b),
-                "operation_code_id": b.operation_code_id,
-                "activity_code_id": b.activity_code_id,
-                "activity_id": b.activity_id,
-                "classification": b.classification,
-                "allocation": b.allocation,
-                "is_productive": b.is_productive,
-                "classification_evidence": b.classification_evidence,
-                "classification_source": b.classification_source or "keyword",
-                "npt_code_id": b.npt_code_id,
-                "npt_code_snapshot": b.npt_code_snapshot or "",
-                "agency_id": b.agency_id,
-                "cause_code": b.cause_code or "",
-                "hole_section_id": b.hole_section_id,
-                "phase_id": b.phase_id,
-                "depth_from_m": b.depth_from_m,
-                "depth_to_m": b.depth_to_m,
-                "tvd_from_m": getattr(b, "tvd_from_m", None),
-                "tvd_to_m": getattr(b, "tvd_to_m", None),
-                "depth_unit": b.depth_unit or "m",
-                "footage_m": b.footage_m,
-                "bit_depth_m": b.bit_depth_m,
-                "mud_weight_ppg": getattr(b, "mud_weight_ppg", None),
-                "rotating_hours": b.rotating_hours,
-                "rop_m_per_hr": b.rop_m_per_hr,
-                "rop_basis": b.rop_basis or "rotating",
-                "responsible_party": b.responsible_party or "",
-                "vendor_id": b.vendor_id,
-                "reason": b.reason or "",
-                "narrative": b.narrative or "",
-                "source_page": b.source_page or 0,
-                "source_bbox": b.source_bbox or "",
-                "confidence": b.confidence,
-                "review_state": b.review_state or "suggested",
-                # The generated comparison is part of the block the user reviews.
-                "timeline_comparison": getattr(b, "timeline_comparison", "on") or "on",
-                "timeline_review_state": getattr(b, "timeline_review_state", "suggested") or "suggested",
-                "timeline_note": getattr(b, "timeline_note", "") or "",
-                "timeline_variance_days": getattr(b, "timeline_variance_days", None),
-                "timeline_planned_days": getattr(b, "timeline_planned_days", None),
-                "timeline_actual_days": getattr(b, "timeline_actual_days", None),
-                "timeline_basis": getattr(b, "timeline_basis", "") or "",
-                "timeline_reviewed_by": getattr(b, "timeline_reviewed_by", "") or "",
-                "timeline_reviewed_at": getattr(b, "timeline_reviewed_at", None),
-                "reviewer_user_id": b.reviewer_user_id,
-                "reviewed_at": b.reviewed_at,
-                "is_deleted": b.is_deleted,
-                "created_at": b.created_at,
-                "updated_at": b.updated_at,
-            }
-            for b in blocks
-        ],
+        "blocks": [_block_out(b, db, organization_id) for b in blocks],
         "unaccounted_minutes": unacc,
         "total_block_minutes": total,
     }
@@ -547,7 +609,7 @@ def list_reports(
         date_from=date_from,
         date_to=date_to,
     )
-    return [_to_report_out(r) for r in rows]
+    return [_to_report_out(r, db) for r in rows]
 
 
 @router.get(
@@ -556,7 +618,7 @@ def list_reports(
 def list_deleted_reports(db: Db, user: Current):
     rows = reports_svc.list_reports(db, user.organization_id, include_deleted=True)
     deleted = [r for r in rows if r.is_deleted]
-    return [_to_report_out(r) for r in deleted]
+    return [_to_report_out(r, db) for r in deleted]
 
 
 @router.post(
@@ -573,7 +635,7 @@ def report_from_document(data: OpsExtractIn, request: Request, db: Db, user: Cur
     report = extract_svc.extract(
         db, user.organization_id, data.document_id, data.report_date, user, request, use_ai=data.use_ai
     )
-    return _to_report_out(reports_svc.get_report(db, user.organization_id, report.id))
+    return _to_report_out(reports_svc.get_report(db, user.organization_id, report.id), db)
 
 
 @router.post(
@@ -597,7 +659,7 @@ def add_report_source(report_id: str, data: OpsExtractIn, request: Request, db: 
         target_id=report_id,
         use_ai=data.use_ai,
     )
-    return _to_report_out(reports_svc.get_report(db, user.organization_id, report.id))
+    return _to_report_out(reports_svc.get_report(db, user.organization_id, report.id), db)
 
 
 @router.post(
@@ -640,7 +702,7 @@ def bulk_edit(data: OpsBulkEdit, request: Request, db: Db, user: Current):
 @router.get("/reports/{report_id}", response_model=OpsReportOut, dependencies=[Depends(require("ops-report:read"))])
 def get_report(report_id: str, db: Db, user: Current, include_deleted: bool = False):
     r = reports_svc.get_report(db, user.organization_id, report_id, include_deleted=include_deleted)
-    return _to_report_out(r)
+    return _to_report_out(r, db)
 
 
 @router.post("/reports", response_model=OpsReportOut, dependencies=[Depends(require("ops-report:create"))])
@@ -648,7 +710,7 @@ def create_report(data: OpsReportCreate, request: Request, db: Db, user: Current
     r = reports_svc.create_report(db, user.organization_id, data, user, request)
     # Return enriched
     full = reports_svc.get_report(db, user.organization_id, r.id)
-    return _to_report_out(full)
+    return _to_report_out(full, db)
 
 
 @router.put(
@@ -664,7 +726,7 @@ def save_report(report_id: str, data: OpsReportSaveIn, request: Request, db: Db,
         request,
         may_review=owner(user) or "ops-report:review" in granted(user),
     )
-    return _to_report_out(r)
+    return _to_report_out(r, db)
 
 
 @router.post(
@@ -673,7 +735,7 @@ def save_report(report_id: str, data: OpsReportSaveIn, request: Request, db: Db,
 def submit_report(report_id: str, request: Request, db: Db, user: Current):
     r = reports_svc.submit_report(db, user.organization_id, report_id, user, request)
     full = reports_svc.get_report(db, user.organization_id, r.id)
-    return _to_report_out(full)
+    return _to_report_out(full, db)
 
 
 @router.post(
@@ -684,7 +746,7 @@ def submit_report(report_id: str, request: Request, db: Db, user: Current):
 def approve_report(report_id: str, request: Request, db: Db, user: Current):
     r = reports_svc.approve_report(db, user.organization_id, report_id, user, request)
     full = reports_svc.get_report(db, user.organization_id, r.id)
-    return _to_report_out(full)
+    return _to_report_out(full, db)
 
 
 @router.post(
@@ -695,7 +757,7 @@ def approve_report(report_id: str, request: Request, db: Db, user: Current):
 def reject_report(report_id: str, data: OpsRejectIn, request: Request, db: Db, user: Current):
     r = reports_svc.reject_report(db, user.organization_id, report_id, data.reason, user, request)
     full = reports_svc.get_report(db, user.organization_id, r.id)
-    return _to_report_out(full)
+    return _to_report_out(full, db)
 
 
 @router.post(
@@ -715,7 +777,7 @@ def reopen_report(report_id: str, data: OpsReopenIn, request: Request, db: Db, u
         can_amend=can_amend,
     )
     full = reports_svc.get_report(db, user.organization_id, r.id)
-    return _to_report_out(full)
+    return _to_report_out(full, db)
 
 
 @router.post(
@@ -750,7 +812,7 @@ def ai_prefill_report(report_id: str, request: Request, db: Db, user: Current):
         from_extract=False,
     )
     report_obj = reports_svc.get_report(db, user.organization_id, report_id)
-    result["report"] = _to_report_out(report_obj)
+    result["report"] = _to_report_out(report_obj, db)
     return result
 
 
@@ -912,53 +974,62 @@ def scope_reference(db: Db, user: Current):
 
 @router.get("/reference", response_model=OpsReferenceOut, dependencies=[Depends(require("ops-report:read"))])
 def reference(db: Db, user: Current):
-    from app.models.operations import (
-        OpsActivityCode,
-        OpsAgency,
-        OpsCause,
-        OpsNptCode,
-        OpsOperationCode,
-        OpsPhaseCode,
-    )
+    """Every daily-report dropdown in one payload.
+
+    Hole Sections, Phases and Activities come from Master Data; sub-phases,
+    Operations, causes and responsible agency labels come from the Code Library;
+    vendors come from the vendor register. Nothing here touches a costing table.
+    """
+    from app.models.master_data import Activity, HoleSection, Phase
+    from app.models.operations import OpsAgency, OpsCause, OpsOperation, OpsSubPhase
+
+    org = user.organization_id
 
     def active(model):
         return db.scalars(
             select(model)
-            .where(
-                model.organization_id == user.organization_id,
-                model.is_active.is_(True),
-                model.is_deleted.is_(False),
-            )
+            .where(model.organization_id == org, model.is_active.is_(True), model.is_deleted.is_(False))
             .order_by(model.sort_order)
         ).all()
 
+    def master(model, code_field: str, name_field: str):
+        rows = db.scalars(
+            select(model)
+            .where(model.organization_id == org, model.is_deleted.is_(False))
+            .order_by(getattr(model, code_field))
+        ).all()
+        return [
+            {
+                "id": row.id,
+                "code": getattr(row, code_field),
+                "name": getattr(row, name_field),
+                "label": f"{getattr(row, code_field)} — {getattr(row, name_field)}",
+                **({"activity_type": row.activity_type} if hasattr(row, "activity_type") else {}),
+            }
+            for row in rows
+        ]
+
     return {
-        **scope_svc.reference(db, user.organization_id),
+        **scope_svc.reference(db, org),
         "vendors": [
             {"id": v.id, "vendor_code": v.vendor_code, "vendor_name": v.vendor_name}
             for v in db.scalars(
                 select(Vendor)
-                .where(
-                    Vendor.organization_id == user.organization_id,
-                    Vendor.is_deleted.is_(False),
-                    Vendor.status == "active",
-                )
+                .where(Vendor.organization_id == org, Vendor.is_deleted.is_(False), Vendor.status == "active")
                 .order_by(Vendor.vendor_name)
             )
         ],
-        "phase_codes": [
-            {"id": c.id, "phase_code": c.phase_code, "phase_name": c.phase_name} for c in active(OpsPhaseCode)
-        ],
-        "activity_codes": active(OpsActivityCode),
-        "operation_codes": active(OpsOperationCode),
-        "npt_codes": active(OpsNptCode),
+        "hole_sections": master(HoleSection, "section_code", "section_name"),
+        "phases": master(Phase, "phase_code", "phase_name"),
+        "activities": master(Activity, "activity_code", "activity_name"),
+        "sub_phases": active(OpsSubPhase),
+        "operations": active(OpsOperation),
         "causes": active(OpsCause),
-        # The block editor and the bulk dialog both need the same code lists and active links;
-        # sending them here keeps one payload instead of separate round trips.
+        # The responsible agency label list configured in the Code Library.
         "agencies": active(OpsAgency),
-        "code_links": correlation_svc.list_code_links(db, user.organization_id, active_only=True),
+        "code_links": correlation_svc.list_code_links(db, org, active_only=True),
         "classification_rules": {
-            classification: list(fields) for classification, fields in MANDATORY_FIELDS.items()
+            activity_type: list(fields) for activity_type, fields in MANDATORY_FIELDS.items()
         },
     }
 
@@ -976,7 +1047,7 @@ def reference(db: Db, user: Current):
 def list_correlations(
     db: Db,
     user: Current,
-    kind: Literal["operation", "activity", "npt", "cause", "phase", "agency"] | None = None,
+    kind: str | None = None,
     deleted: bool = False,
 ):
     """Correlations that let extraction pre-select this workspace's own codes."""
@@ -988,16 +1059,15 @@ def list_correlations(
     dependencies=[Depends(require("ops-master:read"))],
 )
 def correlation_reference(db: Db, user: Current):
-    """The two sides of correlations and multi-criteria code links."""
-    from app.models.operations import (
-        OpsActivityCode,
-        OpsAgency,
-        OpsCause,
-        OpsMarkRule,
-        OpsNptCode,
-        OpsOperationCode,
-        OpsPhaseCode,
-    )
+    """The two sides of correlations and multi-criteria code links.
+
+    The left side is the printed reference catalogue; the right side is this
+    workspace's criteria — Master Data registers (Hole Section, Phase, Activity,
+    vendor) and Code Library lists (Sub-phase, Operations, Cause, responsible
+    agency label, source mark).
+    """
+    from app.models.master_data import Activity, HoleSection, Phase
+    from app.models.operations import OpsAgency, OpsCause, OpsMarkRule, OpsOperation, OpsSubPhase
 
     usage = correlation_svc.code_usage_counts(db, user.organization_id)
 
@@ -1020,10 +1090,14 @@ def correlation_reference(db: Db, user: Current):
                 "name": getattr(row, name_field),
                 "correlation_count": bucket.get(row.id, 0),
             }
-            if hasattr(row, "default_classification"):
-                item["default_classification"] = getattr(row, "default_classification") or ""
+            # The Activity carries its own type; a link or correlation dialog reads
+            # it to refuse a cause on Planned work before the request is sent.
+            if hasattr(row, "activity_type"):
+                item["activity_type"] = getattr(row, "activity_type") or ""
             if hasattr(row, "default_allocation"):
                 item["default_allocation"] = getattr(row, "default_allocation") or ""
+            if hasattr(row, "default_cause_code"):
+                item["default_cause_code"] = getattr(row, "default_cause_code") or ""
             items.append(item)
         return items
 
@@ -1042,12 +1116,16 @@ def correlation_reference(db: Db, user: Current):
             for row in catalogue_rows()
         ],
         "library": {
-            "operation": library(OpsOperationCode, "operation_code", "operation_name", "operation-codes"),
-            "activity": library(OpsActivityCode, "activity_code", "activity_name", "activity-codes"),
-            "npt": library(OpsNptCode, "npt_code", "npt_name", "npt-codes"),
+            # Master Data registers.
+            "hole_section": library(HoleSection, "section_code", "section_name", "hole-sections"),
+            "phase": library(Phase, "phase_code", "phase_name", "phases"),
+            "activity": library(Activity, "activity_code", "activity_name", "activities"),
+            "vendor": library(Vendor, "vendor_code", "vendor_name", "vendors"),
+            # Code Library lists.
+            "sub_phase": library(OpsSubPhase, "sub_phase_code", "sub_phase_name", "sub-phases"),
+            "operation": library(OpsOperation, "operation_code", "operation_name", "operations"),
             "cause": library(OpsCause, "cause_code", "cause_name", "causes"),
-            "phase": library(OpsPhaseCode, "phase_code", "phase_name", "phase-codes"),
-            "agency": library(OpsAgency, "agency_code", "agency_name", "agencies"),
+            "responsible_agency": library(OpsAgency, "agency_code", "agency_name", "agencies"),
             "mark": library(OpsMarkRule, "mark_code", "mark_name", "source-marks"),
         },
     }
@@ -1281,7 +1359,7 @@ def dashboard(
         scope=scope or None,
     )
     result["recent_reports"] = (
-        [_to_report_out(report) for report in result["recent_reports"]]
+        [_to_report_out(report, db) for report in result["recent_reports"]]
         if owner(user) or "ops-report:read" in granted(user)
         else []
     )
@@ -1306,12 +1384,10 @@ def time_depth(
 # Masters
 # ---------------------------------------------------------------------------
 MASTER_SCHEMAS = {
-    "operation-codes": OpsOperationCodeIn,
-    "activity-codes": OpsActivityCodeIn,
-    "npt-codes": OpsNptCodeIn,
+    "operations": OpsOperationIn,
+    "sub-phases": OpsSubPhaseIn,
     "agencies": OpsAgencyIn,
     "causes": OpsCauseIn,
-    "phase-codes": OpsPhaseCodeIn,
     "source-marks": OpsMarkRuleIn,
 }
 
@@ -1336,6 +1412,9 @@ def default_codes():
 @router.get("/masters/{kind}", dependencies=[Depends(require("ops-master:read"))])
 def list_masters(kind: str, db: Db, user: Current, include_deleted: bool = False):
     kind = _master_kind(kind)
+    if kind == "operations":
+        # A workspace starts with the printed downtime vocabulary, once.
+        masters_svc.ensure_default_operations(db, user.organization_id)
     rows = masters_svc.list_masters(db, user.organization_id, kind, include_deleted=include_deleted)
     return [masters_svc.serialize_master(row) for row in rows]
 

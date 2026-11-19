@@ -56,7 +56,7 @@ class OpsSettings(Base):
     auto_extract_on_upload: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     classification_confidence_high: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0.85"), nullable=False)
     classification_confidence_low: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0.60"), nullable=False)
-    require_npt_code: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    require_operations: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     require_npt_agency: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     require_npt_reason: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     max_daily_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
@@ -76,64 +76,25 @@ class OpsSettings(Base):
 # ---------------------------------------------------------------------------
 # Code library — all user-configurable
 # ---------------------------------------------------------------------------
-class OpsOperationCode(Base):
-    __tablename__ = "ops_operation_codes"
+class OpsOperation(Base):
+    """Downtime / non-productive operation, configured in the Code Library.
+
+    Replaces the former NPT code list: one *Operations* list describes the work
+    that was not part of the programme. It is required only when the block's
+    Activity type is NPT or UPA, which is why the old ``requires_npt_code`` flag
+    and NPT-only pairing rules are gone with the NPT code family.
+    """
+
+    __tablename__ = "ops_operations"
     __table_args__ = (
-        UniqueConstraint("organization_id", "operation_code", name="uq_ops_operation_codes_org_code"),
-        Index("ix_ops_operation_codes_org_deleted", "organization_id", "is_deleted"),
+        UniqueConstraint("organization_id", "operation_code", name="uq_ops_operations_org_code"),
+        Index("ix_ops_operations_org_deleted", "organization_id", "is_deleted"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     operation_code: Mapped[str] = mapped_column(String(50), nullable=False)
     operation_name: Mapped[str] = mapped_column(String(150), nullable=False)
-    category: Mapped[str] = mapped_column(String(50), default="other", nullable=False)
-    default_classification: Mapped[str] = mapped_column(String(10), default="Planned", nullable=False)
-    is_productive_default: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    counts_as_on_bottom: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    requires_npt_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    phase_applicable: Mapped[str] = mapped_column(String(20), default="both", nullable=False)
-    description: Mapped[str] = mapped_column(String(500), default="", nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
-
-
-class OpsActivityCode(Base):
-    __tablename__ = "ops_activity_codes"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "activity_code", name="uq_ops_activity_codes_org_code"),
-        Index("ix_ops_activity_codes_org_deleted", "organization_id", "is_deleted"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    activity_code: Mapped[str] = mapped_column(String(50), nullable=False)
-    activity_name: Mapped[str] = mapped_column(String(150), nullable=False)
-    default_allocation: Mapped[str] = mapped_column(String(10), default="PT", nullable=False)
-    description: Mapped[str] = mapped_column(String(500), default="", nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
-
-
-class OpsNptCode(Base):
-    __tablename__ = "ops_npt_codes"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "npt_code", name="uq_ops_npt_codes_org_code"),
-        Index("ix_ops_npt_codes_org_deleted", "organization_id", "is_deleted"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    npt_code: Mapped[str] = mapped_column(String(50), nullable=False)
-    npt_name: Mapped[str] = mapped_column(String(150), nullable=False)
     family: Mapped[str] = mapped_column(String(30), default="other", nullable=False)
     category: Mapped[str] = mapped_column(String(50), default="other", nullable=False)
     default_responsible_party: Mapped[str] = mapped_column(String(200), default="", nullable=False)
@@ -208,21 +169,39 @@ class OpsCodeRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
 
 
-class OpsPhaseCode(OpsCodeRecord):
-    __tablename__ = "ops_phase_codes"
-    __table_args__ = (UniqueConstraint("organization_id", "phase_code", name="uq_ops_phase_code"),)
-    phase_code: Mapped[str] = mapped_column(String(20), nullable=False)
-    phase_name: Mapped[str] = mapped_column(String(150), nullable=False)
+class OpsSubPhase(OpsCodeRecord):
+    """Sub-phase of a Master Data Phase, configured in the Code Library.
+
+    The Phase itself is a Master Data register; the sub-phase narrows it. A
+    sub-phase belongs to one phase, so the daily report offers only the
+    sub-phases of the phase the engineer selected.
+    """
+
+    __tablename__ = "ops_sub_phases"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "phase_id", "sub_phase_code", name="uq_ops_sub_phase_code"),
+    )
+    phase_id: Mapped[str] = mapped_column(
+        ForeignKey("phases.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    phase_code_snapshot: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
+    phase_name_snapshot: Mapped[str] = mapped_column(String(150), default="", server_default="", nullable=False)
+    sub_phase_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    sub_phase_name: Mapped[str] = mapped_column(String(150), nullable=False)
 
 
 class OpsCodeCorrelation(Base):
-    """Map one printed default-code token to one workspace code.
+    """Map one printed code from the reference catalogue to this workspace's criteria.
 
-    A correlation is a *pre-selection*, never a saved value: extraction writes
-    the workspace code onto the block as a suggestion the engineer still has to
-    accept. A token may only map once per workspace and code family, and a
-    correlation always points at a workspace code in the same family, so a
-    summary can never claim an operation is an activity code.
+    A correlation is a *pre-selection*, never a saved value: extraction writes the
+    correlated criteria onto the block as suggestions the engineer still has to
+    accept. One printed token may only map once per workspace *and* family, so a
+    summary can never claim an operation is an activity.
+
+    ``kind`` names the criterion the printed token belongs to: ``operation``
+    (the Code Library Operations list), ``cause``, ``sub-phase``,
+    ``responsible-party``, or ``agency``. Hole Section, Phase and Activity are
+    Master Data registers, so they are carried as companion criteria only.
     """
 
     __tablename__ = "ops_code_correlations"
@@ -237,37 +216,42 @@ class OpsCodeCorrelation(Base):
     organization_id: Mapped[str] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # 'operation' | 'activity' | 'npt' | 'cause' | 'phase' | 'agency'
+    # 'operation' | 'cause' | 'sub-phase' | 'responsible-party' | 'agency'
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     source_family: Mapped[str] = mapped_column(String(60), default="", nullable=False)
     source_code: Mapped[str] = mapped_column(String(100), nullable=False)
     source_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
-    # Primary target is set according to ``kind``; optional companion columns let
-    # one correlation pre-select additional workspace criteria in the same pass.
-    # All foreign keys use RESTRICT so a correlated code can never be silently deleted.
-    target_operation_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_operation_codes.id", ondelete="RESTRICT"), nullable=True
-    )
-    target_activity_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_activity_codes.id", ondelete="RESTRICT"), nullable=True
-    )
-    target_npt_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_npt_codes.id", ondelete="RESTRICT"), nullable=True
+    # Primary target is set according to ``kind``; the companion columns let one
+    # correlation pre-select every other criterion in the same pass.
+    # All foreign keys use RESTRICT so a correlated record can never be silently deleted.
+    target_operation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_operations.id", ondelete="RESTRICT"), nullable=True
     )
     target_cause_id: Mapped[str | None] = mapped_column(
         ForeignKey("ops_causes.id", ondelete="RESTRICT"), nullable=True
     )
-    target_phase_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_phase_codes.id", ondelete="RESTRICT"), nullable=True
+    target_sub_phase_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_sub_phases.id", ondelete="RESTRICT"), nullable=True
     )
-    target_agency_id: Mapped[str | None] = mapped_column(
+    target_responsible_agency_id: Mapped[str | None] = mapped_column(
         ForeignKey("ops_agencies.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_vendor_id: Mapped[str | None] = mapped_column(
+        ForeignKey("vendors.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_hole_section_id: Mapped[str | None] = mapped_column(
+        ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_phase_id: Mapped[str | None] = mapped_column(
+        ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_activity_id: Mapped[str | None] = mapped_column(
+        ForeignKey("activities.id", ondelete="RESTRICT"), nullable=True
     )
     target_mark_rule_id: Mapped[str | None] = mapped_column(
         ForeignKey("ops_mark_rules.id", ondelete="RESTRICT"), nullable=True
     )
     scope: Mapped[str] = mapped_column(String(20), default="", server_default="", nullable=False)
-    target_classification: Mapped[str] = mapped_column(String(12), default="", server_default="", nullable=False)
     target_allocation: Mapped[str] = mapped_column(String(8), default="", server_default="", nullable=False)
     target_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     extra_criteria_summary: Mapped[str] = mapped_column(String(300), default="", server_default="", nullable=False)
@@ -283,24 +267,28 @@ class OpsCodeCorrelation(Base):
     @property
     def target_id(self) -> str | None:
         col = {
-            "operation": "target_operation_code_id",
-            "activity": "target_activity_code_id",
-            "npt": "target_npt_code_id",
+            "operation": "target_operation_id",
             "cause": "target_cause_id",
-            "phase": "target_phase_code_id",
-            "agency": "target_agency_id",
+            "sub-phase": "target_sub_phase_id",
+            "agency": "target_vendor_id",
+            "responsible-party": "target_responsible_agency_id",
             "mark": "target_mark_rule_id",
         }.get(self.kind or "")
         return getattr(self, col, None) if col else None
 
 
 class OpsCodeLink(Base):
-    """Multi-criteria relationship between two or more workspace Code Library records.
+    """Multi-criteria relationship between two or more workspace records.
 
-    Stores typed, column-wise links across Phase, Operation, Activity, NPT, Cause,
-    Agency, Source Mark, Scope, Classification, and Allocation. Feeds schematic tree
-    visualisation, extraction co-selection, report block review hints, and code
-    deletion guards (linked codes cannot be deleted until unlinked).
+    Stores typed, column-wise links across the Master Data registers (Hole
+    Section, Phase, Activity) and the Code Library lists (Operations, Sub-phase,
+    Cause, Responsible agency, Agency/service vendor, Source mark), plus Scope
+    and Allocation. One rule can carry as many criteria as the user needs, which
+    is what lets ``DRLSUR`` say "this hole section, this phase, this sub-phase,
+    this activity, this operation, this cause and this vendor" in a single row.
+    Links feed the schematic tree, extraction co-selection and the report
+    block review hints, and guard deletion: a linked record cannot be deleted
+    until the rule that references it is removed.
     """
 
     __tablename__ = "ops_code_links"
@@ -316,25 +304,30 @@ class OpsCodeLink(Base):
     rule_name: Mapped[str] = mapped_column(String(160), default="", server_default="", nullable=False)
     rule_signature: Mapped[str] = mapped_column(String(320), nullable=False)
     scope: Mapped[str] = mapped_column(String(20), default="", server_default="", nullable=False)
-    default_classification: Mapped[str] = mapped_column(String(12), default="", server_default="", nullable=False)
     default_allocation: Mapped[str] = mapped_column(String(8), default="", server_default="", nullable=False)
-    phase_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_phase_codes.id", ondelete="RESTRICT"), nullable=True
+    hole_section_id: Mapped[str | None] = mapped_column(
+        ForeignKey("hole_sections.id", ondelete="RESTRICT"), nullable=True
     )
-    operation_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_operation_codes.id", ondelete="RESTRICT"), nullable=True
+    phase_id: Mapped[str | None] = mapped_column(
+        ForeignKey("phases.id", ondelete="RESTRICT"), nullable=True
     )
-    activity_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_activity_codes.id", ondelete="RESTRICT"), nullable=True
+    sub_phase_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_sub_phases.id", ondelete="RESTRICT"), nullable=True
     )
-    npt_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_npt_codes.id", ondelete="RESTRICT"), nullable=True
+    activity_id: Mapped[str | None] = mapped_column(
+        ForeignKey("activities.id", ondelete="RESTRICT"), nullable=True
+    )
+    operation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_operations.id", ondelete="RESTRICT"), nullable=True
     )
     cause_id: Mapped[str | None] = mapped_column(
         ForeignKey("ops_causes.id", ondelete="RESTRICT"), nullable=True
     )
-    agency_id: Mapped[str | None] = mapped_column(
+    responsible_agency_id: Mapped[str | None] = mapped_column(
         ForeignKey("ops_agencies.id", ondelete="RESTRICT"), nullable=True
+    )
+    vendor_id: Mapped[str | None] = mapped_column(
+        ForeignKey("vendors.id", ondelete="RESTRICT"), nullable=True
     )
     mark_rule_id: Mapped[str | None] = mapped_column(
         ForeignKey("ops_mark_rules.id", ondelete="RESTRICT"), nullable=True
@@ -566,9 +559,15 @@ class OpsActivityBlock(Base):
     source_operation_code: Mapped[str] = mapped_column(String(100), default="", server_default="", nullable=False)
     source_cause_code: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
     source_mark: Mapped[str] = mapped_column(String(30), default="", server_default="", nullable=False)
-    operation_code_id: Mapped[str | None] = mapped_column(ForeignKey("ops_operation_codes.id", ondelete="SET NULL"), nullable=True)
-    activity_code_id: Mapped[str | None] = mapped_column(ForeignKey("ops_activity_codes.id", ondelete="SET NULL"), nullable=True)
+    # The engineer-facing criteria, in the order the review dialog lists them:
+    # Hole Section -> Phase -> Sub-phase -> Activity -> Allocation -> Cause ->
+    # Operations -> Agency / service vendor -> Responsible agency label.
+    hole_section_id: Mapped[str | None] = mapped_column(ForeignKey("hole_sections.id", ondelete="SET NULL"), nullable=True)
+    phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="SET NULL"), nullable=True)
+    sub_phase_id: Mapped[str | None] = mapped_column(ForeignKey("ops_sub_phases.id", ondelete="SET NULL"), nullable=True)
     activity_id: Mapped[str | None] = mapped_column(ForeignKey("activities.id", ondelete="SET NULL"), nullable=True)
+    # Derivable from ``activity_id``; kept as a column so historical days, totals
+    # and filters never change when an activity's type is later corrected.
     classification: Mapped[str] = mapped_column(String(10), default="Planned", nullable=False)
     allocation: Mapped[str] = mapped_column(String(10), default="PT", nullable=False)
     is_productive: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -587,12 +586,15 @@ class OpsActivityBlock(Base):
     timeline_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     classification_evidence: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     classification_source: Mapped[str] = mapped_column(String(20), default="keyword", nullable=False)
-    npt_code_id: Mapped[str | None] = mapped_column(ForeignKey("ops_npt_codes.id", ondelete="SET NULL"), nullable=True)
-    npt_code_snapshot: Mapped[str] = mapped_column(String(50), default="", nullable=False)
-    agency_id: Mapped[str | None] = mapped_column(ForeignKey("ops_agencies.id", ondelete="SET NULL"), nullable=True)
+    operation_id: Mapped[str | None] = mapped_column(ForeignKey("ops_operations.id", ondelete="SET NULL"), nullable=True)
+    operation_snapshot: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
     cause_code: Mapped[str] = mapped_column(String(50), default="", nullable=False)
-    hole_section_id: Mapped[str | None] = mapped_column(ForeignKey("hole_sections.id", ondelete="SET NULL"), nullable=True)
-    phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="SET NULL"), nullable=True)
+    # The responsible agency label is this workspace's own Code Library list;
+    # ``responsible_party`` keeps its text beside the link, exactly like the
+    # vendor link keeps the vendor's name.
+    responsible_agency_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_agencies.id", ondelete="SET NULL"), nullable=True
+    )
     depth_from_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     depth_to_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     tvd_from_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
@@ -720,7 +722,7 @@ class OpsPlanItem(Base):
     sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
     hole_section_id: Mapped[str | None] = mapped_column(ForeignKey("hole_sections.id", ondelete="SET NULL"), nullable=True)
     phase_id: Mapped[str | None] = mapped_column(ForeignKey("phases.id", ondelete="SET NULL"), nullable=True)
-    operation_code_id: Mapped[str | None] = mapped_column(ForeignKey("ops_operation_codes.id", ondelete="SET NULL"), nullable=True)
+    operation_id: Mapped[str | None] = mapped_column(ForeignKey("ops_operations.id", ondelete="SET NULL"), nullable=True)
     description: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     target_depth_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     delta_depth_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)

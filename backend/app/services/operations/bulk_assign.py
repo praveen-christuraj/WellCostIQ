@@ -1,4 +1,4 @@
-"""Bulk assignment of operation, activity, NPT, cause and agency codes.
+"""Bulk assignment of the daily-report criteria.
 
 The daily report page lists every extracted block. Correcting fifty rows one
 dialog at a time is where review errors come from, so this service applies one
@@ -10,10 +10,9 @@ explicit instruction to many blocks and reports exactly what happened:
   touched block as ``edited`` with the reviewer's identity, and records one
   audit entry that names the report, the fields and the counts.
 
-Nothing here bypasses the classification rule. A field the chosen
-classification does not allow (an NPT code on Planned work) is refused, and a
-block that cannot legally hold the value is skipped with a reason rather than
-silently changed.
+Nothing here bypasses the Activity rule. A field the chosen Activity type does
+not allow (a cause on Planned work) is refused, and a block that cannot legally
+hold the value is skipped with a reason rather than silently changed.
 """
 
 from __future__ import annotations
@@ -26,16 +25,14 @@ from sqlalchemy.orm import Session
 
 from app.domain.operations.requirements import BULK_ALLOWED, FIELD_LABELS, bulk_refusal, describe_missing
 from app.models import User
-from app.models.master_data import Activity
+from app.models.master_data import Activity, HoleSection, Phase
 from app.models.operations import (
     OpsActivityBlock,
-    OpsActivityCode,
     OpsAgency,
     OpsCause,
     OpsDailyReport,
-    OpsNptCode,
-    OpsOperationCode,
-    OpsPhaseCode,
+    OpsOperation,
+    OpsSubPhase,
 )
 from app.models.vendor_master import Vendor
 from app.services.audit import record as audit_record
@@ -44,14 +41,23 @@ EDITABLE = ("draft", "in_review", "rejected")
 
 # field name -> (workspace model, label attribute)
 LIBRARY = {
-    "operation_code_id": (OpsOperationCode, "operation_name"),
-    "activity_code_id": (OpsActivityCode, "activity_name"),
-    "npt_code_id": (OpsNptCode, "npt_name"),
+    "hole_section_id": (HoleSection, "section_name"),
+    "phase_id": (Phase, "phase_name"),
+    "sub_phase_id": (OpsSubPhase, "sub_phase_name"),
+    "activity_id": (Activity, "activity_name"),
+    "operation_id": (OpsOperation, "operation_name"),
     "cause_id": (OpsCause, "cause_name"),
-    "agency_id": (OpsAgency, "agency_name"),
-    "phase_id": (OpsPhaseCode, "phase_name"),
+    "responsible_agency_id": (OpsAgency, "agency_name"),
 }
-ASSIGNABLE = ("operation_code_id", "activity_code_id", "npt_code_id", "cause_id", "agency_id")
+ASSIGNABLE = (
+    "hole_section_id",
+    "phase_id",
+    "sub_phase_id",
+    "activity_id",
+    "operation_id",
+    "cause_id",
+    "responsible_agency_id",
+)
 
 
 def _actor(user: User) -> str:
@@ -59,7 +65,15 @@ def _actor(user: User) -> str:
 
 
 def _code_field(model) -> str:
-    for field in ("operation_code", "activity_code", "npt_code", "cause_code", "agency_code", "phase_code"):
+    for field in (
+        "section_code",
+        "phase_code",
+        "sub_phase_code",
+        "activity_code",
+        "operation_code",
+        "cause_code",
+        "agency_code",
+    ):
         if hasattr(model, field):
             return field
     raise KeyError(model.__name__)
@@ -132,26 +146,18 @@ def _resolve_values(db: Session, organization_id: str, data) -> tuple[dict, dict
     values: dict[str, object] = {}
     labels: dict[str, str] = {}
     for field in ASSIGNABLE:
-        if field == "agency_id":
-            vendor_id = getattr(data, "vendor_id", None)
-            agency_id = getattr(data, "agency_id", None)
-            if vendor_id:
-                vendor, label = _resolve_vendor(db, organization_id, vendor_id)
-                values["vendor_id"] = vendor
-                values["responsible_party"] = vendor.vendor_name
-                labels["agency_id"] = f"agency {label}"
-            elif agency_id:
-                agency, label = _resolve(db, organization_id, "agency_id", agency_id)
-                values["agency_id"] = agency
-                values["responsible_party"] = agency.agency_name
-                labels["agency_id"] = f"library agency {label}"
-            continue
         value_id = getattr(data, field, None)
         if not value_id:
             continue
         row, label = _resolve(db, organization_id, field, value_id)
         values[field] = row
         labels[field] = label
+    vendor_id = getattr(data, "vendor_id", None)
+    if vendor_id:
+        vendor, label = _resolve_vendor(db, organization_id, vendor_id)
+        values["vendor_id"] = vendor
+        values["responsible_party"] = vendor.vendor_name
+        labels["vendor_id"] = f"agency / service vendor {label}"
     if raw_cause := getattr(data, "cause_code", None):
         codes = set(
             db.scalars(
@@ -168,9 +174,9 @@ def _resolve_values(db: Session, organization_id: str, data) -> tuple[dict, dict
         # Blocks store the printed cause token, not an id. The library row supplies it.
         values["cause_code"] = values.pop("cause_id").cause_code
         labels["cause_code"] = labels.pop("cause_id")
-    if getattr(data, "classification", None):
-        values["classification"] = data.classification
-        labels["classification"] = f"classification {data.classification}"
+    if getattr(data, "allocation", None):
+        values["allocation"] = data.allocation
+        labels["allocation"] = f"allocation {data.allocation}"
     return values, labels
 
 
@@ -207,80 +213,105 @@ def _matches_kind(block, kind: str) -> bool:
     return True
 
 
+#: Every value a bulk instruction can write, in one comparable tuple.
+SNAPSHOT_FIELDS = (
+    "hole_section_id",
+    "phase_id",
+    "sub_phase_id",
+    "activity_id",
+    "operation_id",
+    "cause_code",
+    "responsible_agency_id",
+    "vendor_id",
+    "responsible_party",
+    "allocation",
+    "classification",
+)
+
+
 def _snapshot(block) -> tuple:
-    """Every value a bulk instruction can write, in one comparable tuple."""
-    return (
-        block.operation_code_id,
-        block.activity_code_id,
-        block.npt_code_id,
-        block.cause_code,
-        block.responsible_party,
-        block.agency_id,
-        block.vendor_id,
-        block.classification,
-    )
+    return tuple(getattr(block, field, None) for field in SNAPSHOT_FIELDS)
 
 
 def _apply_to_block(block, values: dict) -> list[str]:
     """Write the values onto one block; return the notes worth telling the user.
 
-    A field the classification forbids is skipped on that block — the rest of the
-    instruction still lands. The note names the field and the classification, so
-    the summary can say "3 changed, 2 NPT codes skipped on Planned work".
+    A field the Activity type forbids is skipped on that block — the rest of the
+    instruction still lands. The note names the field and the type, so the
+    summary can say "3 changed, 1 cause skipped on Planned work".
     """
-    classification = values.get("classification") or block.classification
     notes: list[str] = []
+    incoming = {field: value for field, value in values.items() if field not in ("responsible_party",)}
+    # The Activity decides the type; a bulk edit may only write what that type
+    # allows. Assigning the Activity and its cause in one gesture is therefore
+    # judged against the Activity being assigned, not the old one.
+    assigned_activity = values.get("activity_id")
+    incoming_type = (
+        assigned_activity.activity_type
+        if assigned_activity is not None
+        else block.classification
+    )
     forbidden = [
-        field for field in ("npt_code_id",) if field in values and field not in BULK_ALLOWED.get(classification, ())
+        field
+        for field, value in incoming.items()
+        if value is not None and field not in BULK_ALLOWED.get(incoming_type, ()) and field in FIELD_LABELS
     ]
     if forbidden:
-        notes.append(bulk_refusal(classification, [(field, values[field]) for field in forbidden]))
-    if classification != block.classification and values.get("classification"):
-        block.classification = classification
-        block.allocation = "PT" if classification == "Planned" else classification
-        block.is_productive = classification != "NPT"
-        block.classification_source = "reviewer"
+        notes.append(bulk_refusal(incoming_type, [(field, incoming[field]) for field in forbidden]))
+
+    if (activity := values.get("activity_id")) is not None:
+        block.activity_id = activity.id
+        # The Master Data Activity's own type is the block's Activity type.
+        if block.classification_source != "source_mark":
+            block.classification = activity.activity_type
+            block.is_productive = activity.activity_type != "NPT"
+            if activity.activity_type == "Planned" and block.allocation in ("NPT", "UPA"):
+                block.allocation = "PT"
+            elif activity.activity_type in ("NPT", "UPA") and block.allocation == "PT":
+                block.allocation = activity.activity_type
     for field, value in values.items():
-        if field in ("classification", "responsible_party", "cause_code"):
+        if field in ("classification", "responsible_party", "activity_id", "cause_code", "allocation"):
             continue
-        if field in forbidden:
-            continue
-        if field == "vendor_id":
-            block.vendor_id = value.id
+        if field in forbidden or field not in FIELD_LABELS:
             continue
         setattr(block, field, getattr(value, "id", value))
-    if "cause_code" in values:
+    if "cause_code" in values and "cause_code" not in forbidden:
         block.cause_code = values["cause_code"]
+    if "allocation" in values and "allocation" not in forbidden:
+        block.allocation = values["allocation"]
+        if values["allocation"] == "NPT":
+            block.is_productive = False
     if "responsible_party" in values:
         block.responsible_party = values["responsible_party"]
-    if "agency_id" in values and "vendor_id" not in values:
-        block.vendor_id = None  # a library agency is not a Master Data vendor
-    if block.npt_code_id:
-        code = values.get("npt_code_id")
-        if code is not None:
-            block.npt_code_snapshot = code.npt_code
+    if "operation_id" in values and (operation := values["operation_id"]) is not None:
+        block.operation_snapshot = operation.operation_code
+    if "responsible_agency_id" in values and (agency := values["responsible_agency_id"]) is not None:
+        block.responsible_party = agency.agency_name
     return notes
 
 
 def _describe(values: dict) -> str:
     parts = []
     for field, value in values.items():
-        if field == "classification":
-            parts.append(f"classification {value}")
-        elif field == "responsible_party":
-            parts.append(f"agency {value}")
+        if field == "responsible_party":
+            continue
+        if field in ("classification", "allocation"):
+            parts.append(f"{field} {value}")
         elif field == "vendor_id":
-            parts.append(f"agency {value.vendor_name}")
-        elif hasattr(value, "id"):
-            parts.append(f"{FIELD_LABELS.get(field, field)} {getattr(value, _code_field(type(value)))}")
+            parts.append(f"agency / service vendor {value.vendor_name}")
         elif field == "cause_code":
             parts.append(f"cause {value}")
+        elif hasattr(value, "id"):
+            parts.append(f"{FIELD_LABELS.get(field, field)} {getattr(value, _code_field(type(value)))}")
     return " · ".join(filter(None, parts))
 
 
 def preview(db: Session, organization_id: str, data) -> dict:
     values, _labels = _resolve_values(db, organization_id, data)
-    if not any(field in values for field in ASSIGNABLE + ("classification",)):
+    if not any(
+        field in values
+        for field in ASSIGNABLE + ("classification", "allocation", "vendor_id", "cause_code")
+    ):
         raise HTTPException(422, "Choose at least one value to assign.")
     reports = _reports(db, organization_id, data.report_ids or [])
     blocks = _blocks(db, organization_id, [r.id for r in reports], data.block_ids or [])
@@ -289,14 +320,7 @@ def preview(db: Session, organization_id: str, data) -> dict:
     picks, skipped = _targets(db, organization_id, blocks, data)
     changes = []
     for block in picks:
-        before = {
-            "operation_code_id": block.operation_code_id,
-            "activity_code_id": block.activity_code_id,
-            "npt_code_id": block.npt_code_id,
-            "cause_code": block.cause_code,
-            "responsible_party": block.responsible_party,
-            "classification": block.classification,
-        }
+        before = {field: getattr(block, field, None) for field in SNAPSHOT_FIELDS}
         start = _snapshot(block)
         notes = _apply_to_block(block, values)  # mutated in memory only; never committed here
         if notes:
@@ -308,14 +332,7 @@ def preview(db: Session, organization_id: str, data) -> dict:
                     "reason": " ".join(notes),
                 }
             )
-        after = {
-            "operation_code_id": block.operation_code_id,
-            "activity_code_id": block.activity_code_id,
-            "npt_code_id": block.npt_code_id,
-            "cause_code": block.cause_code,
-            "responsible_party": block.responsible_party,
-            "classification": block.classification,
-        }
+        after = {field: getattr(block, field, None) for field in SNAPSHOT_FIELDS}
         end = _snapshot(block)
         if start == end:
             continue
@@ -339,7 +356,10 @@ def preview(db: Session, organization_id: str, data) -> dict:
 
 def apply(db: Session, organization_id: str, data, user: User, request=None) -> dict:
     values, _labels = _resolve_values(db, organization_id, data)
-    if not any(field in values for field in ASSIGNABLE + ("classification",)):
+    if not any(
+        field in values
+        for field in ASSIGNABLE + ("classification", "allocation", "vendor_id", "cause_code")
+    ):
         raise HTTPException(422, "Choose at least one value to assign.")
     reports = _reports(db, organization_id, data.report_ids or [])
     blocks = _blocks(db, organization_id, [r.id for r in reports], data.block_ids or [])
