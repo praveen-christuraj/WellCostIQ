@@ -12,11 +12,13 @@ import { SectionCard } from './SectionCard'
  * exactly as it is on screen, together with its own title and caption, so an
  * exported dashboard carries the visuals rather than a list of numbers.
  */
-export function ChartPanel({ title, subtitle, meta, height = 280, children, empty, emptyMessage, caption, exportable = true, figureKey }: {
+export function ChartPanel({ title, subtitle, meta, toolbar, height = 280, children, empty, emptyMessage, caption, exportable = true, figureKey }: {
   title: string
   subtitle?: string
   /** Unit, currency or time basis badge shown beside the title. */
   meta?: ReactNode
+  /** Optional compact control strip (for example axis scale inputs) rendered above the plot. */
+  toolbar?: ReactNode
   height?: number
   children?: ReactNode
   empty?: boolean
@@ -45,6 +47,11 @@ export function ChartPanel({ title, subtitle, meta, height = 280, children, empt
       'data-chart-empty': empty ? '1' : '0',
     } : undefined}
   >
+    {toolbar ? (
+      <Box sx={{ px: 2.25, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+        {toolbar}
+      </Box>
+    ) : null}
     <Box sx={{ px: 1.5, pt: 1, pb: .5 }}>
       {empty
         ? <Box sx={{ height, display: 'grid', placeItems: 'center', px: 3 }} data-chart-empty="1">

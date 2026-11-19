@@ -335,6 +335,47 @@ def test_templates_are_tenant_scoped_soft_deleted_and_exported():
             assert any(row.action == "soft_delete" for row in db.query(AuditLog).all())
 
 
+def test_deleted_templates_are_listed_restored_and_only_then_purged():
+    """The three-state lifecycle a template now shares with every other register.
+
+    Deleted entries are their own listing; restore returns the template intact;
+    permanent deletion is refused until the template is actually deleted, refuses
+    a live record, and leaves an audit row behind.
+    """
+    with TestClient(app) as client:
+        headers = login(client)
+        seed = _seed(client, headers)
+        template = _post(client, "/api/v1/record-templates", headers, _afe_payload(seed))
+        base = "/api/v1/record-templates"
+
+        # A live template cannot be purged straight from the library.
+        live = client.delete(f"{base}/{template['id']}/permanent", headers=headers)
+        assert live.status_code == 409 and "Delete a template" in live.json()["detail"]
+
+        assert client.delete(f"{base}/{template['id']}", headers=headers).status_code == 204
+        assert client.get(base, headers=headers).json() == []
+        deleted = client.get(base, headers=headers, params={"deleted": True}).json()
+        assert [row["id"] for row in deleted] == [template["id"]]
+        assert deleted[0]["name"] == template["name"]
+        assert deleted[0]["line_count"] == template["line_count"]
+
+        restored = client.post(f"{base}/{template['id']}/restore", headers=headers)
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["id"] == template["id"]
+        assert [row["id"] for row in client.get(base, headers=headers).json()] == [template["id"]]
+        assert client.get(base, headers=headers, params={"deleted": True}).json() == []
+
+        # Restoring twice is not a silent no-op: the template is no longer deleted.
+        assert client.post(f"{base}/{template['id']}/restore", headers=headers).status_code == 404
+
+        assert client.delete(f"{base}/{template['id']}", headers=headers).status_code == 204
+        assert client.delete(f"{base}/{template['id']}/permanent", headers=headers).status_code == 204
+        assert client.get(base, headers=headers, params={"deleted": True}).json() == []
+        with SessionLocal() as db:
+            actions = {row.action for row in db.query(AuditLog).all()}
+            assert {"soft_delete", "restore", "permanent_delete"} <= actions
+
+
 def test_apply_is_audited_counts_one_use_and_never_writes_a_record():
     """Applying a template is a starting point, not a record.
 

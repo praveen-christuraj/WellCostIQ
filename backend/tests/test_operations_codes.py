@@ -528,3 +528,505 @@ def test_reference_context_names_the_asked_abbreviation():
 
     # A question with no printed abbreviation still gets the primer, never a blank.
     assert format_reference_context("How many days behind are we?").strip()
+
+
+# ---------------------------------------------------------------------------
+# Multi-criteria code links (API 0.20.0)
+# ---------------------------------------------------------------------------
+
+
+def _pair(client, headers, codes):
+    """A second code per family, so a link can join two distinct criteria."""
+    return {
+        "phase": good(
+            client.post(OPS + "/masters/phase-codes", headers=headers, json={"phase_code": "PH1", "phase_name": "Drilling"})
+        ),
+        "activity2": good(
+            client.post(
+                OPS + "/masters/activity-codes", headers=headers, json={"activity_code": "TRIP", "activity_name": "Tripping"}
+            )
+        ),
+        "operation2": codes["operation"],
+    }
+
+
+def test_multi_criteria_code_links_require_two_criteria_and_guard_code_deletion():
+    with TestClient(app) as client:
+        headers = login(client)
+        codes = _codes(client, headers)
+        extra = _pair(client, headers, codes)
+
+        # One criterion is not a link: it is just a code.
+        single = client.post(
+            OPS + "/code-links",
+            headers=headers,
+            json={"operation_code_id": codes["operation"]["id"]},
+        )
+        assert single.status_code == 422 and "two workspace code criteria" in single.json()["detail"]
+
+        # NPT code with a Planned classification is refused before it is written.
+        matrix = client.post(
+            OPS + "/code-links",
+            headers=headers,
+            json={
+                "operation_code_id": codes["operation"]["id"],
+                "npt_code_id": codes["npt"]["id"],
+                "default_classification": "Planned",
+            },
+        )
+        assert matrix.status_code == 422 and "NPT code applies only" in matrix.json()["detail"]
+
+        link = good(
+            client.post(
+                OPS + "/code-links",
+                headers=headers,
+                json={
+                    "rule_name": "Drilling + rotating",
+                    "operation_code_id": codes["operation"]["id"],
+                    "activity_code_id": codes["activity"]["id"],
+                    "phase_code_id": extra["phase"]["id"],
+                    "note": "Rotating while drilling",
+                },
+            )
+        )
+        assert link["criteria_count"] == 3
+        assert "Operation: DRL" in link["summary_label"]
+        assert link["phase_label"] == "PH1 — Drilling"
+
+        # The same criteria twice is a conflict; deletion then re-creation is not.
+        # The signature is the exact criteria set: the same two codes with a
+        # *narrower* set is a different rule (and is what the duplicate above would
+        # be if the phase were dropped). Repeating the identical set is the conflict.
+        different = good(
+            client.post(
+                OPS + "/code-links",
+                headers=headers,
+                json={"operation_code_id": codes["operation"]["id"], "activity_code_id": codes["activity"]["id"]},
+            )
+        )
+        duplicate = client.post(
+            OPS + "/code-links",
+            headers=headers,
+            json={"operation_code_id": codes["operation"]["id"], "activity_code_id": codes["activity"]["id"]},
+        )
+        assert duplicate.status_code == 409
+        good(client.post(OPS + "/code-links/bulk-delete", headers=headers, json={"ids": [different["id"]]}))
+        good(client.post(OPS + "/code-links/bulk-permanent-delete", headers=headers, json={"ids": [different["id"]]}))
+
+        listed = good(client.get(OPS + "/code-links", headers=headers))
+        assert [row["id"] for row in listed] == [link["id"]]
+
+        # A code inside a link cannot leave the library until the link is gone.
+        blocked = client.post(
+            OPS + "/masters/operation-codes/bulk-delete", headers=headers, json={"ids": [codes["operation"]["id"]]}
+        )
+        assert blocked.status_code == 409 and "code link 'Drilling + rotating'" in blocked.json()["detail"]
+        good(client.post(OPS + "/code-links/bulk-delete", headers=headers, json={"ids": [link["id"]]}))
+        good(client.post(OPS + "/masters/operation-codes/bulk-delete", headers=headers, json={"ids": [codes["operation"]["id"]]}))
+
+        # A deleted link whose code is itself deleted cannot be restored blind.
+        refused = client.post(OPS + "/code-links/bulk-restore", headers=headers, json={"ids": [link["id"]]})
+        assert refused.status_code == 409 and "Restore the code first" in refused.json()["detail"]
+        good(client.post(OPS + "/masters/operation-codes/bulk-restore", headers=headers, json={"ids": [codes["operation"]["id"]]}))
+        restored = good(client.post(OPS + "/code-links/bulk-restore", headers=headers, json={"ids": [link["id"]]}))
+        assert restored["affected_count"] == 1
+
+        # Permanent deletion is only ever offered from Deleted entries.
+        live = client.post(OPS + "/code-links/bulk-permanent-delete", headers=headers, json={"ids": [link["id"]]})
+        assert live.status_code == 409 and "Delete a code link before" in live.json()["detail"]
+        good(client.post(OPS + "/code-links/bulk-delete", headers=headers, json={"ids": [link["id"]]}))
+        purged = good(client.post(OPS + "/code-links/bulk-permanent-delete", headers=headers, json={"ids": [link["id"]]}))
+        assert purged["affected_count"] == 1
+        assert good(client.get(OPS + "/code-links", headers=headers, params={"deleted": True})) == []
+        with SessionLocal() as db:
+            entry = db.scalars(
+                select(AuditLog).where(AuditLog.action == "permanent_delete", AuditLog.entity_type == "ops_code_link")
+            ).all()
+            assert entry
+
+
+def test_batch_code_links_are_atomic_across_duplicates_and_bad_rows():
+    with TestClient(app) as client:
+        headers = login(client)
+        codes = _codes(client, headers)
+        url = OPS + "/code-links/batch"
+        base = {"operation_code_id": codes["operation"]["id"]}
+
+        # A duplicate inside the batch rolls the whole batch back.
+        refused = client.post(
+            url,
+            headers=headers,
+            json={
+                "items": [
+                    {**base, "activity_code_id": codes["activity"]["id"]},
+                    {**base, "activity_code_id": codes["activity"]["id"]},
+                ]
+            },
+        )
+        assert refused.status_code == 409 and "Link 2" in refused.json()["detail"]
+        assert good(client.get(OPS + "/code-links", headers=headers)) == []
+
+        # Same for a row that cannot be formed at all: nothing half-saved.
+        refused = client.post(
+            url,
+            headers=headers,
+            json={
+                "items": [
+                    {**base, "activity_code_id": codes["activity"]["id"]},
+                    {"rule_name": "only one criterion", **base},
+                ]
+            },
+        )
+        assert refused.status_code == 422
+        assert good(client.get(OPS + "/code-links", headers=headers)) == []
+
+        created = good(
+            client.post(
+                url,
+                headers=headers,
+                json={
+                    "items": [
+                        {
+                            "rule_name": "Drilling",
+                            "operation_code_id": codes["operation"]["id"],
+                            "activity_code_id": codes["activity"]["id"],
+                        },
+                        {
+                            "rule_name": "NPT",
+                            "npt_code_id": codes["npt"]["id"],
+                            "cause_id": codes["cause"]["id"],
+                            "default_classification": "NPT",
+                            "default_allocation": "NPT",
+                        },
+                    ]
+                },
+            )
+        )
+        assert created["created_count"] == 2
+        assert len(good(client.get(OPS + "/code-links", headers=headers))) == 2
+
+
+def test_correlations_accept_companion_criteria_and_free_text_agency_tokens():
+    with TestClient(app) as client:
+        headers = login(client)
+        codes = _codes(client, headers)
+
+        # Agency names are operator data: a printed token need not be in the catalogue.
+        agency = good(
+            client.post(
+                OPS + "/correlations",
+                headers=headers,
+                json={
+                    "kind": "agency",
+                    "source_code": "Halliburton",
+                    "target_id": codes["agency"]["id"],
+                    "note": "Printed operator spelling",
+                },
+            )
+        )
+        assert agency["source_family"] == "Source agency"
+        assert agency["source_code"] == "HALLIBURTON"
+
+        # Companion criteria pin the same token to a second workspace code.
+        companion = good(
+            client.post(
+                OPS + "/correlations",
+                headers=headers,
+                json={
+                    "kind": "npt",
+                    "source_family": "Trouble / NPT",
+                    "source_code": "TP02",
+                    "target_id": codes["npt"]["id"],
+                    "target_cause_id": codes["cause"]["id"],
+                    "target_agency_id": codes["agency"]["id"],
+                    "target_classification": "NPT",
+                    "target_allocation": "NPT",
+                },
+            )
+        )
+        assert companion["target_npt_code_id"] == codes["npt"]["id"]
+        assert companion["target_cause_id"] == codes["cause"]["id"]
+        assert "Cause" in companion["extra_criteria_summary"]
+
+        # The classification matrix applies to correlations as well.
+        bad = client.post(
+            OPS + "/correlations",
+            headers=headers,
+            json={
+                "kind": "operation",
+                "source_family": "OpenWells operation code",
+                "source_code": "01-A",
+                "target_id": codes["operation"]["id"],
+                "target_classification": "NPT",
+                "target_allocation": "PT",
+            },
+        )
+        assert bad.status_code == 422 and "NPT classification" in bad.json()["detail"]
+
+        # A correlated code cannot be soft-deleted; the refusal names the rule.
+        blocked = client.post(
+            OPS + "/masters/agencies/bulk-delete", headers=headers, json={"ids": [codes["agency"]["id"]]}
+        )
+        assert blocked.status_code == 409 and "HALLIBURTON" in blocked.json()["detail"]
+
+        # Purge is refused while even a deleted correlation still names the code.
+        good(client.post(OPS + "/correlations/bulk-delete", headers=headers, json={"ids": [agency["id"]]}))
+        # The companion row still names the agency: correlation rules are blocked too.
+        for rule in good(client.get(OPS + "/correlations", headers=headers)):
+            good(client.post(OPS + "/correlations/bulk-delete", headers=headers, json={"ids": [rule["id"]]}))
+        good(client.post(OPS + "/masters/agencies/bulk-delete", headers=headers, json={"ids": [codes["agency"]["id"]]}))
+        purge = client.post(
+            OPS + "/masters/agencies/bulk-permanent-delete", headers=headers, json={"ids": [codes["agency"]["id"]]}
+        )
+        assert purge.status_code == 409 and "deleted correlation" in purge.json()["detail"]
+
+        # Removing the rule, then purging, is allowed and audited.
+        good(client.post(OPS + "/correlations/bulk-permanent-delete", headers=headers, json={"ids": [agency["id"]]}))
+        good(client.post(OPS + "/correlations/bulk-delete", headers=headers, json={"ids": [companion["id"]]}))
+        good(client.post(OPS + "/correlations/bulk-permanent-delete", headers=headers, json={"ids": [companion["id"]]}))
+        purged = good(
+            client.post(OPS + "/masters/agencies/bulk-permanent-delete", headers=headers, json={"ids": [codes["agency"]["id"]]})
+        )
+        assert purged["affected_count"] == 1
+
+
+def test_batch_correlations_are_atomic_and_reference_counts_are_live():
+    with TestClient(app) as client:
+        headers = login(client)
+        codes = _codes(client, headers)
+        url = OPS + "/correlations/batch"
+
+        refused = client.post(
+            url,
+            headers=headers,
+            json={
+                "items": [
+                    {
+                        "kind": "operation",
+                        "source_family": "OpenWells operation code",
+                        "source_code": "19-D",
+                        "target_id": codes["operation"]["id"],
+                    },
+                    {
+                        "kind": "operation",
+                        "source_family": "OpenWells operation code",
+                        "source_code": "19-D",
+                        "target_id": codes["operation"]["id"],
+                    },
+                ]
+            },
+        )
+        assert refused.status_code == 409 and "Row 2" in refused.json()["detail"]
+        assert good(client.get(OPS + "/correlations", headers=headers)) == []
+
+        created = good(
+            client.post(
+                url,
+                headers=headers,
+                json={
+                    "items": [
+                        {
+                            "kind": "operation",
+                            "source_family": "OpenWells operation code",
+                            "source_code": "19-D",
+                            "target_id": codes["operation"]["id"],
+                        },
+                        {
+                            "kind": "activity",
+                            "source_family": "Activity",
+                            "source_code": "06",
+                            "target_id": codes["activity"]["id"],
+                        },
+                    ]
+                },
+            )
+        )
+        assert created["created_count"] == 2
+
+        # The reference payload counts live rules per code, so the library can link to them.
+        reference = good(client.get(OPS + "/correlations/reference", headers=headers))
+        counted = {row["code"]: row["correlation_count"] for row in reference["library"]["operation"]}
+        assert counted["DRL"] == 1
+
+
+def test_completion_reports_never_report_a_rate_of_penetration():
+    """ROP is a drilling measurement; a completion must say N/A, never inherit one."""
+    with TestClient(app) as client:
+        headers = login(client)
+        codes = _codes(client, headers)
+        from app.models.rig_well import Well
+        from test_rig_well import create_rig, create_well
+
+        rig = create_rig(client, headers)
+        well = create_well(client, headers, rig["id"], "COMPLETION-WELL-01")
+        with SessionLocal() as db:
+            row = db.get(Well, well["id"])
+            row.config_status = "configured"
+            row.completion_config_status = "configured"
+            db.commit()
+        report = good(
+            client.post(
+                OPS + "/reports",
+                headers=headers,
+                json={"well_id": well["id"], "scope": "completion", "report_date": DAY, "report_type": "DCR"},
+            )
+        )
+        blocks = [
+            {
+                "sequence_no": 1,
+                "started_at": f"{DAY}T00:00:00+01:00",
+                "ended_at": f"{DAY}T12:00:00+01:00",
+                "duration_minutes": 720,
+                "classification": "Planned",
+                "allocation": "PT",
+                "is_productive": True,
+                "narrative": "Run completion string.",
+                "operation_code_id": codes["operation"]["id"],
+                "activity_code_id": codes["activity"]["id"],
+                "footage_m": "120.000",
+                "rotating_hours": "6.000",
+                "depth_from_m": "2000.000",
+                "depth_to_m": "2120.000",
+                "review_state": "accepted",
+            }
+        ]
+        saved = good(
+            client.put(
+                OPS + f"/reports/{report['id']}",
+                headers=headers,
+                json={"report": {}, "blocks": blocks, "confirm_review": True},
+            )
+        )
+        assert saved["blocks"][0]["rop_m_per_hr"] is None
+
+        brief = good(client.get(OPS + f"/reports/{report['id']}/brief", headers=headers))
+        assert "ROP: N/A (completion operation)" in brief["summary"]
+        assert brief["depth_progress"]["rop_m_per_hr"] is None
+        # The summary is keyed by `well_id`; the Summary page accepts `?well=` and
+        # falls back to `well_id`, so both names must reach the same resource.
+        overall = good(client.get(OPS + "/summary", headers=headers, params={"well_id": well["id"]}))
+        assert overall["kpis"]["avg_rop_m_per_hr"] in (None, "N/A")
+        for activity in overall["activities"]:
+            assert activity["rop_m_per_hr"] in (None, "N/A")
+        dashboard = good(client.get(OPS + "/dashboard", headers=headers, params={"well_id": well["id"]}))
+        assert dashboard["kpis"]["avg_rop"] in (None, "N/A")
+
+
+def test_completion_scope_is_recognised_from_the_summary_and_never_carries_a_rate():
+    """The AI surfaces must reach the same N/A conclusion as the pages.
+
+    ``ops_ai`` decides from the summary document itself, because the assistant's
+    AI grounding builds its context from summaries without any scope argument.
+    A completion-only summary must therefore be recognised on its own, and the
+    blended context block must build without raising (a NameError there used to
+    be swallowed by the assistant's generic enrichment handler and surface as
+    "AI communication error").
+    """
+    from app.services.operations import ops_ai
+
+    completion_only = {"daily_rollup": [{"scope": "completion"}, {"scope": "completion"}], "kpis": {}}
+    assert ops_ai._is_completion_only(completion_only) is True
+    assert ops_ai._is_completion_only({"scope_label": "Completion", "daily_rollup": []}) is True
+    assert ops_ai._is_completion_only({"scopes": ["completion"]}) is True
+    # Mixed or drilling work keeps a real rate, with or without an explicit filter.
+    assert ops_ai._is_completion_only({"daily_rollup": [{"scope": "drilling"}, {"scope": "completion"}]}) is False
+    assert ops_ai._is_completion_only({"scopes": ["drilling"]}) is False
+    assert ops_ai._is_completion_only({}) is False
+    assert ops_ai._is_completion_only(completion_only, "drilling") is False
+    assert ops_ai._is_completion_only({}, "completion") is True
+    # The formatter the assistant uses for a rate renders N/A, never a blank.
+    assert ops_ai._fmt_rop(None, " m/h", completion=True) == "N/A"
+    assert ops_ai._fmt_rop(12.5, " m/h", completion=True) == "N/A"
+    assert ops_ai._fmt_rop(12.5, " m/h") == "12.5 m/h"
+
+    # A real workspace summary reaches the same verdict, and the context block
+    # that grounds the offline AI builds for it.
+    with TestClient(app) as client:
+        headers = login(client)
+        codes = _codes(client, headers)
+        from app.models.rig_well import Well
+        from test_rig_well import create_rig, create_well
+
+        rig = create_rig(client, headers)
+        well = create_well(client, headers, rig["id"], "COMPLETION-AI-01")
+        with SessionLocal() as db:
+            row = db.get(Well, well["id"])
+            row.config_status = "configured"
+            row.completion_config_status = "configured"
+            db.commit()
+        report = good(
+            client.post(
+                OPS + "/reports",
+                headers=headers,
+                json={"well_id": well["id"], "scope": "completion", "report_date": DAY, "report_type": "DCR"},
+            )
+        )
+        good(
+            client.put(
+                OPS + f"/reports/{report['id']}",
+                headers=headers,
+                json={
+                    "report": {},
+                    "blocks": [
+                        {
+                            "sequence_no": 1,
+                            "started_at": f"{DAY}T00:00:00+01:00",
+                            "ended_at": f"{DAY}T12:00:00+01:00",
+                            "duration_minutes": 720,
+                            "classification": "Planned",
+                            "allocation": "PT",
+                            "is_productive": True,
+                            "narrative": "Run completion string.",
+                            "operation_code_id": codes["operation"]["id"],
+                            "activity_code_id": codes["activity"]["id"],
+                            "footage_m": "120.000",
+                            "rotating_hours": "6.000",
+                        }
+                    ],
+                    "confirm_review": True,
+                },
+            )
+        )
+        summary = good(client.get(OPS + "/summary", headers=headers, params={"well_id": well["id"]}))
+        assert ops_ai._is_completion_only(summary) is True
+        # The grounding block the offline AI reads is built from the same summary
+        # and states N/A, so the model is never handed a fabricated rate.
+        from app.models import User
+
+        with SessionLocal() as db:
+            user = db.scalar(select(User).where(User.email == "owner@example.com"))
+            org_id = user.organization_id
+            context = ops_ai.build_ops_context_block(
+                db, org_id, "How is COMPLETION-AI-01 completion progress?", {"ops-report:read", "ops-analytics:read"}
+            )
+        assert isinstance(context, str) and context
+        assert "COMPLETION-AI-01" in context
+        assert "AvgROP=N/A" in context
+        assert "avg_ROP=" in context
+
+
+def test_guide_explains_correlations_and_the_deletion_rule():
+    with TestClient(app) as client:
+        headers = login(client)
+        _codes(client, headers)
+        answer = good(
+            client.post("/api/v1/assistant/ask", headers=headers, json={"question": "How do code correlations work?"})
+        )
+        text = (answer.get("answer") or "") + " " + " ".join(answer.get("steps") or [])
+        assert "correlation" in text.lower()
+        assert "/operations/library?tab=correlations" in json_dumps(answer)
+        purge = good(
+            client.post(
+                "/api/v1/assistant/ask",
+                headers=headers,
+                json={"question": "How do I permanently delete a code that is still linked?"},
+            )
+        )
+        purge_text = (purge.get("answer") or "") + " " + " ".join(purge.get("steps") or [])
+        assert "delete permanently" in purge_text.lower() or "permanently" in purge_text.lower()
+
+
+def json_dumps(value) -> str:
+    import json
+
+    return json.dumps(value, default=str)

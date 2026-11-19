@@ -53,22 +53,36 @@ const permissions = [
 const printed = {
   kinds: ['operation', 'activity', 'npt', 'cause', 'phase', 'agency'],
   printed: [
-    { family: 'OpenWells operation code', code: '19-D', description: 'Stuck', classification: 'NPT' },
-    { family: 'Activity', code: '06', description: 'Wiper trip and reaming', classification: 'Planned' },
+    { family: 'OpenWells operation code', code: '19-D', name: 'Stuck', description: 'Fishing', classification: 'NPT' },
+    { family: 'Activity', code: '06', name: 'Wiper trip and reaming', description: 'Tripping', classification: 'Planned' },
+    { family: 'Trouble / NPT', code: 'TP02', name: 'Stuck pipe', classification: 'NPT' },
   ],
   library: {
-    operation: [{ id: 'op-1', code: 'DRL', name: 'Drilling' }],
-    activity: [{ id: 'ac-1', code: 'ROT', name: 'Rotating' }],
-    npt: [{ id: 'npt-1', code: 'PUMP', name: 'Pump failure' }],
-    cause: [{ id: 'cause-1', code: 'EQP', name: 'Equipment failure' }],
-    phase: [],
-    agency: [{ id: 'ag-1', code: 'RIG', name: 'Rig contractor' }],
+    operation: [{ id: 'op-1', code: 'DRL', name: 'Drilling', correlation_count: 1 }],
+    activity: [{ id: 'ac-1', code: 'ROT', name: 'Rotating', correlation_count: 0 }],
+    npt: [{ id: 'npt-1', code: 'PUMP', name: 'Pump failure', correlation_count: 0 }],
+    cause: [{ id: 'cause-1', code: 'EQP', name: 'Equipment failure', correlation_count: 0 }],
+    phase: [{ id: 'ph-1', code: 'DRILL', name: 'Drilling', correlation_count: 0 }],
+    agency: [{ id: 'ag-1', code: 'RIG', name: 'Rig contractor', correlation_count: 0 }],
+    mark: [{ id: 'mk-1', code: 'S', name: 'Stuck', correlation_count: 0 }],
   },
 }
 const correlation = {
   id: 'corr-1', kind: 'operation', source_family: 'OpenWells operation code', source_code: '19-D',
   source_label: 'Stuck', target_label: 'DRL — Drilling', target_id: 'op-1', note: 'Fishing picked as stuck',
+  extra_criteria_summary: 'Class: NPT · Cause: EQP', scope: '', target_classification: 'NPT', target_allocation: 'NPT',
   is_active: true, is_deleted: false, created_by: 'owner', updated_by: 'owner', created_at: null, updated_at: null,
+}
+const codeLink = {
+  id: 'link-1', rule_name: 'Drilling + rotating', scope: '', default_classification: 'Planned', default_allocation: 'PT',
+  phase_code_id: 'ph-1', phase_label: 'DRILL — Drilling',
+  operation_code_id: 'op-1', operation_label: 'DRL — Drilling',
+  activity_code_id: 'ac-1', activity_label: 'ROT — Rotating',
+  npt_code_id: 'npt-1', npt_label: 'PUMP — Pump failure',
+  cause_id: 'cause-1', cause_code: 'EQP', cause_label: 'EQP — Equipment failure',
+  agency_id: 'ag-1', agency_name: 'Rig contractor', agency_label: 'RIG — Rig contractor',
+  mark_rule_id: null, mark_label: '', criteria_count: 4, summary_label: 'Operation: DRL (Drilling) -> Activity: ROT (Rotating)',
+  note: '', is_active: true, is_deleted: false, created_by: 'owner', updated_by: 'owner', created_at: null, updated_at: null,
 }
 const scopeRef = {
   rigs: [{ id: 'rig-1', rig_code: 'RIG-01', rig_name: 'Rig 01', well_count: 1 }],
@@ -128,6 +142,13 @@ globalThis.fetch = async (path, init) => {
       classification_rules: { Planned: ['operation_code_id', 'activity_code_id'], NPT: ['operation_code_id', 'activity_code_id', 'npt_code_id', 'cause_code', 'agency'], UPA: ['operation_code_id', 'activity_code_id', 'cause_code', 'agency'] },
     })
   }
+  if (url.includes('/operations/code-links')) {
+    if (init?.method === 'POST') return Response.json({ affected_count: 1, created_count: 1, items: [codeLink] })
+    return Response.json(url.includes('deleted=true') ? [] : [codeLink])
+  }
+  if (url.includes('/operations/masters/agencies')) {
+    return Response.json([{ id: 'ag-1', agency_code: 'RIG', agency_name: 'Rig contractor', category: 'other', is_deleted: false, correlation_count: 1 }])
+  }
   if (url.includes('/operations/masters/')) return Response.json([])
   if (url.includes('/operations/scope-reference')) return Response.json(scopeRef)
   if (url.includes('/operations/analytics/time-depth')) {
@@ -173,7 +194,45 @@ assert.ok(
 assert.ok(library.text().includes('DRL — Drilling'), 'the workspace code should be listed beside it')
 assert.ok(library.text().includes('Fishing picked as stuck'), 'the correlation note should be visible')
 assert.ok(library.text().includes('No correlation leaves the field empty') || library.text().includes('pre-selects a dropdown only when a correlation exists'), 'the rule should be stated on the tab')
+// Table view is the default; the schematic is opt-in and must not replace the list.
+assert.ok(
+  [...document.querySelectorAll('[role="group"] button')].some((el) => (el.textContent ?? '').includes('Table view')),
+  'the view toggle should offer Table view',
+)
+assert.ok(document.body.textContent.includes('Multi-criteria workspace code links'), 'the second rule table should be shown')
 await act(async () => library.root.unmount())
+
+// 1b. Tree schematic: the same rules as a hierarchy, with coverage and unlinked codes.
+const tree = await mount(<OperationsLibrary />, '/operations/library?tab=correlations')
+await settle()
+const treeToggle = [...document.querySelectorAll('[role="group"] button')].find((el) =>
+  (el.textContent ?? '').includes('Tree schematic'),
+)
+assert.ok(treeToggle, 'a Tree schematic toggle should be offered')
+await act(async () => {
+  treeToggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+})
+await settle()
+const treeText = document.body.textContent ?? ''
+assert.ok(treeText.includes('Operational hierarchy'), 'the schematic should name the operational hierarchy')
+assert.ok(treeText.includes('Source mapping'), 'the schematic should show the printed-source mapping')
+assert.ok(treeText.includes('Library coverage'), 'the schematic should report library coverage')
+assert.ok(treeText.includes('ROT — Rotating'), `the linked activity should appear in the hierarchy; DOM held: ${treeText.slice(0, 300)}`)
+await act(async () => tree.root.unmount())
+
+// 1c. Seven workspace libraries, including Agency codes, plus a clickable rule badge.
+const agencyTab = await mount(<OperationsLibrary />, '/operations/library?tab=agencies')
+await settle()
+const tabsText = document.body.textContent ?? ''
+for (const label of ['Operation codes', 'Activity codes', 'NPT codes', 'Cause codes', 'Phase codes', 'Agency codes', 'Source mark rules']) {
+  assert.ok(tabsText.includes(label), `the ${label} tab should exist`)
+}
+assert.ok(
+  [...document.querySelectorAll('.ag-cell')].some((el) => (el.textContent ?? '').includes('1 rule')),
+  `a code used by a rule should carry its count; DOM held: ${[...document.querySelectorAll('.ag-cell')].map((e) => e.textContent).slice(0, 10).join(' | ')}`,
+)
+assert.ok(!/Delete permanently/.test(tabsText), 'a live code must never offer a permanent delete')
+await act(async () => agencyTab.root.unmount())
 
 // 2. Depth mode: the MD axis steps by 300 and the panel is taller than the old 350.
 const analytics = await mount(<OperationsAnalytics />)

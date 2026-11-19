@@ -307,7 +307,16 @@ export default function Assistant() {
   }, [memory, search, onlyWorkspace])
 
   const workspaceCount = memory.filter(entry => !entry.is_system).length
-  const quickPrompts = overview?.quick_prompts ?? []
+  const overviewPrompts = overview?.quick_prompts ?? []
+  // On a Well Operations page the two rules that shape that page's data are the
+  // most useful first questions; everywhere else the workspace prompts stand.
+  const routePrompts = location.pathname.startsWith('/operations')
+    ? [
+        'How do code correlations and multi-criteria code links work?',
+        'Why is rate of penetration shown as N/A on a completion?',
+      ]
+    : []
+  const quickPrompts = [...routePrompts, ...overviewPrompts]
 
   return <>
     <PageHeading

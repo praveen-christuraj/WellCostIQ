@@ -242,26 +242,35 @@ class OpsCodeCorrelation(Base):
     source_family: Mapped[str] = mapped_column(String(60), default="", nullable=False)
     source_code: Mapped[str] = mapped_column(String(100), nullable=False)
     source_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
-    # Exactly one target column is set, decided by ``kind``.
+    # Primary target is set according to ``kind``; optional companion columns let
+    # one correlation pre-select additional workspace criteria in the same pass.
+    # All foreign keys use RESTRICT so a correlated code can never be silently deleted.
     target_operation_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_operation_codes.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("ops_operation_codes.id", ondelete="RESTRICT"), nullable=True
     )
     target_activity_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_activity_codes.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("ops_activity_codes.id", ondelete="RESTRICT"), nullable=True
     )
     target_npt_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_npt_codes.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("ops_npt_codes.id", ondelete="RESTRICT"), nullable=True
     )
     target_cause_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_causes.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("ops_causes.id", ondelete="RESTRICT"), nullable=True
     )
     target_phase_code_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_phase_codes.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("ops_phase_codes.id", ondelete="RESTRICT"), nullable=True
     )
     target_agency_id: Mapped[str | None] = mapped_column(
-        ForeignKey("ops_agencies.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("ops_agencies.id", ondelete="RESTRICT"), nullable=True
     )
+    target_mark_rule_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_mark_rules.id", ondelete="RESTRICT"), nullable=True
+    )
+    scope: Mapped[str] = mapped_column(String(20), default="", server_default="", nullable=False)
+    target_classification: Mapped[str] = mapped_column(String(12), default="", server_default="", nullable=False)
+    target_allocation: Mapped[str] = mapped_column(String(8), default="", server_default="", nullable=False)
     target_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    extra_criteria_summary: Mapped[str] = mapped_column(String(300), default="", server_default="", nullable=False)
     note: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -270,6 +279,76 @@ class OpsCodeCorrelation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
     created_by: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     updated_by: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+
+    @property
+    def target_id(self) -> str | None:
+        col = {
+            "operation": "target_operation_code_id",
+            "activity": "target_activity_code_id",
+            "npt": "target_npt_code_id",
+            "cause": "target_cause_id",
+            "phase": "target_phase_code_id",
+            "agency": "target_agency_id",
+            "mark": "target_mark_rule_id",
+        }.get(self.kind or "")
+        return getattr(self, col, None) if col else None
+
+
+class OpsCodeLink(Base):
+    """Multi-criteria relationship between two or more workspace Code Library records.
+
+    Stores typed, column-wise links across Phase, Operation, Activity, NPT, Cause,
+    Agency, Source Mark, Scope, Classification, and Allocation. Feeds schematic tree
+    visualisation, extraction co-selection, report block review hints, and code
+    deletion guards (linked codes cannot be deleted until unlinked).
+    """
+
+    __tablename__ = "ops_code_links"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "rule_signature", name="uq_ops_code_links_org_signature"),
+        Index("ix_ops_code_links_org_deleted", "organization_id", "is_deleted"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    rule_name: Mapped[str] = mapped_column(String(160), default="", server_default="", nullable=False)
+    rule_signature: Mapped[str] = mapped_column(String(320), nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), default="", server_default="", nullable=False)
+    default_classification: Mapped[str] = mapped_column(String(12), default="", server_default="", nullable=False)
+    default_allocation: Mapped[str] = mapped_column(String(8), default="", server_default="", nullable=False)
+    phase_code_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_phase_codes.id", ondelete="RESTRICT"), nullable=True
+    )
+    operation_code_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_operation_codes.id", ondelete="RESTRICT"), nullable=True
+    )
+    activity_code_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_activity_codes.id", ondelete="RESTRICT"), nullable=True
+    )
+    npt_code_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_npt_codes.id", ondelete="RESTRICT"), nullable=True
+    )
+    cause_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_causes.id", ondelete="RESTRICT"), nullable=True
+    )
+    agency_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_agencies.id", ondelete="RESTRICT"), nullable=True
+    )
+    mark_rule_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_mark_rules.id", ondelete="RESTRICT"), nullable=True
+    )
+    criteria_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    summary_label: Mapped[str] = mapped_column(String(400), default="", server_default="", nullable=False)
+    note: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
 
 
 class OpsMarkRule(OpsCodeRecord):

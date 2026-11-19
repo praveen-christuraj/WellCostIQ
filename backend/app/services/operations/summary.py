@@ -250,7 +250,7 @@ def well_operation_summary(
         alloc_min["SP"] += r_sp
 
         r_foot, r_rot = penetration(r, r_blocks)
-        r_rop = compute_rop(r_foot, r_rot)
+        r_rop = compute_rop(r_foot, r_rot, scope=r.scope)
         day_progress = r_foot
         if day_progress is None and r.progress_m is not None and r.progress_m >= 0:
             day_progress = r.progress_m
@@ -264,13 +264,14 @@ def well_operation_summary(
         if day_progress is not None and day_progress > 0:
             total_footage += day_progress
             has_footage = True
-        if r_rot is not None and r_rot > 0:
-            total_rot_hours += r_rot
-        elif r.rotating_hours is not None and r.rotating_hours > 0:
-            total_rot_hours += r.rotating_hours
-        if r_foot is not None and r_rot is not None and r_rot > 0:
-            rop_footage += r_foot
-            rop_rot_hours += r_rot
+        if r.scope != "completion":
+            if r_rot is not None and r_rot > 0:
+                total_rot_hours += r_rot
+            elif r.rotating_hours is not None and r.rotating_hours > 0:
+                total_rot_hours += r.rotating_hours
+            if r_foot is not None and r_rot is not None and r_rot > 0:
+                rop_footage += r_foot
+                rop_rot_hours += r_rot
 
         metric = metrics_by_key.get((r.scope, r.report_date))
         day_lag = _num(metric.lag_days) if metric and metric.lag_days is not None else None
@@ -361,7 +362,11 @@ def well_operation_summary(
                     else None
                 )
             )
-            b_rop = b.rop_m_per_hr if b.rop_m_per_hr is not None else compute_rop(b_foot, b.rotating_hours)
+            b_rop = (
+                None
+                if r.scope == "completion"
+                else (b.rop_m_per_hr if b.rop_m_per_hr is not None else compute_rop(b_foot, b.rotating_hours))
+            )
             npt_h = dur_h if (b.classification == "NPT" or b.allocation == "NPT") else 0.0
             pt_h = 0.0 if npt_h > 0 else dur_h
 

@@ -692,6 +692,16 @@ export default function OperationsReportDetail({
                       {prefillBusy ? 'Refining…' : 'AI Prefill Gaps'}
                     </Button>
                   )}
+                  {can('ops-master:read') && (
+                    <Button
+                      component={RouterLink}
+                      to="/operations/library?tab=correlations"
+                      variant="outlined"
+                      size="small"
+                    >
+                      Code correlations
+                    </Button>
+                  )}
                   <Button
                     variant="outlined"
                     size="small"
@@ -727,6 +737,7 @@ export default function OperationsReportDetail({
                 label={`Productive ${(blocks.reduce((n, b) => n + (b.is_productive ? b.duration_minutes : 0), 0) / 60).toFixed(3)} h · Nonproductive ${(blocks.reduce((n, b) => n + (b.is_productive ? 0 : b.duration_minutes), 0) / 60).toFixed(3)} h`}
               />
               <Chip size="small" label={`Period balance: ${gap} min`} />
+              {report.scope === 'completion' && <Chip size="small" variant="outlined" label="ROP: N/A" />}
               {(report.depth_end_m || report.tvd_m) && (
                 <Chip
                   size="small"
@@ -1373,7 +1384,32 @@ export default function OperationsReportDetail({
                 label="Operation code"
                 value={editor.operation_code_id ?? ''}
                 disabled={!editable}
-                onChange={(e) => setEditor({ ...editor, operation_code_id: e.target.value || null })}
+                onChange={(e) => {
+                  const nextOp = e.target.value || null
+                  let next = { ...editor, operation_code_id: nextOp }
+                  if (nextOp && ref?.code_links?.length) {
+                    const hits = ref.code_links.filter(
+                      (l) => l.is_active && (!l.scope || l.scope === report.scope) && l.operation_code_id === nextOp,
+                    )
+                    const unique = <K extends keyof (typeof hits)[number]>(k: K) => {
+                      const vals = Array.from(new Set(hits.map((h) => h[k]).filter(Boolean)))
+                      return vals.length === 1 ? (vals[0] as string) : null
+                    }
+                    if (!next.activity_code_id) next = { ...next, activity_code_id: unique('activity_code_id') }
+                    if (!next.phase_raw) {
+                      const pl = unique('phase_label')
+                      if (pl) next = { ...next, phase_raw: pl.split(' — ')[0].trim() }
+                    }
+                    if (next.classification === 'NPT' && !next.npt_code_id) {
+                      next = { ...next, npt_code_id: unique('npt_code_id') }
+                    }
+                    if ((next.classification === 'NPT' || next.classification === 'UPA') && !next.cause_code) {
+                      const cc = unique('cause_code')
+                      if (cc) next = { ...next, cause_code: cc }
+                    }
+                  }
+                  setEditor(next)
+                }}
               >
                 <MenuItem value="">Not assigned</MenuItem>
                 {ref?.operation_codes.map((c) => (
@@ -1387,7 +1423,22 @@ export default function OperationsReportDetail({
                 label="Activity code"
                 value={editor.activity_code_id ?? ''}
                 disabled={!editable}
-                onChange={(e) => setEditor({ ...editor, activity_code_id: e.target.value || null })}
+                onChange={(e) => {
+                  const nextAct = e.target.value || null
+                  let next = { ...editor, activity_code_id: nextAct }
+                  if (nextAct && ref?.code_links?.length) {
+                    const hits = ref.code_links.filter(
+                      (l) =>
+                        l.is_active &&
+                        (!l.scope || l.scope === report.scope) &&
+                        l.activity_code_id === nextAct &&
+                        (!next.operation_code_id || !l.operation_code_id || l.operation_code_id === next.operation_code_id),
+                    )
+                    const ops = Array.from(new Set(hits.map((h) => h.operation_code_id).filter(Boolean)))
+                    if (!next.operation_code_id && ops.length === 1) next = { ...next, operation_code_id: ops[0] as string }
+                  }
+                  setEditor(next)
+                }}
               >
                 <MenuItem value="">Not assigned</MenuItem>
                 {ref?.activity_codes.map((c) => (
@@ -1401,7 +1452,27 @@ export default function OperationsReportDetail({
                 label="NPT code"
                 disabled={!editable}
                 value={editor.npt_code_id ?? ''}
-                onChange={(e) => setEditor({ ...editor, npt_code_id: e.target.value || null })}
+                onChange={(e) => {
+                  const nextNpt = e.target.value || null
+                  let next = { ...editor, npt_code_id: nextNpt }
+                  if (nextNpt && ref?.code_links?.length) {
+                    const hits = ref.code_links.filter(
+                      (l) => l.is_active && (!l.scope || l.scope === report.scope) && l.npt_code_id === nextNpt,
+                    )
+                    const causes = Array.from(new Set(hits.map((h) => h.cause_code).filter(Boolean)))
+                    if (!next.cause_code && causes.length === 1) next = { ...next, cause_code: causes[0] }
+                    const agencies = Array.from(new Set(hits.map((h) => h.agency_id).filter(Boolean)))
+                    if (!next.vendor_id && !next.agency_id && agencies.length === 1) {
+                      const ag = hits.find((h) => h.agency_id === agencies[0])
+                      next = {
+                        ...next,
+                        agency_id: agencies[0] as string,
+                        responsible_party: next.responsible_party || ag?.agency_name || '',
+                      }
+                    }
+                  }
+                  setEditor(next)
+                }}
               >
                 <MenuItem value="">Not assigned</MenuItem>
                 {ref?.npt_codes.map((n) => (
@@ -1490,15 +1561,20 @@ export default function OperationsReportDetail({
                   ['rotating_hours', 'Rotating hours (h)'],
                   ['rop_m_per_hr', 'ROP (m/hr)'],
                 ] as const
-              ).map(([k, l]) => (
-                <TextField
-                  key={k}
-                  label={l}
-                  disabled={!editable}
-                  value={editor[k] ?? ''}
-                  onChange={(e) => setEditor({ ...editor, [k]: e.target.value || null })}
-                />
-              ))}
+              ).map(([k, l]) => {
+                const ropNa = k === 'rop_m_per_hr' && report.scope === 'completion'
+                return (
+                  <TextField
+                    key={k}
+                    label={l}
+                    disabled={!editable || ropNa}
+                    value={ropNa ? 'N/A' : (editor[k] ?? '')}
+                    onChange={(e) => {
+                      if (!ropNa) setEditor({ ...editor, [k]: e.target.value || null })
+                    }}
+                  />
+                )
+              })}
               <TextField
                 sx={{ gridColumn: '1 / -1' }}
                 label="NPT / delay reason"

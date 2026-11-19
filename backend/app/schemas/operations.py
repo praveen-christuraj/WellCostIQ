@@ -675,14 +675,38 @@ CORRELATION_KINDS = ("operation", "activity", "npt", "cause", "phase", "agency")
 class OpsCorrelationIn(_Strict):
     kind: Literal["operation", "activity", "npt", "cause", "phase", "agency"]
     source_family: str = Field(default="", max_length=60)
-    source_code: str = Field(min_length=1, max_length=60)
+    source_code: str = Field(min_length=1, max_length=100)
     source_label: str = Field(default="", max_length=200)
-    target_id: str
+    target_id: str = Field(min_length=1, max_length=36)
+    scope: Literal["", "drilling", "completion"] = ""
+    target_classification: Literal["", "Planned", "UPA", "NPT"] = ""
+    target_allocation: Literal["", "PT", "UPA", "NPT", "SP"] = ""
+    target_operation_code_id: str | None = Field(default=None, max_length=36)
+    target_activity_code_id: str | None = Field(default=None, max_length=36)
+    target_npt_code_id: str | None = Field(default=None, max_length=36)
+    target_cause_id: str | None = Field(default=None, max_length=36)
+    target_phase_code_id: str | None = Field(default=None, max_length=36)
+    target_agency_id: str | None = Field(default=None, max_length=36)
+    target_mark_rule_id: str | None = Field(default=None, max_length=36)
     note: str = Field(default="", max_length=500)
 
 
+class OpsCorrelationBatchIn(_Strict):
+    items: list[OpsCorrelationIn] = Field(min_length=1, max_length=200)
+
+
 class OpsCorrelationUpdate(_Strict):
-    target_id: str
+    target_id: str = Field(min_length=1, max_length=36)
+    scope: Literal["", "drilling", "completion"] = ""
+    target_classification: Literal["", "Planned", "UPA", "NPT"] = ""
+    target_allocation: Literal["", "PT", "UPA", "NPT", "SP"] = ""
+    target_operation_code_id: str | None = Field(default=None, max_length=36)
+    target_activity_code_id: str | None = Field(default=None, max_length=36)
+    target_npt_code_id: str | None = Field(default=None, max_length=36)
+    target_cause_id: str | None = Field(default=None, max_length=36)
+    target_phase_code_id: str | None = Field(default=None, max_length=36)
+    target_agency_id: str | None = Field(default=None, max_length=36)
+    target_mark_rule_id: str | None = Field(default=None, max_length=36)
     is_active: bool = True
     note: str = Field(default="", max_length=500)
 
@@ -695,6 +719,17 @@ class OpsCorrelationOut(_Strict):
     source_label: str = ""
     target_label: str = ""
     target_id: str | None = None
+    scope: str = ""
+    target_classification: str = ""
+    target_allocation: str = ""
+    target_operation_code_id: str | None = None
+    target_activity_code_id: str | None = None
+    target_npt_code_id: str | None = None
+    target_cause_id: str | None = None
+    target_phase_code_id: str | None = None
+    target_agency_id: str | None = None
+    target_mark_rule_id: str | None = None
+    extra_criteria_summary: str = ""
     note: str = ""
     is_active: bool = True
     is_deleted: bool = False
@@ -703,6 +738,75 @@ class OpsCorrelationOut(_Strict):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+
+class OpsCorrelationBatchOut(_Strict):
+    created_count: int
+    items: list[OpsCorrelationOut]
+
+
+class OpsCodeLinkIn(_Strict):
+    rule_name: str = Field(default="", max_length=160)
+    scope: Literal["", "drilling", "completion"] = ""
+    default_classification: Literal["", "Planned", "UPA", "NPT"] = ""
+    default_allocation: Literal["", "PT", "UPA", "NPT", "SP"] = ""
+    phase_code_id: str | None = Field(default=None, max_length=36)
+    operation_code_id: str | None = Field(default=None, max_length=36)
+    activity_code_id: str | None = Field(default=None, max_length=36)
+    npt_code_id: str | None = Field(default=None, max_length=36)
+    cause_id: str | None = Field(default=None, max_length=36)
+    agency_id: str | None = Field(default=None, max_length=36)
+    mark_rule_id: str | None = Field(default=None, max_length=36)
+    is_active: bool = True
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("rule_name", "note", mode="before")
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OpsCodeLinkBatchIn(_Strict):
+    items: list[OpsCodeLinkIn] = Field(min_length=1, max_length=200)
+
+
+class OpsCodeLinkOut(_Strict):
+    id: str
+    rule_name: str = ""
+    scope: str = ""
+    default_classification: str = ""
+    default_allocation: str = ""
+    phase_code_id: str | None = None
+    phase_label: str = ""
+    operation_code_id: str | None = None
+    operation_label: str = ""
+    activity_code_id: str | None = None
+    activity_label: str = ""
+    npt_code_id: str | None = None
+    npt_label: str = ""
+    cause_id: str | None = None
+    cause_code: str = ""
+    cause_label: str = ""
+    agency_id: str | None = None
+    agency_name: str = ""
+    agency_label: str = ""
+    mark_rule_id: str | None = None
+    mark_label: str = ""
+    criteria_count: int = 0
+    summary_label: str = ""
+    note: str = ""
+    is_active: bool = True
+    is_deleted: bool = False
+    created_by: str = ""
+    updated_by: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+
+class OpsCodeLinkBatchOut(_Strict):
+    created_count: int
+    items: list[OpsCodeLinkOut]
 
 
 class OpsBulkEdit(OpsIDs):
@@ -850,6 +954,7 @@ class OpsReferenceOut(_Strict):
     npt_codes: list[OpsNptCodeOut]
     causes: list[OpsCauseOut]
     agencies: list[OpsAgencyOut] = []
+    code_links: list[OpsCodeLinkOut] = Field(default_factory=list)
     classification_rules: dict[str, list[str]] = {}
 
 

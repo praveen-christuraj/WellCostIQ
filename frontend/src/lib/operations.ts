@@ -300,6 +300,7 @@ export type OpsReference = OpsScopeReference & {
   }[]
   causes: { id: string; cause_code: string; cause_name: string; sort_order: number }[]
   agencies: { id: string; agency_code: string; agency_name: string; category: string; sort_order: number }[]
+  code_links?: OpsCodeLink[]
   /** Which code fields each classification makes mandatory, in display order. */
   classification_rules: Record<string, string[]>
 }
@@ -338,14 +339,27 @@ export type OpsBulkAssignResult = {
   summary: string
 }
 
+export type OpsCorrelationKind = 'operation' | 'activity' | 'npt' | 'cause' | 'phase' | 'agency'
+
 export type OpsCorrelation = {
   id: string
-  kind: 'operation' | 'activity' | 'npt' | 'cause' | 'phase' | 'agency'
+  kind: OpsCorrelationKind
   source_family: string
   source_code: string
   source_label: string
   target_label: string
   target_id: string | null
+  scope?: string
+  target_classification?: string
+  target_allocation?: string
+  target_operation_code_id?: string | null
+  target_activity_code_id?: string | null
+  target_npt_code_id?: string | null
+  target_cause_id?: string | null
+  target_phase_code_id?: string | null
+  target_agency_id?: string | null
+  target_mark_rule_id?: string | null
+  extra_criteria_summary?: string
   note: string
   is_active: boolean
   is_deleted: boolean
@@ -355,10 +369,111 @@ export type OpsCorrelation = {
   updated_at: string | null
 }
 
+export type OpsCorrelationInput = {
+  kind: OpsCorrelationKind
+  source_family?: string
+  source_code: string
+  source_label?: string
+  target_id: string
+  scope?: '' | 'drilling' | 'completion'
+  target_classification?: '' | 'Planned' | 'UPA' | 'NPT'
+  target_allocation?: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
+  target_operation_code_id?: string | null
+  target_activity_code_id?: string | null
+  target_npt_code_id?: string | null
+  target_cause_id?: string | null
+  target_phase_code_id?: string | null
+  target_agency_id?: string | null
+  target_mark_rule_id?: string | null
+  note?: string
+}
+
+export type OpsCorrelationUpdateInput = {
+  target_id: string
+  scope?: '' | 'drilling' | 'completion'
+  target_classification?: '' | 'Planned' | 'UPA' | 'NPT'
+  target_allocation?: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
+  target_operation_code_id?: string | null
+  target_activity_code_id?: string | null
+  target_npt_code_id?: string | null
+  target_cause_id?: string | null
+  target_phase_code_id?: string | null
+  target_agency_id?: string | null
+  target_mark_rule_id?: string | null
+  is_active?: boolean
+  note?: string
+}
+
+export type OpsCodeLink = {
+  id: string
+  rule_name: string
+  scope: string
+  default_classification: string
+  default_allocation: string
+  phase_code_id: string | null
+  phase_label: string
+  operation_code_id: string | null
+  operation_label: string
+  activity_code_id: string | null
+  activity_label: string
+  npt_code_id: string | null
+  npt_label: string
+  cause_id: string | null
+  cause_code: string
+  cause_label: string
+  agency_id: string | null
+  agency_name: string
+  agency_label: string
+  mark_rule_id: string | null
+  mark_label: string
+  criteria_count: number
+  summary_label: string
+  note: string
+  is_active: boolean
+  is_deleted: boolean
+  created_by: string
+  updated_by: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+export type OpsCodeLinkInput = {
+  rule_name?: string
+  scope?: '' | 'drilling' | 'completion'
+  default_classification?: '' | 'Planned' | 'UPA' | 'NPT'
+  default_allocation?: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
+  phase_code_id?: string | null
+  operation_code_id?: string | null
+  activity_code_id?: string | null
+  npt_code_id?: string | null
+  cause_id?: string | null
+  agency_id?: string | null
+  mark_rule_id?: string | null
+  is_active?: boolean
+  note?: string
+}
+
+export type OpsCorrelationLibraryItem = {
+  id: string
+  code: string
+  name: string
+  correlation_count?: number
+  default_classification?: string
+  default_allocation?: string
+}
+
 export type OpsCorrelationReference = {
   kinds: string[]
-  printed: { family: string; code: string; description: string; classification: string }[]
-  library: Record<string, { id: string; code: string; name: string }[]>
+  printed: {
+    family: string
+    code: string
+    name?: string
+    description: string
+    detail?: string
+    classification: string
+    allocation?: string
+  }[]
+  library: Record<string, OpsCorrelationLibraryItem[]>
 }
 
 export type OpsSettings = {
@@ -475,14 +590,7 @@ export function opsCorrelationReference() {
   })
 }
 
-export function opsCreateCorrelation(data: {
-  kind: string
-  source_family?: string
-  source_code: string
-  source_label?: string
-  target_id: string
-  note?: string
-}) {
+export function opsCreateCorrelation(data: OpsCorrelationInput) {
   return api<OpsCorrelation>('/operations/correlations', {
     method: 'POST',
     body: body(data),
@@ -490,10 +598,15 @@ export function opsCreateCorrelation(data: {
   })
 }
 
-export function opsUpdateCorrelation(
-  id: string,
-  data: { target_id: string; is_active?: boolean; note?: string },
-) {
+export function opsCreateCorrelationsBatch(items: OpsCorrelationInput[]) {
+  return api<{ created_count: number; items: OpsCorrelation[] }>('/operations/correlations/batch', {
+    method: 'POST',
+    body: body({ items }),
+    action: 'Batch correlate printed codes',
+  })
+}
+
+export function opsUpdateCorrelation(id: string, data: OpsCorrelationUpdateInput) {
   return api<OpsCorrelation>(`/operations/correlations/${id}`, {
     method: 'PUT',
     body: body(data),
@@ -515,6 +628,284 @@ export function opsRestoreCorrelations(ids: string[]) {
     body: body({ ids }),
     action: 'Restore code correlations',
   })
+}
+
+export function opsPurgeCorrelations(ids: string[]) {
+  return api<{ affected_count: number }>('/operations/correlations/bulk-permanent-delete', {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Permanently delete code correlations',
+  })
+}
+
+export function opsCodeLinks(params: { scope?: string; deleted?: boolean } = {}) {
+  const q = new URLSearchParams()
+  if (params.scope) q.set('scope', params.scope)
+  if (params.deleted) q.set('deleted', 'true')
+  const suffix = q.toString() ? `?${q.toString()}` : ''
+  return api<OpsCodeLink[]>(`/operations/code-links${suffix}`, { action: 'Load multi-criteria code links' })
+}
+
+export function opsCreateCodeLink(data: OpsCodeLinkInput) {
+  return api<OpsCodeLink>('/operations/code-links', {
+    method: 'POST',
+    body: body(data),
+    action: 'Link workspace codes',
+  })
+}
+
+export function opsCreateCodeLinksBatch(items: OpsCodeLinkInput[]) {
+  return api<{ created_count: number; items: OpsCodeLink[] }>('/operations/code-links/batch', {
+    method: 'POST',
+    body: body({ items }),
+    action: 'Batch link workspace codes',
+  })
+}
+
+export function opsUpdateCodeLink(id: string, data: OpsCodeLinkInput) {
+  return api<OpsCodeLink>(`/operations/code-links/${id}`, {
+    method: 'PUT',
+    body: body(data),
+    action: 'Update workspace code link',
+  })
+}
+
+export function opsDeleteCodeLinks(ids: string[]) {
+  return api<{ affected_count: number }>('/operations/code-links/bulk-delete', {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Delete workspace code links',
+  })
+}
+
+export function opsRestoreCodeLinks(ids: string[]) {
+  return api<{ affected_count: number }>('/operations/code-links/bulk-restore', {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Restore workspace code links',
+  })
+}
+
+export function opsPurgeCodeLinks(ids: string[]) {
+  return api<{ affected_count: number }>('/operations/code-links/bulk-permanent-delete', {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Permanently delete workspace code links',
+  })
+}
+
+export function opsPurgeMasters(kind: string, ids: string[]) {
+  return api<{ affected_count: number }>(`/operations/masters/${kind}/bulk-permanent-delete`, {
+    method: 'POST',
+    body: body({ ids }),
+    action: 'Permanently delete codes',
+  })
+}
+
+/** Format rotating ROP consistently: completions always return 'N/A'; drilling formats or shows fallback. */
+export function formatOpsRop(
+  value: number | string | null | undefined,
+  isCompletion: boolean,
+  suffix = ' m/h',
+  fallback = '—',
+  decimals?: number,
+): string {
+  if (isCompletion) return 'N/A'
+  if (value === null || value === undefined || value === '') return fallback
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) return fallback
+  const formatted =
+    decimals !== undefined
+      ? num.toFixed(decimals)
+      : Number(num.toFixed(3)).toLocaleString('en-US', { maximumFractionDigits: 3 })
+  return `${formatted}${suffix}`
+}
+
+export type TimeDepthAxisOverrides = {
+  xMin?: string
+  xMax?: string
+  xStep?: string
+  yMin?: string
+  yMax?: string
+  yStep?: string
+}
+
+export type ComputedTimeDepthAxes = {
+  xMin: number
+  xMax: number
+  xStep: number
+  yMin: number
+  yMax: number
+  yStep: number
+  defaultXStep: number
+  defaultYStep: number
+  defaultXMax: number
+  defaultYMax: number
+  isCustom: boolean
+  warning: string
+}
+
+function pickCompletionStep(maxActivity: number): number {
+  if (maxActivity <= 12) return 1
+  if (maxActivity <= 24) return 2
+  if (maxActivity <= 36) return 3
+  if (maxActivity <= 60) return 5
+  if (maxActivity <= 120) return 10
+  return Math.max(10, Math.ceil(maxActivity / 12 / 5) * 5)
+}
+
+function pickDayStep(spanDays: number): number {
+  if (spanDays <= 3) return 0.5
+  if (spanDays <= 12) return 1
+  if (spanDays <= 24) return 2
+  if (spanDays <= 60) return 5
+  if (spanDays <= 120) return 10
+  if (spanDays <= 240) return 20
+  if (spanDays <= 450) return 30
+  return Math.max(50, Math.ceil(spanDays / 10 / 25) * 25)
+}
+
+function parseFinite(raw?: string): number | null {
+  if (raw === undefined) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const n = Number(trimmed)
+  return Number.isFinite(n) ? n : Number.NaN
+}
+
+/**
+ * Compute crisp, non-overlapping X (days) and Y (depth m or completion activity #)
+ * bounds and intervals, applying optional user-specified min, max, and step overrides.
+ */
+export function computeTimeDepthAxes(params: {
+  mode: 'depth' | 'activity'
+  xValues: number[]
+  yValues: number[]
+  overrides?: TimeDepthAxisOverrides
+}): ComputedTimeDepthAxes {
+  const { mode, xValues, yValues, overrides = {} } = params
+  const cleanX = xValues.filter((n) => Number.isFinite(n) && n >= 0)
+  const cleanY = yValues.filter((n) => Number.isFinite(n) && n >= 0)
+  const rawMaxX = cleanX.length ? Math.max(...cleanX) : 10
+  const rawMaxY = cleanY.length ? Math.max(...cleanY) : mode === 'activity' ? 10 : 300
+
+  const defaultYStep = mode === 'activity' ? pickCompletionStep(rawMaxY) : 300
+  const defaultYMin = 0
+  const defaultYMax =
+    mode === 'activity'
+      ? Math.max(defaultYStep, Math.ceil(Math.max(rawMaxY, 1) / defaultYStep) * defaultYStep)
+      : Math.max(300, Math.ceil((rawMaxY + 1) / defaultYStep) * defaultYStep)
+
+  const defaultXStep = pickDayStep(rawMaxX)
+  const defaultXMin = 0
+  const defaultXMax = Math.max(defaultXStep, Math.ceil(Math.max(rawMaxX, defaultXStep) / defaultXStep) * defaultXStep)
+
+  const warnings: string[] = []
+  const rawEntries = [overrides.xMin, overrides.xMax, overrides.xStep, overrides.yMin, overrides.yMax, overrides.yStep]
+  const isCustom = rawEntries.some((v) => Boolean(v && v.trim() !== ''))
+
+  const applyAxis = (
+    axisName: string,
+    defMin: number,
+    defMax: number,
+    defStep: number,
+    rawMin: string | undefined,
+    rawMax: string | undefined,
+    rawStep: string | undefined,
+    rawDataMax: number,
+    integerOnly: boolean,
+  ): { min: number; max: number; step: number } => {
+    const pMin = parseFinite(rawMin)
+    const pMax = parseFinite(rawMax)
+    const pStep = parseFinite(rawStep)
+
+    let step = defStep
+    if (pStep !== null) {
+      if (Number.isNaN(pStep) || pStep <= 0) {
+        warnings.push(`${axisName} step must be a positive number.`)
+      } else if (integerOnly && !Number.isInteger(pStep)) {
+        step = Math.max(1, Math.round(pStep))
+        warnings.push(`${axisName} uses whole-number activity steps (rounded to ${step}).`)
+      } else {
+        step = pStep
+      }
+    }
+
+    let min = defMin
+    if (pMin !== null) {
+      if (Number.isNaN(pMin) || pMin < 0) {
+        warnings.push(`${axisName} minimum must be zero or greater.`)
+      } else {
+        min = integerOnly ? Math.floor(pMin) : pMin
+      }
+    }
+
+    let max =
+      pStep !== null && pMax === null
+        ? Math.max(min + step, Math.ceil(Math.max(rawDataMax, min + step) / step) * step)
+        : defMax
+    if (pMax !== null) {
+      if (Number.isNaN(pMax)) {
+        warnings.push(`${axisName} maximum must be a valid number.`)
+      } else {
+        max = integerOnly ? Math.ceil(pMax) : pMax
+      }
+    }
+
+    if (max <= min) {
+      warnings.push(`${axisName} maximum must be greater than minimum; automatic range retained.`)
+      min = defMin
+      max = Math.max(defMax, defMin + step)
+    }
+
+    const tickCount = (max - min) / step
+    if (tickCount > 120) {
+      const safeStep = integerOnly
+        ? Math.max(1, Math.ceil((max - min) / 20))
+        : Number(((max - min) / 20).toPrecision(2))
+      warnings.push(`${axisName} step is too fine for the selected range; adjusted to ${safeStep} to prevent label overlap.`)
+      step = safeStep
+    }
+    return { min, max, step }
+  }
+
+  const x = applyAxis(
+    'Time axis (days)',
+    defaultXMin,
+    defaultXMax,
+    defaultXStep,
+    overrides.xMin,
+    overrides.xMax,
+    overrides.xStep,
+    rawMaxX,
+    false,
+  )
+  const y = applyAxis(
+    mode === 'activity' ? 'Activity axis' : 'Depth axis (m)',
+    defaultYMin,
+    defaultYMax,
+    defaultYStep,
+    overrides.yMin,
+    overrides.yMax,
+    overrides.yStep,
+    rawMaxY,
+    mode === 'activity',
+  )
+
+  return {
+    xMin: x.min,
+    xMax: x.max,
+    xStep: x.step,
+    yMin: y.min,
+    yMax: y.max,
+    yStep: y.step,
+    defaultXStep,
+    defaultYStep,
+    defaultXMax,
+    defaultYMax,
+    isCustom,
+    warning: warnings.join(' '),
+  }
 }
 
 export function opsSettingsGet() {

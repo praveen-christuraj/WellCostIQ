@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Alert, Box, Button, MenuItem, Tab, Tabs, TextField, Typography } from '@mui/material'
-import { AddRounded, DeleteOutlineRounded, RestoreRounded } from '@mui/icons-material'
+import { Alert, Box, Button, Chip, MenuItem, Tab, Tabs, TextField, Typography } from '@mui/material'
+import { AddRounded, DeleteForeverOutlined, DeleteOutlineRounded, RestoreRounded } from '@mui/icons-material'
 import { FormDialog, PageHeading } from '../../components/Common'
+import { CorrelationsPanel } from '../../components/operations/CorrelationsPanel'
 import { DataTable } from '../../components/DataTable'
 import { ImportDialog } from '../../components/ImportDialog'
 import { useAuth } from '../../context/AuthContext'
@@ -10,16 +11,9 @@ import { api, body } from '../../lib/api'
 import {
   auditExport,
   defaultOpsCodes,
-  opsCorrelationReference,
-  opsCorrelations,
-  opsCreateCorrelation,
-  opsDeleteCorrelations,
-  opsRestoreCorrelations,
-  opsUpdateCorrelation,
-  type OpsCorrelation,
-  type OpsCorrelationReference,
   type OpsDefaultCode,
 } from '../../lib/operations'
+import { CORRELATION_KIND_FOR_MASTER } from '../../components/operations/codeCriteria'
 
 const kinds = {
   'operation-codes': {
@@ -42,6 +36,7 @@ const kinds = {
   },
   causes: { label: 'Cause codes', code: 'cause_code', name: 'cause_name', defaults: {} },
   'phase-codes': { label: 'Phase codes', code: 'phase_code', name: 'phase_name', defaults: {} },
+  agencies: { label: 'Agency codes', code: 'agency_code', name: 'agency_name', defaults: { category: 'other' } },
   'source-marks': {
     label: 'Source mark rules',
     code: 'mark_code',
@@ -50,7 +45,7 @@ const kinds = {
   },
 } as const
 type Kind = keyof typeof kinds
-type Row = { id: string; is_deleted: boolean } & Record<string, unknown>
+type Row = { id: string; is_deleted: boolean; correlation_count?: number } & Record<string, unknown>
 
 function DefaultCodes() {
   const [codes, setCodes] = useState<OpsDefaultCode[]>([])
@@ -128,57 +123,52 @@ function DefaultCodes() {
   )
 }
 
-const CORRELATION_KINDS = [
-  { key: 'operation', label: 'Operation code' },
-  { key: 'activity', label: 'Activity code' },
-  { key: 'npt', label: 'NPT code' },
-  { key: 'cause', label: 'Cause code' },
-  { key: 'phase', label: 'Phase (and programme phase)' },
-  { key: 'agency', label: 'Agency' },
-] as const
+const TAB_VALUES = ['default-codes', 'correlations', ...Object.keys(kinds)] as const
+type TabValue = (typeof TAB_VALUES)[number]
 
-/**
- * Correlate the printed default codes with this workspace's own library.
- *
- * Extraction reads a printed token such as 19-D from the source. Without a
- * correlation it leaves the dropdown empty — it never guesses which workspace
- * code the token "probably" means. This tab is where that mapping is decided.
- */
-function Correlations() {
-  const { can } = useAuth()
-  const [ref, setRef] = useState<OpsCorrelationReference | null>(null)
-  const [rows, setRows] = useState<OpsCorrelation[]>([])
-  const [deleted, setDeleted] = useState(false)
-  const [kind, setKind] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState<{
-    rowId: string
-    kind: string
-    source_code: string
-    target_id: string
-    note: string
-  } | null>(null)
+export default function OperationsLibrary() {
+  const [params, setParams] = useSearchParams()
+  const requested = params.get('tab') ?? ''
+  const tab: TabValue = (TAB_VALUES as readonly string[]).includes(requested) ? (requested as TabValue) : 'default-codes'
+  const isCorrelations = tab === 'correlations'
+  const isDefault = tab === 'default-codes'
+  const kind = tab as Kind
+  const focusKind = params.get('kind') ?? ''
+  const focusCode = params.get('code') ?? ''
+  const { can } = useAuth(),
+    [deleted, setDeleted] = useState(false),
+    [rows, setRows] = useState<Row[]>([]),
+    [selected, setSelected] = useState<Row[]>([]),
+    [rules, setRules] = useState<Row[]>([])
+  const [form, setForm] = useState<Record<string, string> | null>(null),
+    [id, setId] = useState(''),
+    [pending, setPending] = useState<{ rows: Row[]; action: 'delete' | 'restore' | 'permanent-delete' } | null>(null),
+    [importing, setImporting] = useState(false),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState(''),
+    [busy, setBusy] = useState(false)
+  const spec = kinds[kind],
+    path = `/operations/masters/${kind}`
 
-  const load = async (showDeleted = deleted) => {
-    const [r, c] = await Promise.all([
-      opsCorrelationReference(),
-      opsCorrelations({ kind: kind || undefined, deleted: showDeleted }),
-    ])
-    setRef(r)
-    setRows(c)
-  }
+  const getRows = () =>
+    api<Row[]>(path + (deleted ? '?include_deleted=true' : '')).then((rs) => rs.filter((r) => r.is_deleted === deleted))
+
   useEffect(() => {
     let current = true
+    setRows([])
+    setSelected([])
+    setRules([])
     setError('')
-    Promise.all([
-      opsCorrelationReference(),
-      opsCorrelations({ kind: kind || undefined, deleted }),
-    ])
-      .then(([r, c]) => {
-        if (current) {
-          setRef(r)
-          setRows(c)
+    setNotice('')
+    setPending(null)
+    if (isDefault || isCorrelations) return
+    getRows()
+      .then((rs) => {
+        if (!current) return
+        setRows(rs)
+        const withRules = rs.filter((r) => (r.correlation_count ?? 0) > 0)
+        if (withRules.length) {
+          setRules(withRules)
         }
       })
       .catch((e) => {
@@ -187,286 +177,59 @@ function Correlations() {
     return () => {
       current = false
     }
-  }, [kind, deleted])
+  }, [kind, deleted, isDefault, isCorrelations])
 
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true)
-    setError('')
-    try {
-      await fn()
-      await load()
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const save = async () => {
-    if (!form) return
-    await run(async () => {
-      if (form.rowId) {
-        await opsUpdateCorrelation(form.rowId, {
-          target_id: form.target_id,
-          is_active: true,
-          note: form.note,
-        })
-      } else {
-        const printed = ref?.printed.find((p) => p.code === form.source_code)
-        await opsCreateCorrelation({
-          kind: form.kind,
-          source_family: printed?.family ?? '',
-          source_code: form.source_code,
-          source_label: printed?.description ?? '',
-          target_id: form.target_id,
-          note: form.note,
-        })
-      }
-      setForm(null)
-    })
-  }
-
-  const libraryFor = (k: string) => ref?.library[k] ?? []
-
-  return (
-    <Box mt={1.5}>
-      <Alert severity="info" sx={{ mb: 1.5 }}>
-        Extraction pre-selects a dropdown only when a correlation exists. No correlation leaves the field empty
-        so the engineer chooses from this workspace's own library. Correlating a code never approves a block and
-        never changes an already saved report.
-      </Alert>
-      {error && <Alert severity="error">{error}</Alert>}
-      <Box display="flex" gap={1.5} flexWrap="wrap" alignItems="center" mb={1.5}>
-        <TextField
-          select
-          label="Code kind"
-          value={kind}
-          onChange={(e) => setKind(e.target.value)}
-          sx={{ minWidth: 210 }}
-        >
-          <MenuItem value="">All kinds</MenuItem>
-          {CORRELATION_KINDS.map((k) => (
-            <MenuItem key={k.key} value={k.key}>
-              {k.label}
-            </MenuItem>
-          ))}
-        </TextField>
-        <Button variant="outlined" onClick={() => setDeleted(!deleted)}>
-          {deleted ? 'Active correlations' : 'Deleted correlations'}
-        </Button>
-        {!deleted && can('ops-master:correlate') && (
-          <Button
-            variant="contained"
-            startIcon={<AddRounded />}
-            onClick={() => {
-              setError('')
-              setForm({
-                rowId: '',
-                kind: kind || 'operation',
-                source_code: '',
-                target_id: '',
-                note: '',
-              })
-            }}
-          >
-            New correlation
-          </Button>
-        )}
-      </Box>
-      <DataTable
-        key={`${kind}/${deleted}`}
-        rows={rows as unknown as Record<string, unknown>[]}
-        fillHeight
-        searchPlaceholder="Search printed code, meaning or library code…"
-        canExport={can('ops-master:export')}
-        onExport={auditExport('library')}
-        exportName="operations-correlations"
-        columns={[
-          { field: 'kind', headerName: 'Kind', minWidth: 110 },
-          { field: 'source_family', headerName: 'Printed family', minWidth: 190 },
-          { field: 'source_code', headerName: 'Printed code', minWidth: 120 },
-          { field: 'source_label', headerName: 'Printed meaning', minWidth: 240, tooltipField: 'source_label' },
-          { field: 'target_label', headerName: 'Workspace code', minWidth: 240, tooltipField: 'target_label' },
-          { field: 'note', headerName: 'Note', minWidth: 180, tooltipField: 'note' },
-          {
-            headerName: 'Actions',
-            width: 210,
-            minWidth: 190,
-            sortable: false,
-            cellRenderer: ({ data: row }: { data: OpsCorrelation }) => (
-              <>
-                {!deleted && can('ops-master:correlate') && (
-                  <Button
-                    size="small"
-                    onClick={() =>
-                      setForm({
-                        rowId: row.id,
-                        kind: row.kind,
-                        source_code: row.source_code,
-                        target_id: row.target_id ?? '',
-                        note: row.note,
-                      })
-                    }
-                  >
-                    Edit
-                  </Button>
-                )}
-                {can('ops-master:correlate') && (
-                  <Button
-                    size="small"
-                    color={deleted ? 'inherit' : 'error'}
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() =>
-                        deleted ? opsRestoreCorrelations([row.id]) : opsDeleteCorrelations([row.id]),
-                      )
-                    }
-                  >
-                    {deleted ? 'Restore' : 'Delete'}
-                  </Button>
-                )}
-              </>
-            ),
-          },
-        ]}
-      />
-      {form && (
-        <FormDialog
-          open
-          title={form.rowId ? 'Edit a correlation' : 'Correlate a printed code'}
-          subtitle="The printed left-hand code is read from the source document. The right-hand value is what this workspace wants the dropdown to show."
-          onClose={() => setForm(null)}
-          onSubmit={() => void save()}
-          busy={busy}
-          submitDisabled={!form.kind || !form.source_code || !form.target_id}
-        >
-          <Box display="grid" gap={2} pt={0.5}>
-            {error && <Alert severity="error">{error}</Alert>}
-            <TextField
-              select
-              label="Code kind"
-              value={form.kind}
-              onChange={(e) => setForm({ ...form, kind: e.target.value, target_id: '' })}
-              disabled={Boolean(form.rowId)}
-            >
-              {CORRELATION_KINDS.map((k) => (
-                <MenuItem key={k.key} value={k.key}>
-                  {k.label}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              select
-              label="Printed default code"
-              value={form.source_code}
-              onChange={(e) => setForm({ ...form, source_code: e.target.value })}
-              disabled={Boolean(form.rowId)}
-              helperText="Only codes in the built-in reference can be correlated."
-            >
-              {(ref?.printed ?? [])
-                .filter((p) => (form.kind === 'operation' ? p.family === 'OpenWells operation code' || p.family === 'Operation' : true))
-                .filter((p) => (form.kind === 'activity' ? p.family === 'Activity' || p.family === 'OpenWells code token' : true))
-                .filter((p) => (form.kind === 'npt' ? p.family === 'Trouble / NPT' : true))
-                .filter((p) => (form.kind === 'cause' ? ['Cause', 'Trouble / NPT'].includes(p.family) : true))
-                .filter((p) => (form.kind === 'phase' ? ['OpenWells phase', 'Programme phase'].includes(p.family) : true))
-                .map((p) => (
-                  <MenuItem key={`${p.family}/${p.code}`} value={p.code}>
-                    {p.code} — {p.description || p.family}
-                  </MenuItem>
-                ))}
-            </TextField>
-            <TextField
-              select
-              label="Workspace code"
-              value={form.target_id}
-              onChange={(e) => setForm({ ...form, target_id: e.target.value })}
-            >
-              {libraryFor(form.kind).map((c) => (
-                <MenuItem key={c.id} value={c.id}>
-                  {c.code} — {c.name}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Note"
-              value={form.note}
-              onChange={(e) => setForm({ ...form, note: e.target.value })}
-              multiline
-              minRows={2}
-              helperText="Optional. Record why this printed code maps to that workspace code."
-            />
-          </Box>
-        </FormDialog>
-      )}
-    </Box>
-  )
-}
-
-export default function OperationsLibrary() {
-  const [params, setParams] = useSearchParams()
-  const tab = params.get('tab')
-  const isCorrelations = tab === 'correlations'
-  const isDefault = !isCorrelations && (!tab || !Object.hasOwn(kinds, tab) || tab === 'default-codes')
-  const kind: Kind = isDefault ? 'operation-codes' : (tab as Kind)
-  const { can } = useAuth(),
-    [deleted, setDeleted] = useState(false),
-    [rows, setRows] = useState<Row[]>([]),
-    [selected, setSelected] = useState<Row[]>([])
-  const [form, setForm] = useState<Record<string, string> | null>(null),
-    [id, setId] = useState(''),
-    [pending, setPending] = useState<Row[]>([]),
-    [importing, setImporting] = useState(false),
-    [error, setError] = useState(''),
-    [busy, setBusy] = useState(false)
-  const spec = kinds[kind],
-    path = `/operations/masters/${kind}`
-  const getRows = () =>
-    api<Row[]>(path + (deleted ? '?include_deleted=true' : '')).then((rs) => rs.filter((r) => r.is_deleted === deleted))
   const load = async () => {
     setRows(await getRows())
     setSelected([])
   }
-  useEffect(() => {
-    let current = true
-    setRows([])
-    setSelected([])
-    setError('')
-    if (isDefault || isCorrelations) return
-    getRows()
-      .then((rs) => {
-        if (current) setRows(rs)
-      })
-      .catch((e) => {
-        if (current) setError(e.message)
-      })
-    return () => {
-      current = false
-    }
-  }, [kind, deleted, isDefault, isCorrelations])
+
   const edit = (row?: Row) => {
     const defaults = { [spec.code]: '', [spec.name]: '', ...spec.defaults, description: '' }
     setId(row?.id ?? '')
     setForm(Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, String(row?.[k] ?? v)])))
     setError('')
   }
-  const run = async (fn: () => Promise<void>) => {
+
+  const run = async (fn: () => Promise<void>, message = '') => {
     setBusy(true)
     setError('')
     try {
       await fn()
       await load()
+      if (message) setNotice(message)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setBusy(false)
     }
   }
+
+  const runPending = async () => {
+    if (!pending) return
+    const suffix = pending.action === 'permanent-delete' ? 'permanent-delete' : pending.action
+    await run(async () => {
+      await api(`${path}/bulk-${suffix}`, {
+        method: 'POST',
+        body: body({ ids: pending.rows.map((r) => r.id) }),
+      })
+      setPending(null)
+    })
+  }
+
+  /** Deep link a code into the Correlations tab, filtered to the rules that reference it. */
+  const openRules = (row: Row) =>
+    setParams({ tab: 'correlations', kind: CORRELATION_KIND_FOR_MASTER[kind] ?? '', code: row.id })
+
+  const linkedCount = (row: Row) => Number(row.correlation_count ?? 0)
+  const activeSelection = useMemo(() => selected.filter((r) => linkedCount(r) === 0), [selected])
+
   return (
     <Box>
       <PageHeading
         eyebrow="Well Operations"
         title="Code library"
-        subtitle="Define this workspace’s activity, operation and reason codes. Codes are displayed alongside their names. Responsible parties for new NPT / UPA entries come from active Master Data vendors."
+        subtitle="Define this workspace’s phase, operation, activity, NPT, cause, agency and source-mark codes. Codes are displayed alongside their names. Responsible parties for new NPT / UPA entries come from active Master Data vendors."
         action={
           <>
             {!isDefault && !isCorrelations && !deleted && can('ops-master:create') && (
@@ -484,8 +247,9 @@ export default function OperationsLibrary() {
       />
       <Tabs
         variant="scrollable"
-        value={isCorrelations ? 'correlations' : isDefault ? 'default-codes' : kind}
-        onChange={(_, v) => setParams({ tab: v })}
+        value={tab}
+        onChange={(_, v: TabValue) => setParams(v === 'default-codes' ? {} : { tab: v })}
+        aria-label="Code library tabs"
       >
         <Tab value="default-codes" label="Default Codes" />
         <Tab value="correlations" label="Correlations" />
@@ -494,25 +258,55 @@ export default function OperationsLibrary() {
         ))}
       </Tabs>
       {isCorrelations ? (
-        <Correlations />
+        <CorrelationsPanel
+          focusKind={focusKind}
+          focusCode={focusCode}
+          onClearFocus={() => setParams({ tab: 'correlations' })}
+        />
       ) : isDefault ? (
         <DefaultCodes />
       ) : (
-        <>
+        <Box mt={1.5}>
+          {error && <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>}
+          {notice && <Alert severity="success" sx={{ mb: 1.5 }} onClose={() => setNotice('')}>{notice}</Alert>}
+          {deleted && (
+            <Alert severity="info" sx={{ mb: 1.5 }}>
+              Restore brings a code back into the active library. Delete permanently is offered only here and only for a
+              code no rule, report block or programme item still references.
+            </Alert>
+          )}
           {kind === 'source-marks' && (
-            <Alert severity="info">
+            <Alert severity="info" sx={{ mb: 1.5 }}>
               Add a printed source mark to override its suggested classification and allocation. These rules affect
               future drafts, never saved logs.
             </Alert>
           )}
-          {error && <Alert severity="error">{error}</Alert>}
           {selected.length > 0 && (
-            <Box display="flex" gap={2} alignItems="center" py={1}>
-              <Typography>{selected.length} selected</Typography>
-              {can(deleted ? 'ops-master:restore' : 'ops-master:delete') && (
-                <Button onClick={() => setPending(selected)}>
-                  {deleted ? 'Restore selected' : 'Move to Deleted entries'}
+            <Box display="flex" gap={1.5} alignItems="center" py={1} flexWrap="wrap">
+              <Typography fontWeight={700}>{selected.length} selected</Typography>
+              {!deleted && can('ops-master:delete') && (
+                <Button
+                  color="error"
+                  disabled={activeSelection.length === 0}
+                  onClick={() => setPending({ rows: selected, action: 'delete' })}
+                >
+                  Move to Deleted entries
                 </Button>
+              )}
+              {deleted && can('ops-master:restore') && (
+                <Button onClick={() => setPending({ rows: selected, action: 'restore' })}>Restore selected</Button>
+              )}
+              {deleted && can('ops-master:permanent-delete') && (
+                <Button color="error" startIcon={<DeleteForeverOutlined />} onClick={() => setPending({ rows: selected, action: 'permanent-delete' })}>
+                  Delete selected permanently
+                </Button>
+              )}
+              {!deleted && activeSelection.length < selected.length && (
+                <Typography fontSize={12} color="text.secondary">
+                  {selected.length - activeSelection.length} selected code
+                  {selected.length - activeSelection.length === 1 ? ' is' : 's are'} referenced by a rule and
+                  cannot be deleted until it is unlinked.
+                </Typography>
               )}
             </Box>
           )}
@@ -537,9 +331,29 @@ export default function OperationsLibrary() {
               ...Object.keys(spec.defaults).map((k) => ({ field: k, headerName: k.replaceAll('_', ' ') })),
               { field: 'description', headerName: 'Description' },
               {
+                field: 'correlation_count',
+                headerName: 'Rules',
+                width: 140,
+                minWidth: 130,
+                cellRenderer: ({ data: r }: { data: Row }) => {
+                  const count = linkedCount(r)
+                  if (!count) return <Chip size="small" variant="outlined" label="Unlinked" sx={{ height: 20, fontSize: 10.5 }} />
+                  return (
+                    <Button
+                      size="small"
+                      aria-label={`Show the ${count} rule${count === 1 ? '' : 's'} linked to ${String(r[spec.code])}`}
+                      onClick={() => openRules(r)}
+                      sx={{ minWidth: 0, fontSize: 11.5, px: 1 }}
+                    >
+                      <Chip size="small" color="primary" variant="outlined" label={`${count} rule${count === 1 ? '' : 's'}`} sx={{ height: 20, fontSize: 10.5, cursor: 'pointer' }} />
+                    </Button>
+                  )
+                },
+              },
+              {
                 headerName: 'Actions',
-                width: 155,
-                minWidth: 140,
+                width: 210,
+                minWidth: 200,
                 sortable: false,
                 cellRenderer: ({ data: r }: { data: Row }) => (
                   <>
@@ -548,14 +362,29 @@ export default function OperationsLibrary() {
                         Edit
                       </Button>
                     )}
+                    {!deleted && linkedCount(r) > 0 && (
+                      <Button size="small" onClick={() => openRules(r)}>
+                        View rules
+                      </Button>
+                    )}
                     {can(deleted ? 'ops-master:restore' : 'ops-master:delete') && (
                       <Button
                         size="small"
-                        aria-label={deleted ? 'Restore' : 'Delete'}
+                        aria-label={deleted ? 'Restore' : `Delete ${String(r[spec.code])}`}
                         color={deleted ? 'inherit' : 'error'}
-                        onClick={() => setPending([r])}
+                        onClick={() => setPending({ rows: [r], action: deleted ? 'restore' : 'delete' })}
                       >
                         {deleted ? <RestoreRounded /> : <DeleteOutlineRounded />}
+                      </Button>
+                    )}
+                    {deleted && can('ops-master:permanent-delete') && (
+                      <Button
+                        size="small"
+                        color="error"
+                        aria-label={`Delete ${String(r[spec.code])} permanently`}
+                        onClick={() => setPending({ rows: [r], action: 'permanent-delete' })}
+                      >
+                        Delete permanently
                       </Button>
                     )}
                   </>
@@ -563,6 +392,19 @@ export default function OperationsLibrary() {
               },
             ]}
           />
+          {rows.length === 0 && (
+            <Typography fontSize={12.5} color="text.secondary" mt={1}>
+              {deleted
+                ? 'No codes are in Deleted entries. A code moved here can be restored or deleted permanently.'
+                : `No ${spec.label.toLowerCase()} yet. Add one, or import a list.`}
+            </Typography>
+          )}
+          {rules.length > 0 && !deleted && (
+            <Typography fontSize={12} color="text.secondary" mt={1}>
+              {rules.length} code{rules.length === 1 ? ' is' : 's are'} referenced by a correlation or code link.
+              Managing those rules happens in <strong>Correlations</strong>.
+            </Typography>
+          )}
           {form && (
             <FormDialog
               open
@@ -605,25 +447,44 @@ export default function OperationsLibrary() {
               </Box>
             </FormDialog>
           )}
-          {pending.length > 0 && (
+          {pending && (
             <FormDialog
               open
-              title={`${deleted ? 'Restore' : 'Move to Deleted entries'} · ${pending.length} codes?`}
-              danger={!deleted}
-              onClose={() => setPending([])}
-              submitLabel={deleted ? 'Restore' : 'Delete'}
-              busy={busy}
-              onSubmit={() =>
-                run(async () => {
-                  await api(`${path}/bulk-${deleted ? 'restore' : 'delete'}`, {
-                    method: 'POST',
-                    body: body({ ids: pending.map((r) => r.id) }),
-                  })
-                  setPending([])
-                })
+              danger={pending.action !== 'restore'}
+              title={
+                pending.action === 'delete'
+                  ? `Move ${pending.rows.length} code${pending.rows.length === 1 ? '' : 's'} to Deleted entries?`
+                  : pending.action === 'restore'
+                    ? `Restore ${pending.rows.length} code${pending.rows.length === 1 ? '' : 's'}?`
+                    : `Delete ${pending.rows.length} code${pending.rows.length === 1 ? '' : 's'} permanently?`
               }
+              onClose={() => setPending(null)}
+              submitLabel={
+                pending.action === 'delete'
+                  ? 'Move to Deleted entries'
+                  : pending.action === 'restore'
+                    ? 'Restore'
+                    : 'Delete permanently'
+              }
+              busy={busy}
+              onSubmit={() => void runPending()}
             >
-              Historical reports retain their recorded values.{error && <Alert severity="error">{error}</Alert>}
+              <Box display="grid" gap={2} pt={0.5}>
+                {error && <Alert severity="error">{error}</Alert>}
+                <Typography fontSize={13} color="text.secondary">
+                  {pending.action === 'delete' &&
+                    'Historical reports retain their recorded values. A code referenced by an active correlation or code link is refused until that rule is removed.'}
+                  {pending.action === 'restore' && 'The code becomes available again in every dropdown that uses it.'}
+                  {pending.action === 'permanent-delete' &&
+                    'A permanent delete cannot be undone and is refused while any report block, programme item or rule still references the code.'}
+                </Typography>
+                {pending.action === 'permanent-delete' && (
+                  <Alert severity="warning" icon={false}>
+                    This removes the code from the library for good. Restore it instead if any historical record may need
+                    to name it.
+                  </Alert>
+                )}
+              </Box>
             </FormDialog>
           )}
           {importing && (
@@ -650,7 +511,7 @@ export default function OperationsLibrary() {
               }}
             />
           )}
-        </>
+        </Box>
       )}
     </Box>
   )

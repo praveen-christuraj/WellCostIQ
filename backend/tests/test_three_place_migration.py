@@ -33,6 +33,10 @@ def test_legacy_rounding_positive_preflight_and_downgrade(tmp_path):
         db.execute("INSERT INTO afe_exchange_rates (id,organization_id,afe_id,currency_code,rate,created_at,updated_at) VALUES ('fx','org','afe','EUR',0.0004,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
         db.execute("INSERT INTO services (id,organization_id,service_code,service_name,service_category,provider_type,created_at,updated_at) VALUES ('svc','org','SVC','Mud Logging','Drilling Services','In House Services',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
         db.execute("INSERT INTO ops_plan_versions (id,organization_id,well_id,scope,version_no,label,basis,status,planned_days,prepared_by,approved_by,notes,is_deleted,created_at,updated_at,created_by,updated_by) VALUES ('plan','org','well','drilling',1,'Programme','engineer','draft',1.2345,'','','',false,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'','')")
+        # Second programme whose ten-place value must NOT round up, and a whole
+        # number that must stay an integer rather than become a float.
+        db.execute("INSERT INTO ops_plan_versions (id,organization_id,well_id,scope,version_no,label,basis,status,planned_days,prepared_by,approved_by,notes,is_deleted,created_at,updated_at,created_by,updated_by) VALUES ('plan-hold','org','well','drilling',2,'Programme','engineer','draft',1.2344,'','','',false,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'','')")
+        db.execute("INSERT INTO ops_plan_versions (id,organization_id,well_id,scope,version_no,label,basis,status,planned_days,prepared_by,approved_by,notes,is_deleted,created_at,updated_at,created_by,updated_by) VALUES ('plan-int','org','well','drilling',3,'Programme','engineer','draft',7,'','','',false,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'','')")
     rejected = migrate('upgrade', REVISION)
     assert rejected.returncode != 0 and 'FX rate that would round to zero' in rejected.stderr
     with sqlite3.connect(path) as db:
@@ -57,7 +61,14 @@ def test_legacy_rounding_positive_preflight_and_downgrade(tmp_path):
     with sqlite3.connect(path) as db:
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         assert db.execute("SELECT rate FROM afe_exchange_rates WHERE id='fx'").fetchone() == (0.001,)
+        # Half away from zero, decided by the stored value and not by the SQLite
+        # build: round(1.2345, 3) is 1.235 before SQLite 3.43 and 1.234 from 3.43
+        # because the double sits just under the half.  The ledger must not differ
+        # between the two.
         assert db.execute("SELECT planned_days FROM ops_plan_versions WHERE id='plan'").fetchone() == (1.235,)
+        assert db.execute("SELECT planned_days FROM ops_plan_versions WHERE id='plan-hold'").fetchone() == (1.234,)
+        assert db.execute("SELECT planned_days FROM ops_plan_versions WHERE id='plan-int'").fetchone() == (7,)
+        assert db.execute("SELECT typeof(planned_days) FROM ops_plan_versions WHERE id='plan-int'").fetchone() == ('integer',)
         assert dict((name, sql_type) for _, name, sql_type, *_ in db.execute('PRAGMA table_info(afe_exchange_rates)'))['rate'] == 'NUMERIC(28, 3)'
         with pytest.raises(sqlite3.IntegrityError):
             db.execute("INSERT INTO services (id,organization_id,service_code,service_name,service_category,provider_type,created_at,updated_at) VALUES ('second','org','SVC2','mud logging','Drilling Services','In House Services',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
@@ -68,4 +79,5 @@ def test_legacy_rounding_positive_preflight_and_downgrade(tmp_path):
     with sqlite3.connect(path) as db:
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         assert db.execute("SELECT planned_days FROM ops_plan_versions WHERE id='plan'").fetchone() == (1.235,)
+        assert db.execute("SELECT planned_days FROM ops_plan_versions WHERE id='plan-int'").fetchone() == (7,)
         assert 'source_activity_code' not in {row[1] for row in db.execute('PRAGMA table_info(ops_activity_blocks)')}

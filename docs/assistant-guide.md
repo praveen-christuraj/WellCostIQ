@@ -32,7 +32,7 @@ Guide alerts the user immediately and still displays the verified local answer.
   timelines (including reopening active/superseded versions), daily extraction &
   prefill (MD, TVD, bit depth, casing, mud, BHA, surveys, WAT activity blocks),
   reopening submitted/approved daily reports, multi-day Well Operation Summary
-  PDF/Excel/CSV exports, printed code meanings, ROP, NPT/UPA, directional/mud/well-control
+  PDF/Excel/CSV exports, printed code meanings, code correlations and multi-criteria code links (the Correlations tab, its batch forms and tree schematic), completion ROP reported as N/A, NPT/UPA, directional/mud/well-control
   practices, and live workspace Well Operations queries under your role's RBAC
   permissions, with an optional **Use Offline AI (Ollama)** toggle.
 

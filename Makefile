@@ -1,4 +1,4 @@
-.PHONY: test build graph up up-ai seed-admin check-admin ui-check ui-rollback operations-codes-check daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check cost-intelligence-check ollama-ai-check
+.PHONY: test build graph up up-ai seed-admin check-admin ui-check ui-rollback operations-codes-check daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check cost-intelligence-check ollama-ai-check invoice-config-deleted-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -147,6 +147,15 @@ operations-overview-check:
 		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
 		--outfile=node_modules/.cache/operations-overview-check.mjs --external:jsdom && \
 		node node_modules/.cache/operations-overview-check.mjs
+
+# Invoice Configuration Deleted entries: Restore / Delete permanently act on the
+# tab the row belongs to, never on a hard-coded list.
+invoice-config-deleted-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/invoice-config-deleted-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/invoice-config-deleted-check.mjs --loader:.jsx=jsx --external:jsdom && \
+		node node_modules/.cache/invoice-config-deleted-check.mjs
 
 # Cost Intelligence: the analysis finds what the shaped demo wells contain, and
 # the page selects the well whose bar was pressed.

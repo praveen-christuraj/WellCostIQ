@@ -157,7 +157,12 @@ export async function exportWellSummaryPdf(summary: OpsWellSummary) {
     ['Time Allocation', `PT ${fmtNum(k.pt_hours, ' h')} (${k.productive_pct}%) · UPA ${fmtNum(k.upa_hours, ' h')} (${k.upa_pct}%) · NPT ${fmtNum(k.npt_hours, ' h')} (${k.npt_pct}%) · SP ${fmtNum(k.sp_hours, ' h')} (${k.sp_pct}%)`],
     ['Measured Depth (MD)', `Start ${fmtNum(k.start_md_m, ' m')} · Current ${fmtNum(k.current_md_m, ' m')} · Max ${fmtNum(k.max_md_m, ' m')} · Auth TD ${fmtNum(k.authorized_md_m, ' m')}`],
     ['True Vertical Depth (TVD) & Bit', `Current TVD ${fmtNum(k.current_tvd_m, ' m')} · Max TVD ${fmtNum(k.max_tvd_m, ' m')} · Latest Bit ${fmtNum(k.latest_bit_depth_m, ' m')}`],
-    ['Drilling Performance', `Footage ${fmtNum(k.total_footage_m, ' m')} · Rotating ${fmtNum(k.total_rotating_hours, ' h')} · Avg ROP ${fmtNum(k.avg_rop_m_per_hr, ' m/h')}`],
+    [
+      'Drilling Performance',
+      k.completion_reports > 0 && k.drilling_reports === 0
+        ? 'Avg ROP N/A (completion operation)'
+        : `Footage ${fmtNum(k.total_footage_m, ' m')} · Rotating ${fmtNum(k.total_rotating_hours, ' h')} · Avg ROP ${fmtNum(k.avg_rop_m_per_hr, ' m/h')}`,
+    ],
     ['Hole / Casing / Mud', `${summary.latest_hole_section || '—'} · Casing: ${summary.last_casing || '—'} · Mud: ${summary.latest_mud || '—'}`],
     ['Latest BHA / Status / POB', `${summary.latest_bha || '—'} · ${summary.latest_status || '—'} · POB: ${k.latest_pob ?? '—'}`],
   ]
@@ -203,7 +208,7 @@ export async function exportWellSummaryPdf(summary: OpsWellSummary) {
               fmtNum(d.depth_end_m),
               fmtNum(d.tvd_m),
               fmtNum(d.progress_m),
-              fmtNum(d.rop_m_per_hr),
+              d.scope === 'completion' ? 'N/A' : fmtNum(d.rop_m_per_hr),
               fmtNum(d.mud_weight_ppg),
               fmtNum(d.logged_hours),
               fmtNum(d.pt_hours),
@@ -350,7 +355,15 @@ export async function exportWellSummaryXlsx(summary: OpsWellSummary) {
     { metric: 'Latest Bit Depth (m)', value: k.latest_bit_depth_m != null ? String(k.latest_bit_depth_m) : '' },
     { metric: 'Total Footage Drilled (m)', value: String(k.total_footage_m) },
     { metric: 'Total Rotating Hours', value: String(k.total_rotating_hours) },
-    { metric: 'Average ROP (m/hr)', value: k.avg_rop_m_per_hr != null ? String(k.avg_rop_m_per_hr) : '' },
+    {
+      metric: 'Average ROP (m/hr)',
+      value:
+        k.completion_reports > 0 && k.drilling_reports === 0
+          ? 'N/A'
+          : k.avg_rop_m_per_hr != null
+            ? String(k.avg_rop_m_per_hr)
+            : '',
+    },
     { metric: 'Latest Hole Section', value: summary.latest_hole_section },
     { metric: 'Last Casing Shoe', value: summary.last_casing },
     { metric: 'Latest Mud System', value: summary.latest_mud },
@@ -401,12 +414,15 @@ export async function exportWellSummaryXlsx(summary: OpsWellSummary) {
         { key: 'bit_depth_m', label: 'Bit Depth (m)', numeric: true },
         { key: 'footage_m', label: 'Footage (m)', numeric: true },
         { key: 'rotating_hours', label: 'Rot Hrs', numeric: true },
-        { key: 'rop_m_per_hr', label: 'ROP (m/h)', numeric: true },
+        { key: 'rop_m_per_hr', label: 'ROP (m/h)' },
         { key: 'mud_weight_ppg', label: 'MW (ppg)', numeric: true },
         { key: 'reason', label: 'NPT / Delay Reason' },
         { key: 'narrative', label: 'Operation Description' },
       ],
-      summary.activities as unknown as Record<string, unknown>[],
+      summary.activities.map((a) => ({
+        ...a,
+        rop_m_per_hr: a.scope === 'completion' ? 'N/A' : a.rop_m_per_hr,
+      })) as unknown as Record<string, unknown>[],
     ),
     detailSheet(
       'Daily Rollup',
@@ -427,7 +443,7 @@ export async function exportWellSummaryXlsx(summary: OpsWellSummary) {
         { key: 'bit_depth_m', label: 'Bit Depth (m)', numeric: true },
         { key: 'progress_m', label: 'Progress (m)', numeric: true },
         { key: 'rotating_hours', label: 'Rot Hrs', numeric: true },
-        { key: 'rop_m_per_hr', label: 'ROP (m/h)', numeric: true },
+        { key: 'rop_m_per_hr', label: 'ROP (m/h)' },
         { key: 'mud_type', label: 'Mud Type' },
         { key: 'mud_weight_ppg', label: 'MW (ppg)', numeric: true },
         { key: 'last_casing', label: 'Last Casing' },
@@ -443,7 +459,10 @@ export async function exportWellSummaryXlsx(summary: OpsWellSummary) {
         { key: 'forward_plan', label: '24-Hr Forecast' },
         { key: 'hse_summary', label: 'HSE Summary' },
       ],
-      summary.daily_rollup as unknown as Record<string, unknown>[],
+      summary.daily_rollup.map((d) => ({
+        ...d,
+        rop_m_per_hr: d.scope === 'completion' ? 'N/A' : d.rop_m_per_hr,
+      })) as unknown as Record<string, unknown>[],
     ),
     detailSheet(
       'PT-NPT Breakdown',
@@ -530,7 +549,7 @@ export async function exportWellSummaryCsv(summary: OpsWellSummary, tab: 'activi
       { header: 'Bit Depth (m)', value: (r) => str(r.bit_depth_m) },
       { header: 'Progress (m)', value: (r) => str(r.progress_m) },
       { header: 'Rotating Hrs', value: (r) => str(r.rotating_hours) },
-      { header: 'ROP (m/hr)', value: (r) => str(r.rop_m_per_hr) },
+      { header: 'ROP (m/hr)', value: (r) => (r.scope === 'completion' ? 'N/A' : str(r.rop_m_per_hr)) },
       { header: 'Mud Type', value: (r) => r.mud_type },
       { header: 'MW (ppg)', value: (r) => str(r.mud_weight_ppg) },
       { header: 'Last Casing', value: (r) => r.last_casing },
@@ -641,7 +660,7 @@ export async function exportWellSummaryCsv(summary: OpsWellSummary, tab: 'activi
     { header: 'Bit Depth (m)', value: (r) => str(r.bit_depth_m) },
     { header: 'Footage (m)', value: (r) => str(r.footage_m) },
     { header: 'Rotating Hrs', value: (r) => str(r.rotating_hours) },
-    { header: 'ROP (m/hr)', value: (r) => str(r.rop_m_per_hr) },
+    { header: 'ROP (m/hr)', value: (r) => (r.scope === 'completion' ? 'N/A' : str(r.rop_m_per_hr)) },
     { header: 'Mud Weight (ppg)', value: (r) => str(r.mud_weight_ppg) },
     { header: 'Reason', value: (r) => r.reason },
     { header: 'Operation Description', value: (r) => r.narrative },

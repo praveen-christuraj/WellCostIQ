@@ -12,6 +12,12 @@ Three kinds share this service because the workflow is the same:
 Nothing is copied blindly: catalogue references and plan scopes are matched
 against what this workspace still has, and anything missing is reported as
 unavailable instead of being silently dropped.
+
+Deletion follows the platform two-step safeguard. Deleting a template moves it to
+Deleted entries, restoring it is refused while an active template of the same
+kind still holds its name, and permanent deletion is offered only from Deleted
+entries. A template is never referenced by the records made from it -- they copy
+its values -- so purging one cannot break a saved AFE, well plan or daily sheet.
 """
 
 from datetime import datetime, timezone
@@ -79,18 +85,18 @@ def _commit(db: Session) -> None:
         ) from error
 
 
-def _visible(db: Session, user: Any):
+def _visible(db: Session, user: Any, *, deleted: bool = False):
     """Templates this user may see: their own, plus anything shared in the workspace."""
     return select(RecordTemplate).where(
         RecordTemplate.organization_id == user.organization_id,
-        RecordTemplate.is_deleted.is_(False),
+        RecordTemplate.is_deleted.is_(deleted),
         or_(RecordTemplate.user_id == user.id, RecordTemplate.is_shared.is_(True)),
     )
 
 
-def _load(db: Session, user: Any, template_id: str) -> RecordTemplate:
+def _load(db: Session, user: Any, template_id: str, *, deleted: bool = False) -> RecordTemplate:
     template = db.scalar(
-        _visible(db, user)
+        _visible(db, user, deleted=deleted)
         .options(
             selectinload(RecordTemplate.services),
             selectinload(RecordTemplate.consumables),
@@ -341,8 +347,8 @@ def detail(spec: RecordTemplate, lookups: _Lookups, user: Any) -> TemplateOut:
     )
 
 
-def list_templates(db: Session, user: Any, kind: str = "") -> list[TemplateSummaryOut]:
-    statement = _visible(db, user).options(
+def list_templates(db: Session, user: Any, kind: str = "", *, deleted: bool = False) -> list[TemplateSummaryOut]:
+    statement = _visible(db, user, deleted=deleted).options(
         selectinload(RecordTemplate.services),
         selectinload(RecordTemplate.consumables),
         selectinload(RecordTemplate.tangibles),
@@ -350,7 +356,8 @@ def list_templates(db: Session, user: Any, kind: str = "") -> list[TemplateSumma
     )
     if kind:
         statement = statement.where(RecordTemplate.template_kind == kind)
-    templates = list(db.scalars(statement.order_by(RecordTemplate.updated_at.desc())).unique().all())
+    order_col = RecordTemplate.deleted_at.desc() if deleted else RecordTemplate.updated_at.desc()
+    templates = list(db.scalars(statement.order_by(order_col)).unique().all())
     lookups = _Lookups(db, user.organization_id, templates)
     return [summary(template, lookups, user) for template in templates]
 
@@ -598,6 +605,74 @@ def delete_template(db: Session, user: Any, template_id: str, request: Any) -> N
         summary=f"Moved {KIND_LABELS[template.template_kind]} template {template.name} to deleted entries",
         request=request,
     )
+    _commit(db)
+
+
+def restore_template(db: Session, user: Any, template_id: str, request: Any) -> TemplateOut:
+    """Restore a soft-deleted template back to the active library."""
+    template = _load(db, user, template_id, deleted=True)
+    _require_owner(template, user)
+    clash = db.scalar(
+        select(RecordTemplate).where(
+            RecordTemplate.organization_id == user.organization_id,
+            RecordTemplate.user_id == template.user_id,
+            RecordTemplate.template_kind == template.template_kind,
+            RecordTemplate.name_key == template.name_key,
+            RecordTemplate.is_deleted.is_(False),
+            RecordTemplate.id != template.id,
+        )
+    )
+    if clash is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"An active template named '{clash.name}' already exists; rename or delete it before restoring.",
+        )
+    template.is_deleted = False
+    template.deleted_at = None
+    template.deleted_by = ""
+    template.updated_by = actor_name(user)
+    template.updated_at = _now()
+    audit.record(
+        db,
+        organization_id=user.organization_id,
+        actor=user,
+        action="restore",
+        entity_type="record_template",
+        entity_id=template.id,
+        entity_label=template.name,
+        summary=f"Restored {KIND_LABELS[template.template_kind]} template {template.name}",
+        request=request,
+    )
+    _commit(db)
+    return get_template(db, user, template.id)
+
+
+def purge_template(db: Session, user: Any, template_id: str, request: Any) -> None:
+    """Permanently delete a template already in Deleted entries."""
+    template = db.scalar(
+        select(RecordTemplate).where(
+            RecordTemplate.organization_id == user.organization_id,
+            RecordTemplate.id == template_id,
+            or_(RecordTemplate.user_id == user.id, RecordTemplate.is_shared.is_(True)),
+        )
+    )
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found in this workspace")
+    _require_owner(template, user)
+    if not template.is_deleted:
+        raise HTTPException(status_code=409, detail="Delete a template before removing it permanently.")
+    audit.record(
+        db,
+        organization_id=user.organization_id,
+        actor=user,
+        action="permanent_delete",
+        entity_type="record_template",
+        entity_id=template.id,
+        entity_label=template.name,
+        summary=f"Permanently deleted {KIND_LABELS[template.template_kind]} template {template.name}",
+        request=request,
+    )
+    db.delete(template)
     _commit(db)
 
 
