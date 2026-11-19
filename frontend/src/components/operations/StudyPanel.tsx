@@ -105,11 +105,12 @@ export function StudyPanel({
           Sends the brief to the configured LAN model for wording only. It never edits records or changes calculations.
         </Typography>
       )}
-      {useAi && (study?.ai_error || connectionError) && (
+      {useAi && !study?.ai_text && (study?.ai_error || connectionError) && (
         <AiStatusAlert
           message={study?.ai_error || connectionError || ''}
           errorCode={study?.ai_error_code || status?.error_code}
-          fallbackNote="Use the rule-based brief if AI is unavailable."
+          fallbackNote={study?.ai_error_code === 'invalid_response' ? undefined : 'The rule-based brief remains available.'}
+          onRetry={disabled ? undefined : generate}
           onCheckConnection={check}
           busy={busy || checking}
         />

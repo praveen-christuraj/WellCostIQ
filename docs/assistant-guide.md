@@ -19,6 +19,9 @@ in their organization's RBAC-filtered records, drilling & completion engineering
 workflows, and application guides. If the remote AI PC cannot be reached, the
 Guide alerts the user immediately and still displays the verified local answer.
 
+For model-independent workspace notes and an offline PDF reference library, see
+[Teach the WellCostIQ assistant](ai-knowledge.md).
+
 ## Where to find it
 
 - **Help & Guide → Ask the guide** (`/assistant`, capability `assistant:read`),

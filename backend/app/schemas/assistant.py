@@ -45,6 +45,7 @@ class AssistantAnswer(BaseModel):
     """One answer: a sentence or two, the facts behind it, and where to go next."""
 
     answer: str
+    verified_answer: str = ""  # deterministic lead when AI adds commentary on live facts
     intent: str
     confidence: Confidence
     category: MemoryCategory = "faq"

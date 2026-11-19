@@ -31,7 +31,9 @@ export function AiStatusAlert({
   const codeLabel = errorCode ? AI_ERROR_LABEL[errorCode] : ''
   const title = errorCode === 'disabled'
     ? 'Offline AI model is not enabled'
-    : `AI model communication error${codeLabel ? ` · ${codeLabel}` : ''}`
+    : errorCode === 'invalid_response'
+      ? 'AI reply could not be used'
+      : `AI model communication error${codeLabel ? ` · ${codeLabel}` : ''}`
   const meta = [
     model ? `Model: ${model}` : '',
     endpoint ? `Host: ${endpoint}` : '',
@@ -39,7 +41,7 @@ export function AiStatusAlert({
 
   return (
     <Alert
-      severity={errorCode === 'disabled' ? 'warning' : 'error'}
+      severity={errorCode === 'disabled' || errorCode === 'invalid_response' ? 'warning' : 'error'}
       role="alert"
       onClose={onDismiss}
       sx={{ alignItems: 'flex-start' }}

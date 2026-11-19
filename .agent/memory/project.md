@@ -1,5 +1,10 @@
 # Durable project memory
 
+## Model-independent Assistant knowledge (2026-11-19)
+
+- Live figures still come from deterministic, role- and workspace-scoped services. Both Assistant surfaces can retrieve approved PDF excerpts from an operator-built, read-only index under the current organization UUID; PDFs are shared reference material for Assistant readers in that workspace, never live records or app policy. No migration or model fine-tuning. See `docs/ai-knowledge.md` for publishing and rollback.
+- Operations brief wording uses a bounded qualitative evidence packet and non-thinking generation; the calculated brief stays unchanged. A received-but-unusable draft is separate from a transport failure. Do not use supplemental PDFs as evidence for daily report events or HSE.
+
 ## Operations review and shared three-place precision (2026-11-18)
 
 - API `0.17.0`; Alembic `c1d9e5a4f702` after `b4d621f389aa`. `Decimal3`/`Decimal3Days`, `DECIMAL_QUANT` and `Numeric(28, 3)` supersede the historical ten-place notes below. Preserve internal calculation precision until a result is priced or displayed. Back up first: scale reduction rounds snapshots, rejects an FX factor or required positive invoice input that would become zero, and is not reversible by downgrade. Modern SQLite needs a batch drop for the prior review migration's inline report FKs on deep downgrade.

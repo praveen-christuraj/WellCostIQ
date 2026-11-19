@@ -247,6 +247,8 @@ class Settings(BaseSettings):
     ollama_keep_alive: str = "15m"
     # Optional PEM CA bundle path when OLLAMA_BASE_URL uses https:// with a private CA.
     ollama_ca_cert: str = ""
+    # Read-only, per-workspace indexes built from approved PDFs by the operator.
+    ai_knowledge_directory: str = ""
     # Optional unattended seeding for a first boot with no terminal. Leave blank to be asked.
     seed_org_slug: str = ""
     seed_org_name: str = ""
