@@ -12,6 +12,12 @@ Three kinds share this service because the workflow is the same:
 Nothing is copied blindly: catalogue references and plan scopes are matched
 against what this workspace still has, and anything missing is reported as
 unavailable instead of being silently dropped.
+
+Deletion follows the platform two-step safeguard. Deleting a template moves it to
+Deleted entries, restoring it is refused while an active template of the same
+kind still holds its name, and permanent deletion is offered only from Deleted
+entries. A template is never referenced by the records made from it -- they copy
+its values -- so purging one cannot break a saved AFE, well plan or daily sheet.
 """
 
 from datetime import datetime, timezone
