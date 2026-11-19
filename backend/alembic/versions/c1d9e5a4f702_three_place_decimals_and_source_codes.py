@@ -2,6 +2,8 @@
 
 The scale downgrade cannot restore discarded fractional digits. Back up before upgrading.
 """
+from decimal import Decimal, ROUND_HALF_UP
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -251,6 +253,55 @@ COLUMNS = {
 SOURCE_FIELDS = {'source_activity_code': 100, 'source_operation_code': 100, 'source_cause_code': 50, 'source_mark': 30}
 
 
+# SQLite's round() runs through its own printf, and that rounding changed with the
+# IEEE-correct printf in 3.43: round(1.2345, 3) is 1.235 on older engines and 1.234
+# on 3.43+, because the stored double sits a hair under the exact half. A financial
+# column must not land on a different number depending on which SQLite happens to
+# run the migration, so the stored values are rounded here, in exact decimal
+# arithmetic on the value's shortest round-trip text, and written back. Integers,
+# NULLs and text are left exactly as they are.
+_QUANTUM = {scale: Decimal(1).scaleb(-scale) for scale in range(0, 13)}
+
+
+# Values SQLite hands back for a NUMERIC column: a float, or an int/text the column
+# happened to hold. A Decimal is accepted too so the helper is never silently wrong
+# if the driver starts returning one.
+_ROUNDABLE = (float, Decimal)
+
+
+def _round_half_up(value, scale):
+    """Half away from zero, on the decimal the value prints as. 1.2345 -> 1.235."""
+    number = value if isinstance(value, Decimal) else Decimal(repr(float(value)))
+    return float(number.quantize(_QUANTUM[scale], rounding=ROUND_HALF_UP))
+
+
+def _round_sqlite_columns(table, columns, scale):
+    """Round the real-valued cells of ``columns`` in place, row by row.
+
+    Only real cells are rewritten, so an integer amount keeps its exact integer
+    value and a NULL is never turned into a zero.
+    """
+    bind = op.get_bind()
+    quote = op.get_context().dialect.identifier_preparer.quote
+    real_rows = ' OR '.join(f"typeof({quote(col)}) = 'real'" for col in columns)
+    selected = ', '.join(quote(col) for col in columns)
+    rows = bind.execute(sa.text(f'SELECT rowid, {selected} FROM {quote(table)} WHERE {real_rows}')).fetchall()
+    if not rows:
+        return
+    names = [f'r{index}' for index in range(len(columns))]
+    assignments = ', '.join(f'{quote(col)} = :{name}' for col, name in zip(columns, names))
+    statement = sa.text(f'UPDATE {quote(table)} SET {assignments} WHERE rowid = :rrowid')
+    payload = []
+    for row in rows:
+        values = {
+            name: _round_half_up(value, scale) if isinstance(value, _ROUNDABLE) else value
+            for name, value in zip(names, row[1:])
+        }
+        payload.append({**values, 'rrowid': row[0]})
+    for start in range(0, len(payload), 500):
+        bind.execute(statement, payload[start:start + 500])
+
+
 def _convert(old_scale, new_scale):
     context = op.get_context()
     quote = context.dialect.identifier_preparer.quote
@@ -264,11 +315,7 @@ def _convert(old_scale, new_scale):
         if new_scale < old_scale:
             # SQLite does not enforce NUMERIC scale. Round existing values explicitly;
             # leave integers and NULLs alone, including SQLite's large integer values.
-            assignments = ', '.join(
-                f'{quote(col)} = CASE WHEN typeof({quote(col)}) = \'real\' '
-                f'THEN round({quote(col)}, {new_scale}) ELSE {quote(col)} END' for col in columns
-            )
-            op.execute(f'UPDATE {quote(table)} SET {assignments}')
+            _round_sqlite_columns(table, columns, new_scale)
         if table == 'services':
             # SQLite cannot reflect expression indexes through a batch copy.
             op.drop_index('uq_services_org_name_ci', table_name='services')
