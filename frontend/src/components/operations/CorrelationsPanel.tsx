@@ -44,14 +44,12 @@ import {
 } from '../../lib/operations'
 import {
   ALLOCATIONS,
-  CLASSES,
   CORRELATION_KINDS,
   CRITERIA,
   SCOPES,
   asAllocation,
-  asClassification,
   asScope,
-  classificationProblem,
+  activityTypeProblem,
   printedKey,
   type CriterionKey,
 } from './codeCriteria'
@@ -71,17 +69,17 @@ type CorrelationForm = {
   free_agency: string
   target_id: string
   scope: '' | 'drilling' | 'completion'
-  target_classification: '' | 'Planned' | 'UPA' | 'NPT'
   target_allocation: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
   note: string
+  /** Companion criteria, keyed by the correlation field the API expects. */
+  companion: Record<string, string | null>
 }
 
 type LinkForm = {
   rowId: string
   rule_name: string
   scope: '' | 'drilling' | 'completion'
-  default_classification: '' | 'Planned' | 'UPA' | 'NPT'
-  default_allocation: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
+  default_allocation: string
   note: string
   selections: Selections
 }
@@ -93,16 +91,15 @@ const emptyCorrelation = (): CorrelationForm => ({
   free_agency: '',
   target_id: '',
   scope: '',
-  target_classification: '',
   target_allocation: '',
   note: '',
+  companion: {},
 })
 
 const emptyLink = (): LinkForm => ({
   rowId: '',
   rule_name: '',
   scope: '',
-  default_classification: '',
   default_allocation: '',
   note: '',
   selections: {},
@@ -114,15 +111,20 @@ const KIND_KEYS = CORRELATION_KINDS.map((k) => k.key) as OpsCorrelationInput['ki
 const defaultKind = (value: string): OpsCorrelationInput['kind'] =>
   KIND_KEYS.includes(value as OpsCorrelationInput['kind']) ? (value as OpsCorrelationInput['kind']) : 'operation'
 
-const toneFor = (kind: string): Tone => (kind === 'npt' ? 'warning' : kind === 'cause' ? 'info' : kind === 'agency' ? 'success' : 'neutral')
+const toneFor = (kind: string): Tone =>
+  kind === 'cause' ? 'warning' : kind === 'sub_phase' ? 'info' : kind === 'responsible_agency' ? 'success' : 'neutral'
 
-/** Printed families the server accepts for each correlation kind (mirror of `KINDS`). */
+/**
+ * Printed families the server accepts for each correlation kind (mirror of the
+ * server's `KINDS`). Hole Section, Phase and Activity are Master Data, so they
+ * are never a correlation kind — a printed token is correlated *to* them.
+ */
 const PRINTED_FAMILIES: Record<string, string[]> = {
-  operation: ['Operation', 'OpenWells operation code'],
-  activity: ['Activity', 'OpenWells code token'],
-  npt: ['Trouble / NPT'],
+  operation: ['Trouble / NPT', 'Operation', 'OpenWells operation code'],
   cause: ['Cause', 'Trouble / NPT'],
-  phase: ['OpenWells phase', 'Programme phase'],
+  'sub-phase': ['OpenWells phase', 'Programme phase'],
+  // Responsible agency and vendor names are operator data, not printed codes.
+  'responsible-party': [],
   agency: [],
 }
 
@@ -213,33 +215,63 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
     }
   }
 
-  const libraryFor = (k: string) => ref?.library[k] ?? []
+  const libraryFor = (k: string): OpsCorrelationLibraryItem[] =>
+    (ref?.library as Record<string, OpsCorrelationLibraryItem[]> | undefined)?.[k] ?? []
   const libraryItem = (k: string, id: string): OpsCorrelationLibraryItem | undefined =>
     libraryFor(k).find((c) => c.id === id)
 
   /** Printed options the server will accept for the chosen kind, with the composite key. */
   const printedOptions = useMemo(() => {
-    if (!form || form.kind === 'agency') return []
+    if (!form) return []
     const families = PRINTED_FAMILIES[form.kind] ?? []
+    if (!families.length) return []
     return (ref?.printed ?? []).filter((p) => families.includes(p.family))
   }, [form, ref])
+
+  /** A free-text printed token is used for the two agency kinds. */
+  const freeTextKind = (k: string) => !(PRINTED_FAMILIES[k] ?? []).length
 
   const printedSelection = useMemo(() => {
     if (!form?.printed_key) return null
     return (ref?.printed ?? []).find((p) => printedKey(p.family, p.code) === form.printed_key) ?? null
   }, [form?.printed_key, ref])
 
+  /** A companion value is read from the form by its correlation field name. */
+  const companionTargets = (companion: Record<string, string | null>) =>
+    Object.fromEntries(
+      CRITERIA.filter((c) => c.corrId in companion).map((c) => [c.corrId, companion[c.corrId] ?? null]),
+    )
+
   const saveCorrelation = async () => {
     if (!form) return
-    const agency = form.kind === 'agency'
-    const source_code = agency ? form.free_agency.trim() : (printedSelection?.code ?? '')
-    const source_family = agency ? 'Source agency' : (printedSelection?.family ?? '')
+    const freeText = freeTextKind(form.kind)
+    const source_code = freeText ? form.free_agency.trim() : (printedSelection?.code ?? '')
+    const source_family = freeText
+      ? form.kind === 'agency'
+        ? 'Source agency'
+        : 'Source responsible party'
+      : (printedSelection?.family ?? '')
     if (!source_code) {
-      setFormError(agency ? 'Type the printed agency exactly as the source writes it.' : 'Choose a printed code.')
+      setFormError(
+        freeText ? 'Type the printed token exactly as the source writes it.' : 'Choose a printed code.',
+      )
       return
     }
     if (!form.target_id) {
-      setFormError('Choose the workspace code this printed token should pre-select.')
+      setFormError('Choose the workspace record this printed token should pre-select.')
+      return
+    }
+    // A cause may never be pinned to a Planned Activity: nothing went wrong.
+    const chosenActivity = form.companion.target_activity_id
+      ? libraryItem('activity', form.companion.target_activity_id)
+      : undefined
+    const problem = activityTypeProblem(
+      (chosenActivity?.activity_type as string) || '',
+      Boolean(form.companion.target_cause_id),
+      form.target_allocation,
+    )
+    if (problem) {
+      setFormError(problem)
       return
     }
     setFormError('')
@@ -248,8 +280,8 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
         await opsUpdateCorrelation(form.rowId, {
           target_id: form.target_id,
           scope: asScope(form.scope),
-          target_classification: asClassification(form.target_classification),
           target_allocation: asAllocation(form.target_allocation),
+          ...companionTargets(form.companion),
           note: form.note,
           is_active: true,
         })
@@ -261,8 +293,8 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
           source_label: printedSelection?.name ?? printedSelection?.description ?? '',
           target_id: form.target_id,
           scope: asScope(form.scope),
-          target_classification: asClassification(form.target_classification),
           target_allocation: asAllocation(form.target_allocation),
+          ...companionTargets(form.companion),
           note: form.note,
         }
         await opsCreateCorrelation(payload)
@@ -312,8 +344,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
       rowId: link.id,
       rule_name: link.rule_name,
       scope: asScope(link.scope),
-      default_classification: asClassification(link.default_classification),
-      default_allocation: asAllocation(link.default_allocation),
+      default_allocation: link.default_allocation,
       note: link.note,
       selections,
     })
@@ -358,14 +389,23 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
     if (!linkForm) return
     const chosenCount = CRITERIA.filter((c) => (linkForm.selections[c.key] ?? []).length > 0).length
     if (chosenCount < 2) {
-      setLinkError('Select at least two workspace code criteria (for example Operation + Activity, or NPT + Cause + Agency).')
+      setLinkError(
+        'Select at least two criteria (for example Hole Section + Phase, or Activity + Operations + Cause).',
+      )
       return
     }
-    const nptSelected = (linkForm.selections.npt ?? []).length > 0
-    const problem = classificationProblem(linkForm.default_classification, linkForm.default_allocation, nptSelected)
-    if (problem) {
-      setLinkError(problem)
-      return
+    // The Activity carries the type, so a link may not force a cause onto it
+    // when that Activity is Planned.
+    for (const activityId of linkForm.selections.activity ?? []) {
+      const problem = activityTypeProblem(
+        (libraryItem('activity', activityId)?.activity_type as string) || '',
+        (linkForm.selections.cause ?? []).length > 0,
+        linkForm.default_allocation,
+      )
+      if (problem) {
+        setLinkError(problem)
+        return
+      }
     }
     if (!linkForm.rowId && fanOut.length === 0) {
       setLinkError(
@@ -378,7 +418,6 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
       const items: OpsCodeLinkInput[] = fanOut.map((selection) => ({
         rule_name: linkForm.rule_name,
         scope: asScope(linkForm.scope),
-        default_classification: asClassification(linkForm.default_classification),
         default_allocation: asAllocation(linkForm.default_allocation),
         note: linkForm.note,
         ...Object.fromEntries(
@@ -396,7 +435,6 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
     const item: OpsCodeLinkInput = {
       rule_name: linkForm.rule_name,
       scope: asScope(linkForm.scope),
-      default_classification: asClassification(linkForm.default_classification),
       default_allocation: asAllocation(linkForm.default_allocation),
       note: linkForm.note,
       ...Object.fromEntries(CRITERIA.map((c) => [c.linkId, linkForm.selections[c.key]?.[0] ?? null])),
@@ -443,58 +481,53 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
 
   // ---- Schematic data -----------------------------------------------------
   const hierarchyRoot = useMemo<TreeNode>(() => {
-    const phases = new Map<string, TreeNode>()
+    // Hole Section -> Phase -> Sub-phase -> Activity -> the remaining criteria,
+    // which is the order the daily report lists them.
+    const sections = new Map<string, TreeNode>()
+    const childOf = (parent: TreeNode, id: string, label: string, tone?: Tone): TreeNode => {
+      const existing = parent.children?.find((n) => n.id === id)
+      if (existing) return existing
+      const node: TreeNode = { id, label, tone, children: [] }
+      parent.children = parent.children ?? []
+      parent.children.push(node)
+      return node
+    }
     for (const link of visibleLinks) {
-      const phaseKey = link.phase_code_id || '__none'
-      const phaseLabel = link.phase_label || 'No phase set'
-      let phaseNode = phases.get(phaseKey)
-      if (!phaseNode) {
-        phaseNode = { id: `phase:${phaseKey}`, label: phaseLabel, meta: undefined, tone: 'info', children: [] }
-        phases.set(phaseKey, phaseNode)
+      const sectionKey = link.hole_section_id || '__none'
+      let node = sections.get(sectionKey)
+      if (!node) {
+        node = { id: `hs:${sectionKey}`, label: link.hole_section_label || 'No hole section set', children: [] }
+        sections.set(sectionKey, node)
       }
-      const opKey = `${phaseKey}/${link.operation_code_id || '__none'}`
-      let opNode = phaseNode.children!.find((n) => n.id === `op:${opKey}`)
-      if (!opNode) {
-        opNode = {
-          id: `op:${opKey}`,
-          label: link.operation_label || 'No operation code',
-          children: [],
-        }
-        phaseNode.children!.push(opNode)
-      }
-      const actKey = `${opKey}/${link.activity_code_id || '__none'}`
-      let actNode = opNode.children!.find((n) => n.id === `act:${actKey}`)
-      if (!actNode) {
-        actNode = {
-          id: `act:${actKey}`,
-          label: link.activity_label || 'No activity code',
-          rule: { type: 'link', id: link.id },
-          children: [],
-        }
-        opNode.children!.push(actNode)
-      }
+      const phaseNode = childOf(node, `ph:${sectionKey}/${link.phase_id || '__none'}`, link.phase_label || 'No phase set')
+      const subNode = childOf(
+        phaseNode,
+        `sp:${link.phase_id || '__none'}/${link.sub_phase_id || '__none'}`,
+        link.sub_phase_label || 'No sub-phase set',
+      )
+      const actNode = childOf(
+        subNode,
+        `ac:${link.sub_phase_id || '__none'}/${link.activity_id || '__none'}`,
+        link.activity_label || 'No activity set',
+      )
+      actNode.rule = actNode.rule ?? { type: 'link', id: link.id }
       for (const criterion of CRITERIA) {
-        if (criterion.key === 'phase' || criterion.key === 'operation' || criterion.key === 'activity') continue
+        if (['hole_section', 'phase', 'sub_phase', 'activity'].includes(criterion.key)) continue
         const raw = (link as unknown as Record<string, string | null>)[criterion.linkId]
         if (!raw) continue
         actNode.children!.push({
           id: `leaf:${link.id}:${criterion.key}`,
           label: `${criterion.label}: ${(link as unknown as Record<string, string>)[criterion.linkLabel] || raw}`,
           tone: toneFor(criterion.key),
-          meta: 'workspace code link',
+          meta: criterion.source === 'master' ? 'Master Data' : 'workspace code link',
         })
-      }
-    }
-    for (const phaseNode of phases.values()) {
-      if (!phaseNode.children!.length) {
-        delete phaseNode.children
       }
     }
     return {
       id: 'operational-root',
       label: 'Operational hierarchy',
-      meta: 'Phase → Operation → Activity → NPT / Cause / Agency',
-      children: [...phases.values()],
+      meta: 'Hole Section → Phase → Sub-Phase → Activity → Operations / Cause / Responsible Agency',
+      children: [...sections.values()],
     }
   }, [visibleLinks])
 
@@ -515,7 +548,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
         children: [
           {
             id: `target:${row.id}`,
-            label: row.target_label || 'Workspace code',
+            label: row.target_label || 'Workspace value',
             tone: 'success',
             meta: `${row.kind} code · ${row.scope ? row.scope : 'every scope'}`,
             children: row.extra_criteria_summary
@@ -541,7 +574,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
   }, [visibleRows])
 
   const coverage = useMemo(() => {
-    const cr = ref?.library ?? {}
+    const cr = (ref?.library ?? {}) as Record<string, OpsCorrelationLibraryItem[]>
     return CRITERIA.map((criterion) => {
       const items = cr[criterion.library] ?? []
       const linked = items.filter((i) => (i.correlation_count ?? 0) > 0)
@@ -633,7 +666,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
         <Stack gap={2}>
           <SectionCard
             title="Operational hierarchy"
-            subtitle="Phase → Operation → Activity → NPT / Cause / Agency, built from the active multi-criteria code links."
+            subtitle="Hole Section → Phase → Sub-Phase → Activity → Operations / Cause / Responsible Agency, built from the active multi-criteria code links."
           >
             {visibleLinks.length ? (
               <CorrelationTree
@@ -659,7 +692,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
           </SectionCard>
           <SectionCard
             title="Source mapping"
-            subtitle="Printed family → printed code → the workspace code it pre-selects → any companion criteria."
+            subtitle="Printed family → printed code → the workspace value it pre-selects → any companion criteria."
           >
             {visibleRows.length ? (
               <CorrelationTree
@@ -679,8 +712,13 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                         printed_key: printedKey(row.source_family, row.source_code),
                         target_id: row.target_id ?? '',
                         scope: asScope(row.scope ?? ''),
-                        target_classification: asClassification(row.target_classification ?? ''),
                         target_allocation: asAllocation(row.target_allocation ?? ''),
+                        companion: Object.fromEntries(
+                          CRITERIA.filter((c) => c.key !== row.kind).map((c) => [
+                            c.corrId,
+                            (row as unknown as Record<string, string | null>)[c.corrId] ?? null,
+                          ]),
+                        ),
                         note: row.note,
                       })
                     }
@@ -699,7 +737,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
           </SectionCard>
           <SectionCard
             title="Library coverage & unlinked codes"
-            subtitle="How many codes in each of the seven libraries are referenced by a rule, and which ones still are unlinked."
+            subtitle="How many values in each criterion — Master Data and Code Library alike — are referenced by a rule, and which ones still are unlinked."
           >
             <Box display="grid" gap={1.5} gridTemplateColumns="repeat(auto-fit,minmax(230px,1fr))" mb={2}>
               {coverage.map(({ criterion, total, linked }) => (
@@ -711,7 +749,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                     {linked}/{total}
                   </Typography>
                   <Typography fontSize={11.5} color="text.secondary">
-                    codes referenced by a rule
+                    values referenced by a rule
                   </Typography>
                 </Box>
               ))}
@@ -729,7 +767,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
               </Box>
             ) : (
               <Typography fontSize={12.5} color="text.secondary">
-                Every workspace code in the seven libraries is referenced by at least one rule.
+                Every criterion value in the Master Data and Code Library lists is referenced by at least one rule.
               </Typography>
             )}
           </SectionCard>
@@ -738,7 +776,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
         <>
           <SectionCard
             title={deleted ? 'Deleted correlations' : 'Printed-code correlations'}
-            subtitle="A printed token maps onto one workspace code. Companion criteria pin the scope, classification or a second code."
+            subtitle="A printed token maps onto one workspace code. Companion criteria pin the scope, the allocation, an Activity type or a second code."
             sx={{ mb: 2 }}
             bodyPadding={0}
           >
@@ -756,7 +794,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                 { field: 'source_label', headerName: 'Printed meaning', minWidth: 240, tooltipField: 'source_label' },
                 {
                   field: 'target_label',
-                  headerName: 'Workspace code',
+                  headerName: 'Workspace value',
                   minWidth: 240,
                   tooltipField: 'target_label',
                   valueFormatter: (p) => targetLabelFor(p.data as OpsCorrelation),
@@ -782,8 +820,13 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                               printed_key: printedKey(row.source_family, row.source_code),
                               target_id: row.target_id ?? '',
                               scope: asScope(row.scope ?? ''),
-                              target_classification: asClassification(row.target_classification ?? ''),
                               target_allocation: asAllocation(row.target_allocation ?? ''),
+                              companion: Object.fromEntries(
+                                CRITERIA.filter((c) => c.key !== row.kind).map((c) => [
+                                  c.corrId,
+                                  (row as unknown as Record<string, string | null>)[c.corrId] ?? null,
+                                ]),
+                              ),
                               note: row.note,
                             })
                           }}
@@ -834,7 +877,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                 { field: 'rule_name', headerName: 'Rule name', minWidth: 170 },
                 { field: 'summary_label', headerName: 'Linked criteria', minWidth: 380, flex: 2, tooltipField: 'summary_label' },
                 { field: 'scope', headerName: 'Scope', minWidth: 100 },
-                { field: 'default_classification', headerName: 'Class', minWidth: 95 },
+                { field: 'activity_type', headerName: 'Activity type', minWidth: 125 },
                 { field: 'default_allocation', headerName: 'Allocation', minWidth: 105 },
                 { field: 'criteria_count', headerName: 'Criteria', minWidth: 95 },
                 {
@@ -972,7 +1015,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
               isOptionEqualToValue={(a, b) => a.id === b.id}
               noOptionsText="This library has no codes yet. Add one on its tab first."
               renderInput={(params) => (
-                <TextField {...params} label="Workspace code" helperText="The value extraction should pre-select for this printed token." />
+                <TextField {...params} label="Workspace value" helperText="The value extraction should pre-select for this printed token." />
               )}
             />
             <TextField
@@ -990,8 +1033,8 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
               <Collapse in={companionOpen}>
                 <Box display="grid" gap={2} pt={1.5}>
                   <Typography fontSize={12.5} color="text.secondary">
-                    Companion criteria are optional. They pin the same printed token to a scope, a classification, or a
-                    second workspace code (for example NPT + Cause + Agency).
+                    Companion criteria are optional. They pin the same printed token to a scope, an allocation, an Activity
+                    type, or a second workspace code (for example Operations + Cause + responsible Agency).
                   </Typography>
                   <Box display="flex" gap={2} flexWrap="wrap">
                     <TextField
@@ -1009,19 +1052,6 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                     </TextField>
                     <TextField
                       select
-                      label="Classification"
-                      value={form.target_classification}
-                      onChange={(e) => setForm({ ...form, target_classification: asClassification(e.target.value) })}
-                      sx={{ minWidth: 170 }}
-                    >
-                      {CLASSES.map((c) => (
-                        <MenuItem key={c || 'none'} value={c}>
-                          {c || 'Unset'}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                    <TextField
-                      select
                       label="Allocation"
                       value={form.target_allocation}
                       onChange={(e) => setForm({ ...form, target_allocation: asAllocation(e.target.value) })}
@@ -1034,23 +1064,35 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                       ))}
                     </TextField>
                   </Box>
-                  {CRITERIA.filter((c) => c.key !== form.kind && c.key !== 'mark').map((criterion) => (
-                    <Autocomplete<OpsCorrelationLibraryItem, false, false, false>
-                      key={criterion.key}
-                      options={libraryFor(criterion.library)}
-                      value={
-                        (form as unknown as Record<string, string | null>)[criterion.corrId]
-                          ? (libraryItem(criterion.library, (form as unknown as Record<string, string>)[criterion.corrId]) ?? null)
-                          : null
-                      }
-                      onChange={(_e, next) =>
-                        setForm({ ...form, [criterion.corrId]: next?.id ?? null } as typeof form)
-                      }
-                      getOptionLabel={(item) => `${item.code} — ${item.name}`}
-                      isOptionEqualToValue={(a, b) => a.id === b.id}
-                      renderInput={(params) => <TextField {...params} label={`Companion ${criterion.label.toLowerCase()} code`} />}
-                    />
-                  ))}
+                  {CRITERIA.map((criterion) => {
+                    const selected = form.companion[criterion.corrId] ?? ''
+                    return (
+                      <Autocomplete<OpsCorrelationLibraryItem, false, false, false>
+                        key={criterion.key}
+                        options={libraryFor(criterion.library)}
+                        value={selected ? (libraryItem(criterion.library, selected) ?? null) : null}
+                        onChange={(_e, next) =>
+                          setForm({
+                            ...form,
+                            companion: { ...form.companion, [criterion.corrId]: next?.id ?? null },
+                          })
+                        }
+                        getOptionLabel={(item) => `${item.code} — ${item.name}`}
+                        isOptionEqualToValue={(a, b) => a.id === b.id}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            label={criterion.label}
+                            helperText={
+                              criterion.source === 'master'
+                                ? 'Master Data — maintained on the Master Data page.'
+                                : 'Code Library — maintained on this library tab.'
+                            }
+                          />
+                        )}
+                      />
+                    )
+                  })}
                 </Box>
               </Collapse>
             </Box>
@@ -1119,7 +1161,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                   }}
                   getOptionLabel={(item) => `${item.code} — ${item.name}`}
                   isOptionEqualToValue={(a, b) => a.id === b.id}
-                  renderInput={(params) => <TextField {...params} label="Workspace code" />}
+                  renderInput={(params) => <TextField {...params} label="Workspace value" />}
                 />
                 <Button
                   size="small"
@@ -1179,19 +1221,6 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                 {SCOPES.map((s) => (
                   <MenuItem key={s.key} value={s.key}>
                     {s.label}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                label="Default classification"
-                value={linkForm.default_classification}
-                onChange={(e) => setLinkForm({ ...linkForm, default_classification: asClassification(e.target.value) })}
-                sx={{ minWidth: 185 }}
-              >
-                {CLASSES.map((c) => (
-                  <MenuItem key={c || 'none'} value={c}>
-                    {c || 'Unset'}
                   </MenuItem>
                 ))}
               </TextField>

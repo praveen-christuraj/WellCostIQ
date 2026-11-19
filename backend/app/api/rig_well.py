@@ -3047,7 +3047,15 @@ def sub_activity_options(db: Db, user: Current) -> list[RigWellMasterDataOption]
         .where(Activity.organization_id == user.organization_id, Activity.is_deleted.is_(False))
         .order_by(Activity.activity_code)
     ).all()
-    return [RigWellMasterDataOption(id=item.id, code=item.activity_code, name=item.activity_name) for item in activities]
+    return [
+        RigWellMasterDataOption(
+            id=item.id,
+            code=item.activity_code,
+            name=item.activity_name,
+            activity_type=item.activity_type or "",
+        )
+        for item in activities
+    ]
 
 
 @router.get(

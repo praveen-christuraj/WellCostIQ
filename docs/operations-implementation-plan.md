@@ -1,6 +1,11 @@
 # Well Operations: detailed implementation plan
 
-**Status:** plan only. No code, schema, migration or configuration has been changed.
+**Status:** plan only, and **superseded** — see `docs/operations/implementation-plan.md` (v2) and, for what
+ships, [docs/operations/daily-workflow.md](operations/daily-workflow.md). The code lists sketched below
+(`ops_operation_codes`, `ops_activity_codes`, `ops_npt_codes`, `ops_phase_codes`) were retired on
+2026-11-19 in favour of Master Data Activities carrying an Activity type plus four Code Library lists; the
+nine review criteria are Hole Section, Phase, Sub-phase, Activity, Allocation, Cause, Operations, Agency /
+service vendor and responsible Agency.
 **Companion to:** `docs/operations-module-plan.md` (the architecture decision — read that first for *why*)
 and `docs/operations-costing-decoupling.md` (the 2026-11-17 decision that operations and costing run
 independently — read that second for *what is not being built*).
@@ -132,7 +137,7 @@ is_deleted, deleted_at, created_at, updated_at
 UNIQUE (organization_id, operation_code)
 ```
 
-#### `ops_npt_codes` — the NPT reason taxonomy
+#### `ops_npt_codes` — the NPT reason taxonomy (**retired 2026-11-19**; downtime work now lives in `ops_operations`)
 
 ```
 id, organization_id

@@ -261,7 +261,13 @@ export type RigWellOverview = {
 }
 
 export type ImportResult = { imported_count: number; error_count: number; errors: string[]; success: boolean }
-export type MasterActivity = { id: string; code: string; name: string }
+export type MasterActivity = {
+  id: string
+  code: string
+  name: string
+  /** Planned / UPA / NPT — the type the Activity stands for. */
+  activity_type?: string
+}
 /** A vendor the responsible-party picker may offer for a sub activity. */
 export type SubActivityVendorOption = {
   id: string

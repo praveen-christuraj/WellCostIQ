@@ -50,20 +50,26 @@ const permissions = [
   'ops-plan:read', 'ops-plan:delete', 'ops-plan:restore', 'ops-plan:permanent-delete',
   'ops-analytics:read', 'ops-report:read', 'ops-dashboard:read',
 ]
+// The right-hand side of a correlation: Master Data registers (hole section,
+// phase, activity, vendor) and Code Library lists (sub-phase, Operations, cause,
+// responsible agency label, source mark). There is no separate activity-code or
+// NPT-code list any more — the Activity carries its own type.
 const printed = {
-  kinds: ['operation', 'activity', 'npt', 'cause', 'phase', 'agency'],
+  kinds: ['operation', 'cause', 'sub-phase', 'responsible-party', 'agency'],
   printed: [
     { family: 'OpenWells operation code', code: '19-D', name: 'Stuck', description: 'Fishing', classification: 'NPT' },
-    { family: 'Activity', code: '06', name: 'Wiper trip and reaming', description: 'Tripping', classification: 'Planned' },
     { family: 'Trouble / NPT', code: 'TP02', name: 'Stuck pipe', classification: 'NPT' },
+    { family: 'Cause', code: 'EQP', name: 'Equipment failure', classification: 'NPT' },
   ],
   library: {
+    hole_section: [{ id: 'hs-1', code: 'HS', name: 'Hole section', correlation_count: 1 }],
+    phase: [{ id: 'ph-1', code: 'DRILL', name: 'Drilling', correlation_count: 1 }],
+    activity: [{ id: 'ac-1', code: 'ROT', name: 'Rotating', correlation_count: 1, activity_type: 'Planned' }],
+    vendor: [{ id: 'vn-1', code: 'VND', name: 'Service vendor', correlation_count: 0 }],
+    sub_phase: [{ id: 'sp-1', code: 'DRLPRO', name: 'Drilling progress', correlation_count: 1 }],
     operation: [{ id: 'op-1', code: 'DRL', name: 'Drilling', correlation_count: 1 }],
-    activity: [{ id: 'ac-1', code: 'ROT', name: 'Rotating', correlation_count: 0 }],
-    npt: [{ id: 'npt-1', code: 'PUMP', name: 'Pump failure', correlation_count: 0 }],
     cause: [{ id: 'cause-1', code: 'EQP', name: 'Equipment failure', correlation_count: 0 }],
-    phase: [{ id: 'ph-1', code: 'DRILL', name: 'Drilling', correlation_count: 0 }],
-    agency: [{ id: 'ag-1', code: 'RIG', name: 'Rig contractor', correlation_count: 0 }],
+    responsible_agency: [{ id: 'ag-1', code: 'RIG', name: 'Rig contractor', correlation_count: 0 }],
     mark: [{ id: 'mk-1', code: 'S', name: 'Stuck', correlation_count: 0 }],
   },
 }
@@ -73,15 +79,20 @@ const correlation = {
   extra_criteria_summary: 'Class: NPT · Cause: EQP', scope: '', target_classification: 'NPT', target_allocation: 'NPT',
   is_active: true, is_deleted: false, created_by: 'owner', updated_by: 'owner', created_at: null, updated_at: null,
 }
+// A multi-criteria code link names the same nine criteria as the daily report,
+// in report order. Each criterion is one column, so nothing is parsed from text.
 const codeLink = {
-  id: 'link-1', rule_name: 'Drilling + rotating', scope: '', default_classification: 'Planned', default_allocation: 'PT',
-  phase_code_id: 'ph-1', phase_label: 'DRILL — Drilling',
-  operation_code_id: 'op-1', operation_label: 'DRL — Drilling',
-  activity_code_id: 'ac-1', activity_label: 'ROT — Rotating',
-  npt_code_id: 'npt-1', npt_label: 'PUMP — Pump failure',
-  cause_id: 'cause-1', cause_code: 'EQP', cause_label: 'EQP — Equipment failure',
-  agency_id: 'ag-1', agency_name: 'Rig contractor', agency_label: 'RIG — Rig contractor',
-  mark_rule_id: null, mark_label: '', criteria_count: 4, summary_label: 'Operation: DRL (Drilling) -> Activity: ROT (Rotating)',
+  id: 'link-1', rule_name: 'Rotating in the drilling phase', scope: '', default_allocation: 'PT',
+  hole_section_id: 'hs-1', hole_section_label: 'HS — Hole section',
+  phase_id: 'ph-1', phase_code: 'DRILL', phase_label: 'DRILL — Drilling',
+  sub_phase_id: 'sp-1', sub_phase_label: 'DRLPRO — Drilling progress',
+  activity_id: 'ac-1', activity_label: 'ROT — Rotating', activity_type: 'Planned',
+  operation_id: 'op-1', operation_label: 'DRL — Drilling',
+  cause_id: null, cause_code: '', cause_label: '',
+  responsible_agency_id: 'ag-1', responsible_agency_label: 'RIG — Rig contractor',
+  vendor_id: null, vendor_label: '',
+  mark_rule_id: null, mark_label: '', criteria_count: 5,
+  summary_label: 'Hole Section: HS -> Phase: DRILL -> Activity: ROT -> Operations: DRL',
   note: '', is_active: true, is_deleted: false, created_by: 'owner', updated_by: 'owner', created_at: null, updated_at: null,
 }
 const scopeRef = {
@@ -133,13 +144,19 @@ globalThis.fetch = async (path, init) => {
   if (url.includes('/operations/reference')) {
     return Response.json({
       document_types: ['DDR'], vendors: [], rigs: scopeRef.rigs, wells: scopeRef.wells,
-      phase_codes: [],
-      activity_codes: [{ id: 'ac-1', activity_code: 'ROT', activity_name: 'Rotating', default_allocation: 'PT' }],
-      operation_codes: [{ id: 'op-1', operation_code: 'DRL', operation_name: 'Drilling', default_classification: 'Planned', is_productive_default: true, category: 'other', description: '', sort_order: 0 }],
-      npt_codes: [{ id: 'npt-1', npt_code: 'PUMP', npt_name: 'Pump failure', family: 'other', category: 'other', description: '', sort_order: 0 }],
+      hole_sections: [{ id: 'hs-1', code: 'HS', name: 'Hole section', label: 'HS — Hole section' }],
+      phases: [{ id: 'ph-1', code: 'DRILL', name: 'Drilling', label: 'DRILL — Drilling' }],
+      activities: [{ id: 'ac-1', code: 'ROT', name: 'Rotating', label: 'ROT — Rotating', activity_type: 'Planned' }],
+      sub_phases: [{ id: 'sp-1', sub_phase_code: 'DRLPRO', sub_phase_name: 'Drilling progress', sort_order: 0 }],
+      operations: [{ id: 'op-1', operation_code: 'DRL', operation_name: 'Drilling', family: 'other', sort_order: 0 }],
       causes: [{ id: 'cause-1', cause_code: 'EQP', cause_name: 'Equipment failure', sort_order: 0 }],
       agencies: [{ id: 'ag-1', agency_code: 'RIG', agency_name: 'Rig contractor', category: 'other', sort_order: 0 }],
-      classification_rules: { Planned: ['operation_code_id', 'activity_code_id'], NPT: ['operation_code_id', 'activity_code_id', 'npt_code_id', 'cause_code', 'agency'], UPA: ['operation_code_id', 'activity_code_id', 'cause_code', 'agency'] },
+      code_links: [codeLink],
+      classification_rules: {
+        Planned: ['hole_section_id', 'phase_id', 'activity_id', 'allocation'],
+        NPT: ['hole_section_id', 'phase_id', 'activity_id', 'allocation', 'cause_code'],
+        UPA: ['hole_section_id', 'phase_id', 'activity_id', 'allocation', 'cause_code'],
+      },
     })
   }
   if (url.includes('/operations/code-links')) {
@@ -217,15 +234,31 @@ const treeText = document.body.textContent ?? ''
 assert.ok(treeText.includes('Operational hierarchy'), 'the schematic should name the operational hierarchy')
 assert.ok(treeText.includes('Source mapping'), 'the schematic should show the printed-source mapping')
 assert.ok(treeText.includes('Library coverage'), 'the schematic should report library coverage')
-assert.ok(treeText.includes('ROT — Rotating'), `the linked activity should appear in the hierarchy; DOM held: ${treeText.slice(0, 300)}`)
+// A row is expanded three levels deep by default (Hole Section -> Phase ->
+// Sub-Phase); the Activity sits below that, so open every branch the way a user
+// auditing the hierarchy would before reading it.
+const expandAll = [...document.querySelectorAll('button')].find((el) => (el.textContent ?? '').trim() === 'Expand all')
+assert.ok(expandAll, 'the schematic should offer Expand all')
+await act(async () => {
+  expandAll.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+})
+await settle()
+const expandedText = document.body.textContent ?? ''
+assert.ok(expandedText.includes('ROT — Rotating'), `the linked activity should appear in the hierarchy; DOM held: ${expandedText.slice(0, 3000)}`)
+assert.ok(expandedText.includes('Operations: DRL — Drilling'), 'the Operations link beneath the Activity should be shown')
 await act(async () => tree.root.unmount())
 
-// 1c. Seven workspace libraries, including Agency codes, plus a clickable rule badge.
+// 1c. The Code Library tabs are the lists this workspace actually owns. Hole
+// Sections, Phases, Activities and vendors are Master Data, so the retired
+// Activity-code, NPT-code and Phase-code lists must no longer be offered.
 const agencyTab = await mount(<OperationsLibrary />, '/operations/library?tab=agencies')
 await settle()
 const tabsText = document.body.textContent ?? ''
-for (const label of ['Operation codes', 'Activity codes', 'NPT codes', 'Cause codes', 'Phase codes', 'Agency codes', 'Source mark rules']) {
+for (const label of ['Operations', 'Sub-Phases', 'Cause Codes', 'Responsible Agency labels', 'Source mark rules']) {
   assert.ok(tabsText.includes(label), `the ${label} tab should exist`)
+}
+for (const retired of ['NPT codes', 'Activity codes', 'Phase codes']) {
+  assert.ok(!tabsText.includes(retired), `the retired ${retired} list must not be offered`)
 }
 assert.ok(
   [...document.querySelectorAll('.ag-cell')].some((el) => (el.textContent ?? '').includes('1 rule')),

@@ -1,13 +1,16 @@
 """Operations code library management with correlation and historical dependency guards.
 
-Covers all seven configurable code libraries:
-- ``operation-codes`` (``OpsOperationCode``)
-- ``activity-codes`` (``OpsActivityCode``)
-- ``npt-codes`` (``OpsNptCode``)
-- ``agencies`` (``OpsAgency``)
-- ``causes`` (``OpsCause``)
-- ``phase-codes`` (``OpsPhaseCode``)
-- ``source-marks`` (``OpsMarkRule``)
+Covers the four Code Library lists, all configured here:
+
+- ``operations`` (``OpsOperation``) — the downtime / non-productive work list
+- ``sub-phases`` (``OpsSubPhase``) — sub-phases of a Master Data phase
+- ``causes`` (``OpsCause``) — the reason list used when an Activity is NPT or UPA
+- ``agencies`` (``OpsAgency``) — the responsible agency label list
+- ``source-marks`` (``OpsMarkRule``) — printed mark interpretation rules
+
+Hole Sections, Phases, Activities and vendors are **Master Data**, not Code
+Library lists: correlations read them where they live, so a workspace has one
+definition of a hole section or an activity for costing and operations alike.
 
 Deletion follows the platform two-step safeguard:
 1. Soft delete is blocked (409) while a code is referenced by any active printed-code
@@ -26,15 +29,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.master_data import Phase
 from app.models.operations import (
     OpsActivityBlock,
-    OpsActivityCode,
     OpsAgency,
     OpsCause,
     OpsMarkRule,
-    OpsNptCode,
-    OpsOperationCode,
-    OpsPhaseCode,
+    OpsOperation,
+    OpsSubPhase,
 )
 from app.models import User
 from app.services.audit import record as audit_record
@@ -42,14 +44,59 @@ from app.services.dependencies import dependency_counts
 from app.services.operations import correlations as correlation_svc
 
 MASTERS: dict[str, tuple[type[Any], str, str]] = {
-    "operation-codes": (OpsOperationCode, "operation_code", "ops_operation_code"),
-    "activity-codes": (OpsActivityCode, "activity_code", "ops_activity_code"),
-    "npt-codes": (OpsNptCode, "npt_code", "ops_npt_code"),
+    "operations": (OpsOperation, "operation_code", "ops_operation"),
+    "sub-phases": (OpsSubPhase, "sub_phase_code", "ops_sub_phase"),
     "agencies": (OpsAgency, "agency_code", "ops_agency"),
     "causes": (OpsCause, "cause_code", "ops_cause"),
-    "phase-codes": (OpsPhaseCode, "phase_code", "ops_phase_code"),
     "source-marks": (OpsMarkRule, "mark_code", "ops_mark_rule"),
 }
+
+
+def _sync_sub_phase_phase(db: Session, organization_id: str, row: OpsSubPhase) -> None:
+    """Keep the phase code/name snapshot beside the sub-phase's Master Data phase."""
+    phase = db.scalar(
+        select(Phase).where(
+            Phase.organization_id == organization_id,
+            Phase.id == row.phase_id,
+            Phase.is_deleted.is_(False),
+        )
+    )
+    if phase is None:
+        raise HTTPException(422, "The selected phase is not available in this workspace's Master Data.")
+    row.phase_code_snapshot = (phase.phase_code or "")[:50]
+    row.phase_name_snapshot = (phase.phase_name or "")[:150]
+
+
+def ensure_default_operations(db: Session, organization_id: str) -> int:
+    """Seed the built-in downtime operations list for a workspace that has none.
+
+    The tokens come from ``default_codes.py`` (the organisation's own printed
+    trouble/NPT vocabulary), so a new workspace starts with the codes its reports
+    actually print. Seeding never overwrites or re-creates a code a user deleted:
+    it runs only while the workspace has no Operations row at all.
+    """
+    from app.domain.operations.default_codes import catalogue_rows
+
+    existing = db.scalar(
+        select(func.count(OpsOperation.id)).where(OpsOperation.organization_id == organization_id)
+    )
+    if existing:
+        return 0
+    rows = [row for row in catalogue_rows() if row["family"] == "Trouble / NPT"]
+    for sort_order, row in enumerate(rows):
+        db.add(
+            OpsOperation(
+                organization_id=organization_id,
+                operation_code=row["code"],
+                operation_name=(row["name"] or row["code"])[:150],
+                family="trouble",
+                category="other",
+                description=(row.get("description") or "")[:500],
+                sort_order=sort_order,
+            )
+        )
+    db.commit()
+    return len(rows)
 
 
 def list_masters(db: Session, organization_id: str, kind: str, *, include_deleted: bool = False) -> list[Any]:
@@ -63,6 +110,22 @@ def list_masters(db: Session, organization_id: str, kind: str, *, include_delete
     counts = correlation_svc.code_usage_counts(db, organization_id).get(kind, {})
     for row in rows:
         row.correlation_count = counts.get(row.id, 0)
+    if kind == "sub-phases":
+        # A sub-phase belongs to a Master Data phase, so the list prints that
+        # phase beside it and the page can filter without a second request.
+        from app.models.master_data import Phase
+
+        phase_ids = {row.phase_id for row in rows if row.phase_id}
+        phases = {
+            phase.id: phase
+            for phase in db.scalars(
+                select(Phase).where(Phase.organization_id == organization_id, Phase.id.in_(phase_ids))
+            ).all()
+        } if phase_ids else {}
+        for row in rows:
+            phase = phases.get(row.phase_id)
+            row.phase_code_snapshot = getattr(phase, "phase_code", "") or ""
+            row.phase_name_snapshot = getattr(phase, "phase_name", "") or ""
     return rows
 
 
@@ -92,6 +155,8 @@ def create_master(
             )
         raise HTTPException(409, f"{code_field} '{code_val}' already exists")
     row = model(organization_id=organization_id, **payload)
+    if kind == "sub-phases":
+        _sync_sub_phase_phase(db, organization_id, row)
     db.add(row)
     db.flush()
     audit_record(
@@ -149,6 +214,8 @@ def update_master(
             raise HTTPException(409, f"{code_field} '{new_code}' already exists")
     for k, v in payload.items():
         setattr(row, k, v)
+    if kind == "sub-phases":
+        _sync_sub_phase_phase(db, organization_id, row)
     row.updated_at = datetime.now(UTC)
     correlation_svc.refresh_labels_for_code(db, organization_id, kind, row)
     audit_record(
@@ -257,7 +324,6 @@ def restore_masters(
 # re-created starts a new id whose history must not inherit the old one.
 STRING_REFERENCE_COLUMNS = {
     "causes": (OpsActivityBlock.cause_code, ("cause_code",)),
-    "phase-codes": (OpsActivityBlock.phase_raw, ("phase_code",)),
     "source-marks": (OpsActivityBlock.source_mark, ("mark_code", "mark_name")),
 }
 

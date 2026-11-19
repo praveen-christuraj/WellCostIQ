@@ -126,7 +126,7 @@ def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, da
             if b.is_productive:
                 productive += b.duration_minutes
             if b.allocation == "NPT":
-                by_code[b.npt_code_snapshot or "Uncoded"] += b.duration_minutes
+                by_code[b.operation_snapshot or "Uncoded"] += b.duration_minutes
                 by_agency[b.responsible_party or "Not assigned"] += b.duration_minutes
     total = sum(logged.values())
     counts = Counter(r.status for r in reports)
@@ -167,8 +167,13 @@ def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, da
         },
         "recent_reports": reports[:10],
         "missing_reports": _gaps(db, organization_id, wells, reports, scope, date_from, date_to),
+        # The Operations code is what a downtime block is grouped by; ``code``/``name``
+        # stay for the existing chart series.
         "npt_by_code": [
             {"code": k, "name": k, "minutes": v, "hours": round(v / 60, 3)} for k, v in by_code.most_common(10)
+        ],
+        "npt_by_operation": [
+            {"operation_code": k, "minutes": v, "hours": round(v / 60, 3)} for k, v in by_code.most_common(10)
         ],
         "npt_by_agency": [
             {"agency": k, "minutes": v, "hours": round(v / 60, 3)} for k, v in by_agency.most_common(10)

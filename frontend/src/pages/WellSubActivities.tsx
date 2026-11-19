@@ -29,6 +29,10 @@ import { formatWatDate } from '../lib/time'
 
 function isPlannedActivity(activity?: MasterActivity | null): boolean {
   if (!activity) return true
+  // The Master Data Activity carries its own type; the printed code and name are
+  // only read as a fallback for records created before the type existed.
+  const declared = (activity.activity_type ?? '').trim()
+  if (declared) return declared === 'Planned'
   const text = `${activity.code} ${activity.name}`.toLowerCase()
   if (/\bnpt\b/.test(text) || /non[ -]?productive/.test(text)) return false
   if (/\bupa\b/.test(text) || text.includes('unplanned')) return false

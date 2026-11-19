@@ -37,14 +37,14 @@ from app.domain.operations.metrics import compute_rop, penetration
 from app.domain.operations.taxonomy import code_key
 from app.models import User
 from app.models.vendor_master import Vendor
+from app.models.master_data import Activity
 from app.models.operations import (
     OpsActivityBlock,
-    OpsActivityCode,
+    OpsAgency,
     OpsCause,
     OpsDailyReport,
     OpsDocument,
-    OpsNptCode,
-    OpsOperationCode,
+    OpsOperation,
     OpsPlanVersion,
     OpsSurvey,
 )
@@ -776,7 +776,7 @@ def build_ops_context_block(
                 f"{r['code']}: {r['hours']}h ({round(100.0 * float(r['hours']) / npt_total_h, 1) if npt_total_h else 0.0}%)"
                 for r in dash["npt_by_code"][:5]
             )
-            fleet_lines.append(f"- Top NPT codes: {top_npt}")
+            fleet_lines.append(f"- Top Operations on NPT time: {top_npt}")
         if dash["npt_by_agency"]:
             top_ag = "; ".join(
                 f"{r.get('agency') or r.get('name') or 'Unassigned'}: {r['hours']}h ({round(100.0 * float(r['hours']) / npt_total_h, 1) if npt_total_h else 0.0}%)"
@@ -914,7 +914,7 @@ def enrich_operations_answer(
     system_prompt = (
         "You are WellCostIQ's senior Drilling & Completion Operations Engineer AI running offline on the workspace LAN. "
         "Answer clearly, concisely, and accurately using ONLY the verified Well Operations database facts and D&C "
-        "engineering rules below. Quote exact numbers, depths (m MD and m TVD), hours, ROP (m/h), NPT codes, and WAT "
+        "engineering rules below. Quote exact numbers, depths (m MD and m TVD), hours, ROP (m/h), Operations codes, and WAT "
         "timestamps directly from the provided records — never invent wells, reports, figures, costs, or events. "
         "If a database value is blank or unrecorded, state that plainly. Keep the response focused (3–6 crisp sentences "
         "or short bullet points) suitable for a drilling or completion engineer."
@@ -1080,8 +1080,11 @@ def _deterministic_narratives(report: OpsDailyReport, blocks: list[OpsActivityBl
         sugg = sum(1 for b in blocks if b.review_state == "suggested")
         warnings.append(f"{sugg} of {len(blocks)} activity block(s) still in suggested state awaiting engineer confirmation.")
     for b in blocks:
-        if (b.classification == "NPT" or b.allocation == "NPT") and not b.npt_code_id:
-            warnings.append(f"Block #{b.sequence_no} ({round(b.duration_minutes / 60.0, 2)} h NPT) requires a workspace NPT code before submission.")
+        if b.classification in ("NPT", "UPA") and not b.operation_id:
+            warnings.append(
+                f"Block #{b.sequence_no} ({round(b.duration_minutes / 60.0, 2)} h {b.classification}) "
+                "requires an Operations code before submission."
+            )
 
     brief = (
         f"{report.well_code_snapshot} ({report.rig_code_snapshot or '—'}) {report.report_type} #{report.report_no_text or '—'} "
@@ -1289,8 +1292,8 @@ def refine_report_prefill(
     - Never overwrites an engineer-accepted or engineer-edited block.
     - Every numeric header value proposed by the AI MUST appear in the source report text
       (exact or ft->m converted), and TVD must never exceed MD.
-    - Every classification, allocation, operation code, activity code, NPT code, cause, and
-      vendor match is validated against workspace master data.
+    - Every Hole Section, Phase, Sub-phase, Activity, allocation, Operations, cause and
+      agency match is validated against the workspace's Master Data and Code Library.
     - Updated blocks stay in ``review_state='suggested'`` with transparent evidence.
     """
     report = ops_reports.get_report(db, org_id, report_id)
@@ -1320,30 +1323,30 @@ def refine_report_prefill(
     op_codes = [
         (c.id, c.operation_code, c.operation_name)
         for c in db.scalars(
-            select(OpsOperationCode).where(
-                OpsOperationCode.organization_id == org_id,
-                OpsOperationCode.is_active.is_(True),
-                OpsOperationCode.is_deleted.is_(False),
+            select(OpsOperation).where(
+                OpsOperation.organization_id == org_id,
+                OpsOperation.is_active.is_(True),
+                OpsOperation.is_deleted.is_(False),
             )
         ).all()
     ]
+    # Master Data Activities: the code, the name and the type the block inherits.
     act_codes = [
-        (c.id, c.activity_code, c.activity_name)
+        (c.id, c.activity_code, c.activity_name, c.activity_type)
         for c in db.scalars(
-            select(OpsActivityCode).where(
-                OpsActivityCode.organization_id == org_id,
-                OpsActivityCode.is_active.is_(True),
-                OpsActivityCode.is_deleted.is_(False),
+            select(Activity).where(
+                Activity.organization_id == org_id,
+                Activity.is_deleted.is_(False),
             )
         ).all()
     ]
-    npt_codes = [
-        (c.id, c.npt_code, c.npt_name)
+    agency_names = [
+        c.agency_code
         for c in db.scalars(
-            select(OpsNptCode).where(
-                OpsNptCode.organization_id == org_id,
-                OpsNptCode.is_active.is_(True),
-                OpsNptCode.is_deleted.is_(False),
+            select(OpsAgency).where(
+                OpsAgency.organization_id == org_id,
+                OpsAgency.is_active.is_(True),
+                OpsAgency.is_deleted.is_(False),
             )
         ).all()
     ]
@@ -1425,11 +1428,14 @@ def refine_report_prefill(
         f"MISSING HEADER FIELDS TO EXTRACT IF PRESENT: {', '.join(missing_header) or 'none'}",
     ]
     if op_codes:
-        prompt_lines.append("OPERATION CODES: " + ", ".join(f"{c}={n}" for _, c, n in op_codes[:25]))
+        prompt_lines.append("OPERATIONS CODES: " + ", ".join(f"{c}={n}" for _, c, n in op_codes[:30]))
     if act_codes:
-        prompt_lines.append("ACTIVITY CODES: " + ", ".join(f"{c}={n}" for _, c, n in act_codes[:30]))
-    if npt_codes:
-        prompt_lines.append("NPT CODES: " + ", ".join(f"{c}={n}" for _, c, n in npt_codes[:30]))
+        prompt_lines.append(
+            "ACTIVITY CODES (code=name [type]): "
+            + ", ".join(f"{c}={n} [{t}]" for _, c, n, t in act_codes[:40])
+        )
+    if agency_names:
+        prompt_lines.append("RESPONSIBLE AGENCY LABELS: " + ", ".join(agency_names[:20]))
     if vendors:
         prompt_lines.append("ACTIVE VENDORS: " + ", ".join(f"{c}={n}" for _, c, n in vendors[:25]))
     if surveys:
@@ -1461,9 +1467,10 @@ def refine_report_prefill(
         "You are WellCostIQ's Drilling & Completion Report Extraction AI.\n"
         f"{DNC_CORE_PRIMER}\n"
         "Extract ONLY explicitly stated values from the provided report text (convert ft to m using *0.3048; ensure TVD <= MD). "
-        "Leave unknown fields null. For each suggested activity block, verify classification (Planned, UPA, or NPT), "
-        "allocation (PT, UPA, NPT, or SP), matching operation_code, activity_code, npt_code (e.g. TP01/TP02/TR02/TR03/TR04/TD01/TW01/TW02), "
-        "vendor_code (if an active vendor matches), bit_depth_m, and concise downtime/UPA reason.\n"
+        "Leave unknown fields null. For each suggested activity block choose the activity_code from the Master Data list "
+        "(its type Planned/UPA/NPT becomes the block's Activity), allocation (PT, UPA, NPT, or SP), matching operation_code "
+        "(e.g. TP01/TP02/TR02/TR03/TR04/TD01/TW01/TW02), cause_code, responsible_agency (a Code Library label) and "
+        "vendor_code (if an active vendor matches), plus bit_depth_m and a concise downtime/UPA reason.\n"
         "Return ONLY valid JSON with shape:\n"
         '{"header": {"depth_start_m": null, "depth_end_m": null, "tvd_m": null, "bit_depth_m": null, "progress_m": null, '
         '"rotating_hours": null, "last_casing_size_in": null, "last_casing_depth_m": null, "hole_section_text": null, '
@@ -1471,8 +1478,9 @@ def refine_report_prefill(
         '"mud_yp_lbf": null, "bha_summary": null, "pob_count": null, "customer": null, "supervisor": null, '
         '"engineer": null, "block_text": null, "current_status": null, "operation_summary": null, "forward_plan": null, '
         '"hse_summary": null}, '
-        '"blocks": [{"seq": 1, "classification": "Planned", "allocation": "PT", "operation_code": "", '
-        '"activity_code": "", "npt_code": "", "cause_code": "", "vendor_code": "", "bit_depth_m": null, "reason": ""}]}'
+        '"blocks": [{"seq": 1, "allocation": "PT", "operation_code": "", '
+        '"activity_code": "", "cause_code": "", "responsible_agency": "", "vendor_code": "", '
+        '"bit_depth_m": null, "reason": ""}]}'
     )
     try:
         reply = ollama.chat(
@@ -1568,10 +1576,10 @@ def refine_report_prefill(
             setattr(report, fname, cleaned[:limit])
             updated_fields.append(fname)
 
-    op_lookup = {code_key(k): cid for cid, c, n in op_codes for k in (c, n)}
-    act_lookup = {code_key(k): cid for cid, c, n in act_codes for k in (c, n)}
-    npt_lookup = {code_key(k): (cid, c) for cid, c, n in npt_codes for k in (c, n)}
+    op_lookup = {code_key(k): (cid, c) for cid, c, n in op_codes for k in (c, n)}
+    act_lookup = {code_key(k): (cid, t) for cid, c, n, t in act_codes for k in (c, n)}
     cause_lookup = {code_key(c): c for c in causes}
+    agency_lookup = {code_key(c): c for c in agency_names}
     vendor_lookup = {code_key(k): (vid, n) for vid, c, n in vendors for k in (c, n)}
 
     updated_blocks = 0
@@ -1598,22 +1606,22 @@ def refine_report_prefill(
             if alloc_val == "NPT":
                 blk.is_productive = False
             changed = True
-        if not blk.operation_code_id and item.get("operation_code"):
-            if oid := op_lookup.get(code_key(str(item["operation_code"]))):
-                blk.operation_code_id = oid
+        if not blk.operation_id and item.get("operation_code"):
+            if match := op_lookup.get(code_key(str(item["operation_code"]))):
+                blk.operation_id, blk.operation_snapshot = match
                 changed = True
-        if not blk.activity_code_id and item.get("activity_code"):
+        if not blk.activity_id and item.get("activity_code"):
             if aid := act_lookup.get(code_key(str(item["activity_code"]))):
-                blk.activity_code_id = aid
+                blk.activity_id = aid[0]
+                # The Master Data Activity's type is the block's Activity type.
+                if aid[1] and blk.classification_source == "keyword":
+                    blk.classification = aid[1]
+                    blk.is_productive = aid[1] != "NPT"
                 changed = True
-        raw_npt = str(item.get("npt_code") or "").strip()
-        if raw_npt and (blk.classification == "NPT" or blk.allocation == "NPT"):
-            if not blk.npt_code_id and (nmatch := npt_lookup.get(code_key(raw_npt))):
-                blk.npt_code_id, blk.npt_code_snapshot = nmatch
-                changed = True
-            elif not blk.npt_code_snapshot and (dmatch := find_code(raw_npt, "Trouble / NPT")):
-                blk.npt_code_snapshot = dmatch.code
-                changed = True
+        raw_agency = str(item.get("responsible_agency") or "").strip()
+        if raw_agency and not blk.responsible_party and (ag := agency_lookup.get(code_key(raw_agency))):
+            blk.responsible_party = ag
+            changed = True
         raw_cause = str(item.get("cause_code") or "").strip()
         if raw_cause and not blk.cause_code and (cm := cause_lookup.get(code_key(raw_cause))):
             blk.cause_code = cm

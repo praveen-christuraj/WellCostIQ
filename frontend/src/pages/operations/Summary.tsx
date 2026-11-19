@@ -183,17 +183,27 @@ export default function OperationsSummary() {
       { field: 'end_wat', headerName: 'TO (WAT)', minWidth: 145 },
       { field: 'duration_hours', headerName: 'HRS', minWidth: 85, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'cum_days', headerName: 'CUM DAYS', minWidth: 102, valueFormatter: (p) => fmtNum(p.value) },
-      { field: 'hole_section', headerName: 'SECTION', minWidth: 115 },
-      { field: 'phase_code', headerName: 'PHASE', minWidth: 95 },
-      { field: 'activity_code', headerName: 'ACTIVITY', minWidth: 160 },
-      { field: 'classification', headerName: 'CLASS', minWidth: 98 },
+      // Criteria in the order the daily report lists them.
+      { field: 'hole_section_label', headerName: 'HOLE SECTION', minWidth: 165 },
+      { field: 'phase_label', headerName: 'PHASE', minWidth: 150 },
+      { field: 'sub_phase_label', headerName: 'SUB-PHASE', minWidth: 155 },
+      {
+        field: 'activity_label',
+        headerName: 'ACTIVITY',
+        minWidth: 195,
+        valueGetter: (p) =>
+          [p.data?.activity_label, p.data?.classification].filter(Boolean).join(' · '),
+      },
       {
         field: 'allocation',
-        headerName: 'ALLOC',
-        minWidth: 92,
+        headerName: 'ALLOCATION',
+        minWidth: 115,
         cellRenderer: (p: { value: string }) => <Tag tone={allocTone(p.value)}>{p.value}</Tag>,
       },
-      { field: 'responsible_party', headerName: 'AGENCY / VENDOR', minWidth: 150 },
+      { field: 'cause_code', headerName: 'CAUSE', minWidth: 110 },
+      { field: 'operation_label', headerName: 'OPERATIONS', minWidth: 185 },
+      { field: 'responsible_party', headerName: 'AGENCY / SERVICE VENDOR', minWidth: 200 },
+      { field: 'responsible_agency_label', headerName: 'RESPONSIBLE AGENCY', minWidth: 190 },
       { field: 'depth_from_m', headerName: 'MD FROM (M)', minWidth: 115, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'depth_to_m', headerName: 'MD TO (M)', minWidth: 112, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'tvd_from_m', headerName: 'TVD FROM (M)', minWidth: 118, valueFormatter: (p) => fmtNum(p.value) },
@@ -207,7 +217,6 @@ export default function OperationsSummary() {
         valueFormatter: (p) => (p.data?.scope === 'completion' ? 'N/A' : fmtNum(p.value)),
       },
       { field: 'mud_weight_ppg', headerName: 'MW (PPG)', minWidth: 100, valueFormatter: (p) => fmtNum(p.value) },
-      { field: 'npt_code', headerName: 'NPT CODE', minWidth: 140 },
       { field: 'reason', headerName: 'REASON', minWidth: 180 },
       { field: 'narrative', headerName: 'OPERATION DESCRIPTION', minWidth: 320, flex: 2 },
       {
@@ -291,7 +300,7 @@ export default function OperationsSummary() {
 
   const breakdownCols = useMemo<ColDef<OpsSummaryBreakdown>[]>(
     () => [
-      { field: 'classification', headerName: 'CLASSIFICATION', minWidth: 130 },
+      { field: 'classification', headerName: 'ACTIVITY TYPE', minWidth: 130 },
       {
         field: 'allocation',
         headerName: 'ALLOCATION',
@@ -679,7 +688,7 @@ export default function OperationsSummary() {
                   columns={breakdownCols}
                   rowKey={(r) => `${r.classification}-${r.allocation}-${r.responsible_party}-${r.code}-${r.cause_code}`}
                   exportName={`${summary.well_code}-pt-npt-breakdown`}
-                  searchPlaceholder="Search agency, vendor, NPT code, cause, allocation…"
+                  searchPlaceholder="Search hole section, phase, activity, operations, cause, agency…"
                   canExport={mayExport}
                   onExport={auditSummaryExport}
                 />

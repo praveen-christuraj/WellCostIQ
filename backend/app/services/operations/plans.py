@@ -142,14 +142,14 @@ def replace_items(db, org, plan_id, items, user, request):
 
 def _write_items(db, org, plan, items, existing, user, request):
     from app.models.master_data import HoleSection, Phase
-    from app.models.operations import OpsOperationCode
+    from app.models.operations import OpsOperation
 
     resolve(db, org, plan.well_id, plan.scope)
     for data in items:
         for model, ident in [
             (HoleSection, data.hole_section_id),
             (Phase, data.phase_id),
-            (OpsOperationCode, data.operation_code_id),
+            (OpsOperation, data.operation_id),
         ]:
             if ident and not db.scalar(
                 select(model.id).where(model.id == ident, model.organization_id == org, model.is_deleted.is_(False))

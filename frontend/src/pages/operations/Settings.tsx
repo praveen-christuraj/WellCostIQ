@@ -164,8 +164,8 @@ export default function OperationsSettings() {
             <Box display="grid">
               {(
                 [
-                  ['require_npt_code', 'Require an NPT code for nonproductive time'],
-                  ['require_npt_agency', 'Require a responsible vendor for NPT and UPA'],
+                  ['require_operations', 'Require an Operations code for NPT and UPA time'],
+                  ['require_npt_agency', 'Require a responsible agency or vendor for NPT and UPA'],
                   ['require_npt_reason', 'Require a reason for NPT and UPA'],
                 ] as const
               ).map(([k, l]) => (

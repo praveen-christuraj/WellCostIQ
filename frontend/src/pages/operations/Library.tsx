@@ -15,28 +15,30 @@ import {
 } from '../../lib/operations'
 import { CORRELATION_KIND_FOR_MASTER } from '../../components/operations/codeCriteria'
 
+//: The Code Library owns the lists that are the workspace's own vocabulary.
+//: Hole Sections, Phases, Activities and vendors are Master Data and are
+//: maintained on the Master Data page; a field links to it rather than duplicating
+//: the list here.
 const kinds = {
-  'operation-codes': {
-    label: 'Operation codes',
+  operations: {
+    label: 'Operations',
     code: 'operation_code',
     name: 'operation_name',
-    defaults: { default_classification: 'Planned', category: 'other' },
-  },
-  'activity-codes': {
-    label: 'Activity codes',
-    code: 'activity_code',
-    name: 'activity_name',
-    defaults: { default_allocation: 'PT' },
-  },
-  'npt-codes': {
-    label: 'NPT codes',
-    code: 'npt_code',
-    name: 'npt_name',
     defaults: { family: 'other', category: 'other' },
   },
-  causes: { label: 'Cause codes', code: 'cause_code', name: 'cause_name', defaults: {} },
-  'phase-codes': { label: 'Phase codes', code: 'phase_code', name: 'phase_name', defaults: {} },
-  agencies: { label: 'Agency codes', code: 'agency_code', name: 'agency_name', defaults: { category: 'other' } },
+  'sub-phases': {
+    label: 'Sub-Phases',
+    code: 'sub_phase_code',
+    name: 'sub_phase_name',
+    defaults: {},
+  },
+  causes: { label: 'Cause Codes', code: 'cause_code', name: 'cause_name', defaults: {} },
+  agencies: {
+    label: 'Responsible Agency labels',
+    code: 'agency_code',
+    name: 'agency_name',
+    defaults: { category: 'other' },
+  },
   'source-marks': {
     label: 'Source mark rules',
     code: 'mark_code',
@@ -112,7 +114,7 @@ function DefaultCodes() {
                 flex: 2,
                 tooltipField: 'description',
               },
-              { field: 'classification', headerName: 'Suggested class' },
+              { field: 'classification', headerName: 'Suggested Activity type' },
               { field: 'allocation', headerName: 'Suggested allocation' },
               { field: 'source', headerName: 'Reference', minWidth: 195 },
             ]}
@@ -150,6 +152,24 @@ export default function OperationsLibrary() {
   const spec = kinds[kind],
     path = `/operations/masters/${kind}`
 
+  // A sub-phase is a child of a Master Data phase, so that list is read from
+  // Master Data rather than duplicated in the Code Library.
+  const [phases, setPhases] = useState<{ id: string; phase_code: string; phase_name: string }[]>([])
+  useEffect(() => {
+    if (kind !== 'sub-phases') return
+    let current = true
+    api<{ id: string; code: string; name: string }[]>('/master-data/phases?include_deleted=false')
+      .then((rows) => {
+        if (current) setPhases(rows.map((r) => ({ id: r.id, phase_code: r.code, phase_name: r.name })))
+      })
+      .catch(() => {
+        if (current) setPhases([])
+      })
+    return () => {
+      current = false
+    }
+  }, [kind])
+
   const getRows = () =>
     api<Row[]>(path + (deleted ? '?include_deleted=true' : '')).then((rs) => rs.filter((r) => r.is_deleted === deleted))
 
@@ -185,7 +205,13 @@ export default function OperationsLibrary() {
   }
 
   const edit = (row?: Row) => {
-    const defaults = { [spec.code]: '', [spec.name]: '', ...spec.defaults, description: '' }
+    const defaults = {
+      ...(kind === 'sub-phases' ? { phase_id: phases[0]?.id ?? '' } : {}),
+      [spec.code]: '',
+      [spec.name]: '',
+      ...spec.defaults,
+      description: '',
+    }
     setId(row?.id ?? '')
     setForm(Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, String(row?.[k] ?? v)])))
     setError('')
@@ -229,7 +255,7 @@ export default function OperationsLibrary() {
       <PageHeading
         eyebrow="Well Operations"
         title="Code library"
-        subtitle="Define this workspace’s phase, operation, activity, NPT, cause, agency and source-mark codes. Codes are displayed alongside their names. Responsible parties for new NPT / UPA entries come from active Master Data vendors."
+        subtitle="Define this workspace’s Operations, Sub-Phases, Cause Codes, Responsible Agency labels and source-mark rules. Hole Sections, Phases, Activities and Service Vendors are Master Data, so they are maintained on the Master Data page and are referenced here, never duplicated."
         action={
           <>
             {!isDefault && !isCorrelations && !deleted && can('ops-master:create') && (
@@ -277,7 +303,7 @@ export default function OperationsLibrary() {
           )}
           {kind === 'source-marks' && (
             <Alert severity="info" sx={{ mb: 1.5 }}>
-              Add a printed source mark to override its suggested classification and allocation. These rules affect
+              Add a printed source mark to override its suggested Activity type and allocation. These rules affect
               future drafts, never saved logs.
             </Alert>
           )}
@@ -322,6 +348,9 @@ export default function OperationsLibrary() {
             exportName={`operations-${kind}`}
             onImport={!deleted && can('ops-master:import') ? () => setImporting(true) : undefined}
             columns={[
+              ...(kind === 'sub-phases'
+                ? [{ field: 'phase_code_snapshot', headerName: 'Phase', minWidth: 140 }]
+                : []),
               { field: spec.code, headerName: 'Code' },
               {
                 field: spec.name,
@@ -422,22 +451,40 @@ export default function OperationsLibrary() {
               <Box display="grid" gap={2} pt={1}>
                 {Object.keys(form).map((k) => {
                   const options =
-                    k === 'default_classification'
-                      ? ['Planned', 'UPA', 'NPT']
-                      : k === 'default_allocation'
-                        ? ['PT', 'UPA', 'NPT', 'SP']
-                        : null
+                    k === 'phase_id'
+                      ? phases.map((p) => p.id)
+                      : k === 'default_classification'
+                        ? ['Planned', 'UPA', 'NPT']
+                        : k === 'default_allocation'
+                          ? ['PT', 'UPA', 'NPT', 'SP']
+                          : null
+                  const label =
+                    k === 'phase_id'
+                      ? 'Phase'
+                      : k === 'default_classification'
+                        ? 'Activity type'
+                        : k.replaceAll('_', ' ')
                   return (
                     <TextField
                       key={k}
                       select={!!options}
-                      label={k.replaceAll('_', ' ')}
+                      label={label}
                       value={form[k]}
+                      helperText={
+                        k === 'phase_id'
+                          ? 'Master Data phase this sub-phase belongs to.'
+                          : k === 'family' && kind === 'operations'
+                            ? 'Groups the Operations list; "trouble" is downtime work.'
+                            : undefined
+                      }
                       onChange={(e) => setForm({ ...form, [k]: e.target.value })}
                     >
                       {options?.map((o) => (
                         <MenuItem key={o} value={o}>
-                          {o}
+                          {k === 'phase_id'
+                            ? (phases.find((p) => p.id === o)?.phase_code ?? o) +
+                              ` — ${phases.find((p) => p.id === o)?.phase_name ?? ''}`
+                            : o}
                         </MenuItem>
                       ))}
                     </TextField>

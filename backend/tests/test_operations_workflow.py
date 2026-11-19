@@ -153,7 +153,7 @@ def test_real_programme_to_reviewed_daily_kpis():
         blocks = [{k: b[k] for k in OpsActivityBlockIn.model_fields} for b in draft["blocks"]]
         for b, source_block in zip(blocks, draft["blocks"]):
             b.update(review_state="accepted", block_id=source_block["id"])
-        # A Planned block cannot be accepted without its operation and activity code.
+        # The Master Data criteria are mandatory whatever the Activity type.
         refused = c.put(
             OPS + address,
             headers=h,
@@ -164,21 +164,42 @@ def test_real_programme_to_reviewed_daily_kpis():
                 "surveys": draft["surveys"],
             },
         )
-        assert refused.status_code == 422 and "operation code" in refused.json()["detail"]
-        operation = post("/masters/operation-codes", json={"operation_code": "DRILL", "operation_name": "Drilling"})
-        activity = post("/masters/activity-codes", json={"activity_code": "ROT", "activity_name": "Rotating"})
-        for b in blocks:
-            b.update(operation_code_id=operation["id"], activity_code_id=activity["id"])
-        code = post("/masters/npt-codes", json={"npt_code": "ENGINE", "npt_name": "Engine shutdown"})
+        assert refused.status_code == 422 and "hole section" in refused.json()["detail"]
+        # Hole Sections, Phases and Activities are Master Data, shared with costing.
+        section = good(
+            c.post("/api/v1/master-data/hole-sections", headers=h, json={"code": "H12", "name": '12-1/4" hole'})
+        )
+        phase = good(c.post("/api/v1/master-data/phases", headers=h, json={"code": "DRL", "name": "Drilling"}))
+        planned = good(
+            c.post("/api/v1/master-data/activities", headers=h, json={"code": "ROT", "name": "Rotating"})
+        )
+        down = good(
+            c.post(
+                "/api/v1/master-data/activities",
+                headers=h,
+                json={"code": "DWN", "name": "Downtime", "activity_type": "NPT"},
+            )
+        )
+        # Operations and causes are configured in the Code Library.
+        operation = post("/masters/operations", json={"operation_code": "ENGINE", "operation_name": "Engine shutdown"})
         with SessionLocal() as db:
             org = db.scalar(select(Organization.id).where(Organization.slug == "north"))
             db.add(Vendor(organization_id=org, vendor_name="Rig contractor", vendor_code="RC", status="active"))
             db.commit()
         vendor = get("/reference")["vendors"][0]
         assert vendor["vendor_name"] == "Rig contractor"
-        cause = post("/masters/causes", json={"cause_code": "EQP", "cause_name": "Equipment failure"})
+        post("/masters/causes", json={"cause_code": "EQP", "cause_name": "Equipment failure"})
+        for b in blocks:
+            b.update(hole_section_id=section["id"], phase_id=phase["id"], activity_id=planned["id"])
         block = blocks[1]
-        block.update(npt_code_id=code["id"], cause_code="EQP", reason="Engine shutdown", review_state="edited")
+        # Selecting the NPT Activity is what makes the block NPT.
+        block.update(
+            activity_id=down["id"],
+            operation_id=operation["id"],
+            cause_code="EQP",
+            reason="Engine shutdown",
+            review_state="edited",
+        )
         checkpoint = active["items"][30]
         edited = {
             "confirm_review": True,
@@ -189,9 +210,11 @@ def test_real_programme_to_reviewed_daily_kpis():
             "blocks": blocks,
             "surveys": draft["surveys"],
         }
-        # An NPT block without an agency is refused before it ever reaches submit.
-        blocked = c.put(OPS + address, headers=h, json=edited)
-        assert blocked.status_code == 422 and "agency" in blocked.json()["detail"]
+        # An NPT block without a cause is refused before it ever reaches submit.
+        missing_cause = [{**b} for b in blocks]
+        missing_cause[1] = {**missing_cause[1], "cause_code": ""}
+        blocked = c.put(OPS + address, headers=h, json={**edited, "blocks": missing_cause})
+        assert blocked.status_code == 422 and "cause code" in blocked.json()["detail"]
         assert c.post(OPS + address + "/submit", headers=h).status_code == 422
         block.update(vendor_id=vendor["id"], responsible_party="Untrusted client label")
         reviewed = put(address, json=edited)
@@ -490,13 +513,12 @@ def test_dated_checkpoint_without_depth_and_closed_day_gaps():
         active = good(c.post(base + "/activate", headers=h))
         draft = good(c.post(OPS + "/reports", headers=h, json=dict(**folder, report_date="2020-01-02")))
         url = OPS + "/reports/" + draft["id"]
-        operation = good(
-            c.post(OPS + "/masters/operation-codes", headers=h,
-                   json={"operation_code": "MOB", "operation_name": "Mobilisation"})
+        section = good(
+            c.post("/api/v1/master-data/hole-sections", headers=h, json={"code": "S1", "name": "Surface hole"})
         )
+        phase = good(c.post("/api/v1/master-data/phases", headers=h, json={"code": "MOB", "name": "Mobilisation"}))
         activity = good(
-            c.post(OPS + "/masters/activity-codes", headers=h,
-                   json={"activity_code": "MOB", "activity_name": "Move in"})
+            c.post("/api/v1/master-data/activities", headers=h, json={"code": "MOB", "name": "Move in"})
         )
         b = {
             "sequence_no": 1,
@@ -505,8 +527,9 @@ def test_dated_checkpoint_without_depth_and_closed_day_gaps():
             "duration_minutes": 1440,
             "review_state": "accepted",
             "narrative": "Mobilisation complete",
-            "operation_code_id": operation["id"],
-            "activity_code_id": activity["id"],
+            "hole_section_id": section["id"],
+            "phase_id": phase["id"],
+            "activity_id": activity["id"],
         }
         good(
             c.put(

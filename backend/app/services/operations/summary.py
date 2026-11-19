@@ -14,14 +14,15 @@ from app.domain.operations.default_codes import describe_code
 from app.domain.operations.metrics import compute_rop, penetration, period_balance
 from app.models.rig_well import Block, Rig, Well
 from app.models.vendor_master import Vendor
+from app.models.master_data import Activity, HoleSection, Phase
 from app.models.operations import (
     OpsActivityBlock,
-    OpsActivityCode,
+    OpsAgency,
     OpsDailyMetric,
     OpsDailyReport,
-    OpsNptCode,
-    OpsOperationCode,
+    OpsOperation,
     OpsPlanVersion,
+    OpsSubPhase,
     OpsSurvey,
 )
 
@@ -82,15 +83,27 @@ def well_operation_summary(
     # Reference maps for clean labels without N+1 queries.
     op_map = {
         c.id: f"{c.operation_code} — {c.operation_name}"
-        for c in db.scalars(select(OpsOperationCode).where(OpsOperationCode.organization_id == organization_id)).all()
+        for c in db.scalars(select(OpsOperation).where(OpsOperation.organization_id == organization_id)).all()
     }
     act_map = {
         c.id: f"{c.activity_code} — {c.activity_name}"
-        for c in db.scalars(select(OpsActivityCode).where(OpsActivityCode.organization_id == organization_id)).all()
+        for c in db.scalars(select(Activity).where(Activity.organization_id == organization_id)).all()
     }
-    npt_map = {
-        c.id: (c.npt_code, c.npt_name)
-        for c in db.scalars(select(OpsNptCode).where(OpsNptCode.organization_id == organization_id)).all()
+    section_map = {
+        c.id: f"{c.section_code} — {c.section_name}"
+        for c in db.scalars(select(HoleSection).where(HoleSection.organization_id == organization_id)).all()
+    }
+    phase_map = {
+        c.id: f"{c.phase_code} — {c.phase_name}"
+        for c in db.scalars(select(Phase).where(Phase.organization_id == organization_id)).all()
+    }
+    sub_phase_map = {
+        c.id: f"{c.sub_phase_code} — {c.sub_phase_name}"
+        for c in db.scalars(select(OpsSubPhase).where(OpsSubPhase.organization_id == organization_id)).all()
+    }
+    agency_map = {
+        c.id: c.agency_name
+        for c in db.scalars(select(OpsAgency).where(OpsAgency.organization_id == organization_id)).all()
     }
     vendor_map = {
         v.id: v.vendor_name
@@ -327,7 +340,8 @@ def well_operation_summary(
             cum_d = round(cum_minutes / 1440.0, 3)
 
             op_label = (
-                op_map.get(b.operation_code_id or "")
+                op_map.get(b.operation_id or "")
+                or b.operation_snapshot
                 or (
                     describe_code(b.source_operation_code, "Operation")
                     if b.source_operation_code
@@ -336,22 +350,35 @@ def well_operation_summary(
             )
             act_family = "OpenWells code token" if b.source_page else "Activity"
             act_label = (
-                act_map.get(b.activity_code_id or "")
+                act_map.get(b.activity_id or "")
                 or (describe_code(b.source_activity_code, act_family) if b.source_activity_code else "")
             )
-            npt_code, npt_name = npt_map.get(b.npt_code_id or "", (b.npt_code_snapshot or "", ""))
+            # Operations prints the Code Library code; the snapshot keeps the value
+            # a saved report was reviewed against.
+            operation_code = op_map.get(b.operation_id or "", "").split(" — ")[0] or b.operation_snapshot or ""
+            operation_name = (
+                op_map.get(b.operation_id or "", "").split(" — ", 1)[1] if b.operation_id and b.operation_id in op_map else ""
+            )
+            section_label = section_map.get(b.hole_section_id or "") or r.hole_section_text or ""
+            sub_phase_label = sub_phase_map.get(b.sub_phase_id or "")
+            # The responsible agency label is its own criterion beside the vendor.
+            agency_label = agency_map.get(b.responsible_agency_id or "") or ""
             agency = (
-                b.responsible_party
+                agency_map.get(b.responsible_agency_id or "")
+                or b.responsible_party
                 or vendor_map.get(b.vendor_id or "", "")
                 or customer
                 or "Unassigned"
             )
-            phase_label = b.phase_raw or r.hole_section_text or r.scope.title()
-            cause_label = (
-                f"{npt_code} — {npt_name}"
-                if npt_code and npt_name
-                else (npt_code or b.cause_code or b.source_cause_code or b.allocation)
+            phase_label = (
+                sub_phase_map.get(b.sub_phase_id or "")
+                or phase_map.get(b.phase_id or "")
+                or b.phase_raw
+                or section_map.get(b.hole_section_id or "")
+                or r.hole_section_text
+                or r.scope.title()
             )
+            cause_label = b.cause_code or b.source_cause_code or b.allocation
             b_mw = b.mud_weight_ppg if b.mud_weight_ppg is not None else r.mud_weight_ppg
             b_foot = (
                 b.footage_m
@@ -387,7 +414,11 @@ def well_operation_summary(
                     "report_status": r.status,
                     "sequence_no": b.sequence_no,
                     "day_number": r.day_number,
-                    "hole_section": r.hole_section_text or "",
+                    "hole_section": section_label,
+                    "hole_section_label": section_label,
+                    "sub_phase": sub_phase_label,
+                    "sub_phase_label": sub_phase_label,
+                    "activity_type": b.classification,
                     "start_wat": format_wat(b.started_at, "%Y-%m-%d %H:%M"),
                     "end_wat": format_wat(b.ended_at, "%Y-%m-%d %H:%M"),
                     "duration_minutes": b.duration_minutes,
@@ -396,9 +427,12 @@ def well_operation_summary(
                     "phase_code": b.phase_raw or "",
                     "phase_label": phase_label,
                     "operation": op_label,
-                    "operation_code": op_label,
+                    "operation_code": operation_code,
+                    "operation_name": operation_name,
+                    "operation_label": op_label,
                     "activity": act_label,
                     "activity_code": act_label,
+                    "activity_label": act_label,
                     "classification": b.classification,
                     "allocation": b.allocation,
                     "is_productive": bool(b.is_productive),
@@ -418,7 +452,9 @@ def well_operation_summary(
                     "rop_m_per_hr": _num(b_rop),
                     "agency": "" if agency == "Unassigned" else agency,
                     "responsible_party": "" if agency == "Unassigned" else agency,
-                    "npt_code": npt_code,
+                    "agency_label": agency_label,
+                    "responsible_agency_label": agency_label,
+                    "operations": operation_code,
                     "cause": b.cause_code or b.source_cause_code,
                     "cause_code": b.cause_code or b.source_cause_code or "",
                     "reason": b.reason,
@@ -435,7 +471,10 @@ def well_operation_summary(
                     "operation": op_label or "General",
                     "cause": cause_label,
                     "cause_code": b.cause_code or b.source_cause_code or "",
-                    "npt_code": npt_code or op_label or b.allocation,
+                    # Kept for existing exports: the operations code, or the
+                    # allocation when a block carries no operation.
+                    "npt_code": operation_code or op_label or b.allocation,
+                    "operation_code": operation_code,
                     "classification": b.classification,
                     "allocation": b.allocation,
                     "sample_reason": "",

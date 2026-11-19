@@ -1,6 +1,6 @@
 # Well Operations module — implementation plan v2
 
-**Status:** historical design proposal. For the implemented workflow, permissions, calculation bases and limits, see [Well Operations: daily workflow](daily-workflow.md). The sections below describe the proposal, not a release checklist with every item completed.
+**Status:** historical design proposal (the code families it names — `ops_operation_codes`, `ops_activity_codes`, `ops_npt_codes`, `ops_phase_codes` — were retired 2026-11-19; Activities now carry an Activity type in Master Data and the Code Library holds Operations, Sub-Phases, Cause Codes, Responsible Agency labels and source marks). For the implemented workflow, permissions, calculation bases and limits, see [Well Operations: daily workflow](daily-workflow.md). The sections below describe the proposal, not a release checklist with every item completed.
 **Date:** 2026-11-17
 **Branch:** `arena/10241b7b-wellcostiq`
 **Supersedes:** `docs/operations-implementation-plan.md` (v1) — v1 covered only the DDR spine.
