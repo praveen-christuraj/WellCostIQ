@@ -860,6 +860,7 @@ class OpsKpiOut(_Strict):
 class OpsDashboardOut(_Strict):
     kpis: OpsKpiOut
     npt_by_code: list[dict[str, Any]]
+    npt_by_operation: list[dict[str, Any]]
     npt_by_agency: list[dict[str, Any]]
     daily_trend: list[dict[str, Any]]
     recent_reports: list[OpsReportOut]
