@@ -168,13 +168,17 @@ export default function OperationsOverview() {
           />
           <StatCard
             label="Weighted ROP"
-            value={k.avg_rop === null ? '—' : `${k.avg_rop} m/h`}
-            hint={`${k.productive_pct}% productive · ${k.npt_pct}% NPT of logged time`}
+            value={scope === 'completion' ? 'N/A' : k.avg_rop === null ? '—' : `${k.avg_rop} m/h`}
+            hint={
+              scope === 'completion'
+                ? `ROP not applicable to completion · ${k.productive_pct}% productive`
+                : `${k.productive_pct}% productive · ${k.npt_pct}% NPT of logged time`
+            }
           />
           <StatCard
             label="Lead / lag"
             value={k.lag_days === null ? '—' : `${k.lag_days} d`}
-            hint="Single well and scope · positive is behind"
+            hint="Single well and scope · positive is lead, negative is lag"
           />
         </Box>
       )}

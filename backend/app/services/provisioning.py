@@ -90,14 +90,16 @@ CAPABILITIES = {resource: actions for resource, actions in {
     "costing-sets": ("read", "create", "update", "delete", "import", "export"),
     # Reusable templates (AFE estimate, well plan, daily sheet). Read is enough to
     # pick and apply one; changing the library needs its own rights.
-    "template": ("read", "create", "update", "delete", "export"),
+    "template": ("read", "create", "update", "delete", "restore", "permanent-delete", "export"),
     "ops-dashboard": ("read",),
     "ops-doc": ("read", "upload", "update", "delete", "restore", "permanent-delete", "download", "extract", "export"),
     "ops-report": (
         "read", "create", "update", "delete", "restore", "permanent-delete", "import", "export",
         "submit", "approve", "reopen", "amend", "print", "review",
     ),
-    "ops-master": ("read", "create", "update", "delete", "restore", "import", "export", "correlate"),
+    "ops-master": (
+        "read", "create", "update", "delete", "restore", "permanent-delete", "import", "export", "correlate",
+    ),
     "ops-plan": (
         "read", "create", "update", "delete", "restore", "permanent-delete", "activate", "reopen", "import", "export",
     ),

@@ -92,6 +92,16 @@ export default function OperationsGuide() {
         eyebrow="Well Operations"
         title="Ask & guide"
         subtitle={`Query live Well Operations records, Drilling & Completion engineering standards, OpenWells codes, and daily workflows (${WAT_LABEL}). Enable Offline AI to run grounded LAN Ollama analysis.`}
+        action={
+          <Stack direction="row" gap={1} flexWrap="wrap">
+            <Button component={RouterLink} to="/operations/library?tab=correlations" variant="outlined" size="small">
+              Open code correlations
+            </Button>
+            <Button component={RouterLink} to="/operations/library" variant="text" size="small">
+              Code library
+            </Button>
+          </Stack>
+        }
       />
       {can('assistant:read') && (
         <SectionCard

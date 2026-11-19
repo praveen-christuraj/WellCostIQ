@@ -114,10 +114,11 @@ def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, da
             continue
         periods += report.period_minutes
         unaccounted += report._unaccounted_minutes
-        g, h = penetration(report, rows)
-        if h:
-            gain += g
-            hours += h
+        if report.scope != "completion":
+            g, h = penetration(report, rows)
+            if h:
+                gain += g
+                hours += h
         for b in rows:
             logged[b.classification] += b.duration_minutes
             trends[report.report_date][b.classification] += b.duration_minutes
@@ -153,7 +154,7 @@ def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, da
             "allocation_hours": {k: round(allocations[k] / 60, 3) for k in ("PT", "UPA", "NPT", "SP")},
             "productive_pct": round(100 * productive / total, 1) if total else 0,
             "npt_pct": round(100 * logged["NPT"] / total, 1) if total else 0,
-            "avg_rop": round(gain / hours, 3) if hours else None,
+            "avg_rop": None if scope == "completion" else (round(gain / hours, 3) if hours else None),
             "lag_days": lag,
             "wells_covered": len({r.well_id for r in reports}),
             "wells_total": sum(
@@ -289,7 +290,7 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
         else:
             continue
         depth = float(r.depth_end_m) if r.depth_end_m is not None else None
-        rop = compute_rop(*penetration(r, blocks[r.id]))
+        rop = None if scope == "completion" else compute_rop(*penetration(r, blocks[r.id]), scope=r.scope)
         actual.append(
             {
                 "cum_days": round(elapsed, 3),
@@ -319,7 +320,13 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
                     "baseline": f"{baseline.label} v{baseline.version_no}",
                 }
             )
-    if actual and actual[-1]["depth_m"] is not None and actual[-1]["rop"] and actual[-1]["rop"] > 0:
+    if (
+        scope != "completion"
+        and actual
+        and actual[-1]["depth_m"] is not None
+        and actual[-1]["rop"]
+        and actual[-1]["rop"] > 0
+    ):
         last = actual[-1]
         target = next((p for p in plan if p["depth_m"] is not None and p["depth_m"] > last["depth_m"]), None)
         if target:

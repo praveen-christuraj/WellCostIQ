@@ -28,9 +28,14 @@ router = APIRouter(prefix="/record-templates", tags=["Reusable Templates"])
 
 
 @router.get("", response_model=list[TemplateSummaryOut], dependencies=[Depends(require("template:read"))])
-def list_templates(db: Db, user: Current, kind: str = Query(default="", max_length=20)) -> list[TemplateSummaryOut]:
+def list_templates(
+    db: Db,
+    user: Current,
+    kind: str = Query(default="", max_length=20),
+    deleted: bool = False,
+) -> list[TemplateSummaryOut]:
     """Every template this user can use: their own plus what the workspace shares."""
-    return svc.list_templates(db, user, kind)
+    return svc.list_templates(db, user, kind, deleted=deleted)
 
 
 @router.get("/export", dependencies=[Depends(require("template:export"))])
@@ -91,6 +96,17 @@ def duplicate_template(template_id: str, request: Request, db: Db, user: Current
 @router.delete("/{template_id}", status_code=204, dependencies=[Depends(require("template:delete"))])
 def delete_template(template_id: str, request: Request, db: Db, user: Current) -> Response:
     svc.delete_template(db, user, template_id, request)
+    return Response(status_code=204)
+
+
+@router.post("/{template_id}/restore", response_model=TemplateOut, dependencies=[Depends(require("template:restore"))])
+def restore_template(template_id: str, request: Request, db: Db, user: Current) -> TemplateOut:
+    return svc.restore_template(db, user, template_id, request)
+
+
+@router.delete("/{template_id}/permanent", status_code=204, dependencies=[Depends(require("template:permanent-delete"))])
+def purge_template(template_id: str, request: Request, db: Db, user: Current) -> Response:
+    svc.purge_template(db, user, template_id, request)
     return Response(status_code=204)
 
 

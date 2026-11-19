@@ -523,6 +523,87 @@ SYSTEM_MEMORY: tuple[dict[str, Any], ...] = (
             "Move the well scope to Final review, correct anything found, then complete it."
         ),
     },
+    {
+        "memory_key": "ops-code-correlations",
+        "title": "Operations Code Library & Codes Correlation",
+        "category": "workflow",
+        "keywords": (
+            "code codes correlation correlations correlate correlated link linked multi criteria "
+            "batch tree schematic hierarchy openwells operation activity npt cause phase agency "
+            "source mark library unlink extract"
+        ),
+        "route": "/operations/library?tab=correlations",
+        "permission": "ops-master:read",
+        "sort_order": 120,
+        "body": (
+            "Well Operations → Code library maintains seven workspace code sets (Operation, Activity, "
+            "NPT, Cause, Phase, Agency and Source marks), the read-only Default Codes dictionary, and "
+            "the Correlations workspace. Correlations map exact printed source codes to workspace codes "
+            "(with optional companion Scope, Classification, Allocation and code criteria), while Link "
+            "criteria creates multi-criteria relationships across two or more workspace codes. Both "
+            "support atomic batch saving, switch between Table view (default) and an interactive Tree "
+            "schematic, enforce the Planned/UPA/NPT classification matrix, pre-select codes as reviewable "
+            "suggestions during report extraction, and block deleting any code until it is unlinked."
+        ),
+        "steps": (
+            "Create or import workspace codes in Well Operations → Code library across Operation, Activity, NPT, Cause, Phase, Agency and Source marks.\n"
+            "Open the Correlations tab and click Add correlation or Batch correlate to map printed codes (plus optional companion criteria) to workspace codes.\n"
+            "Click Link criteria to link multiple workspace codes across Phase, Operation, Activity, NPT, Cause, Agency, Source mark, Scope, Classification and Allocation in one save.\n"
+            "Switch between Table view (default) for search, filtering and bulk actions and Tree schematic to inspect the code hierarchy and unlinked codes visually.\n"
+            "To retire a correlated code, unlink or delete its correlation first, delete the code to Deleted entries, then Restore or Delete permanently if no historical report references it."
+        ),
+    },
+    {
+        "memory_key": "ops-analytics-axes-rop",
+        "title": "Operations Analytics: chart axis intervals & completion ROP",
+        "category": "calculation",
+        "keywords": (
+            "operations analytics time depth completion progress axis axes scale step interval min max "
+            "reset rop penetration rate na not applicable"
+        ),
+        "route": "/operations/analytics",
+        "permission": "ops-analytics:read",
+        "sort_order": 125,
+        "body": (
+            "On Well Operations → Analytics, drilling Time vs measured depth defaults to 300 m depth "
+            "steps and completion Time vs completion progress automatically picks clean whole-number "
+            "activity intervals so labels never overlap. Open Axis scale on the chart to set custom X "
+            "(days) and Y (depth or activity) minimum, maximum and step intervals or one-click presets, "
+            "and click Reset axes to restore defaults. Rate of penetration (ROP) applies only to drilling "
+            "and is always reported as N/A across completion reports, summaries, analytics and exports."
+        ),
+        "steps": (
+            "Open Well Operations → Analytics and pick a well and Drilling or Completion scope.\n"
+            "Use Axis scale on the progress curve to adjust X-axis (days) and Y-axis (MD or activity number) min, max and step interval, or click Reset axes.\n"
+            "Export SVG or PDF directly from the chart panel with your active axis scale preserved; completion views always report ROP as N/A."
+        ),
+    },
+    {
+        "memory_key": "workflow-permanent-delete",
+        "title": "Deleting, restoring and permanently deleting records",
+        "category": "workflow",
+        "keywords": (
+            "delete deleted permanently permanent purge remove trash restore recover dependency blocked "
+            "linked unlink safeguard audit"
+        ),
+        "route": "/audit-logs",
+        "permission": "",
+        "sort_order": 130,
+        "body": (
+            "WellCostIQ uses a uniform two-step deletion safeguard across Master Data, Rig & Well, AFE, "
+            "Daily Costing, Fuel Cost, Invoices, Invoice Configuration, Templates and Well Operations "
+            "(Documents, Daily Reports, Timelines, Code Library and Correlations). Deleting a live record "
+            "moves it to Deleted entries where it can be restored intact; live items linked to active "
+            "code correlations are blocked until unlinked. Permanent deletion is available only inside "
+            "Deleted entries for authorized users, requires explicit confirmation, refuses records still "
+            "referenced by operational history, and writes an immutable audit log entry."
+        ),
+        "steps": (
+            "If a code or catalogue item is blocked by an active correlation, remove or update the correlation first.\n"
+            "Delete the live record to move it safely into Deleted entries (inactive in pickers, preserved in history).\n"
+            "Open Show deleted / Deleted entries and choose Restore to recover the record, or Delete permanently to remove unreferenced items irreversibly."
+        ),
+    },
 )
 
 

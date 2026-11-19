@@ -61,7 +61,9 @@ def daily_brief(report, blocks, footage, rotating_hours, rop):
             f'Measured depth: {format_value(report.depth_start_m, "m")} to {format_value(report.depth_end_m, "m")}. '
             f'Hole gain: {format_value(footage, "m")}.'
         )
-    if rop is not None:
+    if report.scope == 'completion':
+        lines.append('ROP: N/A (completion operation).')
+    elif rop is not None:
         lines.append(f'Rotating ROP: {format_value(rop, "m/h")} on {format_value(rotating_hours, "rotating hours")}.')
     elif report.scope == 'drilling' and blocks:
         lines.append('Rotating ROP unavailable: comparable depth gain and rotating hours must be reported together.')

@@ -376,9 +376,10 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
     causes = lookup(OpsCause, "cause_code", "cause_name")
     trouble = lookup(OpsNptCode, "npt_code", "npt_name")
     mark_rules = lookup(OpsMarkRule, "mark_code")
-    # Workspace correlations pre-select the organisation's own codes. They never
-    # override a code the source printed and never approve the block.
+    # Workspace correlations and multi-criteria code links pre-select the
+    # organisation's own codes. They never override a printed code and never approve the block.
     correlation_map = correlation_svc.correlation_map(db, org)
+    code_links = correlation_svc.list_code_links(db, org, scope=doc.scope, active_only=True)
     active_vendors = db.scalars(
         select(Vendor).where(
             Vendor.organization_id == org,
@@ -517,7 +518,7 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
         rot_b = b.get("rotating_hours")
         from app.domain.operations.metrics import compute_rop
 
-        rop_b = compute_rop(footage, rot_b)
+        rop_b = None if doc.scope == "completion" else compute_rop(footage, rot_b)
         reason_txt = str(b.get("reason") or "").strip()[:500]
         if (
             not reason_txt
@@ -576,11 +577,19 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             "agency": (party,),
         }
         correlation_evidence = correlation_svc.apply_to_block(
-            block, correlation_map, **{f"{kind}_tokens": tokens for kind, tokens in correlation_tokens.items()}
+            block,
+            correlation_map,
+            db=db,
+            report_scope=doc.scope,
+            **{f"{kind}_tokens": tokens for kind, tokens in correlation_tokens.items()},
         )
-        if correlation_evidence:
+        link_evidence = correlation_svc.apply_code_links_to_block(
+            db, block, code_links, report_scope=doc.scope
+        )
+        all_evidence = [*correlation_evidence, *link_evidence]
+        if all_evidence:
             note = block.classification_evidence or ""
-            block.classification_evidence = " · ".join(filter(None, [note, *correlation_evidence]))[:500]
+            block.classification_evidence = " · ".join(filter(None, [note, *all_evidence]))[:500]
         db.add(block)
         new_blocks.append(block)
     if unmapped_codes:

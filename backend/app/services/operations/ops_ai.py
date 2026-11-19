@@ -186,6 +186,38 @@ def schedule_sentence(days: Any) -> str:
     return f"schedule position {schedule_label(days)} versus the active timeline."
 
 
+def _is_completion_only(summary_doc: dict[str, Any], scope_filter: str | None = None) -> bool:
+    """True when nothing but completion scope is in view, so ROP has no meaning.
+
+    ``scope_filter`` is the analyst's explicit request. Without one, the scope mix
+    is read from the summary itself (``scopes``, the daily rollup, or its label) so
+    a completion-only well is never reported at a rotating penetration rate.
+    """
+    if scope_filter == "completion":
+        return True
+    if scope_filter == "drilling":
+        return False
+    scopes = summary_doc.get("scopes")
+    if not scopes:
+        scopes = sorted(
+            {
+                row.get("scope")
+                for row in (summary_doc.get("daily_rollup") or [])
+                if isinstance(row, dict) and row.get("scope")
+            }
+        )
+    if not scopes:
+        scopes = [str(summary_doc.get("scope_label") or "").strip().lower()]
+    scopes = [s for s in scopes if s]
+    return len(scopes) == 1 and scopes[0] == "completion"
+
+
+def _fmt_rop(val: Any, suffix: str = " m/h", *, completion: bool = False) -> str:
+    if completion:
+        return "N/A"
+    return _fmt_num(val, suffix)
+
+
 def _fmt_num(val: Any, suffix: str = "") -> str:
     if val is None or val == "":
         return "—"
@@ -293,6 +325,8 @@ def answer_ops_database(
         for d in dossiers:
             k = d["kpis"]
             label = f"{d['well_code']} ({d['well_name']})" if d["well_name"] != d["well_code"] else d["well_code"]
+            comp_only = _is_completion_only(d, scope_filter)
+            rop_txt = _fmt_rop(k["avg_rop_m_per_hr"], " m/h", completion=comp_only)
             rows.append(
                 [
                     label,
@@ -303,7 +337,7 @@ def answer_ops_database(
                     _fmt_num(k["total_footage_m"], " m"),
                     _fmt_num(k["total_logged_hours"], " h"),
                     f"{_fmt_num(k['npt_hours'], ' h')} ({k['npt_pct']}%)",
-                    _fmt_num(k["avg_rop_m_per_hr"], " m/h"),
+                    rop_txt,
                     schedule_label(k["lag_days"]),
                 ]
             )
@@ -311,8 +345,8 @@ def answer_ops_database(
                 AssistantFact(
                     label=d["well_code"],
                     value=f"MD {_fmt_num(k['closing_md_m'], ' m')} · TVD {_fmt_num(k['closing_tvd_m'], ' m')}",
-                    hint=f"{k['total_reports']} report(s) · NPT {_fmt_num(k['npt_hours'], ' h')} · ROP {_fmt_num(k['avg_rop_m_per_hr'], ' m/h')}",
-                    route=f"/operations/summary?well_id={d['well_id']}",
+                    hint=f"{k['total_reports']} report(s) · NPT {_fmt_num(k['npt_hours'], ' h')} · ROP {rop_txt}",
+                    route=f"/operations/summary?well={d['well_id']}",
                     permission="ops-report:read",
                 )
             )
@@ -320,7 +354,7 @@ def answer_ops_database(
                 f"{d['well_code']}: {k['total_reports']} report(s), closing MD {_fmt_num(k['closing_md_m'], ' m')}, "
                 f"TVD {_fmt_num(k['closing_tvd_m'], ' m')}, footage {_fmt_num(k['total_footage_m'], ' m')}, "
                 f"logged {_fmt_num(k['total_logged_hours'], ' h')} (NPT {_fmt_num(k['npt_hours'], ' h')} / {k['npt_pct']}%), "
-                f"avg ROP {_fmt_num(k['avg_rop_m_per_hr'], ' m/h')}."
+                f"avg ROP {rop_txt}."
             )
         return AssistantAnswer(
             answer=f"Well Operations comparison ({scope_filter or 'all scopes'}, {WAT_LABEL}): " + " ".join(bullets),
@@ -338,7 +372,7 @@ def answer_ops_database(
                 )
             ],
             sources=[
-                AssistantSource(label=f"{d['well_code']} Operation Summary", route=f"/operations/summary?well_id={d['well_id']}")
+                AssistantSource(label=f"{d['well_code']} Operation Summary", route=f"/operations/summary?well={d['well_id']}")
                 for d in dossiers[:4]
             ],
             follow_ups=[
@@ -404,28 +438,36 @@ def answer_ops_database(
                 label="Closing MD / TVD",
                 value=f"{_fmt_num(k['closing_md_m'], ' m')} / {_fmt_num(k['closing_tvd_m'], ' m')}",
                 hint=f"Start MD {_fmt_num(k['opening_md_m'], ' m')} · Bit {_fmt_num(k['latest_bit_depth_m'], ' m')}",
-                route=f"/operations/summary?well_id={well.id}",
+                route=f"/operations/summary?well={well.id}",
                 permission="ops-report:read",
             ),
             AssistantFact(
                 label="Drilled footage & ROP",
-                value=f"{_fmt_num(k['total_footage_m'], ' m')} · {_fmt_num(k['avg_rop_m_per_hr'], ' m/h')}",
-                hint=f"Rotating hours: {_fmt_num(k['total_rotating_hours'], ' h')}",
-                route=f"/operations/summary?well_id={well.id}",
+                value=(
+                    "ROP: N/A"
+                    if _is_completion_only(d, scope_filter)
+                    else f"{_fmt_num(k['total_footage_m'], ' m')} · {_fmt_num(k['avg_rop_m_per_hr'], ' m/h')}"
+                ),
+                hint=(
+                    "Completion operation (rotating ROP not applicable)"
+                    if _is_completion_only(d, scope_filter)
+                    else f"Rotating hours: {_fmt_num(k['total_rotating_hours'], ' h')}"
+                ),
+                route=f"/operations/summary?well={well.id}",
                 permission="ops-report:read",
             ),
             AssistantFact(
                 label="Logged time",
                 value=f"{_fmt_num(k['total_logged_hours'], ' h')} ({_fmt_num(k['cum_logged_days'], ' d')})",
                 hint=f"Planned {_fmt_num(k['planned_hours'], ' h')} · UPA {_fmt_num(k['upa_hours'], ' h')} · Productive {k['productive_pct']}%",
-                route=f"/operations/summary?well_id={well.id}",
+                route=f"/operations/summary?well={well.id}",
                 permission="ops-report:read",
             ),
             AssistantFact(
                 label="NPT",
                 value=f"{_fmt_num(k['npt_hours'], ' h')} ({k['npt_pct']}%)",
                 hint=f"SP {_fmt_num(k['sp_hours'], ' h')} · {schedule_label(k['lag_days'])}",
-                route=f"/operations/summary?well_id={well.id}",
+                route=f"/operations/summary?well={well.id}",
                 permission="ops-report:read",
             ),
         ]
@@ -486,7 +528,7 @@ def answer_ops_database(
                             _fmt_num(r["progress_m"], " m"),
                             _fmt_num(r["logged_hours"]),
                             _fmt_num(r["npt_hours"]),
-                            _fmt_num(r["rop_m_per_hr"]),
+                            _fmt_rop(r["rop_m_per_hr"], "", completion=(r.get("scope") == "completion")),
                         ]
                         for r in d["daily_rollup"][-10:]
                     ],
@@ -508,13 +550,18 @@ def answer_ops_database(
         if d["latest_status"]:
             extra_bits.append(f"Latest status: {d['latest_status'][:180]}")
 
+        comp_only = _is_completion_only(d, scope_filter)
+        progress_clause = (
+            "ROP N/A (completion operation). "
+            if comp_only
+            else f"with {_fmt_num(k['total_footage_m'], ' m')} drilled footage at {_fmt_num(k['avg_rop_m_per_hr'], ' m/h')} rotating ROP. "
+        )
         prose = (
             f"{d['well_code']} ({d['well_name']}, Rig {d['rig_code'] or '—'}, {d['scope_label']}) spans "
             f"{k['total_reports']} daily report(s) from {d['first_report_date']} to {d['last_report_date']} "
             f"({k['approved_reports']} approved, {k['submitted_reports']} submitted, {k['draft_reports']} draft). "
             f"Closing MD is {_fmt_num(k['closing_md_m'], ' m')} and TVD is {_fmt_num(k['closing_tvd_m'], ' m')} "
-            f"(bit depth {_fmt_num(k['latest_bit_depth_m'], ' m')}), with {_fmt_num(k['total_footage_m'], ' m')} drilled footage "
-            f"at {_fmt_num(k['avg_rop_m_per_hr'], ' m/h')} rotating ROP. "
+            f"(bit depth {_fmt_num(k['latest_bit_depth_m'], ' m')}), {progress_clause}"
             f"Logged time totals {_fmt_num(k['total_logged_hours'], ' h')} ({_fmt_num(k['cum_logged_days'], ' days')}): "
             f"Planned {_fmt_num(k['planned_hours'], ' h')}, UPA {_fmt_num(k['upa_hours'], ' h')}, "
             f"NPT {_fmt_num(k['npt_hours'], ' h')} ({k['npt_pct']}%), Productive {k['productive_pct']}%"
@@ -530,7 +577,7 @@ def answer_ops_database(
             facts=facts,
             tables=tables,
             sources=[
-                AssistantSource(label=f"{d['well_code']} Operation Summary", route=f"/operations/summary?well_id={well.id}"),
+                AssistantSource(label=f"{d['well_code']} Operation Summary", route=f"/operations/summary?well={well.id}"),
                 AssistantSource(label="Daily reports", route="/operations/reports"),
                 AssistantSource(label="Operations analytics", route="/operations/analytics"),
             ],
@@ -620,7 +667,7 @@ def answer_ops_database(
         ),
         AssistantFact(
             label="Avg ROP & Lag",
-            value=f"{_fmt_num(k['avg_rop'], ' m/h')}",
+            value=_fmt_rop(k["avg_rop"], " m/h", completion=(scope_filter == "completion")),
             hint=f"{schedule_label(k['lag_days'])} · Wells covered {k['wells_covered']}/{k['wells_total']}",
             route="/operations/analytics",
             permission="ops-report:read",
@@ -665,7 +712,7 @@ def answer_ops_database(
         f"Verified submitted/approved reports total {_fmt_num(k['total_logged_hours'], ' h')} logged "
         f"({k['productive_pct']}% productive, Planned {_fmt_num(k['planned_hours'], ' h')}, "
         f"UPA {_fmt_num(k['upa_hours'], ' h')}, NPT {_fmt_num(k['npt_hours'], ' h')} / {k['npt_pct']}%, "
-        f"avg rotating ROP {_fmt_num(k['avg_rop'], ' m/h')}).{missing_note}"
+        f"avg rotating ROP {_fmt_rop(k['avg_rop'], ' m/h', completion=(scope_filter == 'completion'))}).{missing_note}"
     )
     return AssistantAnswer(
         answer=prose,
@@ -774,7 +821,7 @@ def build_ops_context_block(
                 f"Opening MD={_fmt_num(wk['opening_md_m'], 'm')}, Closing MD={_fmt_num(wk['closing_md_m'], 'm')}, "
                 f"Closing TVD={_fmt_num(wk['closing_tvd_m'], 'm')}, Auth TD={_fmt_num(wk['md_auth_m'], 'm')}, "
                 f"Bit={_fmt_num(wk['latest_bit_depth_m'], 'm')}, Footage={_fmt_num(wk['total_footage_m'], 'm')}, "
-                f"RotHrs={_fmt_num(wk['total_rotating_hours'], 'h')}, AvgROP={_fmt_num(wk['avg_rop_m_per_hr'], 'm/h')}",
+                f"RotHrs={_fmt_num(wk['total_rotating_hours'], 'h')}, AvgROP={_fmt_rop(wk['avg_rop_m_per_hr'], 'm/h', completion=_is_completion_only(d))}",
                 f"- Time: Logged={wk['total_logged_hours']}h ({wk['cum_logged_days']}d), Planned={wk['planned_hours']}h, "
                 f"UPA={wk['upa_hours']}h, NPT={wk['npt_hours']}h ({wk['npt_pct']}%), SP={wk['sp_hours']}h, "
                 f"Productive={wk['productive_pct']}%, PlannedDays={_fmt_num(wk['planned_days'], 'd')}, {schedule_label(wk['lag_days'])}",
@@ -1041,7 +1088,11 @@ def _deterministic_narratives(report: OpsDailyReport, blocks: list[OpsActivityBl
         f"on {report.report_date} ({WAT_LABEL}): {total_h} h logged across {len(blocks)} block(s) — "
         f"Planned {planned_h} h, UPA {upa_h} h, NPT {npt_h} h. "
         f"MD {_fmt_num(report.depth_start_m)} -> {_fmt_num(report.depth_end_m)} m, TVD {_fmt_num(report.tvd_m)} m"
-        + (f", footage {_fmt_num(footage)} m, ROP {_fmt_num(rop)} m/h." if footage is not None else ".")
+        + (
+            ", ROP N/A."
+            if report.scope == "completion"
+            else (f", footage {_fmt_num(footage)} m, ROP {_fmt_num(rop)} m/h." if footage is not None else ".")
+        )
     )
     return {
         "operation_summary": " ".join(op_parts)[:4000],
@@ -1086,12 +1137,16 @@ def generate_report_narratives(
 
     # Build a compact, crystal-clear fact sheet tuned for qwen3:1.7b.
     footage, rot_hrs = penetration(report, blocks)
-    rop = compute_rop(footage, rot_hrs)
+    rop = compute_rop(footage, rot_hrs, scope=report.scope)
     lines = [
         f"WELL: {report.well_code_snapshot} ({report.well_name_snapshot}) | RIG: {report.rig_code_snapshot or 'N/A'} | SCOPE: {report.scope.upper()}",
         f"REPORT: {report.report_type} #{report.report_no_text or 'N/A'} | DATE: {report.report_date} | TIMEZONE: {WAT_LABEL}",
         f"DEPTHS (m): Start_MD={_fmt_num(report.depth_start_m)} | End_MD={_fmt_num(report.depth_end_m)} | Start_TVD={_fmt_num(report.tvd_start_m)} | End_TVD={_fmt_num(report.tvd_m)} ({report.tvd_source or 'n/a'}) | Bit_MD={_fmt_num(report.bit_depth_m)} | Auth_TD={_fmt_num(report.md_auth_m)}",
-        f"DRILLING: Progress={_fmt_num(footage if footage is not None else report.progress_m)} m | Rot_Hrs={_fmt_num(rot_hrs if rot_hrs is not None else report.rotating_hours)} h | ROP={_fmt_num(rop)} m/h | DFS={_fmt_num(report.dfs_days)} d",
+        (
+            f"COMPLETION: ROP=N/A | DFS={_fmt_num(report.dfs_days)} d"
+            if report.scope == "completion"
+            else f"DRILLING: Progress={_fmt_num(footage if footage is not None else report.progress_m)} m | Rot_Hrs={_fmt_num(rot_hrs if rot_hrs is not None else report.rotating_hours)} h | ROP={_fmt_num(rop)} m/h | DFS={_fmt_num(report.dfs_days)} d"
+        ),
         f"WELLBORE: Section={report.hole_section_text or 'N/A'} ({_fmt_num(report.hole_size_in)} in) | Last_Casing={_fmt_num(report.last_casing_size_in)} in @ {_fmt_num(report.last_casing_depth_m)} m | BHA={report.bha_summary or 'N/A'}",
         f"FLUID: Type={report.mud_type or 'N/A'} | MW={_fmt_num(report.mud_weight_ppg)} ppg | FV={_fmt_num(report.mud_viscosity_sec)} s/qt | PV={_fmt_num(report.mud_pv_cp)} cP | YP={_fmt_num(report.mud_yp_lbf)} lbf/100ft2",
         f"CURRENT STATUS: {report.current_status or 'N/A'}",
@@ -1897,10 +1952,11 @@ def run_ai_review(
     if payload.well_id and reports:
         d = ops_summary.well_operation_summary(db, org_id, payload.well_id, scope=payload.scope, include_drafts=True)
         wk = d["kpis"]
+        rop_summary_str = "N/A" if _is_completion_only(d, payload.scope) else _fmt_num(wk["avg_rop_m_per_hr"], "m/h")
         prompt_parts.append(
             f"WELL SUMMARY: OpeningMD={wk['opening_md_m']}m ClosingMD={wk['closing_md_m']}m ClosingTVD={wk['closing_tvd_m']}m "
             f"BitMD={wk['latest_bit_depth_m']}m Footage={wk['total_footage_m']}m RotHrs={wk['total_rotating_hours']}h "
-            f"AvgROP={wk['avg_rop_m_per_hr']}m/h Casing={d['last_casing'] or '-'} Fluid={d['latest_mud'] or '-'} BHA={d['latest_bha'] or '-'}"
+            f"AvgROP={rop_summary_str} Casing={d['last_casing'] or '-'} Fluid={d['latest_mud'] or '-'} BHA={d['latest_bha'] or '-'}"
         )
     if payload.focus:
         prompt_parts.append(f"ENGINEER FOCUS: {payload.focus[:300]}")

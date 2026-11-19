@@ -41,6 +41,15 @@ TOPICS = (
           ('Workbook Activity 06 means Wiper trip and reaming. The same token is seen on several kinds of trips in OpenWells. Printed codes do not by themselves say whether work was planned.',
            'Printed P suggests Planned; U suggests UPA (unplanned activity); D suggests NPT (nonproductive time). PT, UPA, NPT and SP (slow progress) form the separate allocation column.',
            'A workspace mark can override classification. Printed Excel allocations stay separate. An unknown code stays visible for review rather than being assigned a generic name.')),
+    Topic('correlations', 'Correlate and link workspace codes', 'How do I correlate codes and link multi-criteria code rules?',
+          'correlation correlations correlate correlated link linked linking multi criteria multicriteria batch tree schematic hierarchy library operation activity npt cause phase agency mark unlink delete permanent',
+          'ops-master:read', '/operations/library?tab=correlations',
+          'Open Well Operations → Code library → Correlations to map printed source codes (Operation, Activity, NPT, Cause, Phase and Agency) to your workspace codes, and to link multiple workspace criteria together (Phase, Operation, Activity, NPT, Cause, Agency, Source mark, Scope, Classification and Allocation). Correlations pre-select suggestions during PDF/Excel extraction and guide report review without ever guessing or auto-approving a block.',
+          ('Define or import your workspace codes across the seven Code library tabs: Operation codes, Activity codes, NPT codes, Cause codes, Phase codes, Agency codes and Source marks.',
+           'In the Correlations tab, use Add correlation for one rule or Batch correlate to validate and save many printed-to-workspace rules in one atomic pass. Expand Companion criteria on any rule to co-select Scope, Classification, Allocation, Phase, Activity, NPT, Cause, Agency or Source mark.',
+           'Click Link criteria to create multi-criteria relationships among your own workspace codes (select multiple activities, NPT codes or causes to fan out and batch-save every combination at once). Classification matrix rules are enforced automatically — NPT codes are accepted only on NPT classification, and NPT cannot pair with PT allocation.',
+           'Keep Table view for searchable tabular auditing and bulk actions, or switch to Tree schematic to inspect relationships visually (by Phase → Operation → Activity → NPT / Cause / Agency, by Printed code → Workspace code, or by Code family), see unlinked codes, and add, edit or unlink rules inline.',
+           'Deletion safeguard: any workspace code referenced by an active correlation or code link cannot be deleted until it is unlinked in Correlations. Once unlinked and soft-deleted to Deleted entries, authorized users (ops-master:permanent-delete) can either Restore it or click Delete permanently — permanent removal is blocked whenever any historical report block, timeline row or deleted rule still references the code.')),
     Topic('timeline', 'Import, study and activate a programme', 'How do I import and activate a timeline?',
           'timeline plan programme program baseline planned import activate preview sheet target duration hours',
           'ops-plan:read', '/operations/plans',
@@ -48,14 +57,14 @@ TOPICS = (
           ('Create a draft version and enter a programme start if known. Import a timeline sheet or enter its rows in the editor.',
            'Review each description, planned duration and optional target measured depth. The study flags repeated or missing target depths and missing start dates. It does not assume a speed or set one.',
            'Save the reviewed timeline, then activate it when ready. Authorized users holding ops-plan:reopen can reopen an active or superseded timeline back to draft with audit remarks, update its items or start time (WAT), and re-activate it while preserving historical baseline references.')),
-    Topic('calculations', 'Time balance, ROP and lead/lag', 'How are ROP, time balance and lead or lag calculated?',
-          'rop lead lag compare calculation elapsed time balance footage measured depth rotating checkpoint progress days',
-          'ops-report:read', '/operations/reports',
-          'The period balance is report-period minutes minus logged minutes, not always 24 hours. Schedule position compares actual elapsed days with planned days on the active baseline: a positive number is a lead ahead of plan, a negative number is a lag behind it.',
-          ('Use only comparable measured-depth gain divided by matching rotating hours for rotating ROP. A trip may change bit depth without drilling any new hole.',
+    Topic('calculations', 'Time balance, ROP, chart axes and lead/lag', 'How are ROP, chart axes, time balance and lead or lag calculated?',
+          'rop completion axis axes scale step interval min max lead lag compare calculation elapsed time balance footage measured depth rotating checkpoint progress days',
+          'ops-report:read', '/operations/analytics',
+          'The period balance is report-period minutes minus logged minutes, not always 24 hours. Schedule position compares actual elapsed days with planned days on the active baseline: a positive number is a lead ahead of plan, a negative number is a lag behind it. Rate of penetration (ROP) applies only to drilling operations and is always reported as N/A for completion operations.',
+          ('Drilling ROP uses only comparable measured-depth gain divided by matching rotating hours (m/h). Completion reports, summaries, analytics, PDF exports and AI briefs always report ROP as N/A and never project depth from ROP.',
+           'On Operations Analytics, Time vs measured depth defaults to 300 m vertical depth steps, while Time vs completion progress chooses clean integer activity intervals so tick labels never collide. Use Axis scale on the chart to set custom X (days) and Y (MD or activity) min, max and step values or presets, and click Reset axes to return to automatic scaling.',
            'Use a confirmed completed programme activity when depth stays flat, reverses or is ambiguous. Otherwise the engine compares depth only where the programme gives an unambiguous result.',
-           'Use programme start, or confirmed drilling days from spud when appropriate. Without a usable time origin or corresponding checkpoint, the position is left unavailable.',
-           'Each daily report also carries a suggested lead/lag comparison against the active timeline. It is generated by the system; the engineer accepts, edits or rejects it with a note before submitting.')),
+           'Use programme start, or confirmed drilling days from spud when appropriate. Each daily report carries a suggested lead/lag comparison that the engineer accepts, edits or rejects with a note before submitting.')),
     Topic('documents', 'File and find originals', 'How do I file and find documents for a well?',
           'documents document file vault upload original folder rig well search',
           'ops-doc:read', '/operations/documents',
@@ -156,6 +165,9 @@ def answers(question, route, permissions, *, db=None, organization_id=None):
     contextual = route == '/operations' or route.startswith('/operations/')
     explicit = re.search(
         r'\b(?:openwells|well operations|operation summary|operations summary|ddr|dcr|dmr|rmr|'
+        r'codes?\s+correlations?|correlat(?:e|ed|ing)\s+(?:printed\s+|workspace\s+|operations?\s+|activity\s+|npt\s+)?codes?|'
+        r'batch\s+correlat\w*|code\s+links?|code\s+library|tree\s+schematic|multi[- ]criteria\s+codes?|'
+        r'completion\s+rop|time\s+vs\s+(?:measured\s+depth|completion)|'
         r'stuck pipe|lost circulation|kill mud|sidpp|sicp|maasp|dogleg|dls|scssv|gravel pack|'
         r'packer|xmas tree|mud motor|bha|plastic viscosity|yield point|ecd|hole cleaning|tvd)\b',
         q,
@@ -166,6 +178,37 @@ def answers(question, route, permissions, *, db=None, organization_id=None):
     if not explicit and (not contextual or re.search(r'\b(?:costing|afe|invoice|catalogue)\b', q)):
         return None
     topics = manual(permissions)
+    # Direct manual lookup for Codes Correlation & multi-criteria code linking.
+    if re.search(
+        r'\b(?:correlat(?:e|ed|ing|ion|ions)|code\s+links?|link\s+(?:workspace\s+)?codes?|'
+        r'multi[- ]criteria|tree\s+schematic|unlink\s+codes?)\b',
+        q,
+    ):
+        corr_topic = next((t for t in topics if t['id'] == 'correlations'), None)
+        if corr_topic is None:
+            return AssistantAnswer(
+                answer='Permission denied. Code library and correlation details need ops-master:read.',
+                intent='permission',
+                confidence='high',
+            )
+        return AssistantAnswer(
+            answer=corr_topic['body'],
+            intent='knowledge',
+            confidence='high',
+            category='workflow',
+            memory_key='operations-correlations',
+            steps=list(corr_topic['steps']),
+            sources=[
+                AssistantSource(label='Code library — Correlations', route='/operations/library?tab=correlations'),
+                AssistantSource(label='Default Codes', route='/operations/library?tab=default-codes'),
+                AssistantSource(label='Operations guide', route='/operations/guide'),
+            ],
+            follow_ups=[
+                'What do OpenWells codes and source marks mean?',
+                'How do I review or reopen a daily report?',
+                'How are ROP, chart axes, time balance and lead or lag calculated?',
+            ],
+        )
     code = re.search(r'\b(?:code|mark)\s+(?:\[\s*\d+\s*\]|[a-z0-9-]+)', q)
     if code:
         token = code[0].split(maxsplit=1)[1]

@@ -196,7 +196,7 @@ def _compute_metrics(db: Session, report: OpsDailyReport, blocks: list[OpsActivi
     metric.unaccounted_minutes = max(0, unaccounted)
     metric.depth_end_m = report.depth_end_m
     metric.footage_m = footage
-    metric.rop_m_per_hr = compute_rop(footage, rotating_hours)
+    metric.rop_m_per_hr = compute_rop(footage, rotating_hours, scope=report.scope)
     metric.npt_block_count = sum(1 for b in blocks if b.classification == "NPT")
     metric.avg_confidence = rounded(Decimal(str(avg_conf)))
     metric.review_state = report.status
@@ -668,7 +668,7 @@ def save_report(
             block.rop_basis = "rotating"
             start, end = block.depth_from_m, block.depth_to_m
             block.footage_m = end - start if start is not None and end is not None and end >= start else None
-            block.rop_m_per_hr = compute_rop(block.footage_m, block.rotating_hours)
+            block.rop_m_per_hr = compute_rop(block.footage_m, block.rotating_hours, scope=report.scope)
             code = db.get(OpsNptCode, block.npt_code_id) if block.npt_code_id else None
             block.npt_code_snapshot = code.npt_code if code else ""
             if data.confirm_review and block.review_state in ("accepted", "edited"):
@@ -1082,7 +1082,7 @@ def brief_for_report(db: Session, organization_id: str, report_id: str, *, inclu
         "avg_confidence": str(rounded(sum((b.confidence for b in blocks), Decimal(0)) / len(blocks))) if blocks else "0.000",
     }
     footage, rotating_hours = penetration(report, blocks)
-    rop = compute_rop(footage, rotating_hours)
+    rop = compute_rop(footage, rotating_hours, scope=report.scope)
 
     text = daily_brief(report, blocks, footage, rotating_hours, rop)
     return {

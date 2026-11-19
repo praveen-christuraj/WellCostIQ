@@ -12,10 +12,16 @@ def period_balance(report_type, period_minutes, logged_minutes):
 
 
 def penetration(report, blocks):
-    """Return footage and the denominator for exactly that footage, or unknown."""
+    """Return footage and the denominator for exactly that footage, or unknown.
+
+    Completion operations do not have rotating drilling ROP, so the rotating-hours
+    denominator is always ``None`` when ``report.scope == 'completion'``.
+    """
     gain = report.progress_m
     if report.depth_end_m is not None and report.depth_start_m is not None:
         gain = report.depth_end_m - report.depth_start_m
+    if getattr(report, "scope", None) == "completion":
+        return gain if gain is not None and gain >= 0 else None, None
     if gain is not None and gain >= 0 and report.rotating_hours and report.rotating_hours > 0:
         return gain, report.rotating_hours
     pairs = [
@@ -28,7 +34,10 @@ def penetration(report, blocks):
     return gain if gain is not None and gain >= 0 else None, None
 
 
-def compute_rop(footage_m, rotating_hours):
+def compute_rop(footage_m, rotating_hours, *, scope: str | None = None):
+    """Return rotating ROP in m/h for drilling intervals; always ``None`` for completions."""
+    if scope == "completion":
+        return None
     if footage_m is None or footage_m < 0 or not rotating_hours or rotating_hours <= 0:
         return None
     return (footage_m / rotating_hours).quantize(QUANTUM, rounding=ROUND_HALF_UP)

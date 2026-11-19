@@ -40,6 +40,12 @@ from app.schemas.operations import (
     OpsBulkAssignPreviewOut,
     OpsBulkEdit,
     OpsCauseIn,
+    OpsCodeLinkBatchIn,
+    OpsCodeLinkBatchOut,
+    OpsCodeLinkIn,
+    OpsCodeLinkOut,
+    OpsCorrelationBatchIn,
+    OpsCorrelationBatchOut,
     OpsCorrelationIn,
     OpsCorrelationOut,
     OpsCorrelationUpdate,
@@ -947,9 +953,10 @@ def reference(db: Db, user: Current):
         "operation_codes": active(OpsOperationCode),
         "npt_codes": active(OpsNptCode),
         "causes": active(OpsCause),
-        # The block editor and the bulk dialog both need the same three lists;
-        # sending them here keeps one payload instead of four round trips.
+        # The block editor and the bulk dialog both need the same code lists and active links;
+        # sending them here keeps one payload instead of separate round trips.
         "agencies": active(OpsAgency),
+        "code_links": correlation_svc.list_code_links(db, user.organization_id, active_only=True),
         "classification_rules": {
             classification: list(fields) for classification, fields in MANDATORY_FIELDS.items()
         },
@@ -981,29 +988,44 @@ def list_correlations(
     dependencies=[Depends(require("ops-master:read"))],
 )
 def correlation_reference(db: Db, user: Current):
-    """The two sides of a correlation: the printed dictionary and our library."""
+    """The two sides of correlations and multi-criteria code links."""
     from app.models.operations import (
         OpsActivityCode,
         OpsAgency,
         OpsCause,
+        OpsMarkRule,
         OpsNptCode,
         OpsOperationCode,
         OpsPhaseCode,
     )
 
-    def library(model, code_field, name_field):
-        return [
-            {"id": row.id, "code": getattr(row, code_field), "name": getattr(row, name_field)}
-            for row in db.scalars(
-                select(model)
-                .where(
-                    model.organization_id == user.organization_id,
-                    model.is_deleted.is_(False),
-                )
-                .order_by(getattr(model, code_field))
+    usage = correlation_svc.code_usage_counts(db, user.organization_id)
+
+    def library(model, code_field, name_field, master_kind: str):
+        bucket = usage.get(master_kind, {})
+        items = []
+        for row in db.scalars(
+            select(model)
+            .where(
+                model.organization_id == user.organization_id,
+                model.is_deleted.is_(False),
             )
-            if getattr(row, "is_active", True)
-        ]
+            .order_by(getattr(model, code_field))
+        ):
+            if not getattr(row, "is_active", True):
+                continue
+            item = {
+                "id": row.id,
+                "code": getattr(row, code_field),
+                "name": getattr(row, name_field),
+                "correlation_count": bucket.get(row.id, 0),
+            }
+            if hasattr(row, "default_classification"):
+                item["default_classification"] = getattr(row, "default_classification") or ""
+            if hasattr(row, "default_allocation"):
+                item["default_allocation"] = getattr(row, "default_allocation") or ""
+            items.append(item)
+        return items
 
     return {
         "kinds": list(CORRELATION_KINDS),
@@ -1011,18 +1033,22 @@ def correlation_reference(db: Db, user: Current):
             {
                 "family": row["family"],
                 "code": row["code"],
-                "description": row["description"],
+                "name": row["name"],
+                "description": row["name"] or row["description"],
+                "detail": row["description"],
                 "classification": row.get("classification", ""),
+                "allocation": row.get("allocation", ""),
             }
             for row in catalogue_rows()
         ],
         "library": {
-            "operation": library(OpsOperationCode, "operation_code", "operation_name"),
-            "activity": library(OpsActivityCode, "activity_code", "activity_name"),
-            "npt": library(OpsNptCode, "npt_code", "npt_name"),
-            "cause": library(OpsCause, "cause_code", "cause_name"),
-            "phase": library(OpsPhaseCode, "phase_code", "phase_name"),
-            "agency": library(OpsAgency, "agency_code", "agency_name"),
+            "operation": library(OpsOperationCode, "operation_code", "operation_name", "operation-codes"),
+            "activity": library(OpsActivityCode, "activity_code", "activity_name", "activity-codes"),
+            "npt": library(OpsNptCode, "npt_code", "npt_name", "npt-codes"),
+            "cause": library(OpsCause, "cause_code", "cause_name", "causes"),
+            "phase": library(OpsPhaseCode, "phase_code", "phase_name", "phase-codes"),
+            "agency": library(OpsAgency, "agency_code", "agency_name", "agencies"),
+            "mark": library(OpsMarkRule, "mark_code", "mark_name", "source-marks"),
         },
     }
 
@@ -1030,6 +1056,15 @@ def correlation_reference(db: Db, user: Current):
 @router.post("/correlations", response_model=OpsCorrelationOut, dependencies=[Depends(require("ops-master:correlate"))])
 def create_correlation(data: OpsCorrelationIn, request: Request, db: Db, user: Current):
     return correlation_svc.create_correlation(db, user.organization_id, data, user, request)
+
+
+@router.post(
+    "/correlations/batch",
+    response_model=OpsCorrelationBatchOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def create_correlations_batch(data: OpsCorrelationBatchIn, request: Request, db: Db, user: Current):
+    return correlation_svc.create_correlations_batch(db, user.organization_id, data, user, request)
 
 
 @router.put(
@@ -1057,6 +1092,107 @@ def delete_correlations(data: OpsIDs, request: Request, db: Db, user: Current):
 )
 def restore_correlations(data: OpsIDs, request: Request, db: Db, user: Current):
     return correlation_svc.restore_correlations(db, user.organization_id, data.ids, user, request)
+
+
+@router.post(
+    "/correlations/bulk-permanent-delete",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:permanent-delete"))],
+)
+def purge_correlations(data: OpsIDs, request: Request, db: Db, user: Current):
+    """Permanently delete correlations already moved to Deleted entries."""
+    return correlation_svc.purge_correlations(db, user.organization_id, data.ids, user, request)
+
+
+@router.delete(
+    "/correlations/{correlation_id}/permanent",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:permanent-delete"))],
+)
+def purge_single_correlation(correlation_id: str, request: Request, db: Db, user: Current):
+    return correlation_svc.purge_correlations(db, user.organization_id, [correlation_id], user, request)
+
+
+# ---------------------------------------------------------------------------
+# Multi-criteria Workspace Code Links (Phase / Operation / Activity / NPT / Cause / Agency / Mark)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/code-links",
+    response_model=list[OpsCodeLinkOut],
+    dependencies=[Depends(require("ops-master:read"))],
+)
+def list_code_links(
+    db: Db,
+    user: Current,
+    scope: Literal["", "drilling", "completion"] = "",
+    deleted: bool = False,
+):
+    return correlation_svc.list_code_links(db, user.organization_id, scope=scope, include_deleted=deleted)
+
+
+@router.post(
+    "/code-links",
+    response_model=OpsCodeLinkOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def create_code_link(data: OpsCodeLinkIn, request: Request, db: Db, user: Current):
+    return correlation_svc.create_code_link(db, user.organization_id, data, user, request)
+
+
+@router.post(
+    "/code-links/batch",
+    response_model=OpsCodeLinkBatchOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def create_code_links_batch(data: OpsCodeLinkBatchIn, request: Request, db: Db, user: Current):
+    return correlation_svc.create_code_links_batch(db, user.organization_id, data, user, request)
+
+
+@router.put(
+    "/code-links/{link_id}",
+    response_model=OpsCodeLinkOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def update_code_link(link_id: str, data: OpsCodeLinkIn, request: Request, db: Db, user: Current):
+    return correlation_svc.update_code_link(db, user.organization_id, link_id, data, user, request)
+
+
+@router.post(
+    "/code-links/bulk-delete",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def delete_code_links(data: OpsIDs, request: Request, db: Db, user: Current):
+    return correlation_svc.delete_code_links(db, user.organization_id, data.ids, user, request)
+
+
+@router.post(
+    "/code-links/bulk-restore",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:correlate"))],
+)
+def restore_code_links(data: OpsIDs, request: Request, db: Db, user: Current):
+    return correlation_svc.restore_code_links(db, user.organization_id, data.ids, user, request)
+
+
+@router.post(
+    "/code-links/bulk-permanent-delete",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:permanent-delete"))],
+)
+def purge_code_links(data: OpsIDs, request: Request, db: Db, user: Current):
+    return correlation_svc.purge_code_links(db, user.organization_id, data.ids, user, request)
+
+
+@router.delete(
+    "/code-links/{link_id}/permanent",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:permanent-delete"))],
+)
+def purge_single_code_link(link_id: str, request: Request, db: Db, user: Current):
+    return correlation_svc.purge_code_links(db, user.organization_id, [link_id], user, request)
 
 
 # ---------------------------------------------------------------------------
@@ -1201,19 +1337,19 @@ def default_codes():
 def list_masters(kind: str, db: Db, user: Current, include_deleted: bool = False):
     kind = _master_kind(kind)
     rows = masters_svc.list_masters(db, user.organization_id, kind, include_deleted=include_deleted)
-    return rows
+    return [masters_svc.serialize_master(row) for row in rows]
 
 
 @router.post("/masters/{kind}", dependencies=[Depends(require("ops-master:create"))])
 def create_master(kind: str, request: Request, db: Db, user: Current, payload: dict):
     kind = _master_kind(kind)
-    # Build typed model
     model_cls = MASTER_SCHEMAS[kind]
     try:
         data = model_cls.model_validate(payload)
     except ValidationError as exc:
         raise HTTPException(422, exc.errors(include_context=False)) from exc
-    return masters_svc.create_master(db, user.organization_id, kind, data, user, request)
+    row = masters_svc.create_master(db, user.organization_id, kind, data, user, request)
+    return masters_svc.serialize_master(row)
 
 
 @router.put("/masters/{kind}/{record_id}", dependencies=[Depends(require("ops-master:update"))])
@@ -1224,7 +1360,8 @@ def update_master(kind: str, record_id: str, request: Request, db: Db, user: Cur
         data = model_cls.model_validate(payload)
     except ValidationError as exc:
         raise HTTPException(422, exc.errors(include_context=False)) from exc
-    return masters_svc.update_master(db, user.organization_id, kind, record_id, data, user, request)
+    row = masters_svc.update_master(db, user.organization_id, kind, record_id, data, user, request)
+    return masters_svc.serialize_master(row)
 
 
 @router.post(
@@ -1281,6 +1418,27 @@ def bulk_delete_masters(kind: str, data: OpsIDs, request: Request, db: Db, user:
 def bulk_restore_masters(kind: str, data: OpsIDs, request: Request, db: Db, user: Current):
     kind = _master_kind(kind)
     return masters_svc.restore_masters(db, user.organization_id, kind, data.ids, user, request)
+
+
+@router.post(
+    "/masters/{kind}/bulk-permanent-delete",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:permanent-delete"))],
+)
+def bulk_purge_masters(kind: str, data: OpsIDs, request: Request, db: Db, user: Current):
+    """Permanently delete soft-deleted workspace codes that have no active or historical references."""
+    kind = _master_kind(kind)
+    return masters_svc.purge_masters(db, user.organization_id, kind, data.ids, user, request)
+
+
+@router.delete(
+    "/masters/{kind}/{record_id}/permanent",
+    response_model=OpsBulkActionOut,
+    dependencies=[Depends(require("ops-master:permanent-delete"))],
+)
+def purge_single_master(kind: str, record_id: str, request: Request, db: Db, user: Current):
+    kind = _master_kind(kind)
+    return masters_svc.purge_masters(db, user.organization_id, kind, [record_id], user, request)
 
 
 # ---------------------------------------------------------------------------

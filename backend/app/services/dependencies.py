@@ -67,6 +67,20 @@ REFERENCE_LABELS: dict[str, str] = {
     "invoice_locations": "invoice location configuration(s)",
     "invoice_payment_terms": "invoice payment term configuration(s)",
     "invoice_tax_configurations": "invoice tax configuration(s)",
+    "ops_code_correlations": "code correlation(s)",
+    "ops_code_links": "multi-criteria code link(s)",
+    "ops_activity_blocks": "daily operations report block(s)",
+    "ops_daily_reports": "daily operations report(s)",
+    "ops_plan_items": "operations timeline item(s)",
+    "ops_plan_versions": "operations timeline version(s)",
+    "ops_documents": "operations source document(s)",
+    "ops_operation_codes": "operations code(s)",
+    "ops_activity_codes": "operations activity code(s)",
+    "ops_npt_codes": "operations NPT code(s)",
+    "ops_causes": "operations cause code(s)",
+    "ops_phase_codes": "operations phase code(s)",
+    "ops_agencies": "operations agency code(s)",
+    "ops_mark_rules": "operations source-mark rule(s)",
 }
 
 def _label(table_name: str) -> str:

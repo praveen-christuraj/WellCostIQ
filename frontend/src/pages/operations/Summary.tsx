@@ -76,7 +76,7 @@ export default function OperationsSummary() {
   const [params, setParams] = useSearchParams()
   const [ref, setRef] = useState<OpsScopeReference | null>(null)
   const [rig, setRig] = useState(params.get('rig') || '')
-  const [well, setWell] = useState(params.get('well') || '')
+  const [well, setWell] = useState(params.get('well') || params.get('well_id') || '')
   const [scope, setScope] = useState(params.get('scope') || '')
   const [from, setFrom] = useState(params.get('from') || '')
   const [to, setTo] = useState(params.get('to') || '')
@@ -200,7 +200,12 @@ export default function OperationsSummary() {
       { field: 'tvd_to_m', headerName: 'TVD TO (M)', minWidth: 115, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'bit_depth_m', headerName: 'BIT (M)', minWidth: 100, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'footage_m', headerName: 'FOOTAGE (M)', minWidth: 112, valueFormatter: (p) => fmtNum(p.value) },
-      { field: 'rop_m_per_hr', headerName: 'ROP (M/H)', minWidth: 105, valueFormatter: (p) => fmtNum(p.value) },
+      {
+        field: 'rop_m_per_hr',
+        headerName: 'ROP (M/H)',
+        minWidth: 105,
+        valueFormatter: (p) => (p.data?.scope === 'completion' ? 'N/A' : fmtNum(p.value)),
+      },
       { field: 'mud_weight_ppg', headerName: 'MW (PPG)', minWidth: 100, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'npt_code', headerName: 'NPT CODE', minWidth: 140 },
       { field: 'reason', headerName: 'REASON', minWidth: 180 },
@@ -252,7 +257,12 @@ export default function OperationsSummary() {
       { field: 'bit_depth_m', headerName: 'BIT (M)', minWidth: 102, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'progress_m', headerName: 'PROGRESS (M)', minWidth: 118, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'rotating_hours', headerName: 'ROT HRS', minWidth: 98, valueFormatter: (p) => fmtNum(p.value) },
-      { field: 'rop_m_per_hr', headerName: 'ROP (M/H)', minWidth: 105, valueFormatter: (p) => fmtNum(p.value) },
+      {
+        field: 'rop_m_per_hr',
+        headerName: 'ROP (M/H)',
+        minWidth: 105,
+        valueFormatter: (p) => (p.data?.scope === 'completion' ? 'N/A' : fmtNum(p.value)),
+      },
       { field: 'mud_type', headerName: 'MUD', minWidth: 105 },
       { field: 'mud_weight_ppg', headerName: 'MW (PPG)', minWidth: 100, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'last_casing', headerName: 'LAST CASING', minWidth: 155 },
@@ -530,8 +540,16 @@ export default function OperationsSummary() {
             />
             <StatCard
               label="Footage & Avg ROP"
-              value={fmtNum(k.total_footage_m, ' m')}
-              hint={`Avg ROP ${fmtNum(k.avg_rop_m_per_hr, ' m/h')} · Rot ${fmtNum(k.total_rotating_hours, ' h')}`}
+              value={
+                scope === 'completion' || (k.completion_reports > 0 && k.drilling_reports === 0)
+                  ? 'N/A'
+                  : fmtNum(k.total_footage_m, ' m')
+              }
+              hint={
+                scope === 'completion' || (k.completion_reports > 0 && k.drilling_reports === 0)
+                  ? 'Avg ROP N/A (completion operation)'
+                  : `Avg ROP ${fmtNum(k.avg_rop_m_per_hr, ' m/h')} · Rot ${fmtNum(k.total_rotating_hours, ' h')}`
+              }
             />
             <StatCard
               label="Productive Time (PT)"
