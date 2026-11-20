@@ -590,7 +590,7 @@ SYSTEM_MEMORY: tuple[dict[str, Any], ...] = (
         "permission": "",
         "sort_order": 130,
         "body": (
-            "WellCostIQ uses a uniform two-step deletion safeguard across Master Data, Rig & Well, AFE, "
+            "WellSenseIQ uses a uniform two-step deletion safeguard across Master Data, Rig & Well, AFE, "
             "Daily Costing, Fuel Cost, Invoices, Invoice Configuration, Templates and Well Operations "
             "(Documents, Daily Reports, Timelines, Code Library and Correlations). Deleting a live record "
             "moves it to Deleted entries where it can be restored intact; live items linked to active "
@@ -638,7 +638,7 @@ def seed_memory(db: Session, organization_id: str) -> int:
             is_system=True,
             is_active=True,
             sort_order=entry["sort_order"],
-            created_by_name="WellCostIQ guide",
+            created_by_name="WellSenseIQ guide",
         ))
         added += 1
     if added:

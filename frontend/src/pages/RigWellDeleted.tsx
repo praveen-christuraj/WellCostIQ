@@ -5,6 +5,7 @@ import { Alert, Box, Button, CircularProgress, Paper, Typography } from '@mui/ma
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import { entityLabel, scopeLabel, type DeletedRigWellRecord } from '../lib/rigWell'
@@ -19,6 +20,8 @@ function selectionPayload(target: DeletedRigWellRecord) {
 function scopeQuery(target: DeletedRigWellRecord): string {
   return target.entity_type === 'well' && target.scope ? `?scope=${encodeURIComponent(target.scope)}` : ''
 }
+
+const CAUTION_PAGE = 'rig-well-deleted'
 
 export default function RigWellDeleted() {
   const { can } = useAuth()
@@ -122,6 +125,8 @@ export default function RigWellDeleted() {
   ], [can, restoring])
 
   return <>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     <PageHeading
       eyebrow="RIG & WELL MANAGEMENT / RETENTION"
       title="Deleted entries"
@@ -133,9 +138,15 @@ export default function RigWellDeleted() {
       </Box>}
     />
 
-    <Alert severity="warning" sx={{ mb: 1.8 }} action={can('master-data:read') ? <Button component={RouterLink} to="/master-data/deleted" size="small">Master Data deleted entries</Button> : undefined}>
+    <Caution
+      cautionKey="purge-rules"
+      page={CAUTION_PAGE}
+      signature={[selectedRows.length]}
+      sx={{ mb: 1.8 }}
+      action={can('master-data:read') ? <Button component={RouterLink} to="/master-data/deleted" size="small" color="inherit">Master Data deleted entries</Button> : undefined}
+    >
       Permanent deletion is irreversible. Restore parent records first; a block stays pinned while any well record (including deleted wells) references it, and a rig or well scope is purged only after its own sub activities, AFEs and daily-cost sheets are deleted. Configuration sections, phases, plan revisions and the locked daily-cost rate book are removed with their well once every sheet that priced from it is purged. Restore an Activity from Master Data before restoring sub activities assigned to it.
-    </Alert>
+    </Caution>
     {notice && <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 1.5 }}>{notice}</Alert>}
     <ErrorMessage message={error}/>
     <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.2 }, mb: 1.5, borderRadius: 2 }}>

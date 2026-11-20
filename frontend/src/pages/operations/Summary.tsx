@@ -22,6 +22,7 @@ import {
 } from '@mui/icons-material'
 import type { ColDef } from 'ag-grid-community'
 import { ErrorMessage, PageHeading, Tag, type Tone } from '../../components/Common'
+import { Caution, RestoreCautions } from '../../components/ui/Caution'
 import { DataTable } from '../../components/DataTable'
 import { OpsAiReviewPanel } from '../../components/operations/OpsAiReviewPanel'
 import { SectionCard } from '../../components/ui/SectionCard'
@@ -71,6 +72,8 @@ const statusTone = (status: string): Tone => {
   if (status === 'rejected') return 'error'
   return 'warning'
 }
+
+const CAUTION_PAGE = 'operations-summary'
 
 export default function OperationsSummary() {
   const { can } = useAuth()
@@ -377,7 +380,8 @@ export default function OperationsSummary() {
   const k = summary?.kpis
 
   return (
-    <Box display="grid" gap={2.5}>
+    <Box display="grid" gap={2.5}>      <RestoreCautions page={CAUTION_PAGE}/>
+
       <PageHeading
         eyebrow="Well Operations"
         title="Well Operation Summary"
@@ -512,9 +516,9 @@ export default function OperationsSummary() {
       <ErrorMessage message={error} />
 
       {!well && !loading && (
-        <Alert severity="info">
+        <Caution cautionKey="no-well-selected" page={CAUTION_PAGE} severity="info" signature={[wells.length]}>
           No wells are registered yet, or no well is selected. Choose a well above to compile its multi-day Well Operation Summary.
-        </Alert>
+        </Caution>
       )}
 
       {loading && (

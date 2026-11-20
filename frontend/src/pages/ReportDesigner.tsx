@@ -11,6 +11,7 @@ import {
 } from '@mui/icons-material'
 import { api, body, ApiError } from '../lib/api'
 import { ErrorMessage, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import {
   aggregateLabel, BUCKETS, emptyColumn, emptyDesign, EMPTY_RUN, keyFromLabel, OPERATORS, reportTypeLabel,
   visibilityLabel, type Aggregate, type Catalog, type CatalogDetail, type ColumnKind, type Lookups,
@@ -965,6 +966,7 @@ function PreviewStep({ design, run, previewing, onPreview, record }: {
   record: ReportDefinition | null
 }) {
   return <Stack spacing={2}>
+    <RestoreCautions page="report-preview"/>
     <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={2} flexWrap="wrap">
       <Box>
         <Typography variant="h6" sx={{ mb: .4 }}>Preview against live data</Typography>
@@ -981,7 +983,12 @@ function PreviewStep({ design, run, previewing, onPreview, record }: {
       {record.grants.map(grant => <Tag key={`${grant.grant_type}-${grant.id}`} tone="info">{grant.name} · {grant.level}</Tag>)}
     </Box>}
     {run.generated_at && <>
-      {run.warnings.map(warning => <Alert key={warning} severity="warning">{warning}</Alert>)}
+      {run.warnings.map(warning => <Caution
+        key={warning}
+        cautionKey="run-warning"
+        page="report-preview"
+        signature={[warning, run.generated_at]}
+      >{warning}</Caution>)}
       <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'auto', maxHeight: '52vh' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead>

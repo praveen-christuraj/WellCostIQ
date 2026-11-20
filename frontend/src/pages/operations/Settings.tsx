@@ -100,7 +100,7 @@ export default function OperationsSettings() {
           </SectionCard>
           <SectionCard
             title="Reporting period"
-            subtitle="All timestamps across WellCostIQ default to West Africa Time (Africa/Lagos, WAT UTC+1:00)."
+            subtitle="All timestamps across WellSenseIQ default to West Africa Time (Africa/Lagos, WAT UTC+1:00)."
           >
             <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: 'repeat(3,minmax(0,1fr))' }}>
               <TextField

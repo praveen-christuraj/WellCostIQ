@@ -498,7 +498,7 @@ export default function Assistant() {
           </Box>
           <Typography fontSize={11.5} color="text.secondary" sx={{ mb: 1.2 }}>
             {overview
-              ? `${overview.memory_entries} entries: ${overview.memory_entries - overview.workspace_entries} shipped with WellCostIQ and ${overview.workspace_entries} written by this workspace.`
+              ? `${overview.memory_entries} entries: ${overview.memory_entries - overview.workspace_entries} shipped with WellSenseIQ and ${overview.workspace_entries} written by this workspace.`
               : 'Reading the guide memory…'}
           </Typography>
           <Button size="small" variant="outlined" startIcon={<TuneRounded/>} onClick={() => setTab('memory')}>Read the memory</Button>

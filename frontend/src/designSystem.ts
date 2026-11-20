@@ -1,5 +1,5 @@
 /**
- * Design tokens — the single source of truth for the WellCostIQ interface.
+ * Design tokens — the single source of truth for the WellSenseIQ interface.
  *
  * Aesthetic direction: a "deep petrol instrument panel". Dense, calm and
  * data-first: an ink navigation rail, white working surfaces, petrol-teal as the

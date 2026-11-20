@@ -1,6 +1,6 @@
 # Invoice Processing / IDVS
 
-Invoice Processing records an invoice and its verified commercial value, generates an Invoice Data Verification Sheet (IDVS), and tracks the dated hand-offs through Accounts and EPICOR. EPICOR approval and payment remain external events; WellCostIQ records their dates, references, actors, and remarks but does not claim to perform them inside EPICOR.
+Invoice Processing records an invoice and its verified commercial value, generates an Invoice Data Verification Sheet (IDVS), and tracks the dated hand-offs through Accounts and EPICOR. EPICOR approval and payment remain external events; WellSenseIQ records their dates, references, actors, and remarks but does not claim to perform them inside EPICOR.
 
 ## Setup order
 

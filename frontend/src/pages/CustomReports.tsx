@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
+import { Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
 import { ArrowForwardRounded, InsightsOutlined, RefreshRounded } from '@mui/icons-material'
 import { api } from '../lib/api'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { reportTypeLabel, type ReportDefinitionList } from '../lib/reportBuilder'
 
 function when(value: string | null): string {
@@ -11,6 +12,8 @@ function when(value: string | null): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? 'never run' : `last run ${date.toLocaleDateString(undefined, { month: 'short', day: '2-digit', year: 'numeric' })}`
 }
+
+const CAUTION_PAGE = 'custom-reports'
 
 export default function CustomReports() {
   const navigate = useNavigate()
@@ -35,6 +38,8 @@ export default function CustomReports() {
   const items = reports?.items ?? []
 
   return <>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     <PageHeading
       eyebrow="REPORTS / CUSTOM REPORTS"
       title="Custom Reports"
@@ -65,8 +70,14 @@ export default function CustomReports() {
               onClick={() => navigate(`/reports/custom/${report.id}`)}>Open report</Button>
           </Paper>)}
         </Box>}
-    {reports && reports.counts.mine > 0 && <Alert severity="info" sx={{ mt: 2.5 }}>
+    {reports && reports.counts.mine > 0 && <Caution
+      cautionKey="own-designs"
+      page={CAUTION_PAGE}
+      severity="info"
+      signature={[reports.counts.mine]}
+      sx={{ mt: 2.5 }}
+    >
       {reports.counts.mine} of these report{reports.counts.mine === 1 ? ' is' : 's are'} your own design. Use Report Builder to change them.
-    </Alert>}
+    </Caution>}
   </>
 }

@@ -13,6 +13,7 @@ import type { ColDef } from 'ag-grid-community'
 import { api, body, downloadFile, uploadFiles } from '../lib/api'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag } from '../components/Common'
+import { Caution, RestoreCautions } from '..//components/ui/Caution'
 import { useAuth } from '../context/AuthContext'
 import {
   fileSize, jobLabel, jobTone, relative, requestLabel, requestTone, scopeLabel, stamp,
@@ -36,6 +37,8 @@ function StatCard({ label, value, note, icon }: { label: string; value: string |
     <Typography color="text.secondary" fontSize={11.2} lineHeight={1.45}>{note}</Typography>
   </Paper>
 }
+
+const CAUTION_PAGE = 'backup-recovery'
 
 export default function BackupRecovery() {
   const { can } = useAuth()
@@ -467,9 +470,19 @@ export default function BackupRecovery() {
         {canCreate && <Button variant="contained" startIcon={<BackupOutlined/>} onClick={() => { setBackupDialog(true); setBackupError('') }}>Take backup now</Button>}
       </>}
     />
+    <RestoreCautions page={CAUTION_PAGE}/>
     <ErrorMessage message={error}/>
     {notice && <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 2 }}>{notice}</Alert>}
-    {warnings.map(warning => <Alert key={warning} severity="warning" icon={<WarningAmberRounded/>} sx={{ mb: 1.5 }}>{warning}</Alert>)}
+    {warnings.map(warning => <Caution
+      key={warning}
+      cautionKey="backup-health"
+      page={CAUTION_PAGE}
+      icon={<WarningAmberRounded/>}
+      signature={[warning]}
+      sx={{ mb: 1.5 }}
+    >
+      {warning}
+    </Caution>)}
 
     {busy && !overview ? <Box py={10} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={28}/></Box> : <>
       <Box className="stat-grid" sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(5, minmax(0, 1fr))' }, mb: 2.5 }}>
@@ -546,7 +559,7 @@ export default function BackupRecovery() {
     </FormDialog>
 
     <FormDialog open={importDialog} title="Import an archive" maxWidth="sm"
-      subtitle="Register a previously downloaded WellCostIQ archive so it can be validated and restored. It is copied into this workspace folder and hashed."
+      subtitle="Register a previously downloaded WellSenseIQ archive so it can be validated and restored. It is copied into this workspace folder and hashed."
       onClose={() => setImportDialog(false)} onSubmit={() => void importArchive()} busy={importing} busyLabel="Importing..."
       submitLabel="Import archive" submitDisabled={!importFile}>
       <Stack spacing={2.2} sx={{ pt: .5 }}>
@@ -559,7 +572,7 @@ export default function BackupRecovery() {
         <TextField label="Description" value={importDescription} inputProps={{ maxLength: 500 }}
           onChange={event => setImportDescription(event.target.value)} helperText="Optional, shown with the archive." fullWidth/>
         <Typography color="text.secondary" fontSize={12}>
-          An archive from another workspace is refused, and a file that is not a WellCostIQ archive is reported instead of being stored.
+          An archive from another workspace is refused, and a file that is not a WellSenseIQ archive is reported instead of being stored.
         </Typography>
         <ErrorMessage message={importError}/>
       </Stack>

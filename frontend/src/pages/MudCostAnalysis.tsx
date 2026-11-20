@@ -10,6 +10,7 @@ import {
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { ImportDialog } from '../components/ImportDialog'
 import { MudCostEntryDialog, type MudCostEditorPayload } from '../components/mud-cost/MudCostEntryDialog'
 import { MudCostOpeningStockDialog } from '../components/mud-cost/MudCostOpeningStockDialog'
@@ -49,6 +50,8 @@ function Stat({ label, value, hint }: { label: string; value: string; hint: stri
     <Typography color="text.secondary" fontSize={11.5}>{hint}</Typography>
   </Paper>
 }
+
+const CAUTION_PAGE = 'mud-cost-analysis'
 
 export default function MudCostAnalysis() {
   const { can, user } = useAuth()
@@ -686,6 +689,7 @@ export default function MudCostAnalysis() {
       </Box>}
     />
 
+    <RestoreCautions page={CAUTION_PAGE}/>
     <ErrorMessage message={referenceError}/>
     {notice && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNotice('')}>{notice}</Alert>}
 
@@ -718,20 +722,37 @@ export default function MudCostAnalysis() {
           {wellOptions.map(well => <MenuItem key={well.id} value={well.id}>{well.display_name}</MenuItem>)}
         </TextField>
       </Box>
-      {selectedRig?.is_deleted || selectedWell?.is_deleted ? <Alert severity="warning" sx={{ mt: 1.4 }}>
+      {selectedRig?.is_deleted || selectedWell?.is_deleted ? <Caution
+        cautionKey="mud-scope-deleted"
+        page={CAUTION_PAGE}
+        signature={[rigId, wellId, selectedRig?.is_deleted ? 'rig deleted' : '', selectedWell?.is_deleted ? 'well deleted' : '']}
+        sx={{ mt: 1.4 }}
+      >
         This rig or well is in Deleted Entries. Historical records can be reviewed and cleaned up, but new entries are disabled.
-      </Alert> : null}
+      </Caution> : null}
     </Paper>
 
     {referenceLoading && !reference ? <Box py={7} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={28}/></Box> : null}
-    {reference && !referenceLoading && reference.rigs.length === 0 && <Alert severity="info" sx={{ mb: 2 }}>
+    {reference && !referenceLoading && reference.rigs.length === 0 && <Caution
+      cautionKey="mud-no-rigs"
+      page={CAUTION_PAGE}
+      severity="info"
+      signature={[reference.rigs.length]}
+      sx={{ mb: 2 }}
+      action={can('rig-well:read') ? <Button component={RouterLink} to="/rig-well/wells" size="small" color="inherit">Open well register</Button> : undefined}
+    >
       Create a rig, well and at least one well section in Rig &amp; Well Management to start a Mud Cost record.
-      {can('rig-well:read') && <Button component={RouterLink} to="/rig-well/wells" size="small" sx={{ ml: 1 }}>Open well register</Button>}
-    </Alert>}
-    {noConfiguredSection && <Alert severity="info" sx={{ mb: 2 }}>
+    </Caution>}
+    {noConfiguredSection && <Caution
+      cautionKey="mud-no-sections"
+      page={CAUTION_PAGE}
+      severity="info"
+      signature={[wellId]}
+      sx={{ mb: 2 }}
+      action={can('rig-well:read') ? <Button component={RouterLink} to="/rig-well/wells" size="small" color="inherit">Configure well sections</Button> : undefined}
+    >
       This well has no configured section. Add or configure sections in Rig &amp; Well Management before entering mud quantities.
-      {can('rig-well:read') && <Button component={RouterLink} to="/rig-well/wells" size="small" sx={{ ml: 1 }}>Configure well sections</Button>}
-    </Alert>}
+    </Caution>}
 
     {hasScope && <>
       <Paper variant="outlined" sx={{ p: `${space[4]}px`, borderRadius: `${radius.lg}px`, mb: `${space[4]}px` }}>
@@ -774,9 +795,14 @@ export default function MudCostAnalysis() {
                 </Box>
               </Box>
             : <Typography color="text.secondary" fontSize={12.5}>This well has no configured section to set a mud type on.</Typography>}
-        {unconfiguredSettings.length > 0 && <Alert severity="info" sx={{ mt: 1.4 }}>
+        {unconfiguredSettings.length > 0 && <Caution
+          cautionKey="mud-sections-unconfigured"
+          page={CAUTION_PAGE}
+          signature={[unconfiguredSettings.length, unconfiguredSettings.map(setting => setting.display_name ?? setting.id).join(',')]}
+          sx={{ mt: 1.4 }}
+        >
           {unconfiguredSettings.length} section{unconfiguredSettings.length === 1 ? '' : 's'} still need a mud type. Reconciliation stays unavailable for an unconfigured section and its recorded mud chemicals cost remains the actual in Well Cost Analysis.
-        </Alert>}
+        </Caution>}
       </Paper>
 
       {!deletedView && <MudCostKpis
@@ -831,9 +857,15 @@ export default function MudCostAnalysis() {
           </Box>
           {entriesError && <ErrorMessage message={entriesError} />}
           {detailedExportError && <ErrorMessage message={detailedExportError} />}
-          {entrySection && !entrySection.is_current && !deletedView && <Alert severity="info" sx={{ mb: 1.5 }}>
+          {entrySection && !entrySection.is_current && !deletedView && <Caution
+            cautionKey="mud-historical-section"
+            page={CAUTION_PAGE}
+            severity="info"
+            signature={[entrySection.id]}
+            sx={{ mb: 1.5 }}
+          >
             This is a historical section snapshot. You can review its entries, but new entries must use a section in the current well configuration.
-          </Alert>}
+          </Caution>}
           {entriesLoading ? <Box py={6} display="grid" sx={{ placeItems: 'center' }}><CircularProgress size={25}/></Box> : <DataTable
             fillHeight
             fillReserve={entries.length === 0 ? 74 : 48}
@@ -935,9 +967,14 @@ export default function MudCostAnalysis() {
                     <Stat label="Reconciled mud cost" value={dailyMoney(reconciliation.total_reconciled_cost, reconciliation.currency)} hint="WBM uses actual cost; other mud types value Consumption/Losses at Cost/BBL"/>
                     <Stat label="Reconciliation difference" value={dailyMoney(reconciliation.total_adjustment, reconciliation.currency)} hint={`${reconciliation.configured_section_count} configured · ${reconciliation.unconfigured_section_count} unconfigured section(s)`}/>
                   </Box>
-                  {reconciliation.unconfigured_section_count > 0 && <Alert severity="warning" sx={{ mb: 1.4 }}>
+                  {reconciliation.unconfigured_section_count > 0 && <Caution
+                    cautionKey="mud-reconciliation-unconfigured"
+                    page={CAUTION_PAGE}
+                    signature={[reconciliation.unconfigured_section_count, reconSectionId]}
+                    sx={{ mb: 1.4 }}
+                  >
                     {reconciliation.unconfigured_section_count} section(s) have no mud type. Their actual mud chemicals cost is shown, but no reconciled amount is calculated until the section is configured above.
-                  </Alert>}
+                  </Caution>}
                   {reconView === 'daily'
                     ? <DataTable
                         fillHeight

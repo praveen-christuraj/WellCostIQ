@@ -181,7 +181,7 @@ def verified_context(answer) -> str:
 def main() -> None:
     from pypdf.errors import PdfReadError
 
-    parser = argparse.ArgumentParser(description="Build a workspace PDF reference index for WellCostIQ")
+    parser = argparse.ArgumentParser(description="Build a workspace PDF reference index for WellSenseIQ")
     parser.add_argument("--workspace-id", required=True, help="Organization UUID (not a slug)")
     parser.add_argument("--pdf-dir", required=True, type=Path, help="Directory of approved text PDFs")
     parser.add_argument("--output-root", required=True, type=Path, help="API reference library directory")

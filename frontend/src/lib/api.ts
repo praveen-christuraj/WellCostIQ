@@ -37,7 +37,7 @@ export async function api<T>(path: string, options: ApiOptions = {}, retry = tru
   try {
     response = await fetch(`${ROOT}${path}`, { ...request, headers, credentials: 'include' })
   } catch {
-    const error = new ApiError('Unable to connect to WellCostIQ. Check your network connection and try again.', 0, [], action)
+    const error = new ApiError('Unable to connect to WellSenseIQ. Check your network connection and try again.', 0, [], action)
     if (!silent) notifyError(error)
     throw error
   }
@@ -279,7 +279,7 @@ async function send(method: string, path: string, payload: BodyInit | null, retr
   try {
     response = await fetch(`${ROOT}${path}`, { method, headers, body: payload, credentials: 'include' })
   } catch {
-    const error = new ApiError('Unable to connect to WellCostIQ. Check your network connection and try again.', 0, [])
+    const error = new ApiError('Unable to connect to WellSenseIQ. Check your network connection and try again.', 0, [])
     notifyError(error)
     throw error
   }

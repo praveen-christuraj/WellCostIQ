@@ -9,6 +9,7 @@ import { DataTable } from '../../components/DataTable'
 import { ChartPanel } from '../../components/ui/ChartPanel'
 import { SectionCard } from '../../components/ui/SectionCard'
 import { StatCard } from '../../components/ui/StatCard'
+import { Caution, RestoreCautions } from '../../components/ui/Caution'
 import { ErrorMessage, PageHeading } from '../../components/Common'
 import { useAuth } from '../../context/AuthContext'
 import {
@@ -18,6 +19,9 @@ import {
   type OpsWellPath,
 } from '../../lib/operations'
 import { fmtAngle, fmtDepth, fmtDls, interpolateAt, stationAt } from '../../lib/wellPath'
+
+/** Local-storage namespace for the dismissible cautions shown on this page. */
+const CAUTION_PAGE = 'operations-well-path'
 
 /**
  * Well path — the geometry of one well, drawn from its own record.
@@ -240,6 +244,8 @@ export default function OperationsWellPath() {
           </>
         }
       />
+
+      <RestoreCautions page={CAUTION_PAGE}/>
 
       <SectionCard title="Well and scope" subtitle="One well and one scope at a time: a trajectory belongs to a single hole.">
         <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4,minmax(0,1fr))' }}>
@@ -622,10 +628,16 @@ export default function OperationsWellPath() {
                       long and short string positions are not fabricated from it.
                     </Typography>
                   )}
-                  <Alert severity="info" sx={{ fontSize: 11.5 }}>
+                  <Caution
+                    cautionKey="string-versus-hole"
+                    page={CAUTION_PAGE}
+                    severity="info"
+                    icon={false}
+                    sx={{ fontSize: 11.5 }}
+                  >
                     A short string above the hole bottom is normal: one is equipment position, the other is the
                     drilled hole. They need not match.
-                  </Alert>
+                  </Caution>
                 </Stack>
               </SectionCard>
 
@@ -672,9 +684,16 @@ export default function OperationsWellPath() {
                     </Typography>
                   )}
                   {path.assumption && (
-                    <Alert severity="info" sx={{ fontSize: 12.5 }}>
+                    <Caution
+                      cautionKey="path-assumption"
+                      page={CAUTION_PAGE}
+                      severity="info"
+                      icon={false}
+                      signature={[path.assumption]}
+                      sx={{ fontSize: 12.5 }}
+                    >
                       {path.assumption}
-                    </Alert>
+                    </Caution>
                   )}
                   {path.notes.slice(0, 8).map((note) => (
                     <Typography key={note} variant="caption" display="block" color="text.secondary">
@@ -687,10 +706,16 @@ export default function OperationsWellPath() {
                     </Typography>
                   )}
                   {!path.is_surveyed && (
-                    <Alert severity="warning" sx={{ fontSize: 12.5 }}>
+                    <Caution
+                      cautionKey="no-survey"
+                      page={CAUTION_PAGE}
+                      severity="warning"
+                      icon={false}
+                      sx={{ fontSize: 12.5 }}
+                    >
                       No survey has been recorded for this well and scope. The current depth still comes from the
                       latest report&apos;s header, but no trajectory can be drawn.
-                    </Alert>
+                    </Caution>
                   )}
                 </Stack>
               </SectionCard>

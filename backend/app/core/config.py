@@ -160,8 +160,8 @@ def origin_from_url(value: str) -> str:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    app_name: str = "WellCostIQ"
-    app_tagline: str = "Well Cost Estimation & Tracking"
+    app_name: str = "WellSenseIQ"
+    app_tagline: str = "Well Operations & Cost Monitoring"
     environment: str = "development"
 
     database_url: str = "sqlite:///./wellcosting.db"

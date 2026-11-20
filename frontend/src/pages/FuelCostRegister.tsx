@@ -39,6 +39,7 @@ import {
 import type { ColDef } from 'ag-grid-community'
 import { useAuth } from '../context/AuthContext'
 import { FormDialog, PageHeading, Tag } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { DataTable } from '../components/DataTable'
 import { ImportDialog } from '../components/ImportDialog'
 import { FuelCompanyDialog } from '../components/fuel-cost/FuelCompanyDialog'
@@ -198,6 +199,8 @@ function DateRangeBar({
     </Paper>
   )
 }
+
+const CAUTION_PAGE = 'fuel-cost-register'
 
 export default function FuelCostRegister() {
   const { can } = useAuth()
@@ -1107,6 +1110,8 @@ export default function FuelCostRegister() {
 
   return (
     <Stack spacing={2}>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
       <PageHeading
         eyebrow="DAILY COST MANAGEMENT / FUEL COST REGISTER"
         title="Fuel Cost Register"
@@ -1156,9 +1161,9 @@ export default function FuelCostRegister() {
       {notice ? <Alert severity="success" onClose={() => setNotice('')}>{notice}</Alert> : null}
 
       {!loading && !reference.rigs.length ? (
-        <Alert severity="info">
+        <Caution cautionKey="no-rigs" page={CAUTION_PAGE} severity="info" signature={[reference.rigs.length]}>
           Add a rig in Master Data Management → Rig Master before recording fuel consumption.
-        </Alert>
+        </Caution>
       ) : null}
 
       {/* Compact Single-Strip Rig + Fuel Date Entry Bar */}

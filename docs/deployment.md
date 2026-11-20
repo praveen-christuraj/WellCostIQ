@@ -1,6 +1,6 @@
 > Current repository baseline: [CYBERSEC_BASELINE.md](CYBERSEC_BASELINE.md). Use the pinned Docker image (Python 3.12.16), Node 22.23.4 and hash-verified Python installs. Configure separate restricted-runtime `DATABASE_URL` and schema-owner `MIGRATION_DATABASE_URL` secrets, both with `sslmode=require`. Render runs `backend/Dockerfile`; its entrypoint reuses `start-hosted.sh` to migrate, remove the migration credential and bind the assigned `PORT`. Provision and verify both roles/grants with the database administrator before deploying. The Compose PostgreSQL 18.6 baseline does not upgrade a managed Supabase/Render database; confirm its live version and extensions with the provider.
 
-# Deploying WellCostIQ: Vercel + Render + Supabase
+# Deploying WellSenseIQ: Vercel + Render + Supabase
 
 This guide deploys the three parts of the application to three managed services:
 
@@ -195,8 +195,8 @@ service from `render.yaml`.
 | `OLLAMA_MODEL` / `OLLAMA_API_KEY` / `OLLAMA_CA_CERT` | No | Default model `qwen3:4b-q4_K_M`; optional Bearer token and internal TLS CA certificate path when an authenticating/HTTPS proxy fronts Ollama |
 | `OLLAMA_CONNECT_TIMEOUT_SECONDS` / `OLLAMA_TIMEOUT_SECONDS` | No | Defaults `5` / `90` (seconds). Fast TCP failure detection and full generation read timeout |
 | `OLLAMA_TEMPERATURE` / `OLLAMA_NUM_CTX` / `OLLAMA_MAX_TOKENS` / `OLLAMA_THINK` / `OLLAMA_KEEP_ALIVE` | No | Defaults `0.1` / `8192` / `1200` / `false` / `15m`. Sampling, context window, completion cap, Qwen3 thinking toggle and model warm retention |
-| `APP_NAME` | No | Default `WellCostIQ` |
-| `APP_TAGLINE` | No | Default `Well Cost Estimation & Tracking`; shown as the API description in `/docs` and OpenAPI |
+| `APP_NAME` | No | Default `WellSenseIQ` |
+| `APP_TAGLINE` | No | Default `Well Operations & Cost Monitoring`; shown as the API description in `/docs` and OpenAPI |
 
 Notes:
 

@@ -194,7 +194,7 @@ export function GuideIntro({ prompts, onAsk }: { prompts: string[]; onAsk?: (que
       <Typography fontWeight={800} fontSize={14}>The guide answers from recorded memory, not from guesses</Typography>
     </Box>
     <Typography fontSize={12.6} color="text.secondary" sx={{ lineHeight: 1.6, mb: 1.6 }}>
-      Every workflow, calculation, data-entry rule and navigation path in WellCostIQ is written down once, in
+      Every workflow, calculation, data-entry rule and navigation path in WellSenseIQ is written down once, in
       the memory below, and the guide quotes it. Operational questions are answered from your own workspace
       under your permissions — a figure you may not read is never shown. An answer it does not know is
       reported as unknown, with the topics it can help with.

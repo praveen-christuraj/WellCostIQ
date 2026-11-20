@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink, useParams, useSearchParams } from 'react-router-dom'
-import { Alert, Box, Button, CircularProgress, Paper, Tab, Tabs, Typography } from '@mui/material'
+import { Box, Button, CircularProgress, Paper, Tab, Tabs, Typography } from '@mui/material'
 import { ArrowBackRounded, DownloadRounded, RefreshRounded } from '@mui/icons-material'
 import type { ColDef } from 'ag-grid-community'
 import { api, body, downloadFile } from '../lib/api'
 import { ErrorMessage, PageHeading } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { DataTable } from '../components/DataTable'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -57,6 +58,8 @@ const INDEX_COLUMNS: ColDef<IndexRow>[] = [
 ]
 
 // One table in the workspace database: its rows (Data) and its definition (Structure).
+const CAUTION_PAGE = 'database-table'
+
 export default function DatabaseTableView() {
   const { tableName = '' } = useParams()
   const [params, setParams] = useSearchParams()
@@ -129,6 +132,8 @@ export default function DatabaseTableView() {
     : busy ? 'Loading table...' : 'Table unavailable'
 
   return <>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     <PageHeading
       eyebrow="OTHER MANAGEMENTS / DATABASE BROWSER"
       title={tableName}
@@ -154,9 +159,9 @@ export default function DatabaseTableView() {
         </Tabs>
 
         {view === 'data' && <Box id="table-panel-data" role="tabpanel" aria-labelledby="table-tab-data" sx={{ p: { xs: 1.5, sm: 2 } }}>
-          {rows.truncated && <Alert severity="info" sx={{ mb: 1.5 }}>
+          {rows.truncated && <Caution cautionKey="rows-truncated" page={CAUTION_PAGE} severity="info" signature={[rows.shown, rows.total]} sx={{ mb: 1.5 }}>
             Showing the newest {rows.shown.toLocaleString()} of {rows.total.toLocaleString()} rows. Filters and exports below apply to the rows on screen; use Download full table (CSV) for every row.
-          </Alert>}
+          </Caution>}
           {rows.total === 0 && <Typography color="text.secondary" fontSize={12.5} mb={1.5}>This table has no rows in this workspace yet.</Typography>}
           <DataTable<GridRow>
             fillHeight
@@ -171,9 +176,9 @@ export default function DatabaseTableView() {
         </Box>}
 
         {view === 'structure' && <Box id="table-panel-structure" role="tabpanel" aria-labelledby="table-tab-structure" sx={{ p: { xs: 1.5, sm: 2 } }}>
-          {structure.hidden_columns > 0 && <Alert severity="info" sx={{ mb: 2 }}>
+          {structure.hidden_columns > 0 && <Caution cautionKey="hidden-columns" page={CAUTION_PAGE} severity="info" signature={[structure.hidden_columns]} sx={{ mb: 2 }}>
             {structure.hidden_columns} credential or session {structure.hidden_columns === 1 ? 'column is' : 'columns are'} not listed here and cannot be exported.
-          </Alert>}
+          </Caution>}
           <Typography fontWeight={800} fontSize={14} mb={1}>Columns</Typography>
           <DataTable<StructureRow>
             rows={structureRows}

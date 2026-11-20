@@ -5,18 +5,22 @@ import {
   AddRounded, ArrowForwardRounded, BusinessOutlined, FactCheckOutlined, GridViewOutlined,
   LanguageOutlined, RefreshRounded, ScheduleOutlined, TaskAltOutlined,
 } from '@mui/icons-material'
-import { Alert, Box, Button, List, ListItem, ListItemText, Typography, useTheme } from '@mui/material'
+import { Box, Button, List, ListItem, ListItemText, Typography, useTheme } from '@mui/material'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { ChartPanel } from '../components/ui/ChartPanel'
 import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { chartPalette } from '../designSystem'
 import { api } from '../lib/api'
 import type { RigWellOverview as RigWellOverviewData } from '../lib/rigWell'
+
+/** Local-storage namespace for the dismissible cautions shown on this page. */
+const CAUTION_PAGE = 'rig-well-overview'
 
 function timeLabel(value: string) {
   const date = new Date(value)
@@ -126,6 +130,8 @@ export default function RigWellOverview() {
     />
     <ErrorMessage message={error}/>
 
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     {busy && !overview ? <DatasetState kind="loading" title="Loading the rig and well directory…"/> : overview && <>
       <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: 'repeat(4, minmax(0,1fr))' } }}>
         <StatCard label="Active blocks" value={overview.active_blocks.toLocaleString()} hint={`${overview.deleted_blocks} retained in Deleted entries`} icon={<GridViewOutlined fontSize="small"/>}/>
@@ -149,9 +155,16 @@ export default function RigWellOverview() {
         </SectionCard>
       </Box>
 
-      {overview.active_blocks === 0 && <Alert severity="info" sx={{ mt: 1.5 }} action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/blocks" size="small">Create a block</Button> : undefined}>
+      {overview.active_blocks === 0 && <Caution
+        cautionKey="no-blocks"
+        page={CAUTION_PAGE}
+        severity="info"
+        signature={[overview.active_blocks]}
+        action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/blocks" size="small">Create a block</Button> : undefined}
+        sx={{ mt: 1.5 }}
+      >
         Start with a block and a rig. Every well belongs to one block and one rig, and well sub activities are classified by an Activity in Master Data.
-      </Alert>}
+      </Caution>}
 
       <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.15fr) minmax(0, 1fr)' } }}>
         <SectionCard

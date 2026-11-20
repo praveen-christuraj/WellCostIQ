@@ -5,6 +5,7 @@ import { Alert, Box, Button, CircularProgress, Divider, IconButton, ListItemText
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag, useFormDirty } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { ImportDialog } from '../components/ImportDialog'
 import { PlanAdjustmentDialog } from '../components/PlanAdjustmentDialog'
 import { WellConfigurationDialog } from '../components/WellConfigurationDialog'
@@ -191,6 +192,8 @@ function scopePresetValue(scopes: WellConfigurationScope[]): string {
   if (scopes.includes('completion')) return 'completion'
   return 'drilling'
 }
+
+const CAUTION_PAGE = 'wells'
 
 export default function Wells() {
   const { can } = useAuth()
@@ -473,7 +476,8 @@ export default function Wells() {
   const activeTab = TABS.find(tab => tab.key === active) ?? TABS[0]
 
   return (
-    <>
+    <>      <RestoreCautions page={CAUTION_PAGE}/>
+
       <PageHeading
         eyebrow="RIG & WELL MANAGEMENT / WELL REGISTER"
         title="Wells"
@@ -484,8 +488,24 @@ export default function Wells() {
         </Box>}
       />
 
-      {!rigs.length && <Alert severity="warning" sx={{ mb: 1.8 }} action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/rigs" size="small">Create a rig</Button> : undefined}>Create at least one active rig before adding wells. Rigs are maintained in the Rig register.</Alert>}
-      {!blocks.length && <Alert severity="warning" sx={{ mb: 1.8 }} action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/blocks" size="small">Create a block</Button> : undefined}>Create at least one active block before adding wells. Every well takes its block from the Block register, and the well register is segregated by block.</Alert>}
+      {!rigs.length && <Caution
+        cautionKey="no-rigs"
+        page={CAUTION_PAGE}
+        signature={[rigs.length]}
+        sx={{ mb: 1.8 }}
+        action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/rigs" size="small" color="inherit">Create a rig</Button> : undefined}
+      >
+        Create at least one active rig before adding wells. Rigs are maintained in the Rig register.
+      </Caution>}
+      {!blocks.length && <Caution
+        cautionKey="no-blocks"
+        page={CAUTION_PAGE}
+        signature={[blocks.length]}
+        sx={{ mb: 1.8 }}
+        action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/blocks" size="small" color="inherit">Create a block</Button> : undefined}
+      >
+        Create at least one active block before adding wells. Every well takes its block from the Block register, and the well register is segregated by block.
+      </Caution>}
       {notice && <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 1.5 }}>{notice}</Alert>}
       <ErrorMessage message={error} />
 

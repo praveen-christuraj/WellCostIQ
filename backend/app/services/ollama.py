@@ -37,7 +37,7 @@ _CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.IGNORECASE | r
 
 
 class OllamaCommunicationError(RuntimeError):
-    """Raised whenever WellCostIQ cannot obtain a valid reply from Ollama."""
+    """Raised whenever WellSenseIQ cannot obtain a valid reply from Ollama."""
 
     def __init__(
         self,
@@ -270,7 +270,7 @@ def _request_json(
 
     headers: dict[str, str] = {
         "Accept": "application/json",
-        "User-Agent": "WellCostIQ-OllamaClient/1.0",
+        "User-Agent": "WellSenseIQ-OllamaClient/1.0",
         "Connection": "close",
     }
     body_bytes: bytes | None = None

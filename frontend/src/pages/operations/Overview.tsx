@@ -6,6 +6,7 @@ import { ChartPanel } from '../../components/ui/ChartPanel'
 import { InteractiveChart } from '../../components/ui/InteractiveChart'
 import { SectionCard } from '../../components/ui/SectionCard'
 import { StatCard } from '../../components/ui/StatCard'
+import { Caution, RestoreCautions } from '../../components/ui/Caution'
 import { ErrorMessage, PageHeading } from '../../components/Common'
 import { useAuth } from '../../context/AuthContext'
 import { useColorMode } from '../../context/ThemeContext'
@@ -17,6 +18,9 @@ import {
   type OpsScopeReference,
   type OpsWellVisual,
 } from '../../lib/operations'
+
+/** Local-storage namespace for the dismissible cautions shown on this page. */
+const CAUTION_PAGE = 'operations-overview'
 
 /** A depth or a dash: a zero is a real reading (a spudded well), a null is not. */
 function fmtDepth(value: number | null | undefined): string {
@@ -116,6 +120,7 @@ export default function OperationsOverview() {
         }
       />
       {error && <ErrorMessage message={error} />}
+      <RestoreCautions page={CAUTION_PAGE}/>
       <SectionCard title="Scope & reporting period">
         <Box
           display="grid"
@@ -214,10 +219,15 @@ export default function OperationsOverview() {
       {well && scope ? (
         <WellPathPanel well={well} scope={scope} canOpenPath={can('ops-report:read') || can('ops-dashboard:read')} />
       ) : (
-        <Alert severity="info">
+        <Caution
+          cautionKey="well-path-scope"
+          page={CAUTION_PAGE}
+          severity="info"
+          icon={false}
+        >
           Select one well and one scope to draw its path and casing diagram. A single drawing cannot represent
           several wells, and the record differs well to well.
-        </Alert>
+        </Caution>
       )}
       <Box display="grid" gap={2} gridTemplateColumns="minmax(0,1fr)">
         <ChartPanel

@@ -90,7 +90,7 @@ FOCUS_INSTRUCTIONS: dict[str, str] = {
     ),
 }
 
-REVIEW_SYSTEM_PROMPT = """You are a senior drilling & completion cost-control auditor operating inside WellCostIQ.
+REVIEW_SYSTEM_PROMPT = """You are a senior drilling & completion cost-control auditor operating inside WellSenseIQ.
 
 STRICT RULES:
 1. Base every statement ONLY on the verified figures, statistical findings, and daily-sheet entry checks provided below.

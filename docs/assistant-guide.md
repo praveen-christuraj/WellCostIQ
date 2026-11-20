@@ -20,7 +20,7 @@ workflows, and application guides. If the remote AI PC cannot be reached, the
 Guide alerts the user immediately and still displays the verified local answer.
 
 For model-independent workspace notes and an offline PDF reference library, see
-[Teach the WellCostIQ assistant](ai-knowledge.md).
+[Teach the WellSenseIQ assistant](ai-knowledge.md).
 
 ## Where to find it
 
@@ -42,7 +42,7 @@ For model-independent workspace notes and an offline PDF reference library, see
   printed ranges and page citations from the two supplied study works (Rabia;
   Baker Hughes INTEQ), searchable and browsable with no model in the loop, and
   answered with the same arithmetic when asked as a question. See
-  [Teach the WellCostIQ assistant](ai-knowledge.md).
+  [Teach the WellSenseIQ assistant](ai-knowledge.md).
 
 ## What an answer contains
 

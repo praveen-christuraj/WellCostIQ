@@ -58,7 +58,7 @@ export default function Login() {
     } catch (err) { setRecoveryError((err as Error).message) } finally { setRecoveryBusy(false) }
   }
   return <Box className="login-shell">
-    <Box className="login-story" component="section" aria-label="About WellCostIQ">
+    <Box className="login-story" component="section" aria-label="About WellSenseIQ">
       <Box className="story-bg" aria-hidden="true">
         <img src="/login-bg.svg" alt="" className="login-bg-image"/>
       </Box>

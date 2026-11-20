@@ -1,4 +1,4 @@
-"""Targeted regression tests for WellCostIQ reporting, intelligence, and assistant upgrades.
+"""Targeted regression tests for WellSenseIQ reporting, intelligence, and assistant upgrades.
 
 Covers:
 1. Tangible-aware Cost Intelligence: end-of-scope lump-sum tangibles never fire false

@@ -5,12 +5,13 @@ import {
   Box,
   Button,
   Collapse,
-  Checkbox, FormControlLabel,
+  Checkbox,
   Divider,
   ListSubheader,
   MenuItem,
   Paper,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import { AddRounded, DeleteOutlineRounded, TuneRounded } from '@mui/icons-material'
@@ -39,6 +40,7 @@ import {
   type DailyCostCatalogueOption,
   type DailyCostConsumableInput,
   type DailyCostOtherExpenseInput,
+  type DailyCostRateOption,
   type DailyCostReference,
   type DailyCostServiceInput,
   type DailyCostTangibleInput,
@@ -87,8 +89,21 @@ const isService = (line: EditableDailyCostLine): line is DailyCostServiceInput =
 const isConsumable = (line: EditableDailyCostLine): line is DailyCostConsumableInput => 'item_kind' in line
 const isOther = (line: EditableDailyCostLine): line is DailyCostOtherExpenseInput => 'expense_type' in line
 
+/**
+ * One service chosen in the entry window.
+ *
+ * A service configured in the AFE is one *cost item*, but it can carry several
+ * priced charge categories (Operation, Standby, Mobilization, …) that are all
+ * part of the same AFE line. ``item_rate_ids`` is the set of those locked AFE
+ * rates this row bills for; the row is saved as one ordinary ledger line per
+ * selected cost item, because that is how the AFE compares, clubs and prices
+ * them. ``baseline_service_rate_id`` stays the row's primary rate (the first
+ * selected cost item) for the shared fields: currency, basis, override, scope
+ * and quantity.
+ */
 type ServiceEntryRow = {
-  extra_categories?: string[]
+  /** Locked AFE rates (cost items) of this service the row bills for. */
+  item_rate_ids?: string[]
   cost_items?: { description: string; amount: string }[]
   id: string
   service_id: string
@@ -106,6 +121,21 @@ type ServiceEntryRow = {
   customQuantity: boolean
   custom_quantity: string
   custom_quantity_unit: DailyQuantityUnit
+}
+
+const itemCheckboxId = (rowId: string, rateId: string) => `daily-cost-cost-item-${rowId}-${rateId}`
+const LEGACY_RATE = 'legacy'
+
+/** The cost items (locked AFE rates) this row bills for, in the order shown. */
+function rowItemRateIds(row: ServiceEntryRow): string[] {
+  const ids = (row.item_rate_ids ?? []).filter(Boolean)
+  if (ids.length) return ids
+  return row.baseline_service_rate_id ? [row.baseline_service_rate_id] : [LEGACY_RATE]
+}
+
+/** Whether this locked rate is a one-time (unit-priced) charge. */
+function rateIsOneTime(rate: DailyCostRateOption | undefined): boolean {
+  return Boolean(rate && rate.charging_basis === 'Day Rate' && DAILY_ONE_TIME_CATEGORIES.includes(rate.charge_category as ChargeCategory))
 }
 
 function defaultUsdRateForCurrency(currency: string, baseline: DailyCostBaseline): string {
@@ -250,6 +280,7 @@ export function DailyCostLineDialog({
             cost_items: initialLine.cost_items ?? [],
             id: initialLine.id || 'service-0',
             service_id: initialLine.service_id,
+            item_rate_ids: initialLine.baseline_service_rate_id ? [initialLine.baseline_service_rate_id] : [],
             baseline_service_rate_id: initialLine.baseline_service_rate_id,
             charging_basis: initialLine.charging_basis,
             charge_category: initialLine.charge_category,
@@ -278,6 +309,9 @@ export function DailyCostLineDialog({
           {
             id: 'service-0',
             service_id: firstService?.id || '',
+            // The primary cost item is billed by default, exactly as before; every
+            // other cost item of the same service is one tick away below.
+            item_rate_ids: firstRate ? [firstRate.id] : [],
             baseline_service_rate_id: firstRate?.id || null,
             charging_basis: basis,
             charge_category: category,
@@ -300,6 +334,7 @@ export function DailyCostLineDialog({
           const rate = baseline.service_rates.find(rate => rate.service_id === serviceId && rate.is_current !== false)
           const cur = rate?.currency ?? baseline.standard_currency
           return { id: `set-${index}`, service_id: serviceId, baseline_service_rate_id: rate?.id ?? null,
+            item_rate_ids: rate ? [rate.id] : [],
             charging_basis: rate?.charging_basis ?? 'Day Rate', charge_category: (rate?.charge_category || 'Operation') as ChargeCategory,
             currency: cur, exchange_rate: defaultUsdRateForCurrency(cur, baseline), override_rate: null, override_reason: '', remarks: '',
             customScope: Boolean(rate?.hole_section_id), custom_hole_section_id: rate?.hole_section_id ?? defaultSection?.hole_section_id ?? null,
@@ -522,6 +557,7 @@ export function DailyCostLineDialog({
       {
         id: `service-${Date.now()}-${prev.length}`,
         service_id: '',
+        item_rate_ids: [],
         baseline_service_rate_id: null,
         charging_basis: 'Day Rate',
         charge_category: 'Operation',
@@ -545,8 +581,11 @@ export function DailyCostLineDialog({
       if (row.id !== rowId) return row
       const updated = { ...row, ...patch }
       if (patch.service_id && patch.service_id !== row.service_id) {
-        updated.extra_categories = []
-        const rate = baseline.service_rates.find(r => r.service_id === patch.service_id && r.is_current !== false)
+        // Changing the service replaces its cost items wholesale: the locked
+        // rates belong to the previous service and must never be carried over.
+        const costs = baseline.service_rates.filter(r => r.service_id === patch.service_id && r.is_current !== false)
+        const rate = costs[0]
+        updated.item_rate_ids = rate ? [rate.id] : []
         if (rate) {
           updated.baseline_service_rate_id = rate.id
           updated.charging_basis = rate.charging_basis
@@ -557,6 +596,13 @@ export function DailyCostLineDialog({
           updated.baseline_service_rate_id = null
         }
       }
+      if (patch.baseline_service_rate_id !== undefined && patch.baseline_service_rate_id !== row.baseline_service_rate_id) {
+        // Picking the primary cost item re-adds it when the user had unticked it.
+        const ids = rowItemRateIds(row).filter(id => id !== LEGACY_RATE)
+        updated.item_rate_ids = ids.includes(patch.baseline_service_rate_id ?? '') || !patch.baseline_service_rate_id
+          ? ids
+          : [patch.baseline_service_rate_id, ...ids]
+      }
       if (patch.currency && patch.currency !== row.currency && patch.exchange_rate === undefined) {
         updated.exchange_rate = defaultUsdRateForCurrency(patch.currency, baseline)
       }
@@ -564,12 +610,81 @@ export function DailyCostLineDialog({
     }))
   }
 
+  /** Tick or untick one cost item (locked AFE rate) of a service row. */
+  const toggleItemRate = (rowId: string, rateId: string, checked: boolean) => {
+    setServiceRows(prev => prev.map(row => {
+      if (row.id !== rowId) return row
+      const ids = rowItemRateIds(row).filter(id => id !== LEGACY_RATE)
+      const others = row.service_id
+        ? baseline.service_rates.filter(rate => rate.service_id === row.service_id && rate.is_current !== false).map(rate => rate.id)
+        : []
+      const next = checked
+        ? [...others.filter(id => id === rateId || ids.includes(id))]
+        : ids.filter(id => id !== rateId)
+      const ordered = others.filter(id => next.includes(id))
+      const primary = ordered.includes(row.baseline_service_rate_id ?? '') ? row.baseline_service_rate_id : ordered[0] ?? null
+      const primaryRate = baseline.service_rates.find(rate => rate.id === primary)
+      return {
+        ...row,
+        item_rate_ids: ordered,
+        baseline_service_rate_id: primary,
+        charging_basis: primaryRate?.charging_basis ?? row.charging_basis,
+        charge_category: (primaryRate?.charge_category || row.charge_category) as ChargeCategory,
+      }
+    }))
+  }
+
+  /**
+   * Quantity checks for one service row.
+   *
+   * The working hours a row bills are its own custom quantity when it has one,
+   * otherwise the common quantity. Because every selected cost item shares that
+   * quantity, the 24-hour ceiling applies to the row as a whole — 12 hours of
+   * Operation plus 12 of Standby is one 24-hour service day, and 13 + 13 is
+   * rejected here rather than by the server after the sheet is saved.
+   */
+  const rowQuantityProblems = (row: ServiceEntryRow, rowLabel: string): string[] => {
+    const problems: string[] = []
+    const usesOwn = !allocations.length && row.customQuantity
+    const raw = usesOwn ? row.custom_quantity : commonQuantity
+    const unit = usesOwn ? row.custom_quantity_unit : commonQuantityUnit
+    const value = Number(raw)
+    if (!raw || !Number.isFinite(value) || value <= 0) {
+      problems.push(`${rowLabel}: Quantity must be greater than zero.`)
+      return problems
+    }
+    if (unit === 'hours' && value > 24) {
+      problems.push(`${rowLabel}: Hours cannot exceed 24 on one daily sheet; enter days instead.`)
+    }
+    return problems
+  }
+
+  /** The service row the override/currency fields follow: the row's primary item, else its first item. */
+  const rowRates = (row: ServiceEntryRow): DailyCostRateOption[] => {
+    const ids = rowItemRateIds(row)
+    const byId = new Map(baseline.service_rates.map(rate => [rate.id, rate]))
+    const listed = ids.map(id => byId.get(id)).filter((rate): rate is DailyCostRateOption => Boolean(rate))
+    if (listed.length) return listed
+    const fallback = baseline.service_rates.find(rate => rate.id === row.baseline_service_rate_id)
+    return fallback ? [fallback] : []
+  }
+
   const removeServiceRow = (rowId: string) => {
     if (serviceRows.length <= 1) return
     setServiceRows(prev => prev.filter(r => r.id !== rowId))
   }
 
-  const timeBased = serviceRows.some(row => row.charging_basis === 'Day Rate' && [row.charge_category ?? 'Operation', ...(row.extra_categories ?? [])].some(category => !DAILY_ONE_TIME_CATEGORIES.includes(category as ChargeCategory)))
+  /**
+   * Whether a row bills any time-based cost item. Every cost item the row shows
+   * shares its quantity, so the 24-hour ceiling is judged per row: a service
+   * billing Operation (time-based) *and* Mobilization (charged once) still caps
+   * at 24 hours, while a row billing only one-time items does not carry hours at
+   * all. The whole-sheet flag is only what the allocation editor needs.
+   */
+  const rowTimeBased = (row: ServiceEntryRow): boolean =>
+    !DAILY_ONE_TIME_CATEGORIES.includes((row.charge_category || 'Operation') as ChargeCategory)
+    || rowRates(row).some(rate => !rateIsOneTime(rate))
+  const timeBased = serviceRows.some(rowTimeBased)
 
   const validate = (): string[] => {
     const problems: string[] = []
@@ -592,11 +707,9 @@ export function DailyCostLineDialog({
       if (!serviceRows.length) problems.push('Add at least one service.')
 
       const commonQtyNum = Number(commonQuantity)
-      if (!allocations.length && timeBased && (!commonQuantity || isNaN(commonQtyNum) || commonQtyNum <= 0)) {
+      const usesCommon = !allocations.length && serviceRows.some(row => rowTimeBased(row) && !row.customQuantity)
+      if (usesCommon && (!commonQuantity || isNaN(commonQtyNum) || commonQtyNum <= 0)) {
         problems.push('Common quantity must be greater than zero.')
-      }
-      if (!allocations.length && timeBased && commonQuantityUnit === 'hours' && commonQtyNum > 24) {
-        problems.push('Hours cannot exceed 24 for a daily line; enter days instead.')
       }
 
       const duplicateCheck = new Set<string>()
@@ -609,28 +722,40 @@ export function DailyCostLineDialog({
         }
 
         const subId = commonSubActivityId || ''
-        const dupKey = `${row.service_id}:${subId}:${row.charge_category}:${row.customScope ? row.custom_hole_section_id : commonHoleSectionId}:${row.customScope ? row.custom_phase_id : commonPhaseId}`
-        if (duplicateCheck.has(dupKey)) {
-          const sName = reference.services.find(s => s.id === row.service_id)?.service_code || row.service_id
-          problems.push(`${rowLabel} (${sName}): Cannot add the same service twice under the same sub activity.`)
+        // Duplicates are judged per *cost item* (locked AFE rate), not per
+        // service: a service whose AFE line carries Operation, Standby and
+        // Mobilization is entered once and bills all three, and only a second
+        // charge for the very same cost item under the same sub activity is a
+        // duplicate. This is the guard the backend applies to saved rows.
+        const rowItems = rowRates(row)
+        const rowKeys = rowItems.length
+          ? rowItems.map(rate => `${row.service_id}:${subId}:${rate.charge_category}:${row.customScope ? row.custom_hole_section_id : commonHoleSectionId}:${row.customScope ? row.custom_phase_id : commonPhaseId}`)
+          : [`${row.service_id}:${subId}:${row.charge_category}:${row.customScope ? row.custom_hole_section_id : commonHoleSectionId}:${row.customScope ? row.custom_phase_id : commonPhaseId}`]
+        const sName = reference.services.find(s => s.id === row.service_id)?.service_code || row.service_id
+        for (const [keyIndex, dupKey] of rowKeys.entries()) {
+          if (duplicateCheck.has(dupKey)) {
+            const category = rowItems[keyIndex]?.charge_category || row.charge_category || 'this charge'
+            problems.push(`${rowLabel} (${sName}): ${category} is already entered twice under the same sub activity. Untick the repeated cost item or use a different sub activity.`)
+          }
+          duplicateCheck.add(dupKey)
         }
-        duplicateCheck.add(dupKey)
 
-        const existingDup = serviceLines.some(
-          (sLine, sIdx) => sIdx !== lineIndex && sLine.service_id === row.service_id && (sLine.sub_activity_id || '') === subId && sLine.charge_category === row.charge_category && sLine.hole_section_id === (row.customScope ? row.custom_hole_section_id : commonHoleSectionId) && sLine.phase_id === (row.customScope ? row.custom_phase_id : commonPhaseId),
-        )
-        if (!allocations.length && existingDup) {
-          const sName = reference.services.find(s => s.id === row.service_id)?.service_code || row.service_id
-          problems.push(`${rowLabel} (${sName}): This service is already entered for this sub activity on this sheet.`)
+        const existingKeys = new Set(serviceLines.flatMap((sLine, sIdx) => sIdx === lineIndex || sLine.service_id !== row.service_id || (sLine.sub_activity_id || '') !== subId
+          ? []
+          : [`${sLine.service_id}:${subId}:${sLine.charge_category}:${sLine.hole_section_id}:${sLine.phase_id}`]))
+        const clashes = rowItems.filter(rate => existingKeys.has(`${row.service_id}:${subId}:${rate.charge_category}:${row.customScope ? row.custom_hole_section_id : commonHoleSectionId}:${row.customScope ? row.custom_phase_id : commonPhaseId}`))
+        if (!allocations.length && clashes.length) {
+          problems.push(`${rowLabel} (${sName}): ${clashes.map(rate => rate.charge_category).join(', ')} ${clashes.length === 1 ? 'is' : 'are'} already entered for this sub activity on this sheet. Untick ${clashes.length === 1 ? 'that cost item' : 'those cost items'}, or add the service again under a different sub activity.`)
         }
 
-        if ((allocations.length ? allocations.some(item => deriveClassification(reference.activities.find(activity => activity.id === item.activity_id)) === 'Planned') : derivedClassification === 'Planned') && !row.baseline_service_rate_id) {
-          const sName = reference.services.find(s => s.id === row.service_id)?.service_code || row.service_id
-          problems.push(`${rowLabel} (${sName}): Planned work requires a saved AFE rate. Select an AFE rate or use UPA/NPT Activity.`)
+        const plannedRow = allocations.length
+          ? allocations.some(item => deriveClassification(reference.activities.find(activity => activity.id === item.activity_id)) === 'Planned')
+          : derivedClassification === 'Planned'
+        if (plannedRow && !rowRates(row).length) {
+          problems.push(`${rowLabel} (${sName}): Select at least one cost item from the AFE, or record the service under a UPA/NPT Activity with a justified rate.`)
         }
 
         if (!row.baseline_service_rate_id && row.override_rate === null) {
-          const sName = reference.services.find(s => s.id === row.service_id)?.service_code || row.service_id
           problems.push(`${rowLabel} (${sName}): Unplanned service requires a manual override rate and reason.`)
         }
 
@@ -640,14 +765,8 @@ export function DailyCostLineDialog({
           if (row.override_reason.trim().length < 3) problems.push(`${rowLabel}: Explain the rate override (at least 3 characters).`)
         }
 
-        if (!allocations.length && timeBased && row.customQuantity) {
-          const custQtyNum = Number(row.custom_quantity)
-          if (!row.custom_quantity || isNaN(custQtyNum) || custQtyNum <= 0) {
-            problems.push(`${rowLabel}: Custom quantity must be greater than zero.`)
-          }
-          if (row.custom_quantity_unit === 'hours' && custQtyNum > 24) {
-            problems.push(`${rowLabel}: Custom hours cannot exceed 24; enter days instead.`)
-          }
+        if (!allocations.length && row.customQuantity && rowTimeBased(row)) {
+          problems.push(...rowQuantityProblems(row, rowLabel))
         }
 
         const cur = (row.currency || 'USD').toUpperCase()
@@ -768,14 +887,20 @@ export function DailyCostLineDialog({
     setSaving(true)
     try {
       if (kind === 'service') {
-        const results: DailyCostServiceInput[] = serviceRows.map(row => {
+        // Every selected cost item becomes its own ordinary ledger line. That is
+        // how the AFE priced the service (one allowance per charge category), so
+        // the report clubs them back into the one service row and each category
+        // reconciles against its own budget line. A row with no selectable item
+        // (an unplanned UPA/NPT service) is saved exactly as before.
+        const lines: DailyCostServiceInput[] = []
+        let editedIdentityUsed = false
+        for (const row of serviceRows) {
           const secId = row.customScope ? row.custom_hole_section_id : commonHoleSectionId
           const phId = row.customScope ? row.custom_phase_id : commonPhaseId
           const qty = row.customQuantity ? row.custom_quantity : commonQuantity
           const unit = row.customQuantity ? row.custom_quantity_unit : commonQuantityUnit
-          const cur = (row.currency || baseline.standard_currency || 'USD').toUpperCase()
-          return {
-            id: initialLine && serviceRows.length === 1 ? initialLine.id : null,
+          const costs = rowRates(row)
+          const shared = {
             activity_id: commonActivityId,
             sub_activity_id: commonSubActivityId,
             vendor_id: derivedClassification === 'Planned' ? null : commonVendorId,
@@ -786,29 +911,55 @@ export function DailyCostLineDialog({
             actual_depth_unit: commonDepthUnit,
             quantity: qty,
             quantity_unit: unit,
-            cost_items: row.cost_items ?? [],
             service_id: row.service_id,
-            baseline_service_rate_id: row.baseline_service_rate_id,
-            charging_basis: row.charging_basis,
-            charge_category: (row.charge_category || 'Operation') as ChargeCategory,
-            currency: cur,
-            exchange_rate: cur !== 'USD' && row.exchange_rate ? row.exchange_rate : null,
-            override_rate: row.override_rate || null,
-            override_reason: row.override_rate ? row.override_reason.trim() : '',
             remarks: row.remarks.trim(),
           }
-        })
-        const expanded = results.flatMap((line, index) => {
-          const row = serviceRows[index]
-          const extras = (row.extra_categories ?? []).filter(category => category !== line.charge_category).map(category => {
-            const selectedRate = baseline.service_rates.find(rate => rate.id === line.baseline_service_rate_id)
-            const rate = baseline.service_rates.find(rate => rate.is_current !== false && rate.service_id === line.service_id && rate.source_afe_line_id === selectedRate?.source_afe_line_id && rate.charge_category === category && rate.charging_basis === line.charging_basis && rate.hole_section_id === selectedRate?.hole_section_id && rate.phase_id === selectedRate?.phase_id)
-            if (!rate) throw new Error(`No current AFE rate exists for ${category}.`)
-            return { ...line, id: null, cost_items: [], override_rate: null, override_reason: '', baseline_service_rate_id: rate.id, charge_category: category as ChargeCategory, currency: rate.currency }
-          })
-          return [line, ...extras].flatMap(charge => allocations.length ? allocateService(charge, allocations, baseline, reference) : allocateService(charge, [], baseline, reference))
-        })
-        onSave(expanded)
+          const charges: DailyCostServiceInput[] = costs.length
+            ? costs.map((rate, rateIndex) => {
+              // The daily override applies to the item it was typed beside (the
+              // row's primary item). Any other cost item keeps its locked AFE
+              // rate, so one entry can never quietly reprice the whole service.
+              const carriesOverride = row.override_rate !== null && rate.id === row.baseline_service_rate_id
+              const cur = (carriesOverride || rateIndex === 0 ? row.currency : rate.currency || row.currency || baseline.standard_currency || 'USD').toUpperCase()
+              return {
+                ...shared,
+                cost_items: rateIndex === 0 ? row.cost_items ?? [] : [],
+                baseline_service_rate_id: rate.id,
+                charging_basis: rate.charging_basis,
+                charge_category: (rate.charge_category || 'Operation') as ChargeCategory,
+                currency: cur,
+                exchange_rate: cur !== 'USD' && row.exchange_rate ? row.exchange_rate : null,
+                override_rate: carriesOverride ? row.override_rate : null,
+                override_reason: carriesOverride && row.override_rate ? row.override_reason.trim() : '',
+              }
+            })
+            : [{
+              ...shared,
+              cost_items: row.cost_items ?? [],
+              baseline_service_rate_id: null,
+              charging_basis: row.charging_basis,
+              charge_category: (row.charge_category || 'Operation') as ChargeCategory,
+              currency: (row.currency || baseline.standard_currency || 'USD').toUpperCase(),
+              exchange_rate: row.exchange_rate,
+              override_rate: row.override_rate || null,
+              override_reason: row.override_rate ? row.override_reason.trim() : '',
+            }]
+          for (const charge of charges) {
+            // Only an edit that still produces exactly one line keeps the saved
+            // line's identity; splitting it would otherwise overwrite one row
+            // and append the rest.
+            const keepsIdentity = Boolean(initialLine) && serviceRows.length === 1 && charges.length === 1 && !editedIdentityUsed
+            if (keepsIdentity) editedIdentityUsed = true
+            // `allocateService` also normalises a line with no allocation:
+            // a one-time charge becomes one unit, and per-service / per-section
+            // charges keep their own quantity unit.
+            lines.push(...allocateService(
+              { ...charge, id: keepsIdentity ? initialLine!.id : null },
+              allocations, baseline, reference,
+            ))
+          }
+        }
+        onSave(lines)
       } else if (nonServiceForm) {
         const cur = (nonServiceForm.currency || baseline.standard_currency || 'USD').toUpperCase()
         const prepared: EditableDailyCostLine = {
@@ -1090,6 +1241,7 @@ export function DailyCostLineDialog({
                 const sObj = reference.services.find(s => s.id === row.service_id)
                 const rate = baseline.service_rates.find(r => r.id === row.baseline_service_rate_id)
                 const rateMatches = baseline.service_rates.filter(r => r.service_id === row.service_id && (r.is_current !== false || r.id === row.baseline_service_rate_id))
+                const selectedRates = rowRates(row)
                 const rowCurrency = (row.currency || 'USD').toUpperCase()
                 const canChangeCurrency = row.override_rate !== null || !rate
                 return (
@@ -1134,54 +1286,87 @@ export function DailyCostLineDialog({
                       </TextField>
 
                       {row.service_id && (
-                        <Box sx={{ gridColumn: '1 / -1' }}>
-                          {rateMatches.length > 1 ? (
-                            <TextField
-                              select
-                              size="small"
-                              label="Matched AFE rate"
-                              value={row.baseline_service_rate_id ?? ''}
-                              onChange={e => {
-                                const pickedRate = baseline.service_rates.find(r => r.id === e.target.value)
-                                if (pickedRate?.charging_basis === 'Day Rate' && row.charging_basis !== 'Day Rate') { setCommonQuantity('24'); setCommonQuantityUnit('hours') }
-                                updateServiceRow(row.id, {
-                                  baseline_service_rate_id: e.target.value || null,
-                                  extra_categories: [],
-                                  customQuantity: false,
-                                  charging_basis: pickedRate?.charging_basis || row.charging_basis,
-                                  charge_category: (pickedRate?.charge_category || row.charge_category) as ChargeCategory,
-                                  currency: (pickedRate?.currency || row.currency).toUpperCase(),
-                                })
-                              }}
-                              fullWidth
-                            >
-                              {rateMatches.map(r => (
-                                <MenuItem key={r.id} value={r.id}>
-                                  {dailyMoney(r.unit_rate, r.currency)} / {r.charging_basis} ({r.charge_category || 'Operation'})
-                                  {r.section_label ? ` · ${r.section_label}` : ''}{r.is_current === false ? ' · Historical rate' : ''}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                          ) : rate ? (
-                            <Alert severity="info" sx={{ py: 0.2 }}>
-                              Locked AFE rate: {dailyMoney(rate.unit_rate, rate.currency)} / {rate.charging_basis} ({rate.charge_category || 'Operation'})
-                            </Alert>
-                          ) : derivedClassification === 'Planned' ? (
-                            <Alert severity="error" sx={{ py: 0.2 }}>
-                              No locked AFE rate found for {sObj?.service_code || 'this service'} under this scope.
-                            </Alert>
+                        <Box sx={{ gridColumn: '1 / -1' }} display="grid" gap={1}>
+                          {/* One service, one entry, every cost item it carries.
+                              Each ticked item is saved as its own ledger line, so
+                              the AFE compares and clubs the service exactly as it
+                              was estimated, and the user never has to add the same
+                              service twice to reach a second cost item. */}
+                          <Box display="flex" alignItems="baseline" justifyContent="space-between" gap={1} flexWrap="wrap">
+                            <Typography fontSize={11} fontWeight={800} color="text.secondary" textTransform="uppercase" letterSpacing={.6}>
+                              AFE cost items · {selectedRates.length} of {rateMatches.length} selected
+                            </Typography>
+                            {rateMatches.length > 1 && (
+                              <Box display="flex" gap={.5}>
+                                <Button size="small" sx={{ textTransform: 'none', py: 0 }} onClick={() => updateServiceRow(row.id, { item_rate_ids: rateMatches.map(item => item.id) })}>Select all</Button>
+                                <Button size="small" sx={{ textTransform: 'none', py: 0 }} onClick={() => updateServiceRow(row.id, { item_rate_ids: row.baseline_service_rate_id ? [row.baseline_service_rate_id] : [] })}>This item only</Button>
+                              </Box>
+                            )}
+                          </Box>
+                          {rateMatches.length === 0 ? (
+                            derivedClassification === 'Planned' ? (
+                              <Alert severity="error" sx={{ py: 0.2 }}>
+                                No locked AFE rate found for {sObj?.service_code || 'this service'} under this scope.
+                              </Alert>
+                            ) : (
+                              <Alert severity="warning" sx={{ py: 0.2 }}>
+                                No locked AFE rate for this unplanned service. Enter a daily rate override below.
+                              </Alert>
+                            )
                           ) : (
-                            <Alert severity="warning" sx={{ py: 0.2 }}>
-                              No locked AFE rate for this unplanned service. Enter a daily rate override below.
-                            </Alert>
+                            <Box display="grid" gap={.75}>
+                              {rateMatches.map(item => {
+                                const checked = rowItemRateIds(row).includes(item.id)
+                                const oneTime = rateIsOneTime(item)
+                                return <Box
+                                  key={item.id}
+                                  sx={{ display: 'flex', alignItems: 'center', gap: 1.2, px: 1.2, py: .7, borderRadius: 1, border: '1px solid', borderColor: checked ? 'primary.main' : 'divider', bgcolor: checked ? 'action.hover' : 'transparent' }}
+                                >
+                                  <Checkbox
+                                    size="small"
+                                    id={itemCheckboxId(row.id, item.id)}
+                                    checked={checked}
+                                    onChange={event => toggleItemRate(row.id, item.id, event.target.checked)}
+                                    inputProps={{ 'aria-label': `Include ${item.charge_category || 'Operation'} cost item` }}
+                                    sx={{ p: .35 }}
+                                  />
+                                  <Box
+                                    component="label"
+                                    htmlFor={itemCheckboxId(row.id, item.id)}
+                                    sx={{ flex: 1, minWidth: 0, cursor: 'pointer', display: 'block' }}
+                                  >
+                                    <Typography fontSize={12.5} fontWeight={700} noWrap title={`${item.charge_category || 'Operation'} · ${item.display_name}`}>
+                                      {item.charge_category || 'Operation'}
+                                      <Typography component="span" fontSize={11.5} fontWeight={500} color="text.secondary"> · {dailyMoney(item.unit_rate, item.currency)} / {item.charging_basis}</Typography>
+                                    </Typography>
+                                    <Typography fontSize={10.8} color="text.secondary" noWrap>
+                                      {oneTime ? 'Charged once' : `Billed on ${row.customQuantity ? `${row.custom_quantity} ${row.custom_quantity_unit}` : `${commonQuantity} ${commonQuantityUnit}`}`}
+                                      {item.section_label ? ` · ${item.section_label}` : ''}{item.is_current === false ? ' · Historical rate' : ''}
+                                    </Typography>
+                                  </Box>
+                                  <Tooltip title="Bill this cost item with the daily rate override instead of its locked AFE rate">
+                                    <Button
+                                      size="small"
+                                      variant={row.baseline_service_rate_id === item.id ? 'contained' : 'text'}
+                                      onClick={() => updateServiceRow(row.id, { baseline_service_rate_id: item.id })}
+                                      sx={{ textTransform: 'none', fontSize: 10.8, whiteSpace: 'nowrap', py: .1 }}
+                                    >
+                                      {row.baseline_service_rate_id === item.id ? 'Override applies here' : 'Override here'}
+                                    </Button>
+                                  </Tooltip>
+                                </Box>
+                              })}
+                              {selectedRates.length > 1 && (
+                                <Typography fontSize={11} color="text.secondary">
+                                  {selectedRates.length} cost items will be saved as {selectedRates.length} lines of this one service,
+                                  {allocations.length ? ` under ${allocations.length} activity allocation${allocations.length === 1 ? '' : 's'}` : ' under the same activity, sub activity and scope'}.
+                                </Typography>
+                              )}
+                            </Box>
                           )}
                         </Box>
                       )}
 
-                      {rate && <Box sx={{ gridColumn: '1 / -1' }}>
-                        <Typography variant="subtitle2">Include other AFE charge categories</Typography>
-                        {rateMatches.filter(other => other.is_current !== false && other.source_afe_line_id === rate.source_afe_line_id && other.charging_basis === rate.charging_basis && other.charge_category !== row.charge_category && other.hole_section_id === rate.hole_section_id && other.phase_id === rate.phase_id).map(other => <FormControlLabel key={other.id} label={`${other.charge_category} · ${dailyMoney(other.unit_rate, other.currency)}`} control={<Checkbox checked={(row.extra_categories ?? []).includes(other.charge_category)} onChange={event => updateServiceRow(row.id, { extra_categories: event.target.checked ? [...(row.extra_categories ?? []), other.charge_category] : (row.extra_categories ?? []).filter(category => category !== other.charge_category) })}/>}/>)}
-                      </Box>}
                       <Box sx={{ gridColumn: '1 / -1' }} display="grid" gap={1}>
                         <Typography fontWeight={700}>Actual cost breakdown (optional)</Typography>
                         <Typography color="text.secondary" fontSize={12}>Amounts are in {row.currency}. Their total replaces the rate-based charge; descriptions are retained for reference.</Typography>

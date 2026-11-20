@@ -4,7 +4,7 @@
 
 [View the original illustrated PDF](well-visuals-engineering-plan.pdf) · Page references below refer to that edition.
 
-Proposed Well Path, wellbore diagram and bit / string depth views for WellCostIQ. For approval before implementation; nothing here is a live operations display.
+Proposed Well Path, wellbore diagram and bit / string depth views for WellSenseIQ. For approval before implementation; nothing here is a live operations display.
 
 ### One well, three different questions
 

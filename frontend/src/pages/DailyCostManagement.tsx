@@ -14,6 +14,7 @@ import {
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { isOpenWellStatus } from '../lib/rigWell'
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
 import { BulkDailyCostPrintDialog } from '../components/daily-cost/BulkDailyCostPrintDialog'
@@ -28,6 +29,9 @@ import {
   type DailyCostStatus,
 } from '../lib/dailyCost'
 import { formatDepthMeters } from '../lib/units'
+
+/** Local-storage namespace for the dismissible cautions shown on this page. */
+const CAUTION_PAGE = 'daily-cost'
 
 type CostTab = 'register' | 'history' | 'final_review' | 'completed'
 
@@ -672,26 +676,45 @@ export default function DailyCostManagement() {
       aria-labelledby={deletedView ? undefined : `daily-cost-tab-${active}`}
     >
       <ErrorMessage message={loadError} />
+      <RestoreCautions page={CAUTION_PAGE}/>
       {notice && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNotice('')}>{notice}</Alert>}
 
-      {!deletedView && <Alert
+      {!deletedView && <Caution
+        cautionKey={`tab-hint-${active}`}
+        page={CAUTION_PAGE}
         severity={active === 'register' ? 'info' : 'warning'}
         icon={active === 'register' ? <InfoOutlined/> : <HistoryOutlined/>}
+        signature={[active, latestRigs?.inactivity_days ?? null]}
         sx={{ mb: 2, py: .25 }}
       >
-        {active === 'register'
-          ? <>One row per rig — the latest saved daily sheet, which is the sheet you continue from. Older days move to <strong>Other daily cost registers</strong> as soon as a newer sheet is saved. A rig with no sheet for {latestRigs?.inactivity_days ?? RIG_INACTIVITY_DAYS} days is not in progress and leaves this list.</>
-          : active === 'history'
-            ? <>Every sheet that is not a rig&rsquo;s latest: earlier days of an active rig, and every sheet of a well that has left the active scope. Nothing is deleted — open any sheet here to review it, print it, or restore it to the register by creating a newer day.</>
-            : <>{TABS.find(tab => tab.key === active)?.hint} These sheets are read-only here; open one to review or print it.</>}
-      </Alert>}
+        <span>
+          {active === 'register'
+            ? <>One row per rig — the latest saved daily sheet, which is the sheet you continue from. Older days move to <strong>Other daily cost registers</strong> as soon as a newer sheet is saved. A rig with no sheet for {latestRigs?.inactivity_days ?? RIG_INACTIVITY_DAYS} days is not in progress and leaves this list.</>
+            : active === 'history'
+              ? <>Every sheet that is not a rig&rsquo;s latest: earlier days of an active rig, and every sheet of a well that has left the active scope. Nothing is deleted — open any sheet here to review it, print it, or restore it to the register by creating a newer day.</>
+              : <>{TABS.find(tab => tab.key === active)?.hint} These sheets are read-only here; open one to review or print it.</>}
+        </span>
+      </Caution>}
 
-      {!deletedView && !perRigView && !loading && <Alert severity="warning" sx={{ mb: 2 }} icon={<InfoOutlined/>}>
+      {!deletedView && !perRigView && !loading && <Caution
+        cautionKey="per-rig-fallback"
+        page={CAUTION_PAGE}
+        icon={<InfoOutlined/>}
+        signature={[rows.length]}
+        sx={{ mb: 2 }}
+      >
         The one-row-per-rig register could not be loaded, so every saved sheet is listed instead. Nothing is missing —
         use Refresh once the connection settles to return to one row per rig.
-      </Alert>}
+      </Caution>}
 
-      {!deletedView && latestRigs?.inactive_rigs?.length && active === 'register' && <Alert severity="info" sx={{ mb: 2 }} icon={<InfoOutlined/>}>
+      {!deletedView && latestRigs?.inactive_rigs?.length && active === 'register' && <Caution
+        cautionKey="inactivity-window"
+        page={CAUTION_PAGE}
+        severity="info"
+        icon={<InfoOutlined/>}
+        signature={[latestRigs.inactivity_days, latestRigs.inactive_rigs.length]}
+        sx={{ mb: 2 }}
+      >
         <Typography fontSize={12.5} fontWeight={700} mb={.4}>
           {latestRigs.inactive_rigs.length} rig{latestRigs.inactive_rigs.length === 1 ? '' : 's'} not in progress (no sheet for {latestRigs.inactivity_days} days)
         </Typography>
@@ -699,7 +722,7 @@ export default function DailyCostManagement() {
           {latestRigs.inactive_rigs.map(item => `${item.rig_code} · last ${displayDate(item.entry.cost_date)} (${item.age_days} days)`).join(' · ')}.
           {' '}Their latest sheets are in <strong>Other daily cost registers</strong>, and they return to this register as soon as a new day is entered.
         </Typography>
-      </Alert>}
+      </Caution>}
 
       {!deletedView && <Paper variant="outlined" sx={{ borderRadius: 2.5, mb: 2, overflow: 'hidden' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', px: 2, py: .95, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
@@ -941,7 +964,7 @@ export default function DailyCostManagement() {
 
     <FormDialog open={createOpen} title="Start a daily cost sheet" subtitle="The first sheet locks the AFE estimate, FX factors, well plan, service rates and Master Data catalogue prices for this well/AFE." onClose={() => setCreateOpen(false)} onSubmit={() => void createEntry()} busy={creating} submitLabel="Create daily sheet" submitDisabled={!selectedAfe || !selectedWell || !createDateValid || !usdRateValid || missingSubActivities}>
       <Box display="grid" gap={1.6}>
-        {!wells.length && <Alert severity="warning">Create and sign off a well plan in Rig &amp; Well Management before starting daily cost tracking.</Alert>}
+        {!wells.length && <Caution cautionKey="new-sheet-no-wells" page={CAUTION_PAGE} signature={[wells.length]}>Create and sign off a well plan in Rig &amp; Well Management before starting daily cost tracking.</Caution>}
         <TextField select required label="Configured well" value={wellId} onChange={event => {
           const next = event.target.value
           setWellId(next)
@@ -958,7 +981,7 @@ export default function DailyCostManagement() {
         <TextField select required label="Saved AFE estimate" value={afeId} onChange={event => setAfeId(event.target.value)} disabled={!afes.length}>
           {afes.map(afe => <MenuItem key={afe.id} value={afe.id}>{afe.display_name}</MenuItem>)}
         </TextField>
-        {selectedAfe && <Alert severity="info" sx={{ py: 0 }}>AFE status: {selectedAfe.status}. Budget baseline: {dailyMoney(selectedAfe.total_cost, selectedAfe.standard_currency)}. Subsequent estimate or Master Data changes will not rewrite this locked baseline.</Alert>}
+        {selectedAfe && <Caution cautionKey="new-sheet-locked-baseline" page={CAUTION_PAGE} severity="info" signature={[selectedAfe.id, selectedAfe.status, selectedAfe.total_cost]} sx={{ py: 0 }}>AFE status: {selectedAfe.status}. Budget baseline: {dailyMoney(selectedAfe.total_cost, selectedAfe.standard_currency)}. Subsequent estimate or Master Data changes will not rewrite this locked baseline.</Caution>}
         {needsUsdExchangeRate && selectedAfe && (
           <TextField
             required

@@ -3,6 +3,7 @@ import { AddOutlined, LockOpenOutlined } from '@mui/icons-material'
 import { Alert, Box, Button, Stack, TextField, Typography } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
 import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag, type Tone } from '../../components/Common'
+import { Caution, RestoreCautions } from '../../components/ui/Caution'
 import { DataTable } from '../../components/DataTable'
 import {
   FolderFields,
@@ -37,6 +38,8 @@ const planStatusTone = (status: string): Tone => {
   if (status === 'draft') return 'warning'
   return 'neutral'
 }
+
+const CAUTION_PAGE = 'operations-plans'
 
 export default function OperationsPlans() {
   const { can } = useAuth()
@@ -151,6 +154,8 @@ export default function OperationsPlans() {
 
   return (
     <Box>
+      <RestoreCautions page={CAUTION_PAGE}/>
+
       <PageHeading
         eyebrow="Well Operations"
         title={deleted ? 'Deleted plan versions' : 'Plans & timeline'}
@@ -493,11 +498,11 @@ function PlanView({
       }
     >
       {plan.reopened_at && (
-        <Alert severity="info" sx={{ mb: 2 }}>
+        <Caution cautionKey="plan-reopened" page={CAUTION_PAGE} severity="info" signature={[plan.id, plan.reopened_at]} sx={{ mb: 2 }}>
           Last reopened by <strong>{plan.reopened_by || 'workspace user'}</strong> on{' '}
           <strong>{formatWatDateTime(plan.reopened_at)}</strong>
           {plan.reopen_reason ? ` — Reason: ${plan.reopen_reason}` : ''}.
-        </Alert>
+        </Caution>
       )}
       <DataTable
         rows={plan.items}

@@ -8,7 +8,7 @@ import {
   PictureAsPdfOutlined, TerrainOutlined, TrendingUpRounded, WarningAmberRounded,
 } from '@mui/icons-material'
 import {
-  Alert, Box, Button, FormControlLabel, LinearProgress, MenuItem, Paper,
+  Box, Button, FormControlLabel, LinearProgress, MenuItem, Paper,
   Switch, Tab, Tabs, TextField, Tooltip, Typography, useTheme,
 } from '@mui/material'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
@@ -20,6 +20,7 @@ import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { DrillThroughPanel } from '../components/business-dashboard/DrillThroughPanel'
 import { ExportReportDialog } from '../components/ui/ExportReportDialog'
 import { chartData, chartDrillHandler, chartRowId } from '../lib/chartInteraction'
@@ -34,6 +35,9 @@ import {
   type BusinessDashboard as BusinessDashboardData, type DashboardAfeRow, type DashboardFilters,
   type DashboardRigRow, type DashboardWellRow, type Money,
 } from '../lib/businessDashboard'
+
+/** Local-storage namespace for the dismissible cautions shown on this dashboard. */
+const CAUTION_PAGE = 'business-dashboard'
 
 function BalanceCell({ value, currency }: { value: Money; currency: string }) {
   const negative = value !== null && Number(value) < 0
@@ -969,22 +973,29 @@ export default function BusinessDashboard() {
     <ErrorMessage message={error}/>
 
     {alerts.length > 0 && <Box sx={{ mb: 2.25 }}>
+      <RestoreCautions page={CAUTION_PAGE}/>
       <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
         <Typography sx={{ fontSize: 10, fontWeight: 750, letterSpacing: '.12em', textTransform: 'uppercase', color: 'text.secondary' }}>Needs attention</Typography>
         <Box sx={{ flex: 1, height: '1px', bgcolor: 'divider' }}/>
         <Typography sx={{ fontSize: 10.5, color: 'text.secondary' }}>{alerts.length} signal{alerts.length === 1 ? '' : 's'}</Typography>
       </Box>
       <Box display="grid" gap={1} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0,1fr))' } }}>
-        {alerts.map(alert => <Alert
+        {/* Standing advisories: read once, then dismissed. A changed count or
+            wording is a new fact and shows again. */}
+        {alerts.map(alert => <Caution
           key={`${alert.kind}-${alert.title}`}
+          cautionKey={`dashboard-${alert.kind}`}
+          page={CAUTION_PAGE}
           severity={alert.severity}
+          text={`${alert.title} ${alert.detail}`}
+          signature={[alert.title, alert.detail]}
           icon={alert.severity === 'error' ? <ReportProblemOutlined/> : alert.severity === 'warning' ? <WarningAmberRounded/> : <SpeedOutlined/>}
           action={alert.well_id ? <Button size="small" onClick={() => setDrillWell(alert.well_id!)}>Open</Button> : undefined}
           sx={{ alignItems: 'flex-start', '& .MuiAlert-message': { minWidth: 0 }, border: '1px solid', borderColor: 'divider' }}
         >
           <Typography fontSize={12.5} fontWeight={700}>{alert.title}</Typography>
           <Typography fontSize={11.5} lineHeight={1.45}>{alert.detail}</Typography>
-        </Alert>)}
+        </Caution>)}
       </Box>
     </Box>}
 

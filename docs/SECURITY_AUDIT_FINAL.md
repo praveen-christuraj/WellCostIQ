@@ -1,4 +1,4 @@
-# WellCostIQ security audit and IT handover — 31 October 2026
+# WellSenseIQ security audit and IT handover — 31 October 2026
 
 This is the controlling security document for the current codebase. It replaces the
 earlier `SECURITY_REVIEW_2026-10-31.md`, whose "verified findings" section described
@@ -127,7 +127,7 @@ application, not a measured CVSS score.
 
 ## 5. Disposition of your 24-item checklist
 
-| # | Original item | Result in WellCostIQ |
+| # | Original item | Result in WellSenseIQ |
 |---|---|---|
 | 1 | CORS misconfiguration | **Fixed.** Exact origins, no wildcard with credentials, HTTPS-only in production, fail-closed at startup (F-03). |
 | 2 | Hardcoded admin username backdoor | **Not present.** No username/e-mail switch exists; the Owner role is a persisted, immutable tenant role; provisioning requires a policy-compliant password. `SEED_*` is environment-only and must be cleared after first boot. |

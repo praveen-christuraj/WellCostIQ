@@ -1,12 +1,12 @@
-# WellCostIQ Security Manual
+# WellSenseIQ Security Manual
 
-This guide explains the controls built into WellCostIQ and the deployment work that remains the responsibility of the customer’s IT team. It is written in two levels: the first section is for ordinary users and workspace administrators; the second is for IT, security and deployment personnel.
+This guide explains the controls built into WellSenseIQ and the deployment work that remains the responsibility of the customer’s IT team. It is written in two levels: the first section is for ordinary users and workspace administrators; the second is for IT, security and deployment personnel.
 
 ## Part 1 — Everyday security for non-IT users
 
 ### Signing in safely
 
-- Sign in only through your organisation’s approved WellCostIQ address. Never follow an unexpected reset link or disclose a password in chat or email.
+- Sign in only through your organisation’s approved WellSenseIQ address. Never follow an unexpected reset link or disclose a password in chat or email.
 - The workspace ID and work email identify your account. A wrong workspace, unknown email and wrong password all produce the same public error so an outsider cannot discover registered accounts.
 - Five failed password attempts temporarily lock the account for 15 minutes. An authorised administrator can unlock it from the Security Centre after verifying the person.
 - Sessions use a short-lived access token and a rotating, browser-only refresh cookie. Signing out invalidates the current refresh session. A password change or password reset invalidates every session for that user.
@@ -38,7 +38,7 @@ If you receive any of these notices and did not expect it, contact your workspac
 1. On the sign-in page choose **Forgot password?**.
 2. Enter the workspace ID, work email and an optional reason. The confirmation is deliberately generic.
 3. A user with **Review password reset requests** sees a high-priority task and notification.
-4. The administrator verifies the requester outside WellCostIQ, approves or rejects the request, and if approved receives a single-use code. The plain code is shown only once; WellCostIQ stores only its SHA-256 hash.
+4. The administrator verifies the requester outside WellSenseIQ, approves or rejects the request, and if approved receives a single-use code. The plain code is shown only once; WellSenseIQ stores only its SHA-256 hash.
 5. The administrator gives the code to the verified user through the organisation’s approved secure channel—not an open group, ticket comment or unverified caller.
 6. The user opens **I already have an approved reset code** on the sign-in page, supplies the code and a new password. Codes expire after 30 minutes by default and cannot be reused.
 
@@ -273,4 +273,4 @@ pool fits the default budget.
 
 ### Current boundaries and recommended next phase
 
-WellCostIQ currently provides password authentication and tenant-aware RBAC; it does not yet claim MFA, SAML/OIDC single sign-on, SCIM provisioning, breached-password intelligence, tamper-evident external audit storage or whole-platform SIEM integration. Organisations requiring those controls should place identity-aware access at the edge now and plan native MFA/SSO as a separately tested security release. Do not describe those controls as implemented until UAT and security review are complete.
+WellSenseIQ currently provides password authentication and tenant-aware RBAC; it does not yet claim MFA, SAML/OIDC single sign-on, SCIM provisioning, breached-password intelligence, tamper-evident external audit storage or whole-platform SIEM integration. Organisations requiring those controls should place identity-aware access at the edge now and plan native MFA/SSO as a separately tested security release. Do not describe those controls as implemented until UAT and security review are complete.
