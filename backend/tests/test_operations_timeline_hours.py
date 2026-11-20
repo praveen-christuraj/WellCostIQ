@@ -418,3 +418,35 @@ def test_a_blank_optional_cell_keeps_the_default_and_a_bad_boolean_is_reported()
         row = good(client.get(OPS + "/masters/causes", headers=headers))[0]
         assert row["description"] == ""
         assert row["is_active"] is True
+
+
+def test_an_engineer_can_state_the_comparison_when_the_hours_say_otherwise():
+    """A stated mark is a judgement the hours cannot overrule, and it persists.
+
+    The rig can move late while the printed programme days still look healthy.
+    The engineer's "behind" must survive the save and stay visible beside the
+    computed variance, so a reader sees both the figure and the call.
+    """
+    with TestClient(app) as client:
+        headers = login(client)
+        rig, well = _well(client, headers)
+        _programme(client, headers, rig, well)
+        report = _report_with_blocks(client, headers, rig, well, [("Perform a wiper trip to shoe", 4)])
+        block = report["blocks"][0]
+        edited = client.post(
+            OPS + f"/reports/{report['id']}/timeline-review",
+            headers=headers,
+            json={
+                "review_state": "edited",
+                "comparison": "behind",
+                "note": "Rig moved late; the printed hours understate the delay.",
+                "block_ids": [block["id"]],
+            },
+        )
+        assert edited.status_code == 200, edited.text
+        assert edited.json()["comparison"] == "behind"
+        saved = good(client.get(OPS + f"/reports/{report['id']}", headers=headers))["blocks"][0]
+        assert saved["timeline_comparison"] == "behind"
+        assert "Rig moved late" in saved["timeline_note"]
+        # The figure is still reported honestly beside the stated mark.
+        assert saved["timeline_variance_hours"] == "2.000"
