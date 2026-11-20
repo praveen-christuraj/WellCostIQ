@@ -1,5 +1,9 @@
 # Durable project memory
 
+## Operations code correlations (2026-11-20)
+
+- A printed source kind determines matching, not the target dropdown. A rule must suggest at least one criterion (including allocation); scope and notes alone do not qualify. Existing same-kind `target_id` requests still work. Source mark interpretation rules remain optional and separate from correlations.
+
 ## Model-independent Assistant knowledge (2026-11-19)
 
 - Live figures still come from deterministic, role- and workspace-scoped services. Both Assistant surfaces can retrieve approved PDF excerpts from an operator-built, read-only index under the current organization UUID; PDFs are shared reference material for Assistant readers in that workspace, never live records or app policy. No migration or model fine-tuning. See `docs/ai-knowledge.md` for publishing and rollback.

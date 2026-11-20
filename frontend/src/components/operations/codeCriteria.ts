@@ -1,6 +1,8 @@
+import type { OpsCorrelationReference, OpsCorrelationTargets } from '../../lib/operations'
+
 /**
  * The workspace criteria a multi-criteria link can join, and that a
- * printed-code correlation can pre-select as companion fields.
+ * printed-code correlation can pre-select for review.
  *
  * The order is the order the daily report lists the fields: Hole Section,
  * Phase, Sub-phase, Activity, Operations, Cause, responsible agency label,
@@ -27,11 +29,11 @@ export type Criterion = {
   key: CriterionKey
   label: string
   /** Key inside `OpsCorrelationReference.library`. */
-  library: string
+  library: keyof OpsCorrelationReference['library']
   /** Request/response field on a multi-criteria code link. */
   linkId: string
-  /** Companion field on a printed-code correlation. */
-  corrId: string
+  /** Criterion field on a printed-code correlation. */
+  corrId: Extract<keyof OpsCorrelationTargets, `target_${string}_id`>
   /** Hydrated label field on `OpsCodeLink`. */
   linkLabel: string
   /** Where the list is maintained, so the page can say where to add a value. */
@@ -129,14 +131,6 @@ export const CRITERIA: Criterion[] = [
 ]
 
 export const criterionFor = (key: string) => CRITERIA.find((c) => c.key === key)
-
-/** Code Library master kind (the `/operations/masters/{kind}` path) -> correlation kind. */
-export const CORRELATION_KIND_FOR_MASTER: Record<string, string> = {
-  operations: 'operation',
-  causes: 'cause',
-  'sub-phases': 'sub-phase',
-  agencies: 'responsible-party',
-}
 
 /** Correlation kinds carry no Hole Section, Phase or Activity: those are Master Data. */
 export const CORRELATION_KINDS = [

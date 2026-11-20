@@ -527,6 +527,11 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             classification["classification"],
             classification["allocation"],
         ) or _infer_printed_operation(raw_operation, b.get("phase_raw", ""), b["narrative"])
+        # A direct workspace code hit is stronger than a correlation. A
+        # narrative guess is not: use it only if the rule leaves Operations empty.
+        direct_operation = operations.get(code_key(raw_cause or raw_mark)) or operations.get(code_key(raw_operation))
+        if direct_operation != operation:
+            direct_operation = None  # Preserve the existing fallback order when no rule supplies Operations.
         printed_activity = activities.get(code_key(raw_activity))
         hole_section = (
             _master_by_label(hole_sections, b.get("hole_section_raw", ""), "code", "name")
@@ -575,8 +580,8 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             source_cause_code=raw_cause[:50],
             source_mark=raw_mark[:30],
             activity_id=printed_activity.id if printed_activity else None,
-            operation_id=operation.id if operation else None,
-            operation_snapshot=operation.operation_code if operation else (default_operation.code if default_operation else ""),
+            operation_id=direct_operation.id if direct_operation else None,
+            operation_snapshot=direct_operation.operation_code if direct_operation else "",
             cause_code=cause.cause_code if cause else raw_cause[:50],
             hole_section_id=hole_section.id if hole_section else None,
             phase_id=phase.id if phase else None,
@@ -610,6 +615,16 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             "responsible-party": (party,),
             "agency": (party,),
         }
+        # OpenWells PDFs put the operation number in the Code column, which
+        # the parser preserves as source_activity_code. Never interpret an
+        # identically numbered workbook Activity as an OpenWells operation.
+        if b.get("source_page") and raw_activity:
+            pdf_code = code_key(raw_activity)  # e.g. [2] or (02) is printed code 02
+            if pdf_code.isdigit():
+                pdf_code = pdf_code.zfill(2)
+            pdf_rule = correlation_map.get(("operation", pdf_code))
+            if pdf_rule and pdf_rule.source_family == "OpenWells operation code":
+                correlation_tokens["operation"] += (pdf_code,)
         correlation_evidence = correlation_svc.apply_to_block(
             block,
             correlation_map,
@@ -617,6 +632,9 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
             report_scope=doc.scope,
             tokens_by_kind=correlation_tokens,
         )
+        if not block.operation_id:
+            block.operation_id = operation.id if operation else None
+            block.operation_snapshot = operation.operation_code if operation else (default_operation.code if default_operation else "")
         link_evidence = correlation_svc.apply_code_links_to_block(
             db, block, code_links, report_scope=doc.scope
         )

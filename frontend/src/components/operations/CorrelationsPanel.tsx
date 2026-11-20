@@ -4,7 +4,6 @@ import {
   Autocomplete,
   Box,
   Button,
-  Collapse,
   MenuItem,
   Stack,
   TextField,
@@ -67,12 +66,11 @@ type CorrelationForm = {
   printed_key: string
   /** Agency tokens are free text: the printed catalogue holds no operator names. */
   free_agency: string
-  target_id: string
   scope: '' | 'drilling' | 'completion'
   target_allocation: '' | 'PT' | 'UPA' | 'NPT' | 'SP'
   note: string
-  /** Companion criteria, keyed by the correlation field the API expects. */
-  companion: Record<string, string | null>
+  /** Selected criteria, keyed by the correlation field the API expects. */
+  criteria: Record<string, string | null>
 }
 
 type LinkForm = {
@@ -89,11 +87,10 @@ const emptyCorrelation = (): CorrelationForm => ({
   kind: 'operation',
   printed_key: '',
   free_agency: '',
-  target_id: '',
   scope: '',
   target_allocation: '',
   note: '',
-  companion: {},
+  criteria: {},
 })
 
 const emptyLink = (): LinkForm => ({
@@ -134,7 +131,7 @@ const PRINTED_FAMILIES: Record<string, string[]> = {
  * The two rule sets answer different questions and are therefore kept apart:
  *
  * * a **correlation** maps one printed token (from a source document) onto one
- *   workspace code, optionally pinning companion criteria;
+ *   or more selected criteria;
  * * a **code link** joins two or more workspace codes so extraction can fill a
  *   remaining empty dropdown only when every active link agrees.
  *
@@ -162,8 +159,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
 
   const [form, setForm] = useState<CorrelationForm | null>(null)
   const [formError, setFormError] = useState('')
-  const [companionOpen, setCompanionOpen] = useState(false)
-  const [batch, setBatch] = useState<{ kind: OpsCorrelationInput['kind']; printed_key: string; target_id: string }[] | null>(null)
+  const [batch, setBatch] = useState<CorrelationForm[] | null>(null)
   const [batchError, setBatchError] = useState('')
   const [linkForm, setLinkForm] = useState<LinkForm | null>(null)
   const [linkError, setLinkError] = useState('')
@@ -215,115 +211,65 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
     }
   }
 
-  const libraryFor = (k: string): OpsCorrelationLibraryItem[] =>
-    (ref?.library as Record<string, OpsCorrelationLibraryItem[]> | undefined)?.[k] ?? []
-  const libraryItem = (k: string, id: string): OpsCorrelationLibraryItem | undefined =>
+  const libraryFor = (k: CriterionKey): OpsCorrelationLibraryItem[] => ref?.library[k] ?? []
+  const libraryItem = (k: CriterionKey, id: string): OpsCorrelationLibraryItem | undefined =>
     libraryFor(k).find((c) => c.id === id)
 
-  /** Printed options the server will accept for the chosen kind, with the composite key. */
-  const printedOptions = useMemo(() => {
-    if (!form) return []
-    const families = PRINTED_FAMILIES[form.kind] ?? []
-    if (!families.length) return []
-    return (ref?.printed ?? []).filter((p) => families.includes(p.family))
-  }, [form, ref])
-
-  /** A free-text printed token is used for the two agency kinds. */
-  const freeTextKind = (k: string) => !(PRINTED_FAMILIES[k] ?? []).length
-
-  const printedSelection = useMemo(() => {
-    if (!form?.printed_key) return null
-    return (ref?.printed ?? []).find((p) => printedKey(p.family, p.code) === form.printed_key) ?? null
-  }, [form?.printed_key, ref])
-
-  /** A companion value is read from the form by its correlation field name. */
-  const companionTargets = (companion: Record<string, string | null>) =>
-    Object.fromEntries(
-      CRITERIA.filter((c) => c.corrId in companion).map((c) => [c.corrId, companion[c.corrId] ?? null]),
+  const freeTextKind = (k: string) => !PRINTED_FAMILIES[k]?.length
+  const printedFor = (row: CorrelationForm) =>
+    ref?.printed.find((p) => printedKey(p.family, p.code) === row.printed_key)
+  const hasCriteria = (row: CorrelationForm) => Boolean(row.target_allocation || Object.values(row.criteria).some(Boolean))
+  const hasSource = (row: CorrelationForm) => Boolean(freeTextKind(row.kind) ? row.free_agency.trim() : row.printed_key)
+  const formProblem = (row: CorrelationForm) => {
+    if (!hasSource(row)) return 'Choose a printed code or enter the source token.'
+    if (!hasCriteria(row)) return 'Select at least one criterion to pre-fill.'
+    return activityTypeProblem(
+      libraryItem('activity', row.criteria.target_activity_id || '')?.activity_type || '',
+      Boolean(row.criteria.target_cause_id), row.target_allocation,
     )
-
-  const saveCorrelation = async () => {
-    if (!form) return
-    const freeText = freeTextKind(form.kind)
-    const source_code = freeText ? form.free_agency.trim() : (printedSelection?.code ?? '')
-    const source_family = freeText
-      ? form.kind === 'agency'
-        ? 'Source agency'
-        : 'Source responsible party'
-      : (printedSelection?.family ?? '')
-    if (!source_code) {
-      setFormError(
-        freeText ? 'Type the printed token exactly as the source writes it.' : 'Choose a printed code.',
-      )
-      return
+  }
+  const targetsFor = (row: CorrelationForm) => ({
+    ...row.criteria, scope: row.scope, target_allocation: row.target_allocation, note: row.note,
+  })
+  const payloadFor = (row: CorrelationForm): OpsCorrelationInput => {
+    const printed = printedFor(row)
+    return {
+      ...targetsFor(row), kind: row.kind,
+      source_code: printed?.code ?? row.free_agency.trim(),
+      source_family: printed?.family,
+      source_label: printed?.name ?? printed?.description,
     }
-    if (!form.target_id) {
-      setFormError('Choose the workspace record this printed token should pre-select.')
-      return
-    }
-    // A cause may never be pinned to a Planned Activity: nothing went wrong.
-    const chosenActivity = form.companion.target_activity_id
-      ? libraryItem('activity', form.companion.target_activity_id)
-      : undefined
-    const problem = activityTypeProblem(
-      (chosenActivity?.activity_type as string) || '',
-      Boolean(form.companion.target_cause_id),
-      form.target_allocation,
-    )
-    if (problem) {
-      setFormError(problem)
-      return
-    }
+  }
+  const editCorrelation = (row: OpsCorrelation) => {
     setFormError('')
-    await run(async () => {
-      if (form.rowId) {
-        await opsUpdateCorrelation(form.rowId, {
-          target_id: form.target_id,
-          scope: asScope(form.scope),
-          target_allocation: asAllocation(form.target_allocation),
-          ...companionTargets(form.companion),
-          note: form.note,
-          is_active: true,
-        })
-      } else {
-        const payload: OpsCorrelationInput = {
-          kind: form.kind,
-          source_family,
-          source_code,
-          source_label: printedSelection?.name ?? printedSelection?.description ?? '',
-          target_id: form.target_id,
-          scope: asScope(form.scope),
-          target_allocation: asAllocation(form.target_allocation),
-          ...companionTargets(form.companion),
-          note: form.note,
-        }
-        await opsCreateCorrelation(payload)
-      }
-      setForm(null)
-      setCompanionOpen(false)
+    setForm({
+      rowId: row.id, kind: row.kind, printed_key: printedKey(row.source_family, row.source_code),
+      free_agency: row.source_code, scope: asScope(row.scope ?? ''),
+      target_allocation: asAllocation(row.target_allocation ?? ''), note: row.note,
+      criteria: Object.fromEntries(CRITERIA.map((c) => [c.corrId, row[c.corrId] ?? null])),
     })
   }
-
+  const newRow = () => ({ ...emptyCorrelation(), kind: defaultKind(kind) })
+  const saveCorrelation = async () => {
+    if (!form) return
+    const problem = formProblem(form)
+    if (problem) return setFormError(problem)
+    setFormError('')
+    await run(async () => {
+      if (form.rowId) await opsUpdateCorrelation(form.rowId, { ...targetsFor(form), is_active: true })
+      else await opsCreateCorrelation(payloadFor(form))
+      setForm(null)
+    })
+  }
   const saveBatch = async () => {
     if (!batch?.length) return
-    const items: OpsCorrelationInput[] = []
     for (const [index, row] of batch.entries()) {
-      const printed = (ref?.printed ?? []).find((p) => printedKey(p.family, p.code) === row.printed_key)
-      if (!printed || !row.target_id) {
-        setBatchError(`Row ${index + 1}: choose both a printed code and a workspace code.`)
-        return
-      }
-      items.push({
-        kind: row.kind,
-        source_family: printed.family,
-        source_code: printed.code,
-        source_label: printed.name ?? printed.description,
-        target_id: row.target_id,
-      })
+      const problem = formProblem(row)
+      if (problem) return setBatchError(`Row ${index + 1}: ${problem}`)
     }
     setBatchError('')
     await run(async () => {
-      const result = await opsCreateCorrelationsBatch(items)
+      const result = await opsCreateCorrelationsBatch(batch.map(payloadFor))
       setBatch(null)
       setNotice(`Created ${result.created_count} correlation${result.created_count === 1 ? '' : 's'} in one transaction.`)
     })
@@ -545,30 +491,14 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
         label: row.source_code,
         meta: row.source_label,
         rule: { type: 'correlation', id: row.id },
-        children: [
-          {
-            id: `target:${row.id}`,
-            label: row.target_label || 'Workspace value',
-            tone: 'success',
-            meta: `${row.kind} code · ${row.scope ? row.scope : 'every scope'}`,
-            children: row.extra_criteria_summary
-              ? [
-                  {
-                    id: `criteria:${row.id}`,
-                    label: 'Companion criteria',
-                    meta: row.extra_criteria_summary,
-                  },
-                ]
-              : undefined,
-          },
-        ],
+        children: [{ id: `criteria:${row.id}`, label: targetLabelFor(row), tone: 'success' }],
       }
       familyNode.children!.push(printedNode)
     }
     return {
       id: 'source-root',
       label: 'Source mapping',
-      meta: 'Family → Printed → Workspace → Criteria',
+      meta: 'Family → Printed code → Selected criteria',
       children: [...families.values()],
     }
   }, [visibleRows])
@@ -592,12 +522,55 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
   const canPurge = can('ops-master:permanent-delete')
   const treeBusy = busy
 
+  const renderRuleFields = (row: CorrelationForm, change: (next: CorrelationForm) => void) => (
+    <>
+      <TextField select label="Printed code kind" value={row.kind} disabled={Boolean(row.rowId)}
+        onChange={(e) => change({ ...row, kind: e.target.value as CorrelationForm['kind'], printed_key: '', free_agency: '' })}>
+        {CORRELATION_KINDS.map((k) => <MenuItem key={k.key} value={k.key}>{k.label}</MenuItem>)}
+      </TextField>
+      {freeTextKind(row.kind) ? (
+        <TextField label="Printed source token" value={row.free_agency} disabled={Boolean(row.rowId)}
+          onChange={(e) => change({ ...row, free_agency: e.target.value })}
+          helperText="Enter the name exactly as printed on the report. Matching ignores case." />
+      ) : (
+        <Autocomplete<Printed> options={(ref?.printed ?? []).filter((p) => PRINTED_FAMILIES[row.kind].includes(p.family))}
+          value={printedFor(row) ?? null} disabled={Boolean(row.rowId)}
+          onChange={(_e, next) => change({ ...row, printed_key: next ? printedKey(next.family, next.code) : '' })}
+          getOptionKey={(p) => printedKey(p.family, p.code)}
+          getOptionLabel={(p) => `${p.code} — ${p.name || p.description || p.family} (${p.family})`}
+          isOptionEqualToValue={(a, b) => a.family === b.family && a.code === b.code}
+          renderInput={(params) => <TextField {...params} label="Printed default code" helperText={printedFor(row)?.detail} />} />
+      )}
+      <Typography variant="subtitle2">Criteria to pre-fill — choose at least one</Typography>
+      <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }}>
+        {CRITERIA.map((c) => (
+          <Autocomplete<OpsCorrelationLibraryItem> key={c.key} options={libraryFor(c.library)}
+            value={libraryItem(c.library, row.criteria[c.corrId] || '') ?? null}
+            onChange={(_e, next) => change({ ...row, criteria: { ...row.criteria, [c.corrId]: next?.id ?? null } })}
+            getOptionLabel={(item) => `${item.code} — ${item.name}`}
+            isOptionEqualToValue={(a, b) => a.id === b.id}
+            noOptionsText={`No matching values. Check ${c.source === 'master' ? 'Master Data' : 'the Code Library'}.`}
+            renderInput={(params) => <TextField {...params} label={c.label} />} />
+        ))}
+        <TextField select label="Allocation" value={row.target_allocation}
+          onChange={(e) => change({ ...row, target_allocation: asAllocation(e.target.value) })}>
+          {ALLOCATIONS.map((a) => <MenuItem key={a} value={a}>{a || 'Unset'}</MenuItem>)}
+        </TextField>
+      </Box>
+      <TextField select label="Apply in scope" value={row.scope}
+        onChange={(e) => change({ ...row, scope: asScope(e.target.value) })}>
+        {SCOPES.map((s) => <MenuItem key={s.key} value={s.key}>{s.label}</MenuItem>)}
+      </TextField>
+      <TextField label="Note (optional)" value={row.note} multiline minRows={2}
+        onChange={(e) => change({ ...row, note: e.target.value })} />
+    </>
+  )
+
   return (
     <Box mt={1.5} data-testid="operations-correlations">
       <Alert severity="info" sx={{ mb: 1.5 }}>
-        Extraction pre-selects a dropdown only when a correlation exists. No correlation leaves the field empty so the
-        engineer chooses from this workspace&rsquo;s own library. Correlating a code never approves a block and never
-        changes an already saved report.
+        When extraction finds a matching printed code, its correlation pre-fills the selected fields for review.
+        A correlation never approves a block or changes an already saved report.
       </Alert>
       {error && <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>}
       {notice && <Alert severity="success" sx={{ mb: 1.5 }} onClose={() => setNotice('')}>{notice}</Alert>}
@@ -646,13 +619,12 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
               startIcon={<AddRounded />}
               onClick={() => {
                 setFormError('')
-                setCompanionOpen(false)
-                setForm(emptyCorrelation())
+                setForm(newRow())
               }}
             >
               Add correlation
             </Button>
-            <Button variant="outlined" onClick={() => { setBatchError(''); setBatch([{ kind: defaultKind(kind), printed_key: '', target_id: '' }]) }}>
+            <Button variant="outlined" onClick={() => { setBatchError(''); setBatch([newRow()]) }}>
               Batch correlate
             </Button>
             <Button variant="outlined" onClick={() => openLink()}>
@@ -692,7 +664,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
           </SectionCard>
           <SectionCard
             title="Source mapping"
-            subtitle="Printed family → printed code → the workspace value it pre-selects → any companion criteria."
+            subtitle="Printed family → printed code → selected criteria."
           >
             {visibleRows.length ? (
               <CorrelationTree
@@ -703,24 +675,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                   onEditRule: (type, id) => {
                     const row = rows.find((r) => r.id === id)
                     if (type === 'correlation' && row && !deleted) {
-                      setCompanionOpen(Boolean(row.extra_criteria_summary))
-                      setFormError('')
-                      setForm({
-                        ...emptyCorrelation(),
-                        rowId: row.id,
-                        kind: row.kind,
-                        printed_key: printedKey(row.source_family, row.source_code),
-                        target_id: row.target_id ?? '',
-                        scope: asScope(row.scope ?? ''),
-                        target_allocation: asAllocation(row.target_allocation ?? ''),
-                        companion: Object.fromEntries(
-                          CRITERIA.filter((c) => c.key !== row.kind).map((c) => [
-                            c.corrId,
-                            (row as unknown as Record<string, string | null>)[c.corrId] ?? null,
-                          ]),
-                        ),
-                        note: row.note,
-                      })
+                      editCorrelation(row)
                     }
                   },
                   onUnlink: (type, id) => {
@@ -776,7 +731,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
         <>
           <SectionCard
             title={deleted ? 'Deleted correlations' : 'Printed-code correlations'}
-            subtitle="A printed token maps onto one workspace code. Companion criteria pin the scope, the allocation, an Activity type or a second code."
+            subtitle="Each printed token pre-selects one or more criteria for review."
             sx={{ mb: 2 }}
             bodyPadding={0}
           >
@@ -794,7 +749,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                 { field: 'source_label', headerName: 'Printed meaning', minWidth: 240, tooltipField: 'source_label' },
                 {
                   field: 'target_label',
-                  headerName: 'Workspace value',
+                  headerName: 'Selected criteria',
                   minWidth: 240,
                   tooltipField: 'target_label',
                   valueFormatter: (p) => targetLabelFor(p.data as OpsCorrelation),
@@ -811,24 +766,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
                         <Button
                           size="small"
                           onClick={() => {
-                            setCompanionOpen(Boolean(row.extra_criteria_summary))
-                            setFormError('')
-                            setForm({
-                              ...emptyCorrelation(),
-                              rowId: row.id,
-                              kind: row.kind,
-                              printed_key: printedKey(row.source_family, row.source_code),
-                              target_id: row.target_id ?? '',
-                              scope: asScope(row.scope ?? ''),
-                              target_allocation: asAllocation(row.target_allocation ?? ''),
-                              companion: Object.fromEntries(
-                                CRITERIA.filter((c) => c.key !== row.kind).map((c) => [
-                                  c.corrId,
-                                  (row as unknown as Record<string, string | null>)[c.corrId] ?? null,
-                                ]),
-                              ),
-                              note: row.note,
-                            })
+                            editCorrelation(row)
                           }}
                         >
                           Edit
@@ -926,176 +864,15 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
         <FormDialog
           open
           title={form.rowId ? 'Edit a correlation' : 'Correlate a printed code'}
-          subtitle="The printed left-hand code is read from the source document. The right-hand value is what this workspace wants the dropdown to show. Extraction still asks the engineer to accept it."
-          onClose={() => {
-            setForm(null)
-            setCompanionOpen(false)
-          }}
+          subtitle="Select a printed code and at least one field to pre-fill when it matches during extraction."
+          onClose={() => setForm(null)}
           onSubmit={() => void saveCorrelation()}
           busy={busy}
-          submitDisabled={!form.target_id || (!form.rowId && form.kind !== 'agency' && !form.printed_key)}
+          submitDisabled={!hasCriteria(form) || !hasSource(form)}
         >
           <Box display="grid" gap={2} pt={0.5}>
-            {formError && <Alert severity="error">{formError}</Alert>}
-            <TextField
-              select
-              label="Code kind"
-              value={form.kind}
-              onChange={(e) => setForm({ ...form, kind: e.target.value as CorrelationForm['kind'], target_id: '', printed_key: '' })}
-              disabled={Boolean(form.rowId)}
-              helperText={form.rowId ? 'A saved correlation keeps its code kind; add a new rule to use another kind.' : 'Kind decides which library the printed token can come from.'}
-            >
-              {CORRELATION_KINDS.map((k) => (
-                <MenuItem key={k.key} value={k.key}>
-                  {k.label}
-                </MenuItem>
-              ))}
-            </TextField>
-            {form.kind === 'agency' ? (
-              <TextField
-                label="Printed agency token"
-                value={form.free_agency}
-                disabled={Boolean(form.rowId)}
-                onChange={(e) => setForm({ ...form, free_agency: e.target.value })}
-                helperText="Agency names are operator data, not a built-in catalogue. Type the token exactly as the source document writes it; it is matched case-insensitively."
-              />
-            ) : (
-              <>
-                <Autocomplete<Printed, false, false, false>
-                  options={printedOptions}
-                  disabled={Boolean(form.rowId)}
-                  value={printedSelection}
-                  onChange={(_e, next) => {
-                    setForm({
-                      ...form,
-                      printed_key: next ? printedKey(next.family, next.code) : '',
-                      target_id: '',
-                    })
-                  }}
-                  getOptionLabel={(p) => `${p.code} — ${p.name || p.description || p.family}`}
-                  isOptionEqualToValue={(a, b) => a.family === b.family && a.code === b.code}
-                  renderOption={(props, p) => {
-                    const { key, ...rest } = props as typeof props & { key: string }
-                    return (
-                      <Box component="li" key={key} {...rest} sx={{ display: 'block !important' }}>
-                        <Typography fontSize={13} fontWeight={700}>
-                          {p.code} — {p.name || p.family}
-                        </Typography>
-                        <Typography fontSize={11.5} color="text.secondary">
-                          {p.family}
-                          {p.detail ? ` · ${p.detail}` : ''}
-                        </Typography>
-                      </Box>
-                    )
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Printed default code"
-                      helperText={
-                        form.rowId
-                          ? 'A saved correlation keeps its printed token.'
-                          : 'Only codes in the built-in reference can be correlated; each printed token appears once per kind.'
-                      }
-                    />
-                  )}
-                />
-                {printedSelection?.detail && (
-                  <Alert severity="info" icon={false}>
-                    <strong>{printedSelection.code}</strong> — {printedSelection.detail}
-                  </Alert>
-                )}
-              </>
-            )}
-            <Autocomplete<OpsCorrelationLibraryItem, false, false, false>
-              options={libraryFor(form.kind)}
-              value={form.target_id ? (libraryItem(form.kind, form.target_id) ?? null) : null}
-              onChange={(_e, next) => setForm({ ...form, target_id: next?.id ?? '' })}
-              getOptionLabel={(item) => `${item.code} — ${item.name}`}
-              isOptionEqualToValue={(a, b) => a.id === b.id}
-              noOptionsText="This library has no codes yet. Add one on its tab first."
-              renderInput={(params) => (
-                <TextField {...params} label="Workspace value" helperText="The value extraction should pre-select for this printed token." />
-              )}
-            />
-            <TextField
-              label="Note"
-              value={form.note}
-              onChange={(e) => setForm({ ...form, note: e.target.value })}
-              multiline
-              minRows={2}
-              helperText="Optional. Record why this printed code maps to that workspace code."
-            />
-            <Box>
-              <Button size="small" onClick={() => setCompanionOpen(!companionOpen)} aria-expanded={companionOpen}>
-                {companionOpen ? 'Hide companion criteria' : 'Add companion criteria'}
-              </Button>
-              <Collapse in={companionOpen}>
-                <Box display="grid" gap={2} pt={1.5}>
-                  <Typography fontSize={12.5} color="text.secondary">
-                    Companion criteria are optional. They pin the same printed token to a scope, an allocation, an Activity
-                    type, or a second workspace code (for example Operations + Cause + responsible Agency).
-                  </Typography>
-                  <Box display="flex" gap={2} flexWrap="wrap">
-                    <TextField
-                      select
-                      label="Scope"
-                      value={form.scope}
-                      onChange={(e) => setForm({ ...form, scope: asScope(e.target.value) })}
-                      sx={{ minWidth: 170 }}
-                    >
-                      {SCOPES.map((s) => (
-                        <MenuItem key={s.key} value={s.key}>
-                          {s.label}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                    <TextField
-                      select
-                      label="Allocation"
-                      value={form.target_allocation}
-                      onChange={(e) => setForm({ ...form, target_allocation: asAllocation(e.target.value) })}
-                      sx={{ minWidth: 170 }}
-                    >
-                      {ALLOCATIONS.map((a) => (
-                        <MenuItem key={a || 'none'} value={a}>
-                          {a || 'Unset'}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Box>
-                  {CRITERIA.map((criterion) => {
-                    const selected = form.companion[criterion.corrId] ?? ''
-                    return (
-                      <Autocomplete<OpsCorrelationLibraryItem, false, false, false>
-                        key={criterion.key}
-                        options={libraryFor(criterion.library)}
-                        value={selected ? (libraryItem(criterion.library, selected) ?? null) : null}
-                        onChange={(_e, next) =>
-                          setForm({
-                            ...form,
-                            companion: { ...form.companion, [criterion.corrId]: next?.id ?? null },
-                          })
-                        }
-                        getOptionLabel={(item) => `${item.code} — ${item.name}`}
-                        isOptionEqualToValue={(a, b) => a.id === b.id}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
-                            label={criterion.label}
-                            helperText={
-                              criterion.source === 'master'
-                                ? 'Master Data — maintained on the Master Data page.'
-                                : 'Code Library — maintained on this library tab.'
-                            }
-                          />
-                        )}
-                      />
-                    )
-                  })}
-                </Box>
-              </Collapse>
-            </Box>
+            {(formError || error) && <Alert severity="error">{formError || error}</Alert>}
+            {renderRuleFields(form, setForm)}
           </Box>
         </FormDialog>
       )}
@@ -1110,59 +887,18 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
           onClose={() => setBatch(null)}
           onSubmit={() => void saveBatch()}
           busy={busy}
-          submitDisabled={batch.every((r) => !r.printed_key || !r.target_id)}
+          submitDisabled={batch.some((r) => !hasSource(r) || !hasCriteria(r))}
         >
           <Stack gap={1.5} pt={0.5}>
-            {batchError && <Alert severity="error">{batchError}</Alert>}
+            {(batchError || error) && <Alert severity="error">{batchError || error}</Alert>}
             <Alert severity="info">
               Rows are saved in one transaction. A duplicate printed token — inside the batch or already in the library —
               rejects the whole batch with the row number.
             </Alert>
             {batch.map((row, index) => (
-              <Box key={index} display="grid" gap={1.25} gridTemplateColumns={{ xs: '1fr', md: '160px 1fr 1fr 40px' }} alignItems="center">
-                <TextField
-                  select
-                  size="small"
-                  label={`Row ${index + 1} kind`}
-                  value={row.kind}
-                  onChange={(e) => {
-                    const next = [...batch]
-                    next[index] = { ...row, kind: e.target.value as OpsCorrelationInput['kind'], printed_key: '' }
-                    setBatch(next)
-                  }}
-                >
-                  {CORRELATION_KINDS.map((k) => (
-                    <MenuItem key={k.key} value={k.key}>
-                      {k.label}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <Autocomplete<Printed, false, false, false>
-                  size="small"
-                  options={(ref?.printed ?? []).filter((p) => (PRINTED_FAMILIES[row.kind] ?? []).includes(p.family))}
-                  value={(ref?.printed ?? []).find((p) => printedKey(p.family, p.code) === row.printed_key) ?? null}
-                  onChange={(_e, next) => {
-                    const copy = [...batch]
-                    copy[index] = { ...row, printed_key: next ? printedKey(next.family, next.code) : '' }
-                    setBatch(copy)
-                  }}
-                  getOptionLabel={(p) => `${p.code} — ${p.name || p.description || p.family}`}
-                  isOptionEqualToValue={(a, b) => a.family === b.family && a.code === b.code}
-                  renderInput={(params) => <TextField {...params} label="Printed code" />}
-                />
-                <Autocomplete<OpsCorrelationLibraryItem, false, false, false>
-                  size="small"
-                  options={libraryFor(row.kind)}
-                  value={row.target_id ? (libraryItem(row.kind, row.target_id) ?? null) : null}
-                  onChange={(_e, next) => {
-                    const copy = [...batch]
-                    copy[index] = { ...row, target_id: next?.id ?? '' }
-                    setBatch(copy)
-                  }}
-                  getOptionLabel={(item) => `${item.code} — ${item.name}`}
-                  isOptionEqualToValue={(a, b) => a.id === b.id}
-                  renderInput={(params) => <TextField {...params} label="Workspace value" />}
-                />
+              <Box key={index} display="grid" gap={1.5}>
+                <Typography variant="subtitle2">Row {index + 1}</Typography>
+                {renderRuleFields(row, (next) => setBatch(batch.map((r, i) => i === index ? next : r)))}
                 <Button
                   size="small"
                   color="error"
@@ -1178,7 +914,7 @@ export function CorrelationsPanel({ focusKind = '', focusCode = '', onClearFocus
               <Button
                 size="small"
                 startIcon={<AddRounded />}
-                onClick={() => setBatch([...batch, { kind: defaultKind(kind), printed_key: '', target_id: '' }])}
+                onClick={() => setBatch([...batch, newRow()])}
               >
                 Add another row
               </Button>

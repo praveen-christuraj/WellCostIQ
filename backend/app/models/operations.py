@@ -195,13 +195,13 @@ class OpsCodeCorrelation(Base):
 
     A correlation is a *pre-selection*, never a saved value: extraction writes the
     correlated criteria onto the block as suggestions the engineer still has to
-    accept. One printed token may only map once per workspace *and* family, so a
+    accept. One printed token may only map once per workspace *and* source kind, so a
     summary can never claim an operation is an activity.
 
     ``kind`` names the criterion the printed token belongs to: ``operation``
     (the Code Library Operations list), ``cause``, ``sub-phase``,
     ``responsible-party``, or ``agency``. Hole Section, Phase and Activity are
-    Master Data registers, so they are carried as companion criteria only.
+    Master Data registers. The source kind does not constrain which target fields a rule fills.
     """
 
     __tablename__ = "ops_code_correlations"
@@ -221,8 +221,7 @@ class OpsCodeCorrelation(Base):
     source_family: Mapped[str] = mapped_column(String(60), default="", nullable=False)
     source_code: Mapped[str] = mapped_column(String(100), nullable=False)
     source_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
-    # Primary target is set according to ``kind``; the companion columns let one
-    # correlation pre-select every other criterion in the same pass.
+    # Criteria are independent. Older clients use target_id for the same-kind field.
     # All foreign keys use RESTRICT so a correlated record can never be silently deleted.
     target_operation_id: Mapped[str | None] = mapped_column(
         ForeignKey("ops_operations.id", ondelete="RESTRICT"), nullable=True

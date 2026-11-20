@@ -640,9 +640,7 @@ class OpsTimelineReviewOut(_Strict):
     summary: str = ""
 
 
-# The criterion a printed reference token can be correlated *as*. Hole Section,
-# Phase and Activity belong to Master Data and therefore travel as companion
-# criteria; the rest are configured in the Code Library.
+# Source kinds describe where to look for a printed token, not which field to pre-fill.
 CORRELATION_KINDS = ("operation", "cause", "sub-phase", "responsible-party", "agency")
 
 CorrelationKind = Literal["operation", "cause", "sub-phase", "responsible-party", "agency"]
@@ -684,7 +682,7 @@ class OpsCorrelationIn(OpsCorrelationFields):
     source_family: str = Field(default="", max_length=60)
     source_code: str = Field(min_length=1, max_length=100)
     source_label: str = Field(default="", max_length=200)
-    target_id: str = Field(min_length=1, max_length=36)
+    target_id: str | None = Field(default=None, min_length=1, max_length=36)
     note: str = Field(default="", max_length=500)
 
 
@@ -693,7 +691,7 @@ class OpsCorrelationBatchIn(_Strict):
 
 
 class OpsCorrelationUpdate(OpsCorrelationFields):
-    target_id: str = Field(min_length=1, max_length=36)
+    target_id: str | None = Field(default=None, min_length=1, max_length=36)
     is_active: bool = True
     note: str = Field(default="", max_length=500)
 
