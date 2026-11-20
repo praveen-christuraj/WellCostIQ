@@ -320,7 +320,7 @@ export function WellPlanSectionViews({
           {/* A square box with equal grid insets is what makes the equal N/E
               range a true 1:1 plan rather than a stretched one. */}
           <Box sx={{ width: height, maxWidth: '100%', aspectRatio: '1 / 1', mx: 'auto' }}>
-            <InteractiveChart option={planOption} style={{ height: '100%' }} onEvents={{ click }} />
+            <InteractiveChart expandable={false} option={planOption} style={{ height: '100%' }} onEvents={{ click }} />
           </Box>
         </Box>
         <Box>
@@ -328,7 +328,7 @@ export function WellPlanSectionViews({
             Vertical section · facing {fmtAngle(path.vertical_section_azimuth_deg, 1)} · TVD increases downward · dashed brass rules give interpolated MD
           </Typography>
           <Box sx={{ height }}>
-            <InteractiveChart option={sectionOption} style={{ height: '100%' }} onEvents={{ click }} />
+            <InteractiveChart expandable={false} option={sectionOption} style={{ height: '100%' }} onEvents={{ click }} />
           </Box>
         </Box>
       </Box>
@@ -454,10 +454,10 @@ export function WellSteeringTracks({
     <Stack spacing={1}>
       <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2}>
         <Box flex={1} minWidth={0} sx={{ height }}>
-          <InteractiveChart option={incOption} style={{ height: '100%' }} onEvents={{ click }} />
+          <InteractiveChart expandable={false} option={incOption} style={{ height: '100%' }} onEvents={{ click }} />
         </Box>
         <Box flex={1} minWidth={0} sx={{ height }}>
-          <InteractiveChart option={aziOption} style={{ height: '100%' }} onEvents={{ click }} />
+          <InteractiveChart expandable={false} option={aziOption} style={{ height: '100%' }} onEvents={{ click }} />
         </Box>
       </Stack>
       <Typography sx={{ fontSize: 10.5, color: 'text.secondary', lineHeight: 1.5 }}>

@@ -253,3 +253,11 @@ well-lifecycle-check:
 		--bundle --platform=node --format=esm --jsx=automatic \
 		--outfile=node_modules/.cache/well-lifecycle-check.mjs --loader:.jsx=jsx --log-level=error \
 		--external:jsdom && node node_modules/.cache/well-lifecycle-check.mjs
+
+.PHONY: planned-survey-check
+planned-survey-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/planned-survey-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/planned-survey-check.mjs --external:jsdom && \
+		node node_modules/.cache/planned-survey-check.mjs

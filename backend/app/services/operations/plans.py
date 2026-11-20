@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.precision import rounded
 from app.domain.operations.durations import utc
 from app.models import User
-from app.models.operations import OpsDailyReport, OpsPlanItem, OpsPlanVersion
+from app.models.operations import OpsDailyReport, OpsPlanItem, OpsPlanSurveyStation, OpsPlanVersion
 from app.models.rig_well import Well
 from app.services.audit import record as audit_record
 from app.services.operations.scope import resolve
@@ -163,6 +163,7 @@ def _write_items(db, org, plan, items, existing, user, request):
         hours += it.planned_hours
         it.cum_planned_days = rounded(hours / 24)
     plan.planned_days = rounded(hours / 24)
+    plan.updated_at = datetime.now(UTC)
     plan.updated_by = user.email
     audit_record(
         db,
@@ -351,6 +352,9 @@ def purge_plans(db: Session, organization_id: str, ids: list[str], user: User, r
         )
     for row in rows:
         db.execute(delete(OpsPlanItem).where(OpsPlanItem.plan_version_id == row.id))
+        db.execute(delete(OpsPlanSurveyStation).where(
+            OpsPlanSurveyStation.organization_id == organization_id, OpsPlanSurveyStation.plan_version_id == row.id,
+        ))
         db.delete(row)
     audit_record(
         db,

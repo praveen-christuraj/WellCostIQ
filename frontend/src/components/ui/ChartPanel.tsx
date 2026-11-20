@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Box, Typography } from '@mui/material'
 import { SectionCard } from './SectionCard'
+import { VisualMetaContext } from './VisualExpand'
 
 /**
  * Chart surface with an explicit subject line, the unit/currency in view and a
@@ -12,11 +13,12 @@ import { SectionCard } from './SectionCard'
  * exactly as it is on screen, together with its own title and caption, so an
  * exported dashboard carries the visuals rather than a list of numbers.
  */
-export function ChartPanel({ title, subtitle, meta, toolbar, height = 280, children, empty, emptyMessage, caption, exportable = true, figureKey }: {
+export function ChartPanel({ title, subtitle, meta, action, toolbar, height = 280, children, empty, emptyMessage, caption, exportable = true, figureKey }: {
   title: string
   subtitle?: string
   /** Unit, currency or time basis badge shown beside the title. */
   meta?: ReactNode
+  action?: ReactNode
   /** Optional compact control strip (for example axis scale inputs) rendered above the plot. */
   toolbar?: ReactNode
   height?: number
@@ -35,6 +37,7 @@ export function ChartPanel({ title, subtitle, meta, toolbar, height = 280, child
     title={title}
     subtitle={subtitle}
     meta={meta}
+    action={empty ? undefined : action}
     bodyPadding={0}
     sx={{ height: '100%' }}
     // The PDF export reads these markers; they are inert for the browser.
@@ -57,7 +60,7 @@ export function ChartPanel({ title, subtitle, meta, toolbar, height = 280, child
         ? <Box sx={{ height, display: 'grid', placeItems: 'center', px: 3 }} data-chart-empty="1">
           <Typography sx={{ fontSize: 12.5, color: 'text.secondary', textAlign: 'center' }}>{emptyMessage ?? 'Nothing to chart for the current filters.'}</Typography>
         </Box>
-        : <Box sx={{ height }}>{children}</Box>}
+        : <Box sx={{ height }}><VisualMetaContext.Provider value={{ title, subtitle, caption }}>{children}</VisualMetaContext.Provider></Box>}
     </Box>
     {caption ? <Box sx={{ px: 2.25, pb: 1.5, pt: .5 }}><Typography sx={{ fontSize: 10.5, color: 'text.secondary', lineHeight: 1.45 }}>{caption}</Typography></Box> : null}
   </SectionCard>

@@ -1,15 +1,17 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { EChartsReactProps } from 'echarts-for-react'
 import ReactEChartsCore from 'echarts-for-react/esm/core'
 import * as echarts from 'echarts/core'
 import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts'
-import { AxisPointerComponent, GraphicComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from 'echarts/components'
+import { AxisPointerComponent, DataZoomComponent, GraphicComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from 'echarts/components'
 import { SVGRenderer } from 'echarts/renderers'
 import { registerChartOption } from '../../lib/chartExport'
+import { ChartInspector } from './ChartInspector'
+import { ExpandedVisualContext, VisualExpand, VisualMetaContext } from './VisualExpand'
 
 echarts.use([
   BarChart, LineChart, PieChart, ScatterChart,
-  AxisPointerComponent, GraphicComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent,
+  AxisPointerComponent, DataZoomComponent, GraphicComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent,
   SVGRenderer,
 ])
 
@@ -198,7 +200,43 @@ export function categoryBandClick(chart: ChartInstance, pointer: BandPointer): u
   return null
 }
 
-export function InteractiveChart({ option, opts, style, onEvents, onChartReady, ...props }: EChartsReactProps) {
+type InteractiveChartProps = EChartsReactProps & {
+  expandTitle?: string
+  expandable?: boolean
+}
+
+export function InteractiveChart({ expandTitle, expandable = true, ...props }: InteractiveChartProps) {
+  const embedded = useContext(ExpandedVisualContext)
+  const context = useContext(VisualMetaContext)
+  const frame = useRef<HTMLDivElement | null>(null)
+  if (embedded || !expandable || !props.option) return <ChartPlot {...props} />
+  const option = props.option
+  const getVisual = () => {
+    const figure = frame.current?.closest<HTMLElement>('[data-chart-figure]')
+    return {
+      title: expandTitle ?? context?.title ?? figure?.dataset.chartTitle ?? 'Chart',
+      subtitle: context?.subtitle ?? figure?.dataset.chartSubtitle,
+      caption: context?.caption ?? figure?.dataset.chartCaption,
+    }
+  }
+  return <div ref={frame} className="wcp-expandable-chart">
+    <div className="wcp-expandable-chart__tools">
+      <VisualExpand visual={{ title: expandTitle ?? context?.title ?? 'Chart' }} getVisual={getVisual}>{close => {
+        const click = props.onEvents?.click
+        const onEvents = click ? { ...props.onEvents, click: (event: ChartClickEvent) => {
+          // A record drill-through replaces the inspection surface rather than layering behind it.
+          if (event.chartRowId || event.dataIndex !== null) close()
+          click(event)
+        } } : props.onEvents
+        return <ChartInspector option={option} renderChart={(next, key) => <ChartPlot key={key}
+          {...props} onChartReady={undefined} onEvents={onEvents} option={next} notMerge lazyUpdate={false} />} />
+      }}</VisualExpand>
+    </div>
+    <div className="wcp-expandable-chart__plot"><ChartPlot {...props} /></div>
+  </div>
+}
+
+function ChartPlot({ option, opts, style, onEvents, onChartReady, ...props }: EChartsReactProps) {
   // The handlers given to ECharts never change identity; they call whatever the
   // page passed on its *latest* render through a ref. `echarts-for-react`
   // unbinds and rebinds every listener whenever `onEvents` compares unequal,
@@ -253,16 +291,17 @@ export function InteractiveChart({ option, opts, style, onEvents, onChartReady, 
   const [box, setBox] = useState<Box | null>(null)
   const [zoom, setZoom] = useState(1)
 
+  const expanded = useContext(ExpandedVisualContext)
   const preciseOption = useMemo(() => preciseTooltip(option), [option])
 
   // Register the live option on the host element so PDF export can re-render a
   // crisp, paper-white scene with formatted data labels immune to CSS zoom/dark mode.
   useEffect(() => {
     const host = hostRef.current
-    if (!host) return
+    if (!host || expanded) return
     registerChartOption(host, option)
     return () => registerChartOption(host, null)
-  }, [option])
+  }, [option, expanded])
 
   // Measure the on-screen box before paint so the chart never initialises at
   // the zoomed size and then has to be corrected visibly.
@@ -277,7 +316,7 @@ export function InteractiveChart({ option, opts, style, onEvents, onChartReady, 
           ? current
           : { width: rect.width, height: rect.height }
       ))
-      const scale = measureAppZoom()
+      const scale = host.closest('#root') ? measureAppZoom() : 1
       setZoom(current => (Math.abs(current - scale) < 0.001 ? current : scale))
     }
     sync()
@@ -292,7 +331,8 @@ export function InteractiveChart({ option, opts, style, onEvents, onChartReady, 
 
   // Re-measure when the application zoom itself changes (density switch/fullscreen).
   useEffect(() => {
-    const sync = () => setZoom(measureAppZoom())
+    // Dialog portals are mounted under body, outside the zoomed application root.
+    const sync = () => setZoom(hostRef.current?.closest('#root') ? measureAppZoom() : 1)
     window.addEventListener('resize', sync)
     return () => window.removeEventListener('resize', sync)
   }, [])

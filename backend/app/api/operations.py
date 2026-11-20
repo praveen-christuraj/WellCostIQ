@@ -4,6 +4,7 @@ import re
 from datetime import date
 from typing import Annotated, Literal
 from urllib.parse import quote
+from zipfile import BadZipFile
 
 from fastapi import (
     APIRouter,
@@ -15,9 +16,11 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import defer
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import Current, Db, granted, owner, require, require_any
 from app.domain.operations.default_codes import catalogue_rows, describe_code
@@ -64,6 +67,9 @@ from app.schemas.operations import (
     OpsOperationIn,
     OpsSubPhaseIn,
     OpsPlanItemIn,
+    OpsPlanSurveyIn,
+    OpsPlanSurveyOut,
+    OpsTrajectoryComparison,
     OpsPlanStudyRequest,
     OpsSeqCodeApplyOut,
     OpsSeqCodeIn,
@@ -102,6 +108,8 @@ from app.services.operations import guide as guide_svc
 from app.services.operations import masters as masters_svc
 from app.services.operations import ops_ai as ops_ai_svc
 from app.services.operations import plans as plans_svc
+from app.services.operations import plan_surveys as plan_surveys_svc
+from app.services.operations import survey_import as survey_import_svc
 from app.services.operations import register as register_svc
 from app.services.operations import reports as reports_svc
 from app.services.operations import seq_codes as seq_codes_svc
@@ -912,15 +920,21 @@ async def preview_surveys(
     through the ordinary report save, so the review-before-write rule holds for
     Excel, CSV and PDF alike.
     """
-    from app.services.operations import survey_import
+    reports_svc.get_report(db, user.organization_id, report_id)
+    return await _survey_upload(db, user.organization_id, file)
 
-    reports_svc.get_report(db, user.organization_id, report_id)  # ensure the report exists
-    limit = docs_svc.upload_limit(db, user.organization_id)
-    content = await file.read(limit + 1)
-    if len(content) > limit:
+
+async def _survey_upload(db, organization_id, file, *, station_limit=survey_import_svc.MAX_STATIONS, sheet=""):
+    upload_limit = docs_svc.upload_limit(db, organization_id)
+    content = await file.read(upload_limit + 1)
+    if len(content) > upload_limit:
         raise HTTPException(413, "The survey file exceeds the upload limit for this workspace.")
     try:
-        return survey_import.survey_preview(file.filename or "survey", content)
+        return await run_in_threadpool(
+            survey_import_svc.survey_preview, file.filename or "survey", content, limit=station_limit, preferred_sheet=sheet,
+        )
+    except (BadZipFile, InvalidFileException) as exc:
+        raise HTTPException(422, "The workbook could not be opened. Save a new, unencrypted .xlsx copy and try again.") from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -1467,7 +1481,8 @@ def well_path(
     cards, so the drawing and the KPI cannot disagree.
     """
     return well_path_svc.well_path(
-        db, user.organization_id, well_id, scope, vertical_section_azimuth=vs_azimuth
+        db, user.organization_id, well_id, scope, vertical_section_azimuth=vs_azimuth,
+        include_planned_trajectory=owner(user) or "ops-plan:read" in granted(user),
     )
 
 
@@ -1495,8 +1510,9 @@ def well_diagram(
     if well_id:
         stmt = stmt.where(Well.id == well_id)
     wells = db.scalars(stmt.order_by(Well.well_code.asc())).all()
+    show_planned = owner(user) or "ops-plan:read" in granted(user)
     drawn = [
-        well_path_svc.well_path(db, user.organization_id, well.id, scope)
+        well_path_svc.well_path(db, user.organization_id, well.id, scope, include_planned_trajectory=show_planned)
         for well in wells
         if scope_svc.available(well, scope)
     ]
@@ -1712,6 +1728,39 @@ def _plan_out(r):
 @router.get('/plans/{plan_id}', response_model=OpsPlanVersionOut, dependencies=[Depends(require('ops-plan:read'))])
 def get_plan(plan_id: str, db: Db, user: Current):
     return _plan_out(plans_svc.get_plan(db, user.organization_id, plan_id, include_deleted=True))
+
+
+@router.get("/plans/{plan_id}/surveys", response_model=OpsPlanSurveyOut, dependencies=[Depends(require("ops-plan:read"))])
+def get_planned_survey(plan_id: str, db: Db, user: Current):
+    plan = plans_svc.get_plan(db, user.organization_id, plan_id, include_deleted=True)
+    return plan_surveys_svc.survey_detail(db, plan)
+
+
+@router.post(
+    "/plans/{plan_id}/surveys/preview", response_model=OpsSurveyPreviewOut,
+    dependencies=[Depends(require("ops-plan:import")), Depends(require("ops-plan:update"))],
+)
+async def preview_planned_survey(
+    plan_id: str, db: Db, user: Current, file: Annotated[UploadFile, File()], sheet: str = Form(""),
+):
+    plan_surveys_svc.draft_plan(db, user.organization_id, plan_id)
+    return await _survey_upload(db, user.organization_id, file, station_limit=survey_import_svc.MAX_PLANNED_STATIONS, sheet=sheet)
+
+
+@router.put("/plans/{plan_id}/surveys", response_model=OpsPlanSurveyOut, dependencies=[Depends(require("ops-plan:update"))])
+def save_planned_survey(plan_id: str, data: OpsPlanSurveyIn, request: Request, db: Db, user: Current):
+    return plan_surveys_svc.replace(db, user.organization_id, plan_id, data, user, request)
+
+
+@router.get(
+    "/plans/{plan_id}/trajectory", response_model=OpsTrajectoryComparison,
+    dependencies=[Depends(require("ops-plan:read"))],
+)
+def planned_survey_trajectory(plan_id: str, db: Db, user: Current, vs_azimuth: float | None = Query(default=None, ge=0, le=360)):
+    plan = plans_svc.get_plan(db, user.organization_id, plan_id)
+    return well_path_svc.plan_comparison(
+        db, plan, include_actual=owner(user) or "ops-report:read" in granted(user), vertical_section_azimuth=vs_azimuth,
+    )
 
 
 @router.post("/plans", response_model=OpsPlanVersionOut, dependencies=[Depends(require("ops-plan:create"))])

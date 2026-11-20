@@ -48,6 +48,13 @@ export function fmtNumber(value: number | null | undefined, digits = 1): string 
   }) : '—'
 }
 
+/** Every downstream computed coordinate depends on all earlier displacements.
+ * Stop before the first interval that could not support an integrated position. */
+export function usableTrajectory(curve: OpsWellPathStation[]): OpsWellPathStation[] {
+  const invalid = curve.findIndex((station, index) => index > 0 && !station.interval_valid)
+  return invalid === -1 ? curve : curve.slice(0, invalid)
+}
+
 /** The deepest station of an accepted curve. */
 export function lastStation(curve: OpsWellPathStation[]): OpsWellPathStation | null {
   return curve.length ? curve[curve.length - 1] : null
@@ -143,18 +150,18 @@ export function shortestAzimuthDelta(from: number, to: number): number {
  * The curve restricted to a measured-depth window, with a point interpolated at
  * each window edge so a chart does not appear to start or stop mid-air.
  */
-export function sliceCurve(curve: OpsWellPathStation[], window: DepthWindow): CurvePoint[] {
+export function sliceCurve(curve: OpsWellPathStation[], window: DepthWindow): InterpolatedPosition[] {
   if (!curve.length) return []
   const first = curve[0].md_m
   const last = curve[curve.length - 1].md_m
   const lower = Math.max(first, window.from ?? first)
   const upper = Math.min(last, window.to ?? last)
   if (upper < lower) return []
-  const points: CurvePoint[] = []
+  const points: InterpolatedPosition[] = []
   const start = interpolateAt(curve, lower)
   if (start) points.push(start)
   for (const station of curve) {
-    if (station.md_m > lower + 1e-6 && station.md_m < upper - 1e-6) points.push(positionOf(station))
+    if (station.md_m > lower + 1e-6 && station.md_m < upper - 1e-6) points.push({ ...positionOf(station), interpolated: false })
   }
   const end = interpolateAt(curve, upper)
   if (end && (points.length === 0 || Math.abs(end.md_m - points[points.length - 1].md_m) > 1e-6)) points.push(end)
@@ -175,9 +182,11 @@ export function effectiveWindow(curve: OpsWellPathStation[], window: DepthWindow
  * scale. Equal scaling is the only way a plan view can be read for direction.
  */
 export function equalPlanBounds(points: CurvePoint[], fallback = 50): [number, number] {
-  const values = [0, ...points.flatMap((point) => [point.ns_m, point.ew_m])]
-  const low = Math.min(...values)
-  const high = Math.max(...values)
+  let low = 0, high = 0
+  for (const { ns_m, ew_m } of points) {
+    low = Math.min(low, ns_m, ew_m)
+    high = Math.max(high, ns_m, ew_m)
+  }
   const span = Math.max(high - low, fallback)
   const pad = span * 0.08
   return [low - pad, low + span + pad]

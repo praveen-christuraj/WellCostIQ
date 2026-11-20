@@ -3,7 +3,7 @@ import { Box, Stack, Typography } from '@mui/material'
 import { useColorMode } from '../../context/ThemeContext'
 import { brand, surface } from '../../designSystem'
 import type { OpsWellPathInterval } from '../../lib/operations'
-import { dlsAxisMax, fmtDepth, fmtDls } from '../../lib/wellPath'
+import { dlsAxisMax, fmtDepth, fmtDls, type DepthWindow } from '../../lib/wellPath'
 
 /**
  * Dogleg severity by interval.
@@ -29,11 +29,17 @@ export function DoglegIntervals({
   selectedMd,
   onSelectMd,
   height = 280,
+  window,
+  severityMax,
+  showLabels = false,
 }: {
   intervals: OpsWellPathInterval[]
   selectedMd: number | null
   onSelectMd: (md: number) => void
   height?: number
+  window?: DepthWindow
+  severityMax?: number | null
+  showLabels?: boolean
 }) {
   const { mode } = useColorMode()
   const s = surface(mode)
@@ -41,29 +47,31 @@ export function DoglegIntervals({
   const accent = mode === 'dark' ? brand[300] : brand[700]
   const brass = mode === 'dark' ? '#F2C14E' : '#A9782B'
 
+  const visible = useMemo(() => intervals.filter(row =>
+    (window?.from == null || row.to_md_m > window.from) && (window?.to == null || row.from_md_m < window.to),
+  ), [intervals, window?.from, window?.to])
   const plot = useMemo(() => {
-    if (!intervals.length) return null
-    const from = Math.min(...intervals.map((row) => row.from_md_m))
-    const to = Math.max(...intervals.map((row) => row.to_md_m))
-    const span = Math.max(to - from, 1)
-    const maxDls = dlsAxisMax(intervals)
+    if (!visible.length) return null
+    const from = window?.from ?? Math.min(...visible.map((row) => row.from_md_m))
+    const to = window?.to ?? Math.max(...visible.map((row) => row.to_md_m))
+    const span = to - from
+    const maxDls = severityMax ?? dlsAxisMax(visible)
     const plotHeight = height - TOP - BOTTOM
     const plotWidth = WIDTH - LEFT - RIGHT
-    const x = (md: number) => LEFT + ((md - from) / span) * plotWidth
+    const x = (md: number) => LEFT + ((Math.max(from, Math.min(md, to)) - from) / span) * plotWidth
     const y = (dls: number) => TOP + plotHeight - (Math.min(dls, maxDls) / maxDls) * plotHeight
-    const peak = intervals.reduce<OpsWellPathInterval | null>((best, row) => {
+    const peak = visible.reduce<OpsWellPathInterval | null>((best, row) => {
       if (row.dls_deg_per_30m === null) return best
       if (!best || (best.dls_deg_per_30m ?? 0) < row.dls_deg_per_30m) return row
       return best
     }, null)
     return { from, to, span, maxDls, plotHeight, plotWidth, x, y, peak }
-  }, [intervals, height])
+  }, [visible, height, window?.from, window?.to, severityMax])
 
   if (!plot) {
     return (
       <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
-        One interval needs two accepted stations. Nothing is recorded above the first station, so a single station
-        has no severity — that is not the same as zero.
+        {intervals.length ? 'No dogleg intervals intersect this depth window.' : 'One interval needs two accepted stations. No interval is not the same as zero severity.'}
       </Typography>
     )
   }
@@ -71,7 +79,7 @@ export function DoglegIntervals({
   const { from, to, maxDls, plotHeight, x, y, peak } = plot
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => fraction * maxDls)
   const mdTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => from + fraction * (to - from))
-  const selectedInterval = intervals.find((row) => Math.abs(row.to_md_m - (selectedMd ?? -1)) <= 0.05) ?? null
+  const selectedInterval = visible.find((row) => Math.abs(row.to_md_m - (selectedMd ?? -1)) <= 0.05) ?? null
 
   return (
     <Box>
@@ -100,7 +108,7 @@ export function DoglegIntervals({
         </text>
 
         {/* One rectangle per interval, spanning that interval's measured depth */}
-        {intervals.map((row, index) => {
+        {visible.map((row, index) => {
           const left = x(row.from_md_m)
           const right = x(row.to_md_m)
           const width = Math.max(1.5, right - left)
@@ -174,7 +182,7 @@ export function DoglegIntervals({
                   opacity={0.95}
                 />
               )}
-              {isPeak && !isSelected && (
+              {row.dls_deg_per_30m !== null && (showLabels || isPeak && !isSelected) && (
                 <text x={left + width / 2} y={top - 5} textAnchor="middle" fontSize={9} fontWeight={700} fill={s.text}>
                   {(row.dls_deg_per_30m ?? 0).toFixed(2)}
                 </text>
@@ -212,6 +220,9 @@ export function DoglegIntervals({
         </g>
       </Box>
 
+      {severityMax != null && visible.some(row => (row.dls_deg_per_30m ?? 0) > severityMax || (row.recorded_dls_deg_per_30m ?? 0) > severityMax) && (
+        <Typography variant="caption" color="text.secondary">Some marks exceed the displayed severity scale. Select the interval for its exact value.</Typography>
+      )}
       {selectedInterval && (
         <Stack direction={{ xs: 'column', sm: 'row' }} gap={1.5} mt={1} flexWrap="wrap" useFlexGap>
           <Typography sx={{ fontSize: 11.5, fontWeight: 700 }}>
