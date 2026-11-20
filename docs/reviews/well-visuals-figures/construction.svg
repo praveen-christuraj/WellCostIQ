@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="500" height="248" preserveAspectRatio="xMinYMin meet" viewBox="0 0 500 248" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>Construction preview</title>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="500" height="248"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-248)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0" y="0" width="240" height="248" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,96%,96%); fill-rule: evenodd;"/>
+			<rect x="248" y="0" width="252" height="248" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,96%,96%); fill-rule: evenodd;"/>
+			<text x="10" y="228" style="font-family: DejaVu Sans, sans-serif; font-weight: bold; font-size: 9px;fill: rgb(6%,18%,29%); stroke:none;" transform="translate(0,456) scale(1,-1)">SCHEMATIC   /   illustrative only</text>
+			<text x="258" y="228" style="font-family: DejaVu Sans, sans-serif; font-weight: bold; font-size: 9px;fill: rgb(6%,18%,29%); stroke:none;" transform="translate(0,456) scale(1,-1)">SNAPSHOT   /   reported depths</text>
+			<path d="M 32,205 L 32,120 Z" style="stroke: rgb(6%,18%,29%); stroke-linecap: butt; stroke-width: 2;"/>
+			<polygon points="32 120, 27 120, 32 125" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(6%,18%,29%); fill-rule: evenodd;"/>
+			<path d="M 110,205 L 110,120 Z" style="stroke: rgb(6%,18%,29%); stroke-linecap: butt; stroke-width: 2;"/>
+			<polygon points="110 120, 115 120, 110 125" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(6%,18%,29%); fill-rule: evenodd;"/>
+			<path d="M 44,205 L 44,75 Z" style="stroke: rgb(6%,18%,29%); stroke-linecap: butt; stroke-width: 2;"/>
+			<polygon points="44 75, 39 75, 44 80" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(6%,18%,29%); fill-rule: evenodd;"/>
+			<path d="M 98,205 L 98,75 Z" style="stroke: rgb(6%,18%,29%); stroke-linecap: butt; stroke-width: 2;"/>
+			<polygon points="98 75, 103 75, 98 80" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(6%,18%,29%); fill-rule: evenodd;"/>
+			<path d="M 54,94 L 54,47 Z" style="stroke: rgb(6%,18%,29%); stroke-linecap: butt; stroke-width: 2;"/>
+			<polygon points="54 47, 49 47, 54 52" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(6%,18%,29%); fill-rule: evenodd;"/>
+			<path d="M 88,94 L 88,47 Z" style="stroke: rgb(6%,18%,29%); stroke-linecap: butt; stroke-width: 2;"/>
+			<polygon points="88 47, 93 47, 88 52" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(6%,18%,29%); fill-rule: evenodd;"/>
+			<path d="M 33,124 L 42,129 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,130 L 42,135 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,136 L 42,141 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,142 L 42,147 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,148 L 42,153 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,154 L 42,159 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,160 L 42,165 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,166 L 42,171 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,172 L 42,177 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 33,178 L 42,183 Z" style="stroke: rgb(66%,35%,7%); stroke-linecap: butt; stroke-width: 1.1;"/>
+			<path d="M 58,46 L 58,26 Z" style="stroke: rgb(25%,36%,43%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 3;"/>
+			<path d="M 84,46 L 84,26 Z" style="stroke: rgb(25%,36%,43%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 3;"/>
+			<path d="M 112,119 L 128,132 Z" style="stroke: rgb(80%,85%,88%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="130" y="132" style="font-family: DejaVu Sans, sans-serif; font-size: 8px;fill: rgb(25%,36%,43%); stroke:none;" transform="translate(0,264) scale(1,-1)">Casing shoe</text>
+			<path d="M 43,161 L 126,176 Z" style="stroke: rgb(80%,85%,88%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="130" y="177" style="font-family: DejaVu Sans, sans-serif; font-size: 8px;fill: rgb(25%,36%,43%); stroke:none;" transform="translate(0,354) scale(1,-1)">Cement interval</text>
+			<path d="M 88,93 L 126,95 Z" style="stroke: rgb(80%,85%,88%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="130" y="94" style="font-family: DejaVu Sans, sans-serif; font-size: 8px;fill: rgb(25%,36%,43%); stroke:none;" transform="translate(0,188) scale(1,-1)">Liner top</text>
+			<path d="M 85,32 L 126,41 Z" style="stroke: rgb(80%,85%,88%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="130" y="42" style="font-family: DejaVu Sans, sans-serif; font-size: 8px;fill: rgb(25%,36%,43%); stroke:none;" transform="translate(0,84) scale(1,-1)">Open hole</text>
+			<text x="10" y="9" style="font-family: DejaVu Sans, sans-serif; font-size: 7px;fill: rgb(25%,36%,43%); stroke:none;" transform="translate(0,18) scale(1,-1)">Widths symbolic · depth increases down</text>
+			<path d="M 266,200 L 480,200 Z" style="stroke: rgb(80%,85%,88%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<path d="M 266,123.7 L 480,123.7 Z" style="stroke: rgb(80%,85%,88%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<path d="M 266,111.5 L 480,111.5 Z" style="stroke: rgb(80%,85%,88%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<path d="M 266,38 L 480,38 Z" style="stroke: rgb(80%,85%,88%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<path d="M 296,200 L 296,111.5 Z" style="stroke: rgb(0%,46%,43%); stroke-linecap: butt; stroke-width: 2.4;"/>
+			<circle cx="296" cy="111.5" r="3" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(0%,46%,43%); fill-rule: evenodd;"/>
+			<path d="M 320,200 L 320,123.7 Z" style="stroke: rgb(0%,46%,43%); stroke-linecap: butt; stroke-width: 2.4;"/>
+			<circle cx="320" cy="123.7" r="3" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(0%,46%,43%); fill-rule: evenodd;"/>
+			<text x="339" y="125.7" style="font-family: DejaVu Sans, sans-serif; font-weight: bold; font-size: 9px;fill: rgb(0%,46%,43%); stroke:none;" transform="translate(0,251) scale(1,-1)">SS   1,526 m</text>
+			<text x="339" y="103.5" style="font-family: DejaVu Sans, sans-serif; font-weight: bold; font-size: 9px;fill: rgb(0%,46%,43%); stroke:none;" transform="translate(0,207) scale(1,-1)">LS   1,770 m</text>
+			<text x="339" y="41" style="font-family: DejaVu Sans, sans-serif; font-weight: bold; font-size: 9px;fill: rgb(6%,18%,29%); stroke:none;" transform="translate(0,82) scale(1,-1)">Hole   3,240 m</text>
+			<text x="265" y="206" style="font-family: DejaVu Sans, sans-serif; font-size: 8px;fill: rgb(25%,36%,43%); stroke:none;" transform="translate(0,412) scale(1,-1)">Report datum · 0 m</text>
+			<text x="258" y="9" style="font-family: DejaVu Sans, sans-serif; font-size: 7px;fill: rgb(25%,36%,43%); stroke:none;" transform="translate(0,18) scale(1,-1)">No bit, cement or casing claimed for this record</text>
+		</g>
+	</g>
+</svg>
