@@ -536,18 +536,18 @@ SYSTEM_MEMORY: tuple[dict[str, Any], ...] = (
         "permission": "ops-master:read",
         "sort_order": 120,
         "body": (
-            "Well Operations → Code library maintains seven workspace code sets (Operation, Activity, "
-            "NPT, Cause, Phase, Agency and Source marks), the read-only Default Codes dictionary, and "
-            "the Correlations workspace. Correlations map exact printed source codes to workspace codes "
-            "(with optional companion Scope, Classification, Allocation and code criteria), while Link "
+            "Well Operations → Code library maintains Operations, Sub-phases, Causes, "
+            "Responsible agency labels and Source marks, the read-only Default Codes dictionary, and "
+            "the Correlations workspace. Correlations map each exact printed source code to one or more selected criteria "
+            "(optionally restricted to a report scope), while Link "
             "criteria creates multi-criteria relationships across two or more workspace codes. Both "
             "support atomic batch saving, switch between Table view (default) and an interactive Tree "
             "schematic, enforce the Planned/UPA/NPT classification matrix, pre-select codes as reviewable "
             "suggestions during report extraction, and block deleting any code until it is unlinked."
         ),
         "steps": (
-            "Create or import workspace codes in Well Operations → Code library across Operation, Activity, NPT, Cause, Phase, Agency and Source marks.\n"
-            "Open the Correlations tab and click Add correlation or Batch correlate to map printed codes (plus optional companion criteria) to workspace codes.\n"
+            "Create or import workspace codes in Well Operations → Code library for Operations, Sub-phases, Causes, Responsible agency labels and Source marks.\n"
+            "Open the Correlations tab and click Add correlation or Batch correlate to map each printed code to at least one criterion, such as Hole Section alone.\n"
             "Click Link criteria to link multiple workspace codes across Phase, Operation, Activity, NPT, Cause, Agency, Source mark, Scope, Classification and Allocation in one save.\n"
             "Switch between Table view (default) for search, filtering and bulk actions and Tree schematic to inspect the code hierarchy and unlinked codes visually.\n"
             "To retire a correlated code, unlink or delete its correlation first, delete the code to Deleted entries, then Restore or Delete permanently if no historical report references it."

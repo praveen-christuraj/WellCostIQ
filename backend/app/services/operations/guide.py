@@ -41,12 +41,18 @@ TOPICS = (
           ('Workbook Activity 06 means Wiper trip and reaming. The same token is seen on several kinds of trips in OpenWells. A printed code does not by itself say what kind of activity the time was.',
            'Every Master Data Activity carries an Activity Type: Planned, UPA (unplanned activity) or NPT (nonproductive time). Selecting the Activity on a daily-report block sets that block\'s Activity Type, so the editor asks for one value instead of a separate classification. PT, UPA, NPT and SP (slow progress) remain the separate Allocation column.',
            'A workspace mark can override the Activity Type. Printed Excel allocations stay separate. An unknown code stays visible for review rather than being assigned a generic name.')),
+    Topic('source-marks', 'When to use source mark rules', 'Do I need a source mark rule?',
+          'source marks mark rules printed classification allocation defaults',
+          'ops-master:read', '/operations/library?tab=source-marks',
+          'A source mark is a short label printed beside a time entry. A source mark rule tells extraction how your workspace interprets that label for Activity Type and default Allocation. These rules are optional: you do not need one to correlate a printed code with a section, phase or other field.',
+          ('For example, if your reports use BD for breakdown, add BD on the Source mark rules tab with Activity Type NPT and default Allocation NPT. On the next extraction, a row marked BD then starts with those suggestions. An allocation printed explicitly in a workbook is read separately.',
+           'Skip the rule if the built-in interpretation fits. Without a workspace rule, extraction uses the printed reference and other available evidence. Review the suggestion against the narrative; a rule neither approves a block nor changes a saved report.')),
     Topic('correlations', 'Correlate and link workspace codes', 'How do I correlate codes and link multi-criteria code rules?',
           'correlation correlations correlate correlated link linked linking multi criteria multicriteria batch tree schematic hierarchy library operations sub phase cause agency mark hole section phase activity vendor unlink delete permanent',
           'ops-master:read', '/operations/library?tab=correlations',
           'Open Well Operations → Code library → Correlations to map printed source codes to your workspace criteria, and to link several criteria into one row. Hole Section, Phase, Activity and Agency / service vendor come from Master Data; Sub-phase, Operations, Cause and the Responsible agency label are configured in the Code library. No costing register is involved: the same Master Data names are simply reused. Correlations pre-select suggestions during PDF/Excel extraction and guide report review without ever guessing or auto-approving a block.',
           ('Configure the Code library tabs — Operations, Sub-phases, Causes, Responsible agency labels and Source marks — and keep Hole Sections, Phases, Activities and vendors in Master Data.',
-           'In the Correlations tab, use Add correlation for one rule or Batch correlate to validate and save many printed-to-workspace rules in one atomic pass. Expand Companion criteria on any rule to co-select Hole Section, Phase, Sub-phase, Activity, Operations, Cause, Responsible agency label, Agency / service vendor, Source mark, Scope and Allocation.',
+           'In the Correlations tab, use Add correlation for one rule or Batch correlate to validate and save many printed-to-workspace rules in one atomic pass. Select the printed code, then choose at least one field to pre-fill. For example, map a printed operation code to Hole Section alone, or add Phase and Sub-phase to the same rule. No particular field is required. Scope only limits where the rule applies.',
            'Click Link criteria to create multi-criteria relationships among your own criteria (for example Hole Section + Phase + Sub-phase + Activity + Operations + Cause + Responsible agency label), so one rule such as DRLSUR describes everything the printed code implies and pre-fills it on the extracted block for the engineer to adjust. Cause is only ever required when the Activity Type is NPT or UPA, and a rule cannot force a cause onto Planned work.',
            'Keep Table view for searchable tabular auditing and bulk actions, or switch to Tree schematic to inspect relationships visually (by Phase → Sub-phase → Activity → Operations / Cause / Responsible agency label, by Printed code → Workspace criterion, or by Code family), see unlinked codes, and add, edit or unlink rules inline.',
            'Deletion safeguard: any workspace code referenced by an active correlation or code link cannot be deleted until it is unlinked in Correlations. Once unlinked and soft-deleted to Deleted entries, authorized users (ops-master:permanent-delete) can either Restore it or click Delete permanently — permanent removal is blocked whenever any historical report block, timeline row or deleted rule still references the code.')),
@@ -166,7 +172,7 @@ def answers(question, route, permissions, *, db=None, organization_id=None):
     explicit = re.search(
         r'\b(?:openwells|well operations|operation summary|operations summary|ddr|dcr|dmr|rmr|'
         r'codes?\s+correlations?|correlat(?:e|ed|ing)\s+(?:printed\s+|workspace\s+|operations?\s+|activity\s+|npt\s+)?codes?|'
-        r'batch\s+correlat\w*|code\s+links?|code\s+library|tree\s+schematic|multi[- ]criteria\s+codes?|'
+        r'source[- ]marks?\b|batch\s+correlat\w*|code\s+links?|code\s+library|tree\s+schematic|multi[- ]criteria\s+codes?|'
         r'completion\s+rop|time\s+vs\s+(?:measured\s+depth|completion)|'
         r'stuck pipe|lost circulation|kill mud|sidpp|sicp|maasp|dogleg|dls|scssv|gravel pack|'
         r'packer|xmas tree|mud motor|bha|plastic viscosity|yield point|ecd|hole cleaning|tvd)\b',
@@ -178,6 +184,13 @@ def answers(question, route, permissions, *, db=None, organization_id=None):
     if not explicit and (not contextual or re.search(r'\b(?:costing|afe|invoice|catalogue)\b', q)):
         return None
     topics = manual(permissions)
+    if re.search(r'\bsource[- ]marks?\s+rules?\b', q):
+        topic = next((t for t in topics if t['id'] == 'source-marks'), None)
+        if topic is None:
+            return AssistantAnswer(answer='Source mark rules need ops-master:read.', intent='permission', confidence='high')
+        return AssistantAnswer(answer=topic['body'], steps=list(topic['steps']), intent='knowledge',
+                               confidence='high', category='workflow', memory_key='operations-source-marks',
+                               sources=[AssistantSource(label=topic['title'], route=topic['route'])])
     # Direct manual lookup for Codes Correlation & multi-criteria code linking.
     if re.search(
         r'\b(?:correlat(?:e|ed|ing|ion|ions)|code\s+links?|link\s+(?:workspace\s+)?codes?|'

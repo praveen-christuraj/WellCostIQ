@@ -386,7 +386,7 @@ export type OpsBulkAssignResult = {
 }
 
 /** A printed token is correlated into a Code Library list; Hole Section, Phase
- * and Activity are Master Data targets, so they are companion criteria only. */
+ * and Activity are Master Data targets, independent of the printed source kind. */
 export type OpsCorrelationKind = 'operation' | 'cause' | 'sub-phase' | 'responsible-party' | 'agency'
 
 export type OpsCorrelationTargets = {
@@ -426,12 +426,12 @@ export type OpsCorrelationInput = OpsCorrelationTargets & {
   source_family?: string
   source_code: string
   source_label?: string
-  target_id: string
+  target_id?: string
   note?: string
 }
 
 export type OpsCorrelationUpdateInput = OpsCorrelationTargets & {
-  target_id: string
+  target_id?: string
   is_active?: boolean
   note?: string
 }

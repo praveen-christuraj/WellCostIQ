@@ -13,7 +13,6 @@ import {
   defaultOpsCodes,
   type OpsDefaultCode,
 } from '../../lib/operations'
-import { CORRELATION_KIND_FOR_MASTER } from '../../components/operations/codeCriteria'
 
 //: The Code Library owns the lists that are the workspace's own vocabulary.
 //: Hole Sections, Phases, Activities and vendors are Master Data and are
@@ -245,7 +244,7 @@ export default function OperationsLibrary() {
 
   /** Deep link a code into the Correlations tab, filtered to the rules that reference it. */
   const openRules = (row: Row) =>
-    setParams({ tab: 'correlations', kind: CORRELATION_KIND_FOR_MASTER[kind] ?? '', code: row.id })
+    setParams({ tab: 'correlations', code: row.id })
 
   const linkedCount = (row: Row) => Number(row.correlation_count ?? 0)
   const activeSelection = useMemo(() => selected.filter((r) => linkedCount(r) === 0), [selected])
@@ -303,8 +302,9 @@ export default function OperationsLibrary() {
           )}
           {kind === 'source-marks' && (
             <Alert severity="info" sx={{ mb: 1.5 }}>
-              Add a printed source mark to override its suggested Activity type and allocation. These rules affect
-              future drafts, never saved logs.
+              Source mark rules are optional. Use one when a mark on your reports needs a local interpretation
+              (for example, BD for breakdown → NPT). It suggests an Activity type and allocation on extraction;
+              it is not required for correlations and never changes saved logs.
             </Alert>
           )}
           {selected.length > 0 && (

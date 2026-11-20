@@ -4,9 +4,7 @@ Two complementary, auditable rule sets live in ``Well Operations -> Code library
 
 1. **Printed-to-workspace correlations (``OpsCodeCorrelation``)** map an exact
    printed token from the reference dictionary (or a printed source agency token)
-   to a primary workspace record — the Code Library Operations list, a cause, a
-   sub-phase, a responsible agency label or an agency/service vendor — plus any
-   optional companion criteria (hole section, phase, activity, allocation, scope).
+   to one or more review criteria, optionally restricted to a report scope.
 2. **Multi-criteria workspace code links (``OpsCodeLink``)** connect two or more
    workspace records across Hole Section, Phase, Sub-phase, Activity, Operations,
    Cause, Responsible agency label, Agency / service vendor and Source mark in
@@ -288,61 +286,52 @@ def _validate_printed(kind: str, source_code: str, source_family: str, *, prefix
     )
 
 
-def _companion_criteria(primary_kind: str) -> dict[str, tuple]:
-    """Every criterion except the one the printed token itself is correlated as."""
-    return {
-        criterion: spec
-        for criterion, spec in CRITERIA_SPECS.items()
-        if criterion != KIND_CRITERION[primary_kind]
-    }
-
-
-def _build_companion_targets(
-    db: Session,
-    organization_id: str,
-    primary_kind: str,
-    primary_id: str,
-    data: OpsCorrelationIn | OpsCorrelationUpdate,
-    *,
-    prefix: str = "",
-) -> tuple[dict[str, str | None], str, str]:
-    """Resolve the primary target plus every companion multi-criteria column."""
-    values: dict[str, str | None] = {}
-    extra_parts: list[str] = []
-    allocation = (getattr(data, "target_allocation", "") or "").strip()
-
-    if data.scope:
-        extra_parts.append(f"Scope: {data.scope.title()}")
-    if allocation:
-        extra_parts.append(f"Alloc: {allocation}")
-
-    _primary_row, primary_label = _resolve_target(db, organization_id, KIND_CRITERION[primary_kind], primary_id)
-    primary_corr_col = CRITERIA_SPECS[KIND_CRITERION[primary_kind]][4]
-
-    for criterion, spec in CRITERIA_SPECS.items():
-        corr_col = spec[4]
-        short_label = spec[6]
-        if corr_col == primary_corr_col:
-            values[corr_col] = primary_id
-            continue
-        raw_id = (getattr(data, corr_col, None) or "").strip() or None
-        if raw_id:
-            row, _label = _resolve_target(db, organization_id, criterion, raw_id)
-            values[corr_col] = raw_id
-            extra_parts.append(f"{short_label}: {getattr(row, spec[2])}")
+def _correlation_labels(kind: str, scope: str, allocation: str, targets: dict[str, object]) -> tuple[str, str]:
+    # Preserve the historical label format when a same-kind target exists. A
+    # display label is not a required target and does not drive extraction.
+    preferred = KIND_CRITERION.get(kind)
+    first = preferred if preferred in targets else next(iter(targets), None)
+    parts = []
+    label = ""
+    for key, row in targets.items():
+        _, _, code_col, name_col, _, _, short, _ = CRITERIA_SPECS[key]
+        if key == first:
+            label = _format_code_label(row, code_col, name_col)
+            if key != preferred:
+                label = f"{short}: {label}"
         else:
-            values[corr_col] = None
+            parts.append(f"{short}: {getattr(row, code_col)}")
+    if allocation:
+        if label:
+            parts.append(f"Alloc: {allocation}")
+        else:
+            label = f"Alloc: {allocation}"
+    if scope:
+        parts.append(f"Scope: {scope.title()}")
+    return label[:200], " · ".join(parts)[:300]
 
-    _check_allocation_matrix(allocation, prefix=prefix)
-    _check_cause_matrix(
-        db,
-        organization_id,
-        values.get("target_activity_id"),
-        values.get("target_cause_id"),
-        prefix=prefix,
-    )
-    summary = " · ".join(extra_parts)[:300]
-    return values, primary_label, summary
+
+def _build_targets(
+    db: Session, organization_id: str, kind: str, data: OpsCorrelationIn | OpsCorrelationUpdate,
+    *, prefix: str = "",
+) -> tuple[dict[str, str | None], str, str]:
+    values = {}
+    targets = {}
+    for key, spec in CRITERIA_SPECS.items():
+        col = spec[4]
+        value = (getattr(data, col) or "").strip() or None
+        if key == KIND_CRITERION[kind] and data.target_id:
+            # Older clients send the same-kind criterion as target_id.
+            value = data.target_id
+        values[col] = value
+        if value:
+            targets[key], _ = _resolve_target(db, organization_id, key, value)
+    if not targets and not data.target_allocation:
+        raise HTTPException(422, f"{prefix}Select at least one criterion to pre-fill.")
+    _check_allocation_matrix(data.target_allocation, prefix=prefix)
+    _check_cause_matrix(db, organization_id, values["target_activity_id"], values["target_cause_id"], prefix=prefix)
+    label, summary = _correlation_labels(kind, data.scope, data.target_allocation, targets)
+    return values, label, summary
 
 
 def list_correlations(
@@ -392,8 +381,8 @@ def _prepare_correlation_row(
             "Edit or delete the existing rule instead.",
         )
 
-    target_cols, label, extra_summary = _build_companion_targets(
-        db, organization_id, data.kind, data.target_id, data, prefix=prefix
+    target_cols, label, extra_summary = _build_targets(
+        db, organization_id, data.kind, data, prefix=prefix
     )
     source_label = (data.source_label or "").strip() or catalogue_name
     return OpsCodeCorrelation(
@@ -518,7 +507,7 @@ def update_correlation(
     )
     if row is None:
         raise HTTPException(404, "Correlation not found.")
-    target_cols, label, extra_summary = _build_companion_targets(db, organization_id, row.kind, data.target_id, data)
+    target_cols, label, extra_summary = _build_targets(db, organization_id, row.kind, data)
     for col, val in target_cols.items():
         setattr(row, col, val)
     row.target_label = label[:200]
@@ -1202,9 +1191,8 @@ def refresh_labels_for_code(db: Session, organization_id: str, master_kind: str,
     criterion = MASTER_TO_CRITERION.get(master_kind)
     if not criterion:
         return
-    _mk, _model, code_col, name_col, corr_col, link_col, _short, _sig = CRITERIA_SPECS[criterion]
+    corr_col, link_col = CRITERIA_SPECS[criterion][4:6]
     record_id = getattr(record, "id")
-    fresh_label = _format_code_label(record, code_col, name_col)[:200]
 
     for corr in db.scalars(
         select(OpsCodeCorrelation).where(
@@ -1212,25 +1200,16 @@ def refresh_labels_for_code(db: Session, organization_id: str, master_kind: str,
             getattr(OpsCodeCorrelation, corr_col) == record_id,
         )
     ):
-        if corr.kind == criterion:
-            corr.target_label = fresh_label
-        # Rebuild companion summary if secondary criteria exist.
-        parts: list[str] = []
-        if corr.scope:
-            parts.append(f"Scope: {corr.scope.title()}")
-        if corr.target_allocation:
-            parts.append(f"Alloc: {corr.target_allocation}")
-        primary_col = CRITERIA_SPECS.get(corr.kind, CRITERIA_SPECS[criterion])[4]
-        for c_key, c_spec in CRITERIA_SPECS.items():
-            if c_spec[4] == primary_col:
-                continue
-            cid = getattr(corr, c_spec[4], None)
-            if not cid:
-                continue
-            target = record if cid == record_id else db.get(c_spec[1], cid)
-            if target is not None:
-                parts.append(f"{c_spec[6]}: {getattr(target, c_spec[2], '')}")
-        corr.extra_criteria_summary = " · ".join(parts)[:300]
+        targets = {}
+        for key, spec in CRITERIA_SPECS.items():
+            cid = getattr(corr, spec[4], None)
+            if cid:
+                target = record if key == criterion else db.get(spec[1], cid)
+                if target is not None:
+                    targets[key] = target
+        corr.target_label, corr.extra_criteria_summary = _correlation_labels(
+            corr.kind, corr.scope, corr.target_allocation, targets
+        )
 
     for link in db.scalars(
         select(OpsCodeLink).where(
@@ -1362,7 +1341,7 @@ def _apply_single_rule(
     *,
     kind: str,
 ) -> bool:
-    """Apply a matched ``OpsCodeCorrelation`` and any empty companion criteria."""
+    """Pre-select the criteria configured on a matched correlation."""
     changed = False
 
     if rule.target_allocation and block.classification_source != "source_mark":
@@ -1448,7 +1427,7 @@ def apply_to_block(
     agency_tokens: tuple[str, ...] = (),
     tokens_by_kind: dict[str, tuple[str, ...]] | None = None,
 ) -> list[str]:
-    """Apply matching printed-code correlations (plus companion criteria) to ``block``.
+    """Apply matching printed-code correlations to ``block``.
 
     Fills only what the source left empty (or translates a raw printed token),
     never overrides a direct library hit, keeps ``review_state == 'suggested'``,
