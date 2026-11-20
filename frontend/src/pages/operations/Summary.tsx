@@ -28,6 +28,7 @@ import { SectionCard } from '../../components/ui/SectionCard'
 import { StatCard } from '../../components/ui/StatCard'
 import { useAuth } from '../../context/AuthContext'
 import {
+  allocationName,
   auditSummaryExport,
   getWellOperationSummary,
   opsScopeReference,
@@ -191,16 +192,15 @@ export default function OperationsSummary() {
         field: 'activity_label',
         headerName: 'ACTIVITY',
         minWidth: 195,
-        valueGetter: (p) =>
-          [p.data?.activity_label, p.data?.classification].filter(Boolean).join(' · '),
       },
       {
         field: 'allocation',
         headerName: 'ALLOCATION',
-        minWidth: 115,
-        cellRenderer: (p: { value: string }) => <Tag tone={allocTone(p.value)}>{p.value}</Tag>,
+        minWidth: 155,
+        valueFormatter: (p) => allocationName(p.value),
+        cellRenderer: (p: { value: string }) => <Tag tone={allocTone(p.value)}>{allocationName(p.value)}</Tag>,
       },
-      { field: 'cause_code', headerName: 'CAUSE', minWidth: 110 },
+      { field: 'cause', headerName: 'CAUSE', minWidth: 110 },
       { field: 'operation_label', headerName: 'OPERATIONS', minWidth: 185 },
       { field: 'responsible_party', headerName: 'AGENCY / SERVICE VENDOR', minWidth: 200 },
       { field: 'responsible_agency_label', headerName: 'RESPONSIBLE AGENCY', minWidth: 190 },
@@ -304,12 +304,13 @@ export default function OperationsSummary() {
       {
         field: 'allocation',
         headerName: 'ALLOCATION',
-        minWidth: 115,
-        cellRenderer: (p: { value: string }) => <Tag tone={allocTone(p.value)}>{p.value}</Tag>,
+        minWidth: 155,
+        valueFormatter: (p) => allocationName(p.value),
+        cellRenderer: (p: { value: string }) => <Tag tone={allocTone(p.value)}>{allocationName(p.value)}</Tag>,
       },
       { field: 'responsible_party', headerName: 'AGENCY / VENDOR', minWidth: 185 },
       { field: 'code', headerName: 'CODE', minWidth: 185 },
-      { field: 'cause_code', headerName: 'CAUSE', minWidth: 135 },
+      { field: 'cause', headerName: 'CAUSE', minWidth: 135 },
       { field: 'events', headerName: 'EVENTS', minWidth: 95 },
       { field: 'hours', headerName: 'HOURS', minWidth: 105, valueFormatter: (p) => fmtNum(p.value) },
       { field: 'days', headerName: 'DAYS', minWidth: 98, valueFormatter: (p) => fmtNum(p.value) },
@@ -686,7 +687,7 @@ export default function OperationsSummary() {
                 <DataTable
                   rows={summary.pt_npt_breakdown}
                   columns={breakdownCols}
-                  rowKey={(r) => `${r.classification}-${r.allocation}-${r.responsible_party}-${r.code}-${r.cause_code}`}
+                  rowKey="id"
                   exportName={`${summary.well_code}-pt-npt-breakdown`}
                   searchPlaceholder="Search hole section, phase, activity, operations, cause, agency…"
                   canExport={mayExport}
@@ -697,7 +698,7 @@ export default function OperationsSummary() {
                 <DataTable
                   rows={summary.phase_breakdown}
                   columns={phaseCols}
-                  rowKey={(r) => `${r.phase}-${r.hole_section}`}
+                  rowKey="id"
                   exportName={`${summary.well_code}-phase-summary`}
                   searchPlaceholder="Search phase or hole section…"
                   canExport={mayExport}

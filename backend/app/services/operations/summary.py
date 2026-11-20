@@ -10,19 +10,15 @@ from sqlalchemy.orm import Session
 
 from app.core.precision import rounded
 from app.core.time import WAT_LABEL, WAT_TZ_NAME, format_wat, wat_now
-from app.domain.operations.default_codes import describe_code
+from app.services.operations.report_labels import report_labels
 from app.domain.operations.metrics import compute_rop, penetration, period_balance
 from app.models.rig_well import Block, Rig, Well
 from app.models.vendor_master import Vendor
-from app.models.master_data import Activity, HoleSection, Phase
 from app.models.operations import (
     OpsActivityBlock,
-    OpsAgency,
     OpsDailyMetric,
     OpsDailyReport,
-    OpsOperation,
     OpsPlanVersion,
-    OpsSubPhase,
     OpsSurvey,
 )
 
@@ -81,30 +77,7 @@ def well_operation_summary(
     report_ids = [r.id for r in reports]
 
     # Reference maps for clean labels without N+1 queries.
-    op_map = {
-        c.id: f"{c.operation_code} — {c.operation_name}"
-        for c in db.scalars(select(OpsOperation).where(OpsOperation.organization_id == organization_id)).all()
-    }
-    act_map = {
-        c.id: f"{c.activity_code} — {c.activity_name}"
-        for c in db.scalars(select(Activity).where(Activity.organization_id == organization_id)).all()
-    }
-    section_map = {
-        c.id: f"{c.section_code} — {c.section_name}"
-        for c in db.scalars(select(HoleSection).where(HoleSection.organization_id == organization_id)).all()
-    }
-    phase_map = {
-        c.id: f"{c.phase_code} — {c.phase_name}"
-        for c in db.scalars(select(Phase).where(Phase.organization_id == organization_id)).all()
-    }
-    sub_phase_map = {
-        c.id: f"{c.sub_phase_code} — {c.sub_phase_name}"
-        for c in db.scalars(select(OpsSubPhase).where(OpsSubPhase.organization_id == organization_id)).all()
-    }
-    agency_map = {
-        c.id: c.agency_name
-        for c in db.scalars(select(OpsAgency).where(OpsAgency.organization_id == organization_id)).all()
-    }
+    labels = report_labels(db, organization_id)
     vendor_map = {
         v.id: v.vendor_name
         for v in db.scalars(select(Vendor).where(Vendor.organization_id == organization_id)).all()
@@ -192,7 +165,7 @@ def well_operation_summary(
     datum = next((r.datum for r in reversed(reports) if r.datum), "")
     spud_date = next((r.spud_date for r in reports if r.spud_date), None)
     latest_status = next((r.current_status for r in reversed(reports) if r.current_status), "")
-    latest_section = next((r.hole_section_text for r in reversed(reports) if r.hole_section_text), "")
+    latest_section = next((labels["hole_section"][b.hole_section_id] for r in reversed(reports) for b in reversed(blocks_by_report[r.id]) if b.hole_section_id in labels["hole_section"]), "")
     latest_bha = next((r.bha_summary for r in reversed(reports) if r.bha_summary), "")
     latest_csg_r = next(
         (r for r in reversed(reports) if r.last_casing_depth_m is not None or r.last_casing_size_in is not None), None
@@ -222,8 +195,8 @@ def well_operation_summary(
     # Accumulators.
     activities: list[dict] = []
     daily_rollup: list[dict] = []
-    pt_npt_groups: dict[tuple[str, str, str, str], dict] = {}
-    phase_groups: dict[str, dict] = {}
+    pt_npt_groups: dict[tuple, dict] = {}
+    phase_groups: dict[tuple[str, str | None, str | None], dict] = {}
 
     cum_minutes = 0
     total_planned_min = 0
@@ -291,94 +264,78 @@ def well_operation_summary(
         if day_lag is not None:
             latest_lag = day_lag
 
-        section_key = (
-            r.hole_section_text
-            or (r_blocks[-1].phase_raw if r_blocks and r_blocks[-1].phase_raw else "")
-            or r.scope.title()
-        )
-        pg = phase_groups.setdefault(
-            section_key,
-            {
-                "phase": section_key,
-                "scope": r.scope,
-                "reports": 0,
-                "start_md_m": None,
-                "end_md_m": None,
-                "end_tvd_m": None,
-                "footage_m": Decimal(0),
-                "logged_min": 0,
-                "planned_min": 0,
-                "upa_min": 0,
-                "npt_min": 0,
-                "rot_hours": Decimal(0),
-                "rop_foot": Decimal(0),
-                "rop_rot": Decimal(0),
-            },
-        )
-        pg["reports"] += 1
-        if r.depth_start_m is not None and (pg["start_md_m"] is None or r.depth_start_m < pg["start_md_m"]):
-            pg["start_md_m"] = r.depth_start_m
-        if r.depth_end_m is not None and (pg["end_md_m"] is None or r.depth_end_m > pg["end_md_m"]):
-            pg["end_md_m"] = r.depth_end_m
-        if r.tvd_m is not None and (pg["end_tvd_m"] is None or r.tvd_m > pg["end_tvd_m"]):
-            pg["end_tvd_m"] = r.tvd_m
-        if day_progress is not None and day_progress > 0:
-            pg["footage_m"] += day_progress
-        pg["logged_min"] += r_logged
-        pg["planned_min"] += r_planned
-        pg["upa_min"] += r_upa
-        pg["npt_min"] += r_npt
-        if r_rot is not None and r_rot > 0:
-            pg["rot_hours"] += r_rot
-            if r_foot is not None:
-                pg["rop_foot"] += r_foot
-                pg["rop_rot"] += r_rot
+        # Attribute time to each saved section/phase pair, not the last imported
+        # phase on the day. Daily measurements belong to a group only when the
+        # whole day shares that pair; otherwise use the group's block readings.
+        grouped_blocks = defaultdict(list)
+        for block in r_blocks:
+            grouped_blocks[(block.hole_section_id, block.phase_id)].append(block)
+        if not grouped_blocks:
+            grouped_blocks[(None, None)] = []
+        section_key = ", ".join(dict.fromkeys(
+            labels["hole_section"][section_id] for section_id, _ in grouped_blocks
+            if section_id in labels["hole_section"]
+        ))
+        for (section_id, phase_id), members in grouped_blocks.items():
+            pg = phase_groups.setdefault((r.scope, section_id, phase_id), {
+                "scope": r.scope, "phase": labels["phase"].get(phase_id, ""),
+                "hole_section": labels["hole_section"].get(section_id, ""),
+                "reports": 0, "events": 0, "logged_min": 0, "planned_min": 0,
+                "upa_min": 0, "npt_min": 0, "start_md_m": None, "end_md_m": None,
+                "end_tvd_m": None, "footage_m": Decimal(0), "rot_hours": Decimal(0),
+                "rop_foot": Decimal(0), "rop_rot": Decimal(0),
+            })
+            pg["reports"] += 1
+            pg["events"] += len(members)
+            for block in members:
+                pg["logged_min"] += block.duration_minutes
+                bucket = {"Planned": "planned_min", "UPA": "upa_min", "NPT": "npt_min"}.get(block.classification)
+                if bucket:
+                    pg[bucket] += block.duration_minutes
+            if len(grouped_blocks) == 1:
+                start, end, tvd = r.depth_start_m, r.depth_end_m, r.tvd_m
+                footage, rot, paired_foot = day_progress, r_rot, r_foot
+            else:
+                start = min((b.depth_from_m for b in members if b.depth_from_m is not None), default=None)
+                end = max((b.depth_to_m for b in members if b.depth_to_m is not None), default=None)
+                tvd = max((b.tvd_to_m for b in members if b.tvd_to_m is not None), default=None)
+                footage = sum(b.footage_m for b in members if b.footage_m and b.footage_m > 0)
+                paired = [b for b in members if b.footage_m is not None and b.footage_m >= 0
+                          and b.rotating_hours and b.rotating_hours > 0 and r.scope != "completion"]
+                paired_foot = sum(b.footage_m for b in paired)
+                rot = sum(b.rotating_hours for b in paired)
+            for field, value, extremum in (("start_md_m", start, min), ("end_md_m", end, max), ("end_tvd_m", tvd, max)):
+                if value is not None:
+                    pg[field] = value if pg[field] is None else extremum(pg[field], value)
+            if footage and footage > 0:
+                pg["footage_m"] += footage
+            if rot and rot > 0:
+                pg["rot_hours"] += rot
+                if paired_foot is not None:
+                    pg["rop_foot"] += paired_foot
+                    pg["rop_rot"] += rot
 
         for b in r_blocks:
             cum_minutes += b.duration_minutes
             dur_h = _hrs(b.duration_minutes)
             cum_d = round(cum_minutes / 1440.0, 3)
 
-            op_label = (
-                op_map.get(b.operation_id or "")
-                or b.operation_snapshot
-                or (
-                    describe_code(b.source_operation_code, "Operation")
-                    if b.source_operation_code
-                    else ""
-                )
-            )
-            act_family = "OpenWells code token" if b.source_page else "Activity"
-            act_label = (
-                act_map.get(b.activity_id or "")
-                or (describe_code(b.source_activity_code, act_family) if b.source_activity_code else "")
-            )
-            # Operations prints the Code Library code; the snapshot keeps the value
-            # a saved report was reviewed against.
-            operation_code = op_map.get(b.operation_id or "", "").split(" — ")[0] or b.operation_snapshot or ""
-            operation_name = (
-                op_map.get(b.operation_id or "", "").split(" — ", 1)[1] if b.operation_id and b.operation_id in op_map else ""
-            )
-            section_label = section_map.get(b.hole_section_id or "") or r.hole_section_text or ""
-            sub_phase_label = sub_phase_map.get(b.sub_phase_id or "")
+            operation_name = op_label = labels["operation"].get(b.operation_id, "")
+            operation_code = labels["operation_code"].get(b.operation_id, "")
+            act_label = labels["activity"].get(b.activity_id, "")
+            section_label = labels["hole_section"].get(b.hole_section_id, "")
+            sub_phase_label = labels["sub_phase"].get(b.sub_phase_id, "")
             # The responsible agency label is its own criterion beside the vendor.
-            agency_label = agency_map.get(b.responsible_agency_id or "") or ""
+            agency_label = labels["agency"].get(b.responsible_agency_id or "") or ""
             agency = (
-                agency_map.get(b.responsible_agency_id or "")
+                labels["agency"].get(b.responsible_agency_id or "")
                 or b.responsible_party
                 or vendor_map.get(b.vendor_id or "", "")
                 or customer
                 or "Unassigned"
             )
-            phase_label = (
-                sub_phase_map.get(b.sub_phase_id or "")
-                or phase_map.get(b.phase_id or "")
-                or b.phase_raw
-                or section_map.get(b.hole_section_id or "")
-                or r.hole_section_text
-                or r.scope.title()
-            )
-            cause_label = b.cause_code or b.source_cause_code or b.allocation
+            phase_label = labels["phase"].get(b.phase_id, "")
+            cause_label = labels["cause"].get((b.cause_code or "").strip().upper(), "")
             b_mw = b.mud_weight_ppg if b.mud_weight_ppg is not None else r.mud_weight_ppg
             b_foot = (
                 b.footage_m
@@ -424,14 +381,14 @@ def well_operation_summary(
                     "duration_minutes": b.duration_minutes,
                     "cum_hours": _hrs(cum_minutes),
                     "phase": phase_label,
-                    "phase_code": b.phase_raw or "",
+                    "phase_code": labels["phase_code"].get(b.phase_id, ""),
                     "phase_label": phase_label,
                     "operation": op_label,
                     "operation_code": operation_code,
                     "operation_name": operation_name,
                     "operation_label": op_label,
                     "activity": act_label,
-                    "activity_code": act_label,
+                    "activity_code": labels["activity_code"].get(b.activity_id, ""),
                     "activity_label": act_label,
                     "classification": b.classification,
                     "allocation": b.allocation,
@@ -454,15 +411,15 @@ def well_operation_summary(
                     "responsible_party": "" if agency == "Unassigned" else agency,
                     "agency_label": agency_label,
                     "responsible_agency_label": agency_label,
-                    "operations": operation_code,
-                    "cause": b.cause_code or b.source_cause_code,
-                    "cause_code": b.cause_code or b.source_cause_code or "",
+                    "operations": operation_name,
+                    "cause": cause_label,
+                    "cause_code": b.cause_code if cause_label else "",
                     "reason": b.reason,
                     "review_state": b.review_state,
                 }
             )
 
-            gkey = (agency, phase_label, op_label or "General", cause_label, b.classification, b.allocation)
+            gkey = (agency, b.phase_id, b.operation_id, cause_label, b.classification, b.allocation)
             grp = pt_npt_groups.setdefault(
                 gkey,
                 {
@@ -470,10 +427,9 @@ def well_operation_summary(
                     "phase": phase_label,
                     "operation": op_label or "General",
                     "cause": cause_label,
-                    "cause_code": b.cause_code or b.source_cause_code or "",
-                    # Kept for existing exports: the operations code, or the
-                    # allocation when a block carries no operation.
-                    "npt_code": operation_code or op_label or b.allocation,
+                    "cause_code": b.cause_code if cause_label else "",
+                    # The NPT breakdown retains both workspace code and name.
+                    "npt_code": labels["npt"].get(b.operation_id, "") if "NPT" in (b.allocation, b.classification) else op_label,
                     "operation_code": operation_code,
                     "classification": b.classification,
                     "allocation": b.allocation,
@@ -519,7 +475,7 @@ def well_operation_summary(
                 "reopened": bool(r.reopened_at),
                 "extraction_status": r.extraction_status,
                 "rig_code": r.rig_code_snapshot or rig_code,
-                "hole_section": r.hole_section_text,
+                "hole_section": section_key,
                 "depth_start_m": _num(r.depth_start_m),
                 "depth_end_m": _num(r.depth_end_m),
                 "tvd_start_m": _num(r.tvd_start_m),
@@ -603,10 +559,10 @@ def well_operation_summary(
             {
                 "id": f"phase-{idx}",
                 "phase": pg["phase"],
-                "hole_section": pg.get("hole_section") or pg["scope"].title(),
+                "hole_section": pg["hole_section"],
                 "scope": pg["scope"],
                 "reports": pg["reports"],
-                "events": pg["reports"],
+                "events": pg["events"],
                 "start_md_m": _num(pg["start_md_m"]),
                 "end_md_m": _num(pg["end_md_m"]),
                 "max_md_m": _num(pg["end_md_m"]),

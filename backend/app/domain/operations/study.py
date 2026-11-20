@@ -51,7 +51,8 @@ def timeline_study(items, *, has_start, scope):
     return {'summary': '\n'.join(summary), 'warnings': warnings}
 
 
-def daily_brief(report, blocks, footage, rotating_hours, rop):
+def daily_brief(report, blocks, footage, rotating_hours, rop, *, labels=None):
+    labels = labels or {}
     prefix = [report.well_code_snapshot, str(report.report_date), report.report_type]
     if report.day_number is not None:
         prefix.append(f'Day {report.day_number}')
@@ -71,19 +72,19 @@ def daily_brief(report, blocks, footage, rotating_hours, rop):
         lines.append('Draft suggestions: verify classifications, allocations and measurements against the source.')
     if blocks:
         totals = {kind: sum(b.duration_minutes for b in blocks if b.allocation == kind) for kind in ('PT', 'UPA', 'NPT', 'SP')}
-        lines.append('Allocated time: ' + ' · '.join(f'{kind} {format_value(Decimal(minutes) / 60, "h")}' for kind, minutes in totals.items()) + '.')
+        names = {'PT': 'Productive Time', 'UPA': 'Unplanned Activity', 'NPT': 'Non-Productive Time', 'SP': 'Slow Progress'}
+        lines.append('Allocated time: ' + ' · '.join(f'{names[kind]} {format_value(Decimal(minutes) / 60, "h")}' for kind, minutes in totals.items()) + '.')
         balance = report.period_minutes - sum(totals.values())
         if balance:
             lines.append(f'Log is {abs(balance)} min {"short of" if balance > 0 else "over"} the report period.')
         top = sorted(sorted(blocks, key=lambda b: b.duration_minutes, reverse=True)[:3], key=lambda b: b.sequence_no)
         for block in top:
-            actions = activities(block.narrative)[:2]
-            label = ' / '.join(actions) or 'Logged activity'
+            label = labels.get('activity', {}).get(getattr(block, 'activity_id', None)) or 'Logged activity'
             lines.append(f'- {label} ({format_value(Decimal(block.duration_minutes) / 60, "h")}): {excerpt(block.narrative, 130)}')
         npt = sorted((b for b in blocks if b.classification == 'NPT' or b.allocation == 'NPT'), key=lambda b: -b.duration_minutes)
         if npt:
             reasons = [
-                excerpt(b.reason or b.narrative, 115) + (f' ({b.responsible_party})' if b.responsible_party else '')
+                ' · '.join(filter(None, (labels.get('npt', {}).get(getattr(b, 'operation_id', None)), excerpt(b.reason or b.narrative, 115)))) + (f' ({b.responsible_party})' if b.responsible_party else '')
                 for b in npt[:2] if b.reason or b.narrative
             ]
             lines.append('Reported downtime: ' + '; '.join(reasons) + '.' if reasons else 'Downtime noted; no reason recorded.')

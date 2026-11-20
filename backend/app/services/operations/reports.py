@@ -35,6 +35,7 @@ from app.models.rig_well import HoleSection, Phase
 from app.models.vendor_master import Vendor
 from app.services.audit import record as audit_record
 from app.services.operations import scope
+from app.services.operations.report_labels import report_labels
 from app.services.operations.plans import active_plan
 
 
@@ -1079,10 +1080,11 @@ def brief_for_report(db: Session, organization_id: str, report_id: str, *, inclu
     planned = sum(b.duration_minutes for b in blocks if b.classification == "Planned")
     upa = sum(b.duration_minutes for b in blocks if b.classification == "UPA")
     npt = sum(b.duration_minutes for b in blocks if b.classification == "NPT")
+    labels = report_labels(db, organization_id)
     npt_items = [
         {
-            "operation_code": b.operation_snapshot or "",
-            "npt_code": b.operation_snapshot or "",
+            "operation_code": labels["operation_code"].get(b.operation_id, ""),
+            "npt_code": labels["npt"].get(b.operation_id, ""),
             "reason": b.reason or b.narrative[:100],
             "duration_minutes": b.duration_minutes,
             "responsible_party": b.responsible_party,
@@ -1101,7 +1103,7 @@ def brief_for_report(db: Session, organization_id: str, report_id: str, *, inclu
     footage, rotating_hours = penetration(report, blocks)
     rop = compute_rop(footage, rotating_hours, scope=report.scope)
 
-    text = daily_brief(report, blocks, footage, rotating_hours, rop)
+    text = daily_brief(report, blocks, footage, rotating_hours, rop, labels=labels)
     return {
         "report_id": report.id,
         "well_code": report.well_code_snapshot,

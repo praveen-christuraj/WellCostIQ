@@ -29,6 +29,7 @@ import { SectionCard } from '../../components/ui/SectionCard'
 import { useAuth } from '../../context/AuthContext'
 import { downloadFile } from '../../lib/api'
 import {
+  allocationName,
   aiPrefillReport,
   approveReport,
   auditExport,
@@ -809,7 +810,7 @@ export default function OperationsReportDetail({
                   headerName: 'Phase',
                   minWidth: 155,
                   tooltipField: 'phase_label',
-                  valueGetter: ({ data }) => data?.phase_label || data?.source_phase_label || '',
+                  valueGetter: ({ data }) => data?.phase_label || '',
                 },
                 { field: 'sub_phase_label', headerName: 'Sub-Phase', minWidth: 165, tooltipField: 'sub_phase_label' },
                 {
@@ -818,19 +819,16 @@ export default function OperationsReportDetail({
                   minWidth: 200,
                   tooltipField: 'activity_label',
                   valueGetter: ({ data }) =>
-                    data?.activity_label ||
-                    [data?.source_activity_label, data?.classification].filter(Boolean).join(' · '),
+                    data?.activity_label || '',
                 },
-                { field: 'allocation', headerName: 'Allocation', minWidth: 110 },
+                { field: 'allocation', headerName: 'Allocation', minWidth: 150, valueFormatter: (p) => allocationName(p.value) },
                 { field: 'cause_label', headerName: 'Cause', minWidth: 175, tooltipField: 'cause_label' },
                 {
                   field: 'operation_code',
                   headerName: 'Operations',
                   minWidth: 175,
                   valueGetter: ({ data }) =>
-                    data?.operation_code
-                      ? `${data.operation_code}${data.operation_name ? ` — ${data.operation_name}` : ''}`
-                      : '',
+                    data?.operation_name || '',
                 },
                 { field: 'responsible_party', headerName: 'Agency / Service Vendor', minWidth: 200 },
                 {

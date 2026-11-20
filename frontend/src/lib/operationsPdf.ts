@@ -1,7 +1,7 @@
 import { api } from './api'
 import { exportCsv } from './export'
 import { detailSheet, writeWorkbook } from './matrixWorkbook'
-import { auditSummaryExport, type OpsReport, type OpsWellSummary } from './operations'
+import { allocationName, auditSummaryExport, type OpsReport, type OpsWellSummary } from './operations'
 import { formatWatDateTime, formatWatShort, WAT_LABEL, watTodayIso } from './time'
 
 const fmtNum = (v: string | number | null | undefined, suffix = ''): string => {
@@ -40,7 +40,7 @@ export async function printDailyReport(report: OpsReport, brief: string) {
     ],
     [
       'Hole Section / Last Casing',
-      `${report.hole_section_text || (report.hole_size_in ? `${fmtNum(report.hole_size_in)}"` : '—')} · ${report.last_casing_size_in ? `${fmtNum(report.last_casing_size_in)}" @ ${fmtNum(report.last_casing_depth_m, ' m')}` : '—'}`,
+      `${Array.from(new Set(report.blocks.map((b) => b.hole_section_label).filter(Boolean))).join(', ') || (report.hole_size_in ? `${fmtNum(report.hole_size_in)}"` : '—')} · ${report.last_casing_size_in ? `${fmtNum(report.last_casing_size_in)}" @ ${fmtNum(report.last_casing_depth_m, ' m')}` : '—'}`,
     ],
     [
       'Rotating Hrs / DFS / POB',
@@ -102,14 +102,12 @@ export async function printDailyReport(report: OpsReport, brief: string) {
               formatWatShort(b.ended_at),
               b.duration_minutes,
               b.hole_section_label || '—',
-              b.phase_label || b.source_phase_label || '—',
+              b.phase_label || '—',
               b.sub_phase_label || '—',
-              b.activity_label || b.source_activity_label || b.source_activity_code || '—',
-              b.allocation,
-              b.cause_label || b.cause_code || '—',
-              b.operation_code
-                ? `${b.operation_code}${b.operation_name ? ` — ${b.operation_name}` : ''}`
-                : '—',
+              b.activity_label || '—',
+              allocationName(b.allocation),
+              b.cause_label || '—',
+              b.operation_name || '—',
               b.responsible_party || '—',
               b.responsible_agency_label || '—',
               b.depth_from_m || b.depth_to_m ? `${fmtNum(b.depth_from_m)}–${fmtNum(b.depth_to_m)}` : '—',
@@ -238,10 +236,10 @@ export async function exportWellSummaryPdf(summary: OpsWellSummary) {
             head: ['Class', 'Alloc', 'Agency / Vendor', 'Code', 'Cause', 'Events', 'Hours', 'Days', '% Total', '% NPT', 'Sample Reason'],
             body: summary.pt_npt_breakdown.map((r) => [
               r.classification,
-              r.allocation,
+              allocationName(r.allocation),
               r.responsible_party,
               r.code,
-              r.cause_code || '—',
+              r.cause || '—',
               r.events,
               fmtNum(r.hours),
               fmtNum(r.days),
@@ -279,21 +277,26 @@ export async function exportWellSummaryPdf(summary: OpsWellSummary) {
         title: `5. Chronological Activity Log (${summary.timezone_label})`,
         tables: [
           {
-            head: ['#', 'From (WAT)', 'To (WAT)', 'Hrs', 'Cum d', 'Phase', 'Class/Alloc', 'Agency', 'MD (m)', 'TVD (m)', 'Operation'],
+            head: ['#', 'From (WAT)', 'To (WAT)', 'Hrs', 'Cum d', 'Hole Section', 'Phase', 'Sub-Phase', 'Activity', 'Allocation', 'Cause', 'Operations', 'Agency', 'MD (m)', 'TVD (m)', 'Operation'],
             body: summary.activities.map((a) => [
               a.line_no,
               a.start_wat,
               a.end_wat,
               fmtNum(a.duration_hours),
               fmtNum(a.cum_days),
-              a.phase_code || '—',
-              `${a.classification}/${a.allocation}`,
+              a.hole_section_label || '—',
+              a.phase_label || '—',
+              a.sub_phase_label || '—',
+              a.activity_label || '—',
+              allocationName(a.allocation),
+              a.cause || '—',
+              a.operation_label || '—',
               a.responsible_party || '—',
               a.depth_from_m != null || a.depth_to_m != null ? `${fmtNum(a.depth_from_m)}–${fmtNum(a.depth_to_m)}` : '—',
               a.tvd_from_m != null || a.tvd_to_m != null ? `${fmtNum(a.tvd_from_m)}–${fmtNum(a.tvd_to_m)}` : '—',
               a.narrative,
             ]),
-            wide: [7, 10],
+            wide: [15],
           },
         ],
       },
@@ -416,7 +419,7 @@ export async function exportWellSummaryXlsx(summary: OpsWellSummary) {
         { key: 'activity_label', label: 'Activity' },
         { key: 'activity_type', label: 'Activity Type' },
         { key: 'allocation', label: 'Allocation' },
-        { key: 'cause_code', label: 'Cause' },
+        { key: 'cause', label: 'Cause' },
         { key: 'operation_label', label: 'Operations' },
         { key: 'responsible_party', label: 'Agency / Service Vendor' },
         { key: 'responsible_agency_label', label: 'responsible Agency' },
@@ -434,6 +437,7 @@ export async function exportWellSummaryXlsx(summary: OpsWellSummary) {
       ],
       summary.activities.map((a) => ({
         ...a,
+        allocation: allocationName(a.allocation),
         rop_m_per_hr: a.scope === 'completion' ? 'N/A' : a.rop_m_per_hr,
       })) as unknown as Record<string, unknown>[],
     ),
@@ -484,7 +488,7 @@ export async function exportWellSummaryXlsx(summary: OpsWellSummary) {
         { key: 'allocation', label: 'Allocation' },
         { key: 'responsible_party', label: 'Agency / Vendor' },
         { key: 'code', label: 'Code' },
-        { key: 'cause_code', label: 'Cause' },
+        { key: 'cause', label: 'Cause' },
         { key: 'events', label: 'Events', numeric: true },
         { key: 'hours', label: 'Hours', numeric: true },
         { key: 'days', label: 'Days', numeric: true },
@@ -492,7 +496,7 @@ export async function exportWellSummaryXlsx(summary: OpsWellSummary) {
         { key: 'pct_of_npt', label: '% NPT', numeric: true },
         { key: 'sample_reason', label: 'Sample Reason' },
       ],
-      summary.pt_npt_breakdown as unknown as Record<string, unknown>[],
+      summary.pt_npt_breakdown.map((r) => ({ ...r, allocation: allocationName(r.allocation) })) as unknown as Record<string, unknown>[],
     ),
     detailSheet(
       'Phase Summary',
@@ -585,10 +589,10 @@ export async function exportWellSummaryCsv(summary: OpsWellSummary, tab: 'activi
     exportCsv(`${base}-pt-npt-breakdown-${stamp}.csv`, summary.pt_npt_breakdown, [
       { header: 'Well Code', value: () => summary.well_code },
       { header: 'Classification', value: (r) => r.classification },
-      { header: 'Allocation', value: (r) => r.allocation },
+      { header: 'Allocation', value: (r) => allocationName(r.allocation) },
       { header: 'Agency / Vendor', value: (r) => r.responsible_party },
       { header: 'Code', value: (r) => r.code },
-      { header: 'Cause', value: (r) => r.cause_code },
+      { header: 'Cause', value: (r) => r.cause },
       { header: 'Events', value: (r) => str(r.events) },
       { header: 'Hours', value: (r) => str(r.hours) },
       { header: 'Days', value: (r) => str(r.days) },
@@ -663,8 +667,8 @@ export async function exportWellSummaryCsv(summary: OpsWellSummary, tab: 'activi
     { header: 'Sub-Phase', value: (r) => r.sub_phase_label },
     { header: 'Activity', value: (r) => r.activity_label },
     { header: 'Activity Type', value: (r) => r.activity_type },
-    { header: 'Allocation', value: (r) => r.allocation },
-    { header: 'Cause', value: (r) => r.cause_code },
+    { header: 'Allocation', value: (r) => allocationName(r.allocation) },
+    { header: 'Cause', value: (r) => r.cause },
     { header: 'Operations', value: (r) => r.operation_label },
     { header: 'Agency / Service Vendor', value: (r) => r.responsible_party },
     { header: 'responsible Agency', value: (r) => r.responsible_agency_label },
