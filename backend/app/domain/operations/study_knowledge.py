@@ -86,7 +86,7 @@ class StudyEntry:
     symbols: tuple[str, ...] = ()
     applies_to: str = ""
     checks: tuple[str, ...] = ()
-    #: (source key, chapter/section label, printed page)
+    #: One (source id, chapter/section label, printed page) triple per citation.
     pages: tuple[tuple[str, str, str], ...] = ()
     follow_ups: tuple[str, ...] = ()
 
