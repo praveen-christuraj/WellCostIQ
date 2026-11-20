@@ -84,6 +84,7 @@ from app.schemas.operations import (
     OpsWellSummaryOut,
 )
 from app.services.audit import record as audit_record
+from app.services.operations.report_labels import report_labels
 from app.services.operations import analytics as analytics_svc
 from app.services.operations import bulk_assign as bulk_svc
 from app.services.operations import correlations as correlation_svc
@@ -364,57 +365,13 @@ def _block_source_codes(block):
     }
 
 
-def _label_maps(db, organization_id: str) -> dict[str, dict[str, str]]:
-    """id -> "code — name" for every criterion a block prints.
-
-    One query per register per request keeps the register payload readable
-    without N+1 lookups, and every page shows the same label text. The cache
-    lives on the session (one session per request), so a rename in Master Data
-    or the Code Library is visible on the very next response.
-    """
-    from app.models.master_data import Activity, HoleSection, Phase
-    from app.models.operations import OpsAgency, OpsCause, OpsOperation, OpsSubPhase
-
-    cache = db.info.setdefault("ops_label_maps", {})
-    if organization_id in cache:
-        return cache[organization_id]
-
-    def load(model, code_field: str, name_field: str) -> dict[str, str]:
-        rows = db.scalars(select(model).where(model.organization_id == organization_id)).all()
-        return {row.id: f"{getattr(row, code_field)} — {getattr(row, name_field)}" for row in rows}
-
-    maps = {
-        "hole_section": load(HoleSection, "section_code", "section_name"),
-        "phase": load(Phase, "phase_code", "phase_name"),
-        "sub_phase": load(OpsSubPhase, "sub_phase_code", "sub_phase_name"),
-        "activity": load(Activity, "activity_code", "activity_name"),
-        "operation": load(OpsOperation, "operation_code", "operation_name"),
-        "cause": {row.id: f"{row.cause_code} — {row.cause_name}" for row in db.scalars(
-            select(OpsCause).where(OpsCause.organization_id == organization_id)
-        )},
-        "agency": {row.id: row.agency_name for row in db.scalars(
-            select(OpsAgency).where(OpsAgency.organization_id == organization_id)
-        )},
-        "activity_type": {row.id: row.activity_type for row in db.scalars(
-            select(Activity).where(Activity.organization_id == organization_id)
-        )},
-    }
-    cache[organization_id] = maps
-    return maps
-
-
 def _block_out(b, db=None, organization_id: str | None = None) -> dict:
-    labels = _label_maps(db, organization_id) if db is not None and organization_id else None
+    labels = report_labels(db, organization_id) if db is not None and organization_id else None
 
     def lookup(kind: str, ident: str | None) -> str:
         return (labels or {}).get(kind, {}).get(ident or "", "") if ident else ""
 
-    cause_label = ""
-    if b.cause_code and labels:
-        for label in labels["cause"].values():
-            if label.split(" — ")[0].strip().upper() == (b.cause_code or "").strip().upper():
-                cause_label = label
-                break
+    cause_label = lookup("cause", (b.cause_code or "").strip().upper())
     return {
         "id": b.id,
         "organization_id": b.organization_id,
@@ -445,8 +402,8 @@ def _block_out(b, db=None, organization_id: str | None = None) -> dict:
         "sub_phase_label": lookup("sub_phase", b.sub_phase_id),
         "activity_label": lookup("activity", b.activity_id),
         "activity_type": lookup("activity_type", b.activity_id),
-        "operation_code": (b.operation_snapshot or lookup("operation", b.operation_id).split(" — ")[0].strip() or None),
-        "operation_name": lookup("operation", b.operation_id).split(" — ", 1)[-1] if b.operation_id else None,
+        "operation_code": lookup("operation_code", b.operation_id) or None,
+        "operation_name": lookup("operation", b.operation_id) if b.operation_id else None,
         "cause_label": cause_label,
         "responsible_agency_label": lookup("agency", b.responsible_agency_id),
         "classification_evidence": b.classification_evidence or "",

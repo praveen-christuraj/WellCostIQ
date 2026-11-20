@@ -163,6 +163,7 @@ digraph WellCostIQ {
   "backend/app/services/operations/ops_ai.py";
   "backend/app/services/operations/plans.py";
   "backend/app/services/operations/register.py";
+  "backend/app/services/operations/report_labels.py";
   "backend/app/services/operations/reports.py";
   "backend/app/services/operations/scope.py";
   "backend/app/services/operations/settings.py";
@@ -496,6 +497,7 @@ digraph WellCostIQ {
   "backend/app/api/operations.py" -> "backend/app/services/__init__.py";
   "backend/app/api/operations.py" -> "backend/app/services/audit.py";
   "backend/app/api/operations.py" -> "backend/app/services/operations/__init__.py";
+  "backend/app/api/operations.py" -> "backend/app/services/operations/report_labels.py";
   "backend/app/api/operations.py" -> "backend/app/services/operations/study_ai.py";
   "backend/app/api/operations.py" -> "backend/app/services/operations/workbooks.py";
   "backend/app/api/rbac.py" -> "backend/app/api/deps.py";
@@ -909,6 +911,8 @@ digraph WellCostIQ {
   "backend/app/services/operations/plans.py" -> "backend/app/services/operations/scope.py";
   "backend/app/services/operations/register.py" -> "backend/app/models/operations.py";
   "backend/app/services/operations/register.py" -> "backend/app/models/rig_well.py";
+  "backend/app/services/operations/report_labels.py" -> "backend/app/models/master_data.py";
+  "backend/app/services/operations/report_labels.py" -> "backend/app/models/operations.py";
   "backend/app/services/operations/reports.py" -> "backend/app/core/precision.py";
   "backend/app/services/operations/reports.py" -> "backend/app/core/time.py";
   "backend/app/services/operations/reports.py" -> "backend/app/domain/operations/durations.py";
@@ -923,6 +927,7 @@ digraph WellCostIQ {
   "backend/app/services/operations/reports.py" -> "backend/app/services/audit.py";
   "backend/app/services/operations/reports.py" -> "backend/app/services/operations/__init__.py";
   "backend/app/services/operations/reports.py" -> "backend/app/services/operations/plans.py";
+  "backend/app/services/operations/reports.py" -> "backend/app/services/operations/report_labels.py";
   "backend/app/services/operations/scope.py" -> "backend/app/models/operations.py";
   "backend/app/services/operations/scope.py" -> "backend/app/models/rig_well.py";
   "backend/app/services/operations/settings.py" -> "backend/app/models/__init__.py";
@@ -933,12 +938,11 @@ digraph WellCostIQ {
   "backend/app/services/operations/study_ai.py" -> "backend/app/services/audit.py";
   "backend/app/services/operations/summary.py" -> "backend/app/core/precision.py";
   "backend/app/services/operations/summary.py" -> "backend/app/core/time.py";
-  "backend/app/services/operations/summary.py" -> "backend/app/domain/operations/default_codes.py";
   "backend/app/services/operations/summary.py" -> "backend/app/domain/operations/metrics.py";
-  "backend/app/services/operations/summary.py" -> "backend/app/models/master_data.py";
   "backend/app/services/operations/summary.py" -> "backend/app/models/operations.py";
   "backend/app/services/operations/summary.py" -> "backend/app/models/rig_well.py";
   "backend/app/services/operations/summary.py" -> "backend/app/models/vendor_master.py";
+  "backend/app/services/operations/summary.py" -> "backend/app/services/operations/report_labels.py";
   "backend/app/services/operations/workbooks.py" -> "backend/app/core/precision.py";
   "backend/app/services/operations/workbooks.py" -> "backend/app/core/units.py";
   "backend/app/services/operations/workbooks.py" -> "backend/app/domain/operations/normalise.py";
@@ -1370,6 +1374,7 @@ digraph WellCostIQ {
   "frontend/src/components/operations/TimelineEditor.tsx" -> "frontend/src/lib/export.ts";
   "frontend/src/components/operations/TimelineEditor.tsx" -> "frontend/src/lib/operations.ts";
   "frontend/src/components/operations/TimelineEditor.tsx" -> "frontend/src/lib/precision.ts";
+  "frontend/src/components/operations/codeCriteria.ts" -> "frontend/src/lib/operations.ts";
   "frontend/src/components/reports/NptUpaMatrix.tsx" -> "frontend/src/lib/usageReports.ts";
   "frontend/src/components/reports/NptUpaReportView.tsx" -> "frontend/src/components/Common.tsx";
   "frontend/src/components/reports/NptUpaReportView.tsx" -> "frontend/src/components/DataTable.tsx";
@@ -2008,7 +2013,6 @@ digraph WellCostIQ {
   "frontend/src/pages/operations/Library.tsx" -> "frontend/src/components/DataTable.tsx";
   "frontend/src/pages/operations/Library.tsx" -> "frontend/src/components/ImportDialog.tsx";
   "frontend/src/pages/operations/Library.tsx" -> "frontend/src/components/operations/CorrelationsPanel.tsx";
-  "frontend/src/pages/operations/Library.tsx" -> "frontend/src/components/operations/codeCriteria.ts";
   "frontend/src/pages/operations/Library.tsx" -> "frontend/src/context/AuthContext.tsx";
   "frontend/src/pages/operations/Library.tsx" -> "frontend/src/lib/api.ts";
   "frontend/src/pages/operations/Library.tsx" -> "frontend/src/lib/operations.ts";

@@ -1263,6 +1263,11 @@ export const runOpsAiReview = (params: {
     action: 'Run operations AI review',
   })
 
+const allocationNames: Record<string, string> = {
+  PT: 'Productive Time', NPT: 'Non-Productive Time', UPA: 'Unplanned Activity', SP: 'Slow Progress',
+}
+export const allocationName = (value: string) => allocationNames[value] || ''
+
 export type OpsSummaryActivity = {
   id: string
   line_no: number
@@ -1296,6 +1301,7 @@ export type OpsSummaryActivity = {
   classification: string
   allocation: string
   is_productive: boolean
+  cause: string
   cause_code: string
   responsible_party: string
   responsible_agency_label: string
@@ -1354,10 +1360,12 @@ export type OpsSummaryDay = {
 }
 
 export type OpsSummaryBreakdown = {
+  id: string
   classification: string
   allocation: string
   responsible_party: string
   code: string
+  cause: string
   cause_code: string
   events: number
   hours: number
@@ -1368,6 +1376,7 @@ export type OpsSummaryBreakdown = {
 }
 
 export type OpsSummaryPhase = {
+  id: string
   phase: string
   hole_section: string
   events: number
