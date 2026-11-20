@@ -22,7 +22,16 @@ same input can never yield two different numbers in two screens:
 
    Dogleg severity is reported in **degrees per 30 m** (the workspace unit),
    converted from the printed ``°/100 ft`` where that is what the report shows
-   (1 °/100 ft = 0.9843 °/30 m).
+   (1 °/100 ft = 0.9843 °/30 m, i.e. ``× 30 / 30.48`` — never the ft-to-m length
+   factor).
+
+   DLS belongs to an **interval**, not to a station. The first accepted station
+   therefore has no interval and no severity (``None``, drawn as ``—``), which is
+   a different statement from a straight pair whose severity really is zero. An
+   interval whose two directions cannot be trusted (a repeated or decreasing
+   measured depth, an out-of-range angle, near-opposed directions) is reported as
+   invalid rather than as a number, so a chart can say "no interval" where the
+   record does not support one.
 
 2. **Casing-seat sectioning** for the well diagram. A hole section is the
    interval between two casing seats read from the recorded reports (last casing
@@ -40,7 +49,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 DEG = math.pi / 180.0
 #: The workspace reports dogleg severity in °/30 m. The printed OpenWells table
@@ -50,6 +59,16 @@ DEG_PER_100FT_TO_DEG_PER_30M = 0.9842519685
 MIN_STATION_GAP_M = 0.0
 #: Above this the printed dogleg is a data fault rather than a tight turn.
 MAX_PLAUSIBLE_DLS = 90.0
+#: Two tangent directions closer to opposed than this cannot be integrated as a
+#: smooth arc: the minimum-curvature ratio factor explodes and the answer would be
+#: an artefact of rounding. Such a pair is held for review instead of drawn.
+MAX_INTEGRABLE_DOGLEG_DEG = 170.0
+#: A station gap wider than this still integrates, but the result is a coarse
+#: average over the whole gap rather than the curvature inside it, and the chart
+#: says so.
+COARSE_STATION_GAP_M = 100.0
+#: The magnitude the tool and the report use for dogleg severity.
+DLS_REFERENCE_M = 30.0
 
 
 @dataclass(frozen=True)
@@ -79,12 +98,51 @@ class StationResult:
     ns_m: float
     ew_m: float
     vsec_m: float
-    dls_deg_per_30m: float
-    build_deg_per_30m: float
-    turn_deg_per_30m: float
+    #: ``None`` for the first accepted station (there is no interval before it)
+    #: and for a pair the record cannot support. A straight pair is ``0.0``.
+    dls_deg_per_30m: float | None
+    build_deg_per_30m: float | None
+    turn_deg_per_30m: float | None
     #: True where the value came from an arithmetic integration, false where the
     #: record printed it and the integration only reproduced it.
     computed: bool = True
+    #: True for the station that seeds the path. Its position is the tie-on.
+    is_anchor: bool = False
+    #: False where the interval that ends at this station is unusable as a number.
+    interval_valid: bool = True
+    #: Words for a chart or a drawer: why an interval has no severity, or why the
+    #: spacing makes its average coarse.
+    interval_issue: str = ""
+
+
+@dataclass(frozen=True)
+class DoglegInterval:
+    """One survey-to-survey interval, which is the unit DLS is defined on.
+
+    ``beta_deg`` is the angle between the two tangent directions, ``dls`` is that
+    angle normalised to 30 m, and ``recorded_dls`` is the printed/typed severity
+    kept beside the calculated one so the two can be compared rather than one
+    silently replacing the other.
+    """
+
+    from_md_m: float
+    to_md_m: float
+    delta_md_m: float
+    inc1_deg: float
+    azi1_deg: float
+    inc2_deg: float
+    azi2_deg: float
+    beta_deg: float | None
+    dls_deg_per_30m: float | None
+    recorded_dls_deg_per_30m: float | None = None
+    valid: bool = True
+    issue: str = ""
+
+    @property
+    def dls_difference_deg_per_30m(self) -> float | None:
+        if self.dls_deg_per_30m is None or self.recorded_dls_deg_per_30m is None:
+            return None
+        return self.recorded_dls_deg_per_30m - self.dls_deg_per_30m
 
 
 def _norm_azi(value: float) -> float:
@@ -113,23 +171,129 @@ def build_and_turn(inc1: float, azi1: float, inc2: float, azi2: float, delta_md:
     return build, turn
 
 
-def integrate(stations: Sequence[Station], *, vertical_section_azimuth: float = 0.0) -> list[StationResult]:
+def deg_per_100ft_to_deg_per_30m(value: float | None) -> float | None:
+    """Convert a printed ``°/100 ft`` severity to the workspace's ``°/30 m``.
+
+    The factor is ``30 / 30.48`` — the ratio of the two reference lengths — not
+    the ft-to-m length factor (0.3048) and never a per-metre rate.
+    """
+    if value is None or not math.isfinite(value):
+        return None
+    return value * DLS_REFERENCE_M / 30.48
+
+
+def dogleg_interval(
+    from_md_m: float,
+    from_inc_deg: float,
+    from_azi_deg: float,
+    to_md_m: float,
+    to_inc_deg: float,
+    to_azi_deg: float,
+    *,
+    recorded_dls_deg_per_30m: float | None = None,
+) -> DoglegInterval:
+    """Facts for one interval, including whether it may be shown as a number.
+
+    Validity is stated explicitly instead of being encoded as zero: a first
+    station, a repeated measured depth or an out-of-range angle carry
+    ``valid=False`` and the reason, so a caller can print "— no interval" rather
+    than plotting a severity the record does not support.
+    """
+    delta_md = to_md_m - from_md_m
+    values = (from_md_m, from_inc_deg, from_azi_deg, to_md_m, to_inc_deg, to_azi_deg)
+    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in values):
+        return DoglegInterval(
+            from_md_m=from_md_m, to_md_m=to_md_m, delta_md_m=delta_md,
+            inc1_deg=from_inc_deg, azi1_deg=from_azi_deg,
+            inc2_deg=to_inc_deg, azi2_deg=to_azi_deg,
+            beta_deg=None, dls_deg_per_30m=None, recorded_dls_deg_per_30m=recorded_dls_deg_per_30m,
+            valid=False, issue="An interval endpoint is not a finite number.",
+        )
+    if not (0.0 <= from_inc_deg <= 180.0 and 0.0 <= to_inc_deg <= 180.0):
+        return DoglegInterval(
+            from_md_m=from_md_m, to_md_m=to_md_m, delta_md_m=delta_md,
+            inc1_deg=from_inc_deg, azi1_deg=from_azi_deg,
+            inc2_deg=to_inc_deg, azi2_deg=to_azi_deg,
+            beta_deg=None, dls_deg_per_30m=None, recorded_dls_deg_per_30m=recorded_dls_deg_per_30m,
+            valid=False, issue="Inclination is outside 0–180°; the direction cannot be trusted.",
+        )
+    if delta_md <= MIN_STATION_GAP_M:
+        return DoglegInterval(
+            from_md_m=from_md_m, to_md_m=to_md_m, delta_md_m=delta_md,
+            inc1_deg=from_inc_deg, azi1_deg=from_azi_deg,
+            inc2_deg=to_inc_deg, azi2_deg=to_azi_deg,
+            beta_deg=None, dls_deg_per_30m=None, recorded_dls_deg_per_30m=recorded_dls_deg_per_30m,
+            valid=False, issue="The stations do not move down the hole; there is no interval.",
+        )
+    beta = dogleg_angle(from_inc_deg, from_azi_deg, to_inc_deg, to_azi_deg)
+    beta_deg = beta / DEG
+    if beta_deg > MAX_INTEGRABLE_DOGLEG_DEG:
+        return DoglegInterval(
+            from_md_m=from_md_m, to_md_m=to_md_m, delta_md_m=delta_md,
+            inc1_deg=from_inc_deg, azi1_deg=from_azi_deg,
+            inc2_deg=to_inc_deg, azi2_deg=to_azi_deg,
+            beta_deg=beta_deg, dls_deg_per_30m=None,
+            recorded_dls_deg_per_30m=recorded_dls_deg_per_30m,
+            valid=False,
+            issue=(
+                f"The two directions are {beta_deg:.1f}° apart (near-opposed); the arc between them "
+                "is not integrable as a smooth path. Check the azimuth or inclination."
+            ),
+        )
+    dls = beta_deg * DLS_REFERENCE_M / delta_md
+    issue = ""
+    if delta_md > COARSE_STATION_GAP_M:
+        issue = (
+            f"The stations are {delta_md:,.1f} m apart, so this is the average severity over that "
+            "interval, not the curvature inside it."
+        )
+    return DoglegInterval(
+        from_md_m=from_md_m, to_md_m=to_md_m, delta_md_m=delta_md,
+        inc1_deg=from_inc_deg, azi1_deg=from_azi_deg,
+        inc2_deg=to_inc_deg, azi2_deg=to_azi_deg,
+        beta_deg=beta_deg, dls_deg_per_30m=dls,
+        recorded_dls_deg_per_30m=recorded_dls_deg_per_30m,
+        valid=True, issue=issue,
+    )
+
+
+def integrate(
+    stations: Sequence[Station],
+    *,
+    vertical_section_azimuth: float = 0.0,
+    anchor: tuple[float, float, float] | None = None,
+) -> list[StationResult]:
     """Integrate a survey list with minimum curvature.
 
     Stations must already be sorted by MD and de-duplicated. The first station
     seeds the position: TVD/N/S/E/W from the printed values when present, else
-    ``MD * cos(inc)`` for TVD and zero departure, which is the honest answer for a
-    first station at surface. Later stations integrate, and a printed TVD that the
-    integration contradicts by more than a centimetre is kept as data evidence in
-    ``survey_discrepancies`` by the caller — the curve itself stays arithmetic.
+    ``MD * cos(inc)`` for TVD and zero departure. That fallback is a *tie-on
+    assumption*, not a measurement, so the result is marked ``is_anchor`` and the
+    caller exposes the basis in words instead of drawing an assumed surface tie as
+    if it were surveyed.
+
+    ``anchor`` overrides the seed with an explicit (TVD, N, E) tie-on — for
+    example a header's surface coordinates or a reviewed tie-on point. The first
+    station then keeps its own recorded MD/Inc/Azi but starts from that position.
+
+    Later stations integrate, and a printed TVD that the integration contradicts
+    is kept as data evidence in ``survey_discrepancies`` by the caller — the
+    curve itself stays arithmetic. An interval the record cannot support keeps
+    ``dls_deg_per_30m=None`` and carries the reason, so no screen can print a
+    fabricated severity.
     """
     if not stations:
         return []
     out: list[StationResult] = []
     first = stations[0]
-    tvd = first.tvd_m if first.tvd_m is not None else first.md_m * math.cos(first.inc_deg * DEG)
-    ns = first.ns_m if first.ns_m is not None else 0.0
-    ew = first.ew_m if first.ew_m is not None else 0.0
+    if anchor is not None:
+        tvd, ns, ew = anchor
+        anchor_printed = True
+    else:
+        tvd = first.tvd_m if first.tvd_m is not None else first.md_m * math.cos(first.inc_deg * DEG)
+        ns = first.ns_m if first.ns_m is not None else 0.0
+        ew = first.ew_m if first.ew_m is not None else 0.0
+        anchor_printed = first.tvd_m is not None
     out.append(
         StationResult(
             md_m=first.md_m,
@@ -139,10 +303,15 @@ def integrate(stations: Sequence[Station], *, vertical_section_azimuth: float = 
             ns_m=ns,
             ew_m=ew,
             vsec_m=_vertical_section(ns, ew, vertical_section_azimuth),
-            dls_deg_per_30m=0.0,
-            build_deg_per_30m=0.0,
-            turn_deg_per_30m=0.0,
-            computed=first.tvd_m is None,
+            # No interval ends at the first station, so there is no severity. A
+            # zero here would claim the hole was straight, which was not measured.
+            dls_deg_per_30m=None,
+            build_deg_per_30m=None,
+            turn_deg_per_30m=None,
+            computed=not anchor_printed,
+            is_anchor=True,
+            interval_valid=False,
+            interval_issue="First station: no interval above it, so there is no dogleg severity.",
         )
     )
     prev = first
@@ -152,6 +321,10 @@ def integrate(stations: Sequence[Station], *, vertical_section_azimuth: float = 
             # A repeated station carries no displacement; skip rather than
             # invent a horizontal jump from a zero-length interval.
             continue
+        interval = dogleg_interval(
+            prev.md_m, prev.inc_deg, prev.azi_deg,
+            station.md_m, station.inc_deg, station.azi_deg,
+        )
         dogleg = dogleg_angle(prev.inc_deg, prev.azi_deg, station.inc_deg, station.azi_deg)
         if dogleg < 1e-9:
             ratio = 1.0
@@ -172,10 +345,12 @@ def integrate(stations: Sequence[Station], *, vertical_section_azimuth: float = 
                 ns_m=ns,
                 ew_m=ew,
                 vsec_m=_vertical_section(ns, ew, vertical_section_azimuth),
-                dls_deg_per_30m=dogleg / DEG * 30.0 / delta_md,
+                dls_deg_per_30m=interval.dls_deg_per_30m,
                 build_deg_per_30m=build,
                 turn_deg_per_30m=turn,
                 computed=True,
+                interval_valid=interval.valid,
+                interval_issue=interval.issue,
             )
         )
         prev = station
@@ -220,12 +395,17 @@ def trajectory_summary(curve: Sequence[StationResult]) -> dict[str, Any]:
             "closure_azimuth_deg": None,
             "max_inc_deg": None,
             "max_dls_deg_per_30m": None,
+            "max_dls_to_md_m": None,
+            "intervals": 0,
+            "invalid_intervals": 0,
             "vertical_section_m": None,
             "kickoff_md_m": None,
         }
     last = curve[-1]
     kickoff = next((s.md_m for s in curve if s.inc_deg >= 1.0), None)
     displacement = math.hypot(last.ns_m, last.ew_m)
+    measured = [s for s in curve if s.dls_deg_per_30m is not None]
+    peak = max(measured, key=lambda s: s.dls_deg_per_30m or 0.0) if measured else None
     return {
         "stations": len(curve),
         "md_m": round(last.md_m, 3),
@@ -234,10 +414,39 @@ def trajectory_summary(curve: Sequence[StationResult]) -> dict[str, Any]:
         "displacement_m": round(displacement, 3),
         "closure_azimuth_deg": round(survey_azimuth_from_departure(last.ns_m, last.ew_m), 2),
         "max_inc_deg": round(max(s.inc_deg for s in curve), 2),
-        "max_dls_deg_per_30m": round(max(s.dls_deg_per_30m for s in curve), 3),
+        "max_dls_deg_per_30m": round(peak.dls_deg_per_30m, 3) if peak and peak.dls_deg_per_30m is not None else None,
+        # Which interval the peak belongs to: severity is a property of an
+        # interval, so the deepest station of that interval is the reference.
+        "max_dls_to_md_m": round(peak.md_m, 3) if peak else None,
+        "intervals": len(measured),
+        "invalid_intervals": sum(1 for s in curve if not s.interval_valid) - (1 if curve else 0),
         "vertical_section_m": round(last.vsec_m, 3),
         "kickoff_md_m": round(kickoff, 3) if kickoff is not None else None,
     }
+
+
+def interval_table(
+    curve: Sequence[StationResult],
+    recorded_dls: dict[float, float] | None = None,
+) -> list[DoglegInterval]:
+    """One row per interval between accepted stations, in measured-depth order.
+
+    ``recorded_dls`` maps an interval's *deeper* station MD to the severity the
+    record printed or the engineer typed. It is carried beside the calculation so
+    a chart can show both marks and a drawer can quote the difference, without
+    either value being overwritten to force agreement.
+    """
+    recorded = recorded_dls or {}
+    rows: list[DoglegInterval] = []
+    for previous, current in zip(curve, curve[1:]):
+        rows.append(
+            dogleg_interval(
+                previous.md_m, previous.inc_deg, previous.azi_deg,
+                current.md_m, current.inc_deg, current.azi_deg,
+                recorded_dls_deg_per_30m=recorded.get(round(current.md_m, 3)),
+            )
+        )
+    return rows
 
 
 # ---------------------------------------------------------------------------

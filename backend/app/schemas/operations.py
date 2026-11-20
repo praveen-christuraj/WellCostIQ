@@ -939,7 +939,12 @@ class OpsTimeDepthOut(_Strict):
 # Well path and well diagram (vertical section, plan view and casing schematic)
 # ---------------------------------------------------------------------------
 class OpsWellPathStation(_Strict):
-    """One integrated trajectory station. Every value is arithmetic on surveys."""
+    """One integrated trajectory station. Every value is arithmetic on surveys.
+
+    ``dls_deg_per_30m`` is nullable because severity belongs to the interval that
+    *ends* at the station: the first station has no interval above it, and a pair
+    the record cannot support has no number. A straight pair is ``0.0``.
+    """
 
     md_m: float
     inc_deg: float
@@ -948,9 +953,107 @@ class OpsWellPathStation(_Strict):
     ns_m: float
     ew_m: float
     vsec_m: float
-    dls_deg_per_30m: float
-    build_deg_per_30m: float = 0.0
-    turn_deg_per_30m: float = 0.0
+    dls_deg_per_30m: float | None = None
+    build_deg_per_30m: float | None = None
+    turn_deg_per_30m: float | None = None
+    is_anchor: bool = False
+    interval_valid: bool = True
+    interval_issue: str = ""
+
+
+class OpsWellPathInterval(_Strict):
+    """One survey-to-survey interval, the unit dogleg severity is defined on."""
+
+    from_md_m: float
+    to_md_m: float
+    delta_md_m: float
+    inc1_deg: float
+    azi1_deg: float
+    inc2_deg: float
+    azi2_deg: float
+    beta_deg: float | None = None
+    dls_deg_per_30m: float | None = None
+    recorded_dls_deg_per_30m: float | None = None
+    dls_difference_deg_per_30m: float | None = None
+    valid: bool = True
+    issue: str = ""
+
+
+class OpsWellPathSurveyStation(_Strict):
+    """Recorded provenance for one drawn station, for the source drawer."""
+
+    survey_id: str
+    station_no: int | None = None
+    md_m: float
+    inc_deg: float | None = None
+    azi_deg: float | None = None
+    recorded_tvd_m: float | None = None
+    recorded_ns_m: float | None = None
+    recorded_ew_m: float | None = None
+    recorded_vsec_m: float | None = None
+    recorded_dls_deg_per_30m: float | None = None
+    tool: str = ""
+    source: str = ""
+    source_page: int | None = None
+    confidence: float | None = None
+    survey_at: str | None = None
+    report_id: str | None = None
+    report_date: str | None = None
+    report_no: str = ""
+    report_status: str = ""
+    computed_tvd_m: float | None = None
+    tvd_difference_m: float | None = None
+    rows_at_md: int = 1
+
+
+class OpsWellPathSurvey(_Strict):
+    """The survey itself: where it starts and ends, and what it is anchored to."""
+
+    stations: int = 0
+    first_md_m: float | None = None
+    last_md_m: float | None = None
+    first_survey_at: str | None = None
+    last_survey_at: str | None = None
+    sources: list[str] = []
+    tools: list[str] = []
+    anchor: dict[str, Any] | None = None
+    anchor_basis: str = ""
+    intervals: int = 0
+    invalid_intervals: int = 0
+    branch: str = ""
+
+
+class OpsWellPathPosition(_Strict):
+    """The marker on the drawing: survey endpoint, report depth, or the gap."""
+
+    marker_md_m: float | None = None
+    marker_tvd_m: float | None = None
+    marker_tvd_basis: str = ""
+    survey_end_md_m: float | None = None
+    report_depth_md_m: float | None = None
+    gap_m: float | None = None
+    basis: str = ""
+    comparable: bool = False
+    note: str = ""
+
+
+class OpsWellPathSnapshot(_Strict):
+    """One report's positions, kept separate from the trajectory."""
+
+    hole_depth_m: float | None = None
+    hole_tvd_m: float | None = None
+    bit_depth_m: float | None = None
+    off_bottom_m: float | None = None
+    off_bottom_note: str = ""
+    report_id: str | None = None
+    report_date: str | None = None
+    report_no: str = ""
+    status: str = ""
+    verified: bool = False
+    basis: str = ""
+    current_status_text: str = ""
+    tvd_source: str = ""
+    label: str = ""
 
 
 class OpsWellPathSummary(_Strict):
@@ -962,6 +1065,9 @@ class OpsWellPathSummary(_Strict):
     closure_azimuth_deg: float | None = None
     max_inc_deg: float | None = None
     max_dls_deg_per_30m: float | None = None
+    max_dls_to_md_m: float | None = None
+    intervals: int = 0
+    invalid_intervals: int = 0
     vertical_section_m: float | None = None
     kickoff_md_m: float | None = None
     current_md_m: float | None = None
@@ -973,6 +1079,10 @@ class OpsWellPathSummary(_Strict):
     depth_basis: str = ""
     casing_seats: int = 0
     sections_drawn: int = 0
+    survey_end_md_m: float | None = None
+    report_depth_md_m: float | None = None
+    survey_to_report_gap_m: float | None = None
+    position_basis: str = ""
 
 
 class OpsWellDiagramSection(_Strict):
@@ -1013,6 +1123,13 @@ class OpsWellPathOut(_Strict):
     vertical_section_azimuth_deg: float = 0.0
     curve: list[OpsWellPathStation] = []
     summary: OpsWellPathSummary
+    #: Intervals between accepted stations: the DLS chart reads these.
+    intervals: list[OpsWellPathInterval] = []
+    #: Recorded provenance for each drawn station: the source drawer reads these.
+    survey_stations: list[OpsWellPathSurveyStation] = []
+    survey: OpsWellPathSurvey = OpsWellPathSurvey()
+    position: OpsWellPathPosition = OpsWellPathPosition()
+    snapshot: OpsWellPathSnapshot = OpsWellPathSnapshot()
     sections: list[OpsWellDiagramSection] = []
     open_hole: dict[str, Any] | None = None
     casing_seats: list[dict[str, Any]] = []

@@ -1234,6 +1234,8 @@ export default function OperationsReportDetail({
               )}
             </SectionCard>
 
+            <ReportSnapshotStrip report={report} editable={editable} />
+
             <SectionCard
               title="Directional survey stations"
               subtitle="Reported MD, TVD, inclination, azimuth, offsets and dogleg severity relative to the survey datum. Blank means unrecorded, never zero."
@@ -1796,5 +1798,83 @@ export default function OperationsReportDetail({
       </PanelDialog>
       {guard}
     </>
+  )
+}
+
+/**
+ * The report's own positions, drawn as a strip rather than as a trajectory.
+ *
+ * These are the values this sheet records: closing hole depth, its printed TVD,
+ * the reported bit/string depth and the last casing header. They are kept apart
+ * from the survey table on purpose — a report position is an observation at a
+ * stated status, and a survey station is a measured direction. One is never used
+ * as evidence for the other, and nothing here is inferred from the narrative.
+ */
+function ReportSnapshotStrip({ report, editable }: { report: OpsReport; editable: boolean }) {
+  const value = (raw: string | null | undefined) => {
+    if (raw === null || raw === undefined || raw === '') return null
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  const hole = value(report.depth_end_m)
+  const tvd = value(report.tvd_m)
+  const bit = value(report.bit_depth_m)
+  const shoeDepth = value(report.last_casing_depth_m)
+  const start = value(report.depth_start_m)
+  const progress = value(report.progress_m)
+  const comparable = hole !== null && bit !== null && bit <= hole + 0.001
+  const offBottom = comparable && hole !== null && bit !== null ? hole - bit : null
+  const rows: { label: string; value: string; note: string }[] = [
+    {
+      label: 'Closing hole depth',
+      value: hole === null ? '— not recorded' : `${hole.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m MD`,
+      note: `Datum ${report.datum || 'not stated'}${start !== null ? ` · from ${start.toLocaleString()} m` : ''}${progress !== null ? ` · progress ${progress.toLocaleString()} m` : ''}`,
+    },
+    {
+      label: 'Hole TVD (printed)',
+      value: tvd === null ? '— not printed' : `${tvd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m`,
+      note: report.tvd_source ? `Source: ${report.tvd_source}` : 'No source stated for the printed TVD.',
+    },
+    {
+      label: 'Bit / string depth',
+      value: bit === null ? '— not recorded' : `${bit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m MD`,
+      note: bit === null
+        ? 'Missing is not surface and not out of hole.'
+        : offBottom !== null
+          ? `${offBottom.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m off bottom — both figures are on this report`
+          : 'Not comparable with the closing depth on this report; both are shown, neither is corrected.',
+    },
+    {
+      label: 'Last casing (header)',
+      value: shoeDepth === null
+        ? '— not recorded'
+        : `${report.last_casing_size_in ? `${report.last_casing_size_in}"` : 'size —'} @ ${shoeDepth.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m MD`,
+      note: shoeDepth === null
+        ? 'A recorded size without a depth is a shoe with no interval, so no top is drawn.'
+        : 'A shoe only: this is not a complete casing history.',
+    },
+  ]
+  return (
+    <SectionCard
+      title="Report snapshot"
+      subtitle="The positions this report states, kept separate from the survey table. A tool can move up while the hole bottom stays put."
+      action={<Chip size="small" variant="outlined" label={editable ? 'As entered on this report' : 'Saved record'} sx={{ height: 22, fontSize: 10.5 }} />}
+    >
+      <Box display="grid" gap={1.5} gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }}>
+        {rows.map((row) => (
+          <Box key={row.label} sx={{ borderBottom: 1, borderColor: 'divider', pb: 0.75 }}>
+            <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>{row.label}</Typography>
+            <Typography sx={{ fontSize: 13.5, fontWeight: 700 }}>{row.value}</Typography>
+            <Typography sx={{ fontSize: 10.5, color: 'text.secondary', lineHeight: 1.45 }}>{row.note}</Typography>
+          </Box>
+        ))}
+      </Box>
+      {report.current_status && (
+        <Typography sx={{ fontSize: 11, color: 'text.secondary', mt: 1.25 }}>
+          Current status as printed: “{report.current_status}”. Long- and short-string positions stay as printed text;
+          they are not parsed into separate depths without a typed entry.
+        </Typography>
+      )}
+    </SectionCard>
   )
 }
