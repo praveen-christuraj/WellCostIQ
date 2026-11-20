@@ -156,7 +156,7 @@ export function WellDiagram({
       <Box
         component="svg"
         role="img"
-        aria-label={`Well diagram for ${path.well_code}: casing and hole on measured depth, vertical section on true vertical depth`}
+        aria-label={`Well diagram for ${path.well_code}: well construction on measured depth, vertical section on true vertical depth`}
         data-chart-precision="1"
         width={WIDTH}
         height={height}
@@ -169,7 +169,7 @@ export function WellDiagram({
           MD
         </text>
         <text x={CASING_CX} y={12} textAnchor="middle" fontSize={9} fontWeight={700} fill={muted}>
-          CASING &amp; HOLE
+          WELL CONSTRUCTION
         </text>
         <text x={CASING_CX} y={23} textAnchor="middle" fontSize={8} fill={muted}>
           measured depth
@@ -202,6 +202,15 @@ export function WellDiagram({
           m
         </text>
 
+        {/* Ground line at surface: a short hatched rule across the construction */}
+        <g opacity={0.75}>
+          <line x1={CASING_CX - 44} x2={CASING_CX + 44} y1={yMd(0)} y2={yMd(0)} stroke={muted} strokeWidth={1.4} />
+          {[-36, -24, -12, 0, 12, 24, 36].map((dx) => (
+            <line key={dx} x1={CASING_CX + dx - 4} x2={CASING_CX + dx + 2} y1={yMd(0)} y2={yMd(0) + 6} stroke={muted} strokeWidth={0.8} />
+          ))}
+          <text x={CASING_CX - 50} y={yMd(0) + 3} textAnchor="end" fontSize={8} fill={muted}>surface</text>
+        </g>
+
         {/* Casing spine: the construction is drawn about a central axis */}
         <line x1={CASING_CX} x2={CASING_CX} y1={TOP} y2={TOP + plotHeight} stroke={muted} strokeWidth={1} opacity={0.6} />
         {path.sections.length === 0 && (
@@ -217,7 +226,7 @@ export function WellDiagram({
           return (
             <g key={`${row.casing_label}-${row.from_depth_m}`}>
               <title>{`${row.casing_label} casing: ${row.from_depth_m.toLocaleString()} m MD → ${row.to_depth_m.toLocaleString()} m MD (${row.source}); shoe at ${row.to_depth_m.toLocaleString()} m MD`}</title>
-              <rect x={CASING_CX - width / 2} y={top} width={width} height={barHeight} fill="none" stroke={accent} strokeWidth={1.6} />
+              <rect x={CASING_CX - width / 2} y={top} width={width} height={barHeight} fill={accent} fillOpacity={0.14} stroke={accent} strokeWidth={1.6} />
               <rect x={CASING_CX - width / 2 + 1.4} y={top} width={Math.max(1.5, width * 0.22)} height={barHeight} fill={accent} opacity={0.22} />
               <rect x={CASING_CX + width / 2 - 1.4 - Math.max(1.5, width * 0.22)} y={top} width={Math.max(1.5, width * 0.22)} height={barHeight} fill={accent} opacity={0.22} />
               {/* The shoe, drawn as the standard angled wedge */}
@@ -231,21 +240,18 @@ export function WellDiagram({
           )
         })}
 
-        {/* Below the last shoe: open hole only when the record supports it */}
+        {/* Below the last shoe: open hole only when the record supports it.
+            Drawn as two thin parallel walls about the centreline — never a
+            casing-coloured line, so uncased hole cannot read as pipe. */}
         {openHole ? (
           <g>
-            <title>{`Open hole ${openHole.from_depth_m} → ${openHole.to_depth_m} m MD`}</title>
-            <line
-              x1={CASING_CX - 13}
-              x2={CASING_CX + 13}
-              y1={yMd(openHole.from_depth_m)}
-              y2={yMd(openHole.to_depth_m)}
-              stroke={accent}
-              strokeWidth={0.9}
-              strokeDasharray="3 3"
-            />
-            <text x={CASING_CX + 30} y={yMd(openHole.to_depth_m) - 4} fontSize={8} fill={muted}>
-              open hole
+            <title>{`Open hole (uncased) ${openHole.from_depth_m} → ${openHole.to_depth_m} m MD`}</title>
+            <line x1={CASING_CX - 11} x2={CASING_CX - 11} y1={yMd(openHole.from_depth_m)} y2={yMd(openHole.to_depth_m)} stroke={muted} strokeWidth={1.3} />
+            <line x1={CASING_CX + 11} x2={CASING_CX + 11} y1={yMd(openHole.from_depth_m)} y2={yMd(openHole.to_depth_m)} stroke={muted} strokeWidth={1.3} />
+            {/* ragged wall ends at the current hole bottom */}
+            <line x1={CASING_CX - 11} x2={CASING_CX + 11} y1={yMd(openHole.to_depth_m)} y2={yMd(openHole.to_depth_m)} stroke={muted} strokeWidth={1} strokeDasharray="2 2" />
+            <text x={CASING_CX + 30} y={(yMd(openHole.from_depth_m) + yMd(openHole.to_depth_m)) / 2 + 3} fontSize={8} fill={muted}>
+              open hole (uncased)
             </text>
           </g>
         ) : deepest && holeDepth !== null && holeDepth <= deepest.to_depth_m + 0.5 ? (
@@ -398,12 +404,13 @@ export function WellDiagram({
         {!compact && (
           <g fontSize={8} fill={muted}>
             <g transform={`translate(${MD_LABEL_X}, ${height - 44})`}>
-              <rect x={0} y={-6} width={9} height={9} fill="none" stroke={accent} strokeWidth={1.2} />
-              <text x={13} y={2}>casing</text>
-              <path d="M 66 -6 L 71 0 L 76 -6" fill="none" stroke={accent} strokeWidth={1.2} />
-              <text x={81} y={2}>shoe</text>
-              <line x1={118} x2={128} y1={-1} y2={-1} stroke={accent} strokeDasharray="3 2" />
-              <text x={133} y={2}>open hole</text>
+              <rect x={0} y={-6} width={9} height={9} fill={accent} fillOpacity={0.14} stroke={accent} strokeWidth={1.2} />
+              <text x={13} y={2}>casing (cased hole)</text>
+              <path d="M 132 -6 L 137 0 L 142 -6" fill="none" stroke={accent} strokeWidth={1.2} />
+              <text x={147} y={2}>shoe</text>
+              <line x1={186} x2={186} y1={-6} y2={3} stroke={muted} strokeWidth={1.1} />
+              <line x1={192} x2={192} y1={-6} y2={3} stroke={muted} strokeWidth={1.1} />
+              <text x={198} y={2}>open hole (uncased)</text>
             </g>
             <g transform={`translate(${MD_LABEL_X}, ${height - 28})`}>
               <line x1={0} x2={14} y1={-3} y2={-3} stroke={brass} strokeDasharray="4 2" strokeWidth={1.1} />

@@ -3,13 +3,13 @@ import type { EChartsReactProps } from 'echarts-for-react'
 import ReactEChartsCore from 'echarts-for-react/esm/core'
 import * as echarts from 'echarts/core'
 import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts'
-import { AxisPointerComponent, GraphicComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { AxisPointerComponent, GraphicComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from 'echarts/components'
 import { SVGRenderer } from 'echarts/renderers'
 import { registerChartOption } from '../../lib/chartExport'
 
 echarts.use([
   BarChart, LineChart, PieChart, ScatterChart,
-  AxisPointerComponent, GraphicComponent, GridComponent, LegendComponent, TooltipComponent,
+  AxisPointerComponent, GraphicComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent,
   SVGRenderer,
 ])
 

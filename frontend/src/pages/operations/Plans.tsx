@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AddOutlined, LockOpenOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, Stack, TextField, Typography } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
 import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag, type Tone } from '../../components/Common'
 import { Caution, RestoreCautions } from '../../components/ui/Caution'
@@ -22,8 +22,10 @@ import {
   getOpsPlan,
   reopenPlan,
   studyTimeline,
+  timelineRollup,
   updatePlan,
   type OpsPlan,
+  type OpsTimelineRollup,
 } from '../../lib/operations'
 import {
   formatWatDateTime,
@@ -477,6 +479,45 @@ function PlanView({
   onReopen?: () => void
 }) {
   const { can } = useAuth()
+  const [rollup, setRollup] = useState<OpsTimelineRollup | null>(null)
+  const [rollupError, setRollupError] = useState('')
+  useEffect(() => {
+    let current = true
+    setRollup(null)
+    setRollupError('')
+    timelineRollup(plan.id)
+      .then((r) => {
+        if (current) setRollup(r)
+      })
+      .catch((e: unknown) => {
+        if (current) setRollupError((e as Error).message)
+      })
+    return () => {
+      current = false
+    }
+  }, [plan.id])
+  /** The programme rows, enriched with what the logs actually recorded per code. */
+  const rows = useMemo<Array<(typeof plan.items)[number] & Partial<import('../../lib/operations').OpsTimelineRollupCode>>>(() => {
+    if (!rollup) return plan.items.map((item) => ({ ...item }))
+    const byCode = new Map(rollup.codes.map((c) => [c.sequence_no, c]))
+    return plan.items.map((item) => {
+      const code = byCode.get(item.sequence_no)
+      return {
+        ...item,
+        actual_hours: code?.actual_hours ?? null,
+        variance_hours: code?.variance_hours ?? null,
+        variance_days: code?.variance_days ?? null,
+        comparison: code?.comparison,
+        line_count: code?.line_count,
+        report_count: code?.report_count,
+      }
+    })
+  }, [plan.items, rollup])
+  const fmt = (value: string | number | null | undefined) => {
+    if (value === null || value === undefined || value === '') return '—'
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed.toFixed(2) : String(value)
+  }
   return (
     <PanelDialog
       open
@@ -504,8 +545,30 @@ function PlanView({
           {plan.reopen_reason ? ` — Reason: ${plan.reopen_reason}` : ''}.
         </Caution>
       )}
+      {rollupError && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Planned-vs-actual per code could not be loaded: {rollupError}
+        </Alert>
+      )}
+      {rollup && (
+        <Box display="flex" gap={1} flexWrap="wrap" alignItems="center" mb={1.5}>
+          <Chip size="small" variant="outlined" label={`Planned ${fmt(rollup.planned_hours)} h`} />
+          <Chip size="small" variant="outlined" label={`Actual ${fmt(rollup.actual_hours)} h`} />
+          <Chip
+            size="small"
+            color={rollup.comparison === 'ahead' ? 'success' : rollup.comparison === 'behind' ? 'warning' : 'default'}
+            label={`Variance ${Number(rollup.variance_hours ?? 0) >= 0 ? '+' : ''}${fmt(rollup.variance_hours)} h · ${rollup.comparison === 'ahead' ? 'lead' : rollup.comparison === 'behind' ? 'lag' : 'on plan'}`}
+          />
+          {rollup.uncoded_lines > 0 && (
+            <Chip size="small" color="warning" variant="outlined" label={`${rollup.uncoded_lines} logged line(s) without a code — excluded`} />
+          )}
+          <Typography variant="caption" color="text.secondary" sx={{ width: '100%' }}>
+            Hours are summed per sequence code across every report logged against this baseline. Variance is planned − actual; positive is a lead.
+          </Typography>
+        </Box>
+      )}
       <DataTable
-        rows={plan.items}
+        rows={rows}
         exportName={`${plan.well_code}-${plan.scope}-timeline-v${plan.version_no}`}
         canExport={can('ops-plan:export')}
         onExport={auditExport('plans')}
@@ -513,7 +576,15 @@ function PlanView({
           { field: 'sequence_no', headerName: 'Sequence' },
           { field: 'description', headerName: 'Activity', minWidth: 250, flex: 3, tooltipField: 'description' },
           { field: 'target_depth_m', headerName: 'Target MD (m)' },
-          { field: 'planned_hours', headerName: 'Planned hours' },
+          { field: 'planned_hours', headerName: 'Planned hours', valueFormatter: (p) => fmt(p.value) },
+          { field: 'actual_hours', headerName: 'Actual (h)', valueGetter: ({ data }) => (data?.actual_hours === null || data?.actual_hours === undefined ? '—' : Number(data.actual_hours).toFixed(2)) },
+          { field: 'variance_hours', headerName: 'Variance (h)', minWidth: 110, valueGetter: ({ data }) => (data?.variance_hours === null || data?.variance_hours === undefined ? '—' : `${Number(data.variance_hours) >= 0 ? '+' : ''}${Number(data.variance_hours).toFixed(2)}`) },
+          { field: 'comparison', headerName: 'Lead / Lag', width: 110, valueGetter: ({ data }) => {
+              if (data?.comparison === undefined) return '—'
+              return data.comparison === 'ahead' ? 'Lead' : data.comparison === 'behind' ? 'Lag' : 'On plan'
+            } },
+          { field: 'line_count', headerName: 'Lines', width: 80, valueGetter: ({ data }) => (data?.line_count === undefined ? '—' : String(data.line_count)) },
+          { field: 'report_count', headerName: 'Logs', width: 80, valueGetter: ({ data }) => (data?.report_count === undefined ? '—' : String(data.report_count)) },
           { field: 'cum_planned_days', headerName: 'Cumulative days' },
         ]}
       />

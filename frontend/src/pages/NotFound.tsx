@@ -22,7 +22,7 @@ export default function NotFound() {
 
   return <>
     <PageHeading
-      eyebrow="WELLCOSTIQ / PAGE NOT FOUND"
+      eyebrow="WELLSENSIQ / PAGE NOT FOUND"
       title="This page does not exist"
       subtitle="The address was not recognised, so nothing was loaded or changed. Pick a destination below, or check the link you followed."
     />

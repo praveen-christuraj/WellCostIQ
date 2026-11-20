@@ -65,6 +65,11 @@ from app.schemas.operations import (
     OpsSubPhaseIn,
     OpsPlanItemIn,
     OpsPlanStudyRequest,
+    OpsSeqCodeApplyOut,
+    OpsSeqCodeIn,
+    OpsSeqCodePreviewOut,
+    OpsReportTimelineCodesOut,
+    OpsTimelineRollupOut,
     OpsPlanUpdateIn,
     OpsPlanVersionIn,
     OpsPlanVersionOut,
@@ -78,6 +83,7 @@ from app.schemas.operations import (
     OpsSettingsIn,
     OpsSettingsOut,
     OpsStudyOut,
+    OpsSurveyPreviewOut,
     OpsTimeDepthOut,
     OpsTimelineReviewIn,
     OpsTimelineReviewOut,
@@ -98,6 +104,7 @@ from app.services.operations import ops_ai as ops_ai_svc
 from app.services.operations import plans as plans_svc
 from app.services.operations import register as register_svc
 from app.services.operations import reports as reports_svc
+from app.services.operations import seq_codes as seq_codes_svc
 from app.services.operations import scope as scope_svc
 from app.services.operations import settings as settings_svc
 from app.services.operations import summary as summary_svc
@@ -453,6 +460,7 @@ def _block_out(b, db=None, organization_id: str | None = None) -> dict:
         "timeline_reviewed_by": getattr(b, "timeline_reviewed_by", "") or "",
         "timeline_reviewed_at": getattr(b, "timeline_reviewed_at", None),
         # Plan-vs-actual hours: the figures the engineer compares and edits.
+        "timeline_code": getattr(b, "timeline_code", None),
         "timeline_plan_item_id": getattr(b, "timeline_plan_item_id", None),
         "timeline_plan_step_no": getattr(b, "timeline_plan_step_no", None),
         "timeline_plan_label": getattr(b, "timeline_plan_label", "") or "",
@@ -827,6 +835,46 @@ def review_timeline(report_id: str, data: OpsTimelineReviewIn, request: Request,
     return reports_svc.review_timeline(db, user.organization_id, report_id, data, user, request)
 
 
+@router.get(
+    "/reports/{report_id}/timeline-codes",
+    response_model=OpsReportTimelineCodesOut,
+    dependencies=[Depends(require("ops-report:read"))],
+)
+def report_timeline_codes(report_id: str, db: Db, user: Current):
+    """The baseline programme this report is compared against, and its linkable codes."""
+    return seq_codes_svc.report_codes(db, user.organization_id, report_id)
+
+
+@router.post(
+    "/reports/timeline-codes/preview",
+    response_model=OpsSeqCodePreviewOut,
+    dependencies=[Depends(require("ops-report:update"))],
+)
+def timeline_codes_preview(data: OpsSeqCodeIn, db: Db, user: Current):
+    """Show what linking the selected lines to one sequence code would do."""
+    return seq_codes_svc.preview(db, user.organization_id, data)
+
+
+@router.post(
+    "/reports/timeline-codes/apply",
+    response_model=OpsSeqCodeApplyOut,
+    dependencies=[Depends(require("ops-report:update"))],
+)
+def timeline_codes_apply(data: OpsSeqCodeIn, request: Request, db: Db, user: Current):
+    """Link the selected lines to one sequence code, then recompute plan-vs-timeline."""
+    return seq_codes_svc.apply(db, user.organization_id, data, user, request)
+
+
+@router.get(
+    "/plans/{plan_id}/timeline-rollup",
+    response_model=OpsTimelineRollupOut,
+    dependencies=[Depends(require("ops-plan:read"))],
+)
+def plan_timeline_rollup(plan_id: str, db: Db, user: Current):
+    """Planned vs actual hours per sequence code, across the baseline's logs."""
+    return seq_codes_svc.timeline_rollup(db, user.organization_id, plan_id, user)
+
+
 @router.post(
     "/reports/bulk-assign/preview",
     response_model=OpsBulkAssignPreviewOut,
@@ -844,6 +892,37 @@ def bulk_assign_preview(data: OpsBulkAssign, db: Db, user: Current):
 )
 def bulk_assign(data: OpsBulkAssign, request: Request, db: Db, user: Current):
     return bulk_svc.apply(db, user.organization_id, data, user, request)
+
+
+@router.post(
+    "/reports/{report_id}/surveys/preview",
+    response_model=OpsSurveyPreviewOut,
+    dependencies=[Depends(require("ops-report:import"))],
+)
+async def preview_surveys(
+    report_id: str,
+    request: Request,
+    db: Db,
+    user: Current,
+    file: Annotated[UploadFile, File()],
+):
+    """Study an uploaded survey file and return the stations it contains.
+
+    Read-only: the engineer reviews the stations in the dialog and applies them
+    through the ordinary report save, so the review-before-write rule holds for
+    Excel, CSV and PDF alike.
+    """
+    from app.services.operations import survey_import
+
+    reports_svc.get_report(db, user.organization_id, report_id)  # ensure the report exists
+    limit = docs_svc.upload_limit(db, user.organization_id)
+    content = await file.read(limit + 1)
+    if len(content) > limit:
+        raise HTTPException(413, "The survey file exceeds the upload limit for this workspace.")
+    try:
+        return survey_import.survey_preview(file.filename or "survey", content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post(

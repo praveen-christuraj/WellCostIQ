@@ -324,6 +324,14 @@ class OpsActivityBlockIn(_Strict):
     timeline_comparison: Literal["ahead", "behind", "on"] = "on"
     timeline_review_state: Literal["suggested", "accepted", "edited", "rejected"] = "suggested"
     timeline_note: str = Field(default="", max_length=500)
+    #: Sequence code of the programme activity this line logs ("" clears the link).
+    timeline_code: str | None = Field(default=None, max_length=20)
+
+    @field_validator("timeline_code", mode="before")
+    @classmethod
+    def _blank_code_to_none(cls, value: Any) -> Any:
+        value = _trim(value)
+        return value or None
 
 
 class OpsActivityBlockOut(OpsActivityBlockIn):
@@ -590,6 +598,44 @@ class OpsSurveyIn(_Strict):
     dls_deg_per_30m: Decimal3 | None = None
     tool: str = Field(default="", max_length=100)
     source: str = Field(default="manual", max_length=20)
+    survey_at: datetime | None = None
+
+
+class OpsSurveyPreviewStation(_Strict):
+    """A station as read from a file, with the file's own numbers kept as-is.
+
+    Range limits are deliberately not enforced here: the point of the preview is
+    to *show* what the file contains — including figures that are obviously off —
+    so the engineer can drop or correct them before applying anything. The
+    limits are enforced again when the stations are saved onto the report.
+    """
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+    station_no: int = 0
+    md_m: Decimal | None = None
+    tvd_m: Decimal | None = None
+    inc_deg: Decimal | None = None
+    azi_deg: Decimal | None = None
+    ns_m: Decimal | None = None
+    ew_m: Decimal | None = None
+    vsec_m: Decimal | None = None
+    dls_deg_per_30m: Decimal | None = None
+    tool: str = ""
+    source: str = ""
+    survey_at: datetime | None = None
+
+
+class OpsSurveyPreviewOut(_Strict):
+    """What the study engine read out of a survey file. Nothing is written."""
+
+    format: Literal["csv", "excel", "pdf"]
+    file_name: str
+    unit: Literal["m", "ft"]
+    detected_sheet: str | None = None
+    sheets: list[str] = Field(default_factory=list)
+    station_count: int
+    stations: list[OpsSurveyPreviewStation] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class OpsReportSaveIn(_Strict):
@@ -634,6 +680,82 @@ class OpsBulkAssignPreviewOut(_Strict):
     skipped: list[dict] = []
     summary: str = ""
     assigned_fields: list[str] = []
+
+
+class OpsTimelineCodeOut(_Strict):
+    """One programme activity as a link target for daily-report lines."""
+
+    sequence_no: int
+    description: str
+    planned_hours: Decimal | None = None
+    target_depth_m: Decimal | None = None
+    cum_planned_days: Decimal | None = None
+
+
+class OpsReportTimelineCodesOut(_Strict):
+    """The baseline programme a report is compared against, and its codes."""
+
+    plan_version_id: str | None = None
+    plan_label: str = ""
+    plan_status: str = ""
+    basis: str = ""
+    codes: list[OpsTimelineCodeOut] = Field(default_factory=list)
+
+
+class OpsSeqCodeIn(_Strict):
+    """Link the selected daily-report lines to one programme sequence code."""
+
+    block_ids: list[str] = Field(min_length=1, max_length=500)
+    sequence_no: int = Field(ge=1)
+
+
+class OpsSeqCodeSkip(_Strict):
+    block_id: str
+    sequence_no: int | None = None
+    reason: str
+
+
+class OpsSeqCodePreviewOut(_Strict):
+    sequence_no: int
+    description: str = ""
+    planned_hours: Decimal | None = None
+    eligible: int = 0
+    lines: list[dict] = Field(default_factory=list)
+    skipped: list[OpsSeqCodeSkip] = Field(default_factory=list)
+    summary: str = ""
+
+
+class OpsSeqCodeApplyOut(_Strict):
+    applied_count: int = 0
+    sequence_no: int
+    skipped: list[OpsSeqCodeSkip] = Field(default_factory=list)
+    summary: str = ""
+
+
+class OpsTimelineRollupCodeOut(_Strict):
+    sequence_no: int
+    description: str
+    planned_hours: Decimal | None = None
+    target_depth_m: Decimal | None = None
+    actual_hours: Decimal | None = None
+    variance_hours: Decimal | None = None
+    variance_days: Decimal | None = None
+    comparison: Literal["ahead", "behind", "on"] = "on"
+    line_count: int = 0
+    report_count: int = 0
+
+
+class OpsTimelineRollupOut(_Strict):
+    """Planned vs actual hours per sequence code, across the baseline's logs."""
+
+    plan_version_id: str
+    plan_label: str = ""
+    actual_hours: Decimal | None = None
+    planned_hours: Decimal | None = None
+    variance_hours: Decimal | None = None
+    comparison: Literal["ahead", "behind", "on"] = "on"
+    codes: list[OpsTimelineRollupCodeOut] = Field(default_factory=list)
+    uncoded_lines: int = 0
 
 
 class OpsTimelineHoursEdit(_Strict):

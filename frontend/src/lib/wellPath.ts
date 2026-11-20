@@ -231,3 +231,27 @@ export function isSurveyed(curve: OpsWellPathStation[], md: number | null): bool
   if (md === null || !curve.length) return false
   return md >= curve[0].md_m - 1e-6 && md <= curve[curve.length - 1].md_m + 1e-6
 }
+
+/**
+ * Nice measured-depth ticks inside [from, to] for MD annotations on the
+ * drawings. A tick a reader cannot match to the axis is worse than none, so the
+ * step is a human round number (25 m up to 10 000 m) and the count stays small.
+ */
+export function mdTickStep(span: number): number {
+  if (!Number.isFinite(span) || span <= 0) return 100
+  const steps = [25, 50, 100, 250, 500, 1000, 1500, 2000, 2500, 5000, 10000]
+  for (const step of steps) if (span / step <= 5) return step
+  return 20000
+}
+
+export function mdTicks(from: number, to: number, max = 6): number[] {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return []
+  const step = mdTickStep(to - from)
+  const ticks: number[] = []
+  const first = Math.ceil(from / step - 1e-9) * step
+  for (let value = first; value <= to + 1e-9; value += step) {
+    ticks.push(Number(value.toFixed(6)))
+    if (ticks.length >= max) break
+  }
+  return ticks
+}

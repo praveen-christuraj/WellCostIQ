@@ -545,6 +545,7 @@ class OpsActivityBlock(Base):
         Index("ix_ops_blocks_org_report_seq", "organization_id", "report_id", "sequence_no"),
         Index("ix_ops_blocks_org_report", "organization_id", "report_id"),
         Index("ix_ops_blocks_org_classification", "organization_id", "classification"),
+        Index("ix_ops_blocks_org_timeline_code", "organization_id", "timeline_code"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
@@ -581,17 +582,24 @@ class OpsActivityBlock(Base):
     #     variance (hours) = planned hours - actual hours
     #     lead  = variance > 0 (finished early)   lag = variance < 0 (overran)
     #
-    # The system proposes: planned hours from the active programme's matching
-    # activity, actual hours from this block's own logged duration. An engineer
-    # may edit the actual hours (the plan is the baseline and is never rewritten
-    # by a daily log), and the variance recomputes from the edited value so every
-    # later day, chart and summary follows the engineer's figure.
+    # Lead/lag is correlated by SEQUENCE CODE, never by description text: every
+    # line of the baseline programme carries a sequence code (its ``sequence_no``),
+    # and each daily-report line may carry the code of the activity it logs.
+    # The system sums the hours of all lines sharing a code and compares the
+    # total with the programme's planned hours for that code. An engineer may
+    # edit a line's actual hours (the plan is the baseline and is never
+    # rewritten by a daily log), and the group total recomputes from the edited
+    # value so every later day, chart and summary follows the engineer's figure.
     #
     # ``timeline_plan_item_id`` is the programme row being compared, so a review
     # survives a re-suggest even when the description text was re-worded.
     timeline_plan_item_id: Mapped[str | None] = mapped_column(
         ForeignKey("ops_plan_items.id", ondelete="SET NULL"), nullable=True
     )
+    #: The programme activity this line logs, by sequence code. Assigned by the
+    #: engineer (or the bulk action), never by description matching; it is the
+    #: key the per-code hour sums use.
+    timeline_code: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
     timeline_plan_step_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     timeline_plan_label: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     #: Planned hours from the programme (Decimal3).
