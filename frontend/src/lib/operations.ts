@@ -40,6 +40,82 @@ export type OpsSurvey = {
   ew_m: string | null
   tool: string
   source: string
+  survey_at?: string | null
+}
+
+export type OpsTimelineCode = {
+  sequence_no: number
+  description: string
+  planned_hours: string | null
+  target_depth_m: string | null
+  cum_planned_days: string | null
+}
+
+export type OpsReportTimelineCodes = {
+  plan_version_id: string | null
+  plan_label: string
+  plan_status: string
+  basis: string
+  codes: OpsTimelineCode[]
+}
+
+export type OpsSeqCodePreview = {
+  sequence_no: number
+  description: string
+  planned_hours: string | null
+  eligible: number
+  lines: {
+    block_id: string
+    report_id: string
+    sequence_no: number
+    before: string | null
+    after: string
+    narrative: string
+  }[]
+  skipped: { block_id: string; sequence_no: number | null; reason: string }[]
+  summary: string
+}
+
+export type OpsSeqCodeApplyOut = {
+  applied_count: number
+  sequence_no: number
+  skipped: { block_id: string; sequence_no: number | null; reason: string }[]
+  summary: string
+}
+
+export type OpsTimelineRollupCode = {
+  sequence_no: number
+  description: string
+  planned_hours: string | null
+  target_depth_m: string | null
+  actual_hours: string | null
+  variance_hours: string | null
+  variance_days: string | null
+  comparison: 'ahead' | 'behind' | 'on'
+  line_count: number
+  report_count: number
+}
+
+export type OpsTimelineRollup = {
+  plan_version_id: string
+  plan_label: string
+  actual_hours: string | null
+  planned_hours: string | null
+  variance_hours: string | null
+  comparison: 'ahead' | 'behind' | 'on'
+  codes: OpsTimelineRollupCode[]
+  uncoded_lines: number
+}
+
+export type OpsSurveyPreview = {
+  format: 'csv' | 'excel' | 'pdf'
+  file_name: string
+  unit: 'm' | 'ft'
+  detected_sheet: string | null
+  sheets: string[]
+  station_count: number
+  stations: OpsSurvey[]
+  warnings: string[]
 }
 
 export type OpsReport = {
@@ -223,6 +299,8 @@ export type OpsBlock = {
   timeline_actual_edited?: boolean
   timeline_edited_by?: string
   timeline_edited_at?: string | null
+  /** Sequence code of the programme activity this line logs. */
+  timeline_code?: string | null
   is_deleted: boolean
   created_at: string
   updated_at: string
@@ -1264,6 +1342,10 @@ export function uploadDocument(file: File, fields: Record<string, string>) {
   return uploadFiles<OpsDocument>('/operations/documents/upload', [file], fields, 'file')
 }
 
+export function previewSurvey(reportId: string, file: File) {
+  return uploadFiles<OpsSurveyPreview>(`/operations/reports/${reportId}/surveys/preview`, [file], {}, 'file')
+}
+
 export function extractReport(document_id: string, report_date: string, reportId?: string, use_ai = false) {
   return api<OpsReport>(reportId ? `/operations/reports/${reportId}/extract` : '/operations/reports/from-document', {
     method: 'POST',
@@ -1428,6 +1510,25 @@ export type OpsDefaultCode = {
 }
 export const defaultOpsCodes = () => api<OpsDefaultCode[]>('/operations/default-codes', { action: 'Load default operations codes' })
 
+
+/** The baseline programme a report is compared against, and its linkable sequence codes. */
+export const reportTimelineCodes = (reportId: string) =>
+  api<OpsReportTimelineCodes>(`/operations/reports/${reportId}/timeline-codes`, { action: 'Load sequence codes' })
+export const previewTimelineCodes = (data: { block_ids: string[]; sequence_no: number }) =>
+  api<OpsSeqCodePreview>('/operations/reports/timeline-codes/preview', {
+    method: 'POST',
+    body: body(data),
+    action: 'Preview sequence code assignment',
+  })
+export const applyTimelineCodes = (data: { block_ids: string[]; sequence_no: number }) =>
+  api<OpsSeqCodeApplyOut>('/operations/reports/timeline-codes/apply', {
+    method: 'POST',
+    body: body(data),
+    action: 'Apply sequence codes',
+  })
+/** Per-code planned vs actual hours across the baseline programme's whole scope. */
+export const timelineRollup = (planId: string) =>
+  api<OpsTimelineRollup>(`/operations/plans/${planId}/timeline-rollup`, { action: 'Load sequence rollup' })
 export type OpsRegisters = { plans: OpsPlan; reports: OpsReport; documents: OpsDocument }
 export type OpsFolderCount = {
   rig_key: string

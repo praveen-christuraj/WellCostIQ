@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { Alert, Box, Stack, Typography } from '@mui/material'
+import { useMemo, useState } from 'react'
+import { Alert, Box, FormControlLabel, Checkbox, Stack, Typography } from '@mui/material'
 import { InteractiveChart, type ChartClickEvent } from '../ui/InteractiveChart'
 import { useColorMode } from '../../context/ThemeContext'
 import { chartPalette, surface } from '../../designSystem'
@@ -13,6 +13,7 @@ import {
   fmtDls,
   interpolateAt,
   isSurveyed,
+  mdTicks,
   sliceCurve,
   stationAt,
   type DepthWindow,
@@ -48,11 +49,20 @@ export function WellPlanSectionViews({
   const { mode } = useColorMode()
   const colors = chartPalette(mode)
   const s = surface(mode)
+  const [showMdLabels, setShowMdLabels] = useState(true)
   const curve = path.curve
   const windowRange = effectiveWindow(curve, window)
   const points = useMemo(() => sliceCurve(curve, { from: windowRange.from, to: windowRange.to }), [curve, windowRange.from, windowRange.to])
   const selectedPoint = interpolateAt(curve, selectedMd)
   const marker = path.position
+  // Measured depth can only be read off a depth-vs-depth drawing if it is
+  // annotated: MD is not an axis of either projection, so the same nice MD
+  // positions are interpolated onto both views.
+  const mdGuides = useMemo(
+    () => mdTicks(windowRange.from, windowRange.to).map((md) => ({ md, point: interpolateAt(curve, md) })).filter((row): row is { md: number; point: NonNullable<ReturnType<typeof interpolateAt>> } => row.point !== null),
+    [curve, windowRange.from, windowRange.to],
+  )
+  const brass = mode === 'dark' ? '#F2C14E' : '#B87503'
 
   const axisText = colors.axis
   const base = {
@@ -136,6 +146,26 @@ export function WellPlanSectionViews({
         data: [{ value: [0, 0], chartRowId: '' }],
         tooltip: { show: false },
       },
+      ...(showMdLabels ? [{
+        name: 'Depth labels',
+        type: 'scatter' as const,
+        silent: true,
+        symbolSize: 1,
+        data: mdGuides.map(({ md, point }) => ({
+          value: [point.ew_m, point.ns_m],
+          chartRowId: String(md),
+        })),
+        label: {
+          show: true,
+          position: 'top' as const,
+          distance: 4,
+          fontSize: 7.5,
+          color: brass,
+          formatter: (p: { dataIndex: number }) => `MD ${Math.round(mdGuides[p.dataIndex].md).toLocaleString()}`,
+        },
+        tooltip: { show: false },
+        z: 4,
+      }] : []),
       ...(selectedPoint ? [{
         name: 'Selected station',
         type: 'scatter' as const,
@@ -147,7 +177,7 @@ export function WellPlanSectionViews({
         z: 5,
       }] : []),
     ],
-  }), [base, colors.actual, colors.grid, colors.planned, curve, planBounds, points, s.paper, selectedPoint])
+  }), [base, brass, colors.actual, colors.grid, colors.planned, curve, mdGuides, planBounds, points, s.paper, selectedPoint, showMdLabels])
 
   /** Section: the same stations projected on the plane facing the VS bearing. */
   const sectionOption = useMemo(() => {
@@ -206,6 +236,27 @@ export function WellPlanSectionViews({
             value: [point.vsec_m, point.tvd_m],
             chartRowId: String(point.md_m),
           })),
+          // Measured-depth guides: MD is not an axis of this projection, so
+          // each tick is drawn as a horizontal rule at the interpolated TVD
+          // and tagged on the right edge. A rule is an annotation, never a
+          // station: it is interpolated between recorded points only.
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            animation: false,
+            data: mdGuides.map(({ md, point }) => ({
+              yAxis: point.tvd_m,
+              name: `MD ${Math.round(md).toLocaleString()} m`,
+            })),
+            lineStyle: { type: 'dashed' as const, width: 0.8, color: brass, opacity: 0.75 },
+            label: {
+              position: 'insideEndTop' as const,
+              fontSize: 8,
+              fontWeight: 700,
+              color: brass,
+              formatter: (p: { name: string }) => p.name,
+            },
+          },
         },
         {
           name: 'Stations',
@@ -228,7 +279,7 @@ export function WellPlanSectionViews({
         }] : []),
       ],
     }
-  }, [base, colors.actual, colors.grid, colors.planned, points, curve, s.paper, selectedPoint])
+  }, [base, brass, colors.actual, colors.grid, colors.planned, mdGuides, points, curve, s.paper, selectedPoint])
 
   const click = (event: ChartClickEvent) => {
     if (event.chartRowId) {
@@ -250,6 +301,13 @@ export function WellPlanSectionViews({
 
   return (
     <Stack spacing={1.5}>
+      <Box display="flex" justifyContent="flex-end" alignItems="center" sx={{ mt: -0.5 }}>
+        <FormControlLabel
+          control={<Checkbox size="small" checked={showMdLabels} onChange={(event) => setShowMdLabels(event.target.checked)} inputProps={{ 'aria-label': 'Show measured-depth labels' }} />}
+          label={<Typography sx={{ fontSize: 11.5 }}>MD labels</Typography>}
+          sx={{ mr: 0 }}
+        />
+      </Box>
       <Box
         display="grid"
         gap={2}
@@ -267,7 +325,7 @@ export function WellPlanSectionViews({
         </Box>
         <Box>
           <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: 'text.secondary', mb: 0.5 }}>
-            Vertical section · facing {fmtAngle(path.vertical_section_azimuth_deg, 1)} · TVD increases downward
+            Vertical section · facing {fmtAngle(path.vertical_section_azimuth_deg, 1)} · TVD increases downward · dashed brass rules give interpolated MD
           </Typography>
           <Box sx={{ height }}>
             <InteractiveChart option={sectionOption} style={{ height: '100%' }} onEvents={{ click }} />
@@ -276,7 +334,8 @@ export function WellPlanSectionViews({
       </Box>
       <Typography sx={{ fontSize: 10.5, color: 'text.secondary', lineHeight: 1.5 }}>
         The vertical section is a projection, not a second survey: horizontal motion out of the stated plane
-        disappears from it. Depth window {fmtDepth(windowRange.from, 1)} – {fmtDepth(windowRange.to, 1)} m MD,
+        disappears from it. Dashed brass rules are interpolated measured depths (never stations), labelled at the
+        right edge of the plot. Depth window {fmtDepth(windowRange.from, 1)} – {fmtDepth(windowRange.to, 1)} m MD,
         clamped to the surveyed range.
         {marker.gap_m !== null && marker.gap_m > 0
           ? ` The reported hole bottom is ${fmtDepth(marker.gap_m, 1)} m below the last station and is not drawn as part of the line.`

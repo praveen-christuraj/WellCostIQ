@@ -666,7 +666,7 @@ def extract(db, org, document_id, requested_day, user, request, target_id=None, 
     # The visible comparison is generated as soon as the draft exists, so the
     # engineer reviews the suggested lead/lag with the same pass that reviews the codes.
     db.flush()
-    reports_svc._suggest_comparison(db, report, new_blocks)
+    reports_svc._suggest_comparison(db, report)
     doc.status = "extracted"
     doc.extraction_job_id = job.id
     record(

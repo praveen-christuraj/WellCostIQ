@@ -17,16 +17,19 @@ import type { ReviewTimelineResult } from '../../lib/operations'
 /**
  * Editable plan-vs-actual hours: the review surface for lead and lag.
  *
- * The question this panel answers is "did this activity take the hours the
- * programme allowed?", so each row carries four numbers and one editable field:
+ * The question this panel answers is "did this job take the hours the
+ * programme allowed?" — and the answer is grouped by sequence code, because
+ * that is the correlation the whole comparison rests on:
  *
- * * **planned** — from the active programme, never editable here (a daily log
- *   cannot rewrite the baseline, it can only disagree with it);
- * * **system actual** — the block's logged duration in hours, kept visible even
- *   after a correction so an auditor can see what the log said;
- * * **your actual** — the engineer's figure; typing a new value recomputes the
- *   variance, the lead/lag badge and the reported total on the spot;
- * * **variance** — planned − actual, in hours and in days; positive is a lead.
+ * * every line of the baseline programme carries a sequence code;
+ * * a daily-report line opts in by carrying the same code (edit it in the
+ *   register's Seq column, or apply one code to many lines with the bulk
+ *   action);
+ * * the panel sums the hours of the lines in each code and compares the total
+ *   with the programme's planned hours for that code — positive variance is a
+ *   lead, negative is a lag;
+ * * lines without a code are listed under "Uncoded" and are excluded from the
+ *   arithmetic: nothing is guessed from the wording of a narrative.
  *
  * Only changed rows are posted, and a correction needs a reason, because the
  * value then differs from the time log. Clearing a field restores the logged
@@ -43,6 +46,7 @@ export type TimelineHoursRow = {
   activity_label?: string
   phase_label?: string
   narrative?: string
+  timeline_code?: string | null
   timeline_plan_step_no?: number | null
   timeline_plan_label?: string
   timeline_planned_hours?: string | null
@@ -142,48 +146,73 @@ export function TimelineHoursReview({
   )
 
   /**
-   * Running totals per row, the same shape as the "Input-lookahead" sheet:
-   * cumulative planned hours, cumulative actual hours and their difference.
-   * A row a reader can add up by hand is a row they can trust.
+   * Group the rows by sequence code: coded groups first in code order, the
+   * uncoded group last. The group is the unit lead/lag is computed on, so the
+   * panel adds up by code, never by line — planned hours belong to the
+   * programme row, not to any single line that logs against it.
    */
-  const running = useMemo(() => {
-    const map = new Map<string, { plan: number | null; actual: number | null }>()
-    let plan = 0
-    let actual = 0
-    let seenPlan = false
-    let seenActual = false
+  const groups = useMemo(() => {
+    const byCode = new Map<string, TimelineHoursRow[]>()
     for (const row of rows) {
-      const p = num(row.timeline_planned_hours)
-      const a = actualOf(row)
-      if (p !== null) {
-        plan += p
-        seenPlan = true
-      }
-      if (a !== null) {
-        actual += a
-        seenActual = true
-      }
-      map.set(row.id, { plan: seenPlan ? plan : null, actual: seenActual ? actual : null })
+      const code = (row.timeline_code ?? '').trim()
+      const list = byCode.get(code) ?? []
+      list.push(row)
+      byCode.set(code, list)
     }
-    return map
+    const entries = Array.from(byCode.entries()).map(([code, members]) => {
+      members.sort((a, b) => a.sequence_no - b.sequence_no)
+      const plannedRaw = members.map((m) => m.timeline_planned_hours).find((v) => v !== null && v !== undefined)
+      const planned = num(plannedRaw ?? null)
+      const actualSum = members.reduce((sum, m) => sum + (actualOf(m) ?? 0), 0)
+      const hasActual = members.some((m) => actualOf(m) !== null)
+      const actual = hasActual ? actualSum : null
+      const variance = planned !== null && actual !== null ? planned - actual : null
+      const codeNo = /^\d+$/.test(code) ? Number(code) : Number.POSITIVE_INFINITY
+      return { code, members, planned, actual, variance, codeNo }
+    })
+    entries.sort((a, b) => (a.code === '' ? 1 : b.code === '' ? -1 : a.codeNo - b.codeNo))
+    return entries
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, draft])
 
+  /** Running per-code sum of logged hours; a reader adds a code up by hand. */
+  const running = useMemo(() => {
+    const map = new Map<string, number | null>()
+    for (const group of groups) {
+      let sum = 0
+      let seen = false
+      for (const row of group.members) {
+        const a = actualOf(row)
+        if (a !== null) {
+          sum += a
+          seen = true
+        }
+        map.set(row.id, seen ? sum : null)
+      }
+    }
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups])
+
+  /** Totals across the distinct coded groups, plus the uncoded line count. */
   const totals = useMemo(() => {
     let planned = 0
     let actual = 0
     let matched = 0
+    let uncoded = 0
     let corrected = 0
-    for (const row of rows) {
-      const p = num(row.timeline_planned_hours)
-      const a = actualOf(row)
-      if (p === null) continue
+    for (const group of groups) {
+      if (group.code === '') {
+        uncoded += group.members.length
+        continue
+      }
       matched += 1
-      planned += p
-      if (a !== null) actual += a
-      if (row.timeline_actual_edited || draft[row.id] !== undefined) corrected += 1
+      if (group.planned !== null) planned += group.planned
+      if (group.actual !== null) actual += group.actual
     }
-    return { planned, actual, variance: planned - actual, matched, corrected }
-  }, [rows, draft])
+    for (const row of rows) if (row.timeline_actual_edited || draft[row.id] !== undefined) corrected += 1
+    return { planned, actual, variance: planned - actual, matched, uncoded, corrected }
+  }, [groups, rows, draft])
 
   /** The decision follows the work: a correction is an edit, a confirmation an accept. */
   const decision: 'accepted' | 'edited' | 'rejected' = state === 'rejected' ? 'rejected' : changed.length ? 'edited' : state
@@ -205,13 +234,14 @@ export function TimelineHoursReview({
   }
 
   const worstCase = totals.variance > 0 ? 'lead' : totals.variance < 0 ? 'lag' : 'on plan'
+  const gridColumns = 'minmax(0,2.2fr) 96px 120px 112px 120px'
 
   return (
     <PanelDialog
       open={open}
       maxWidth="lg"
       title="Planned and actual hours"
-      subtitle="The active programme's hours against what this report logged. Change an actual figure and the variance, the lead/lag badge and the total below recompute from it; the corrected hours are stored on the activity, so every later day, chart and summary follows them."
+      subtitle="The baseline programme's hours per sequence code against what this report — and every other line tagged with the same code — logged. Change an actual figure and the variance, the lead/lag badge and the total below recompute from it; the corrected hours are stored on the activity, so every later day, chart and summary follows them."
       onClose={onClose}
       footer={
         <>
@@ -241,8 +271,8 @@ export function TimelineHoursReview({
           gridTemplateColumns={{ xs: 'repeat(2,minmax(0,1fr))', md: 'repeat(4,minmax(0,1fr))' }}
         >
           {[
-            ['Planned hours', hours(totals.planned), `${totals.matched} of ${rows.length} matched to the programme`],
-            ['Actual hours', hours(totals.actual), `${totals.corrected} corrected by hand`],
+            ['Planned hours', hours(totals.planned), `${totals.matched} coded activit${totals.matched === 1 ? 'y' : 'ies'}${totals.uncoded ? ` · ${totals.uncoded} uncoded line(s) excluded` : ''}`],
+            ['Actual hours', hours(totals.actual), `${totals.corrected} line(s) corrected by hand`],
             [
               'Variance',
               `${totals.variance > 0 ? '+' : ''}${hours(totals.variance)} h`,
@@ -285,137 +315,181 @@ export function TimelineHoursReview({
         <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
           <Box
             display={{ xs: 'none', md: 'grid' }}
-            gridTemplateColumns="minmax(0,2.4fr) 92px 98px 118px 112px 96px 92px"
+            gridTemplateColumns={gridColumns}
             gap={1}
             px={1.5}
             py={1}
             sx={{ bgcolor: 'background.default', borderBottom: '1px solid', borderColor: 'divider' }}
           >
-            {['Activity', 'Plan (h)', 'System (h)', 'Your actual (h)', 'Cum plan (h)', 'Cum actual (h)', 'Variance'].map((label) => (
+            {['Activity', 'System (h)', 'Your actual (h)', 'Code Σ (h)', 'Lead / Lag'].map((label) => (
               <Typography key={label} variant="caption" fontWeight={700} color="text.secondary">
                 {label}
               </Typography>
             ))}
           </Box>
-          {rows.length === 0 && (
+          {groups.length === 0 && (
             <Box px={1.5} py={3}>
               <Typography variant="body2" color="text.secondary">
                 No activity blocks are selected.
               </Typography>
             </Box>
           )}
-          {rows.map((row, index) => {
-            const planned = num(row.timeline_planned_hours)
-            const system = systemOf(row)
-            const actual = actualOf(row)
-            const variance = planned !== null && actual !== null ? planned - actual : null
-            const edited = row.timeline_actual_edited || draft[row.id] !== undefined
-            const isRejected = decision === 'rejected'
+          {groups.map((group) => {
+            const groupLabel = group.members[0]?.timeline_plan_label
+            const isUncoded = group.code === ''
+            const compared = group.variance !== null
             return (
-              <Box
-                key={row.id}
-                display="grid"
-                gridTemplateColumns={{
-                  xs: 'minmax(0,1fr) minmax(0,1fr)',
-                  md: 'minmax(0,2.4fr) 92px 98px 118px 112px 96px 92px',
-                }}
-                gap={1}
-                px={1.5}
-                py={1.1}
-                alignItems="center"
-                sx={{
-                  borderTop: index === 0 ? 'none' : '1px solid',
-                  borderColor: 'divider',
-                  bgcolor: edited ? 'action.hover' : 'transparent',
-                }}
-              >
-                <Box minWidth={0} gridColumn={{ xs: '1 / -1', md: 'auto' }}>
-                  <Typography fontSize={12.5} fontWeight={700} noWrap title={row.narrative || row.timeline_plan_label || ''}>
-                    {row.sequence_no}. {row.timeline_plan_label || row.activity_label || 'Activity'}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {row.phase_label || 'Unphased'}
-                    {row.timeline_plan_step_no !== null && row.timeline_plan_step_no !== undefined
-                      ? ` · programme step ${row.timeline_plan_step_no}`
-                      : ' · no programme step'}
-                    {row.timeline_review_state && row.timeline_review_state !== 'suggested'
-                      ? ` · ${row.timeline_review_state}`
-                      : ''}
-                    {edited ? ' · corrected' : ''}
-                    {row.timeline_basis ? ` · ${row.timeline_basis}` : ''}
-                  </Typography>
-                </Box>
-                <Typography fontSize={12.5} fontWeight={600}>
-                  {hours(planned)}
-                </Typography>
-                <Typography fontSize={12.5} color="text.secondary">
-                  {hours(system)}
-                </Typography>
-                <Box display="flex" alignItems="center" gap={0.5}>
-                  <TextField
-                    size="small"
-                    value={draft[row.id] ?? (actual === null ? '' : String(actual))}
-                    disabled={!editable || busy || isRejected}
-                    onChange={(e) => {
-                      const typed = e.target.value
-                      // Digits and one decimal point; a blank clears the correction.
-                      if (!/^\d*\.?\d*$/.test(typed)) return
-                      setDraft((current) => ({ ...current, [row.id]: typed }))
-                    }}
-                    onBlur={() => {
-                      // Normalise the visible number so 2 and 2.0 read the same.
-                      setDraft((current) => {
-                        if (current[row.id] === undefined) return current
-                        const typed = num(current[row.id])
-                        return { ...current, [row.id]: typed === null ? '' : typed.toFixed(3) }
-                      })
-                    }}
-                    slotProps={{
-                      htmlInput: { inputMode: 'decimal', 'aria-label': `Actual hours for block ${row.sequence_no}` },
-                      input: { endAdornment: <InputAdornment position="end">h</InputAdornment> },
-                    }}
-                    sx={{ width: 118 }}
-                  />
-                  {edited && (
-                    <Tooltip title="Restore the hours this report actually logged">
-                      <span>
-                        <Button
-                          size="small"
-                          sx={{ minWidth: 0, px: 0.5 }}
-                          aria-label={`Restore logged hours for block ${row.sequence_no}`}
-                          disabled={!editable || busy}
-                          onClick={() =>
-                            setDraft((current) => {
-                              const next = { ...current }
-                              delete next[row.id]
-                              return next
-                            })
-                          }
-                        >
-                          <RestartAlt fontSize="small" />
-                        </Button>
-                      </span>
-                    </Tooltip>
-                  )}
-                </Box>
-                <Typography fontSize={12.5} color="text.secondary">
-                  {hours(running.get(row.id)?.plan ?? null)}
-                </Typography>
-                <Typography fontSize={12.5} color="text.secondary">
-                  {hours(running.get(row.id)?.actual ?? null)}
-                </Typography>
-                <Typography
-                  fontSize={12.5}
-                  fontWeight={700}
-                  color={variance === null ? 'text.secondary' : variance > 0 ? 'success.main' : variance < 0 ? 'warning.main' : 'text.primary'}
+              <Box key={group.code || 'uncoded'}>
+                {/* Group header: the code is the unit lead/lag is computed on. */}
+                <Box
+                  display="flex"
+                  alignItems="center"
+                  gap={1}
+                  flexWrap="wrap"
+                  px={1.5}
+                  py={0.75}
+                  sx={{ bgcolor: isUncoded ? 'warning.lighter' : 'action.hover', borderTop: '1px solid', borderColor: 'divider' }}
                 >
-                  {variance === null ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(3)} h`}
-                  {variance !== null && (
-                    <Typography component="span" variant="caption" color="text.secondary" display="block">
-                      {(variance / 24).toFixed(3)} d · {variance > 0 ? 'lead' : variance < 0 ? 'lag' : 'on plan'}
+                  <Typography variant="caption" fontWeight={800} noWrap sx={{ maxWidth: '100%' }}>
+                    {isUncoded ? 'Uncoded lines — excluded from lead/lag' : `Code ${group.code} · ${groupLabel || 'programme activity'}`}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                    {isUncoded
+                      ? `${group.members.length} line(s) · code them in the register’s Seq column`
+                      : `planned ${hours(group.planned)} h · logged ${hours(group.actual)} h · ${group.members.length} line(s)`}
+                  </Typography>
+                  {!isUncoded && (
+                    <Typography
+                      variant="caption"
+                      fontWeight={800}
+                      color={
+                        !compared
+                          ? 'text.secondary'
+                          : (group.variance ?? 0) > 0
+                            ? 'success.main'
+                            : (group.variance ?? 0) < 0
+                              ? 'warning.main'
+                              : 'text.primary'
+                      }
+                    >
+                      {compared
+                        ? `${(group.variance ?? 0) > 0 ? '+' : ''}${hours(group.variance)} h (${((group.variance ?? 0) / 24).toFixed(3)} d) · ${(group.variance ?? 0) > 0 ? 'lead' : (group.variance ?? 0) < 0 ? 'lag' : 'on plan'}`
+                        : group.planned === null
+                          ? 'planned hours missing'
+                          : 'no hours logged'}
                     </Typography>
                   )}
-                </Typography>
+                </Box>
+                {group.members.map((row) => {
+                  const system = systemOf(row)
+                  const actual = actualOf(row)
+                  const edited = row.timeline_actual_edited || draft[row.id] !== undefined
+                  const isRejected = decision === 'rejected'
+                  const lineDisabled = !editable || busy || isRejected || isUncoded
+                  return (
+                    <Box
+                      key={row.id}
+                      display="grid"
+                      gridTemplateColumns={{ xs: 'minmax(0,1fr) minmax(0,1fr)', md: gridColumns }}
+                      gap={1}
+                      px={1.5}
+                      py={1.1}
+                      alignItems="center"
+                      sx={{
+                        borderTop: '1px solid',
+                        borderColor: 'divider',
+                        bgcolor: edited ? 'action.selected' : 'transparent',
+                      }}
+                    >
+                      <Box minWidth={0} gridColumn={{ xs: '1 / -1', md: 'auto' }}>
+                        <Typography fontSize={12.5} fontWeight={700} noWrap title={row.narrative || row.timeline_plan_label || ''}>
+                          {row.sequence_no}. {row.timeline_plan_label || row.activity_label || 'Activity'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {row.phase_label || 'Unphased'}
+                          {isUncoded ? ' · uncoded' : ` · code ${group.code}`}
+                          {row.timeline_review_state && row.timeline_review_state !== 'suggested'
+                            ? ` · ${row.timeline_review_state}`
+                            : ''}
+                          {edited ? ' · corrected' : ''}
+                          {row.timeline_basis ? ` · ${row.timeline_basis}` : ''}
+                        </Typography>
+                      </Box>
+                      <Typography fontSize={12.5} color="text.secondary">
+                        {hours(system)}
+                      </Typography>
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <TextField
+                          size="small"
+                          value={draft[row.id] ?? (actual === null ? '' : String(actual))}
+                          disabled={lineDisabled}
+                          onChange={(e) => {
+                            const typed = e.target.value
+                            // Digits and one decimal point; a blank clears the correction.
+                            if (!/^\d*\.?\d*$/.test(typed)) return
+                            setDraft((current) => ({ ...current, [row.id]: typed }))
+                          }}
+                          onBlur={() => {
+                            // Normalise the visible number so 2 and 2.0 read the same.
+                            setDraft((current) => {
+                              if (current[row.id] === undefined) return current
+                              const typed = num(current[row.id])
+                              return { ...current, [row.id]: typed === null ? '' : typed.toFixed(3) }
+                            })
+                          }}
+                          slotProps={{
+                            htmlInput: { inputMode: 'decimal', 'aria-label': `Actual hours for block ${row.sequence_no}` },
+                            input: { endAdornment: <InputAdornment position="end">h</InputAdornment> },
+                          }}
+                          sx={{ width: 118 }}
+                        />
+                        {edited && (
+                          <Tooltip title="Restore the hours this report actually logged">
+                            <span>
+                              <Button
+                                size="small"
+                                sx={{ minWidth: 0, px: 0.5 }}
+                                aria-label={`Restore logged hours for block ${row.sequence_no}`}
+                                disabled={!editable || busy}
+                                onClick={() =>
+                                  setDraft((current) => {
+                                    const next = { ...current }
+                                    delete next[row.id]
+                                    return next
+                                  })
+                                }
+                              >
+                                <RestartAlt fontSize="small" />
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        )}
+                      </Box>
+                      <Typography fontSize={12.5} color="text.secondary">
+                        {isUncoded ? '—' : hours(running.get(row.id) ?? null)}
+                      </Typography>
+                      <Typography
+                        fontSize={12.5}
+                        fontWeight={700}
+                        color={
+                          isUncoded || group.variance === null
+                            ? 'text.secondary'
+                            : group.variance > 0
+                              ? 'success.main'
+                              : group.variance < 0
+                                ? 'warning.main'
+                                : 'text.primary'
+                        }
+                      >
+                        {isUncoded || group.variance === null
+                          ? isUncoded
+                            ? 'excluded'
+                            : '—'
+                          : `${group.variance > 0 ? '+' : ''}${group.variance.toFixed(3)} h · ${group.variance > 0 ? 'lead' : group.variance < 0 ? 'lag' : 'on plan'}`}
+                      </Typography>
+                    </Box>
+                  )
+                })}
               </Box>
             )
           })}
@@ -447,8 +521,10 @@ export function TimelineHoursReview({
         )}
 
         <Typography variant="caption" color="text.secondary">
-          Planned hours belong to the active programme and are read-only here. An edited actual is stored on the
-          activity, not on the report, so it survives later recalculations and carries into the next day.
+          Planned hours belong to the baseline programme and are read-only here; each group’s plan is the programme
+          row’s hours, not the sum of its lines. An edited actual is stored on the activity, not on the report, so it
+          survives later recalculations and carries into the next day. The Σ code column adds the group up after each
+          line, the same way you would on paper.
         </Typography>
       </Stack>
     </PanelDialog>

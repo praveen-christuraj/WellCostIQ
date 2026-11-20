@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import { AutoAwesomeOutlined, LockOpenOutlined } from '@mui/icons-material'
+import { AutoAwesomeOutlined, DownloadRounded, LockOpenOutlined, UploadRounded } from '@mui/icons-material'
 import {
   Alert,
   Autocomplete,
@@ -24,12 +24,15 @@ import { ErrorMessage, FormDialog, PanelDialog, useFormDirty, useUnsavedChangesG
 import { Caution, RestoreCautions } from '../../components/ui/Caution'
 import { DataTable } from '../../components/DataTable'
 import { BulkAssignDialog } from '../../components/operations/BulkAssignDialog'
+import { SeqCodeDialog } from '../../components/operations/SeqCodeDialog'
 import { SourceDialog } from '../../components/operations/SourceDialog'
+import { SurveyImportDialog } from '../../components/operations/SurveyImportDialog'
 import { StudyPanel } from '../../components/operations/StudyPanel'
 import { TimelineHoursReview } from '../../components/operations/TimelineHoursReview'
 import { SectionCard } from '../../components/ui/SectionCard'
 import { useAuth } from '../../context/AuthContext'
 import { downloadFile } from '../../lib/api'
+import { downloadTemplate } from '../../lib/export'
 import {
   allocationName,
   aiPrefillReport,
@@ -39,6 +42,7 @@ import {
   getBrief,
   getReport,
   opsReference,
+  reportTimelineCodes,
   opsReviewTimeline,
   rejectReport,
   reopenReport,
@@ -50,6 +54,7 @@ import {
   type OpsNarratives,
   type OpsReference,
   type OpsReport,
+  type OpsReportTimelineCodes,
   type OpsSurvey,
 } from '../../lib/operations'
 import { printDailyReport } from '../../lib/operationsPdf'
@@ -106,6 +111,9 @@ const editFields = [
   'timeline_comparison',
   'timeline_review_state',
   'timeline_note',
+  // The sequence code travels with the block so saving a draft never drops the
+  // link between a line and the programme activity it logs.
+  'timeline_code',
 ] as const
 
 type Block = Pick<
@@ -210,6 +218,9 @@ export default function OperationsReportDetail({
   const [reopenRemarks, setReopenRemarks] = useState('')
   const [confirmed, setConfirmed] = useState(false)
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [seqOpen, setSeqOpen] = useState(false)
+  const [surveyImportOpen, setSurveyImportOpen] = useState(false)
+  const [timelineCodes, setTimelineCodes] = useState<OpsReportTimelineCodes | null>(null)
   const [selected, setSelected] = useState<Block[]>([])
   // Bumped on every load so a stale selection never carries onto a new report.
   const [selectionKey, setSelectionKey] = useState(0)
@@ -248,11 +259,12 @@ export default function OperationsReportDetail({
     setPrefillResult(null)
     setReport(null)
     if (id)
-      Promise.all([getReport(id, includeDeleted), opsReference()])
-        .then(([r, refs]) => {
+      Promise.all([getReport(id, includeDeleted), opsReference(), reportTimelineCodes(id).catch(() => null)])
+        .then(([r, refs, codes]) => {
           if (current) {
             reset(r)
             setRef(refs)
+            setTimelineCodes(codes)
           }
         })
         .catch((e) => {
@@ -272,8 +284,11 @@ export default function OperationsReportDetail({
 
   /** Re-read the report after a bulk or review action, keeping the current tab. */
   const load = () =>
-    getReport(id, includeDeleted)
-      .then((r) => reset(r))
+    Promise.all([getReport(id, includeDeleted), reportTimelineCodes(id).catch(() => null)])
+      .then(([r, codes]) => {
+        reset(r)
+        setTimelineCodes(codes)
+      })
       .catch((e) => setError((e as Error).message))
 
   const refreshBrief = () => {
@@ -754,6 +769,14 @@ export default function OperationsReportDetail({
                     variant="outlined"
                     size="small"
                     disabled={!blocks.length}
+                    onClick={() => setSeqOpen(true)}
+                  >
+                    Apply sequence code{selected.length ? ` (${selected.length})` : ''}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={!blocks.length}
                     onClick={() => setTimelineOpen(true)}
                   >
                     Review hours & lead / lag
@@ -861,6 +884,42 @@ export default function OperationsReportDetail({
                   headerName: 'responsible Agency',
                   minWidth: 200,
                   tooltipField: 'responsible_agency_label',
+                },
+                {
+                  // The sequence code is the link to the programme activity this
+                  // line logs — the only key lead/lag is correlated on.
+                  field: 'timeline_code',
+                  headerName: 'Seq',
+                  minWidth: 120,
+                  sortable: false,
+                  cellRenderer: ({ data: b }: { data: Block }) => (
+                    <TextField
+                      select
+                      size="small"
+                      variant="standard"
+                      value={b.timeline_code ?? ''}
+                      disabled={!editable}
+                      onChange={(e) => {
+                        const code = e.target.value || null
+                        setBlocks(blocks.map((x) => (x.id === b.id ? { ...x, timeline_code: code } : x)))
+                        setDirty(true)
+                      }}
+                      sx={{ minWidth: 100 }}
+                      slotProps={{
+                        htmlInput: { 'aria-label': `Programme sequence code for line ${b.sequence_no}` },
+                        select: { MenuProps: { PaperProps: { sx: { maxHeight: 320 } } } },
+                      }}
+                    >
+                      <MenuItem value="">—</MenuItem>
+                      {(timelineCodes?.codes ?? []).map((c) => (
+                        <MenuItem key={c.sequence_no} value={String(c.sequence_no)}>
+                          <Typography variant="caption" noWrap>
+                            {c.sequence_no} — {c.description}
+                          </Typography>
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  ),
                 },
                 {
                   // Plan against actual hours is what lead and lag is computed
@@ -1249,20 +1308,50 @@ export default function OperationsReportDetail({
               subtitle="Reported MD, TVD, inclination, azimuth, offsets and dogleg severity relative to the survey datum. Blank means unrecorded, never zero."
               action={
                 editable && (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => {
-                      setSurveys([...surveys, newSurvey()])
-                      setDirty(true)
-                    }}
-                  >
-                    Add station
-                  </Button>
+                  <Stack direction="row" gap={1} flexWrap="wrap" justifyContent="flex-end">
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={<DownloadRounded />}
+                      onClick={() =>
+                        downloadTemplate(
+                          'survey-import.csv',
+                          ['md_m', 'inc_deg', 'azi_deg', 'tvd_m', 'ns_m', 'ew_m', 'vsec_m', 'dls_deg_per_30m', 'tool', 'survey_at', 'source'],
+                          { md_m: '0', inc_deg: '0', azi_deg: '0', tvd_m: '0', ns_m: '0', ew_m: '0', vsec_m: '0', dls_deg_per_30m: '', tool: 'MWD', survey_at: '2026-03-12 10:00', source: '' },
+                        )
+                      }
+                    >
+                      Template
+                    </Button>
+                    {can('ops-report:import') && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<UploadRounded />}
+                        onClick={() => setSurveyImportOpen(true)}
+                      >
+                        Import survey file
+                      </Button>
+                    )}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => {
+                        setSurveys([...surveys, newSurvey()])
+                        setDirty(true)
+                      }}
+                    >
+                      Add station
+                    </Button>
+                  </Stack>
                 )
               }
             >
-              {!surveys.length && <Typography variant="body2">No survey measurements reported.</Typography>}
+              {!surveys.length && (
+                <Typography variant="body2">
+                  No survey measurements reported. Download the template, fill it, and use “Import survey file” — or import a DDR-style Excel/PDF and the stations will be studied for your review.
+                </Typography>
+              )}
               {surveys.map((s, i) => (
                 <Box key={i} display="flex" gap={1} alignItems="center" flexWrap="wrap" mb={1.25}>
                   <Typography variant="body2" sx={{ minWidth: 110, fontWeight: 600 }}>
@@ -1328,6 +1417,35 @@ export default function OperationsReportDetail({
           onApplied={() => {
             void load()
             void onChanged()
+          }}
+        />
+
+        <SeqCodeDialog
+          open={seqOpen}
+          reportId={report?.id ?? ''}
+          blocks={(selected.length ? selected : blocks) as unknown as OpsBlock[]}
+          onClose={() => setSeqOpen(false)}
+          onApplied={() => {
+            setNotice('Sequence codes applied and plan-vs-timeline recomputed. Save the report if you have other unsaved edits.')
+            void load()
+            void onChanged()
+          }}
+        />
+
+        <SurveyImportDialog
+          open={surveyImportOpen}
+          reportId={report?.id ?? ''}
+          existingCount={surveys.length}
+          busy={busy}
+          onClose={() => setSurveyImportOpen(false)}
+          onApply={(rows, mode) => {
+            setDirty(true)
+            setSurveys((current) => (mode === 'replace' ? rows : [...current, ...rows]))
+            setNotice(
+              mode === 'replace'
+                ? `Imported ${rows.length} station(s), replacing the previous table. Save the report to keep them.`
+                : `Imported ${rows.length} station(s) appended to the existing table. Save the report to keep them.`,
+            )
           }}
         />
 
