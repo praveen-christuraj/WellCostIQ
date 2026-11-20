@@ -9,12 +9,15 @@ import {
 } from '@mui/icons-material'
 import { api, body, downloadFile } from '../lib/api'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { useAuth } from '../context/AuthContext'
 import { exportPdf, exportXlsx, type ExportColumn } from '../lib/export'
 import { EMPTY_RUN, type ReportDefinition, type ReportRun } from '../lib/reportBuilder'
 import { formatWatDateTime } from '../lib/time'
 
 type Answers = Record<string, string>
+
+const CAUTION_PAGE = 'custom-report'
 
 export default function CustomReportViewer() {
   const { reportId } = useParams()
@@ -147,6 +150,8 @@ export default function CustomReportViewer() {
   const missingAnswer = questions.find(question => question.required && !(answers[question.key] ?? '').trim())
 
   return <>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     <PageHeading
       eyebrow="REPORTS / CUSTOM REPORTS"
       title={report.name}
@@ -201,7 +206,13 @@ export default function CustomReportViewer() {
       {design.date_basis === 'NONE' && <Typography color="text.secondary" fontSize={11.5} sx={{ mt: 1.2 }}>This report has no date filter; it always shows the whole table.</Typography>}
     </Paper>
 
-    {(run.warnings ?? []).map(warning => <Alert key={warning} severity="warning" sx={{ mb: 1.5 }}>{warning}</Alert>)}
+    {(run.warnings ?? []).map(warning => <Caution
+      key={warning}
+      cautionKey="run-warning"
+      page={CAUTION_PAGE}
+      signature={[warning, run.generated_at ?? '']}
+      sx={{ mb: 1.5 }}
+    >{warning}</Caution>)}
 
     <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
       <Box display="flex" alignItems="center" justifyContent="space-between" gap={1.5} px={2} py={1.4} flexWrap="wrap" sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>

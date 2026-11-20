@@ -391,7 +391,7 @@ def to_column_value(value, column):
         raise BackupError(
             422,
             f"A stored value in {column.table.name}.{column.name} could not be restored ({error}). "
-            "The archive was probably edited outside WellCostIQ.",
+            "The archive was probably edited outside WellSenseIQ.",
         ) from error
     return value
 
@@ -515,15 +515,15 @@ def read_manifest(path: Path) -> dict:
         with gzip.open(path, "rt", encoding="utf-8") as stream:
             first = stream.readline()
     except (OSError, EOFError, UnicodeDecodeError) as error:
-        raise BackupError(422, "This file is not a readable WellCostIQ archive (it may be corrupt or truncated).") from error
+        raise BackupError(422, "This file is not a readable WellSenseIQ archive (it may be corrupt or truncated).") from error
     try:
         manifest = json.loads(first)
     except json.JSONDecodeError as error:
-        raise BackupError(422, "This file is not a WellCostIQ archive: its header could not be read.") from error
+        raise BackupError(422, "This file is not a WellSenseIQ archive: its header could not be read.") from error
     if not isinstance(manifest, dict) or manifest.get("type") != "manifest" or manifest.get("kind") != ARCHIVE_KIND:
-        raise BackupError(422, "This file is not a WellCostIQ archive.")
+        raise BackupError(422, "This file is not a WellSenseIQ archive.")
     if int(manifest.get("format_version") or 0) != ARCHIVE_FORMAT_VERSION:
-        raise BackupError(422, "This archive was written by a different WellCostIQ version and cannot be read here.")
+        raise BackupError(422, "This archive was written by a different WellSenseIQ version and cannot be read here.")
     return manifest
 
 
@@ -677,7 +677,7 @@ def _replace_workspace_rows(
         raise BackupError(
             422,
             "The archive could not be applied to this database. It may come from an incompatible "
-            f"version of WellCostIQ (database detail: {type(error).__name__}).",
+            f"version of WellSenseIQ (database detail: {type(error).__name__}).",
         ) from error
     db.flush()
     return {"tables": len(insertion_order), "rows": inserted_rows}

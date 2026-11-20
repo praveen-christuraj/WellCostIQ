@@ -43,7 +43,7 @@ MAX_DOSSIER_CHARS = 14_500
 MAX_COMPARED_WELLS = 6
 
 # Concise end-to-end application workflow reference so the AI model understands
-# how WellCostIQ modules connect, how numbers are derived, and where each action lives.
+# how WellSenseIQ modules connect, how numbers are derived, and where each action lives.
 WORKFLOW_MAP = """WELLCOSTIQ WORKFLOW & CALCULATION RULES:
 1. Master Data (/master-data, capability master-data:read/write): Define default currency, exchange currencies, UOMs, blocks, hole sections, phases, activities, sub-activities, vendors (Inhouse or Third party; active/inactive/blocked), PO/SO orders (with revision chain), services (Day Rate / Per Service Rate / Per Section Rate), and priced catalogue items (Tangibles, Drill Bits, Mud Chemicals, Cement Additives, Fuel) with unit rates, uplifts, and effective dates.
 2. Rig & Well Management (/rig-well, capability rig-well:read/write): Register rigs (assigned to blocks), then wells under rigs with separate Drilling and Completion plans (sections, phases, planned depths standardized in metres, planned days, spud date/time, well sub-activities with responsible party, and audited Plan Adjustments). Well status ladder: Upcoming -> Active -> Final review -> Completed (one-step rollback permitted).
@@ -103,7 +103,7 @@ def _workflow_for(capabilities: set[str]) -> str:
     return "\n".join([header, *allowed]) if allowed else ""
 
 
-ASSISTANT_SYSTEM_PROMPT = """You are the WellCostIQ offline AI Guide assisting drilling, completion, finance, and cost-control users.
+ASSISTANT_SYSTEM_PROMPT = """You are the WellSenseIQ offline AI Guide assisting drilling, completion, finance, and cost-control users.
 
 STRICT GROUNDING RULES:
 1. Use the verified answer, workspace database context, and workflow/memory for all application claims. Use supplied PDF excerpts only for general domain background.

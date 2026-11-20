@@ -5,11 +5,11 @@
  * here, so the two lines cannot drift apart between screens. The API has the same
  * pair in `backend/app/core/config.py` (`app_name` / `app_tagline`).
  */
-export const APP_NAME = 'WellCostIQ'
-export const APP_TAGLINE = 'Well Cost Estimation & Tracking'
+export const APP_NAME = 'WellSenseIQ'
+export const APP_TAGLINE = 'Well Operations & Cost Monitoring'
 
 /**
- * Browser-tab title: `Page · WellCostIQ`, or the application name with its
+ * Browser-tab title: `Page · WellSenseIQ`, or the application name with its
  * subtitle when no page is selected (the sign-in screen).
  */
 export const pageTitle = (page?: string | null): string =>

@@ -1,4 +1,4 @@
-.PHONY: test build graph up up-ai seed-admin check-admin ui-check ui-rollback operations-codes-check daily-cost-check daily-cost-scope-check daily-cost-date-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check cost-intelligence-check ollama-ai-check invoice-config-deleted-check well-visuals-check
+.PHONY: test build graph up up-ai seed-admin check-admin ui-check ui-rollback operations-codes-check daily-cost-check daily-cost-scope-check daily-cost-date-check cautions-check entry-checks-check entry-checks-simulation afe-scope-dialog-check afe-print-check well-lifecycle-check mud-cost-reconciliation-check mud-cost-kpi-check lih-worksheet-check fuel-cost-check usage-reports-check templates-check catalogue-check assistant-check chart-drill-check export-report-check cost-intelligence-check ollama-ai-check invoice-config-deleted-check well-visuals-check
 
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
@@ -37,6 +37,8 @@ assistant-check:
 		node node_modules/.cache/assistant-check.mjs
 
 # Full daily/well printing and list-only register regressions (jsdom is a locked dev dependency).
+# Daily cost register: printing, allocations, entry windows and the cost items of
+# one service (one entry may bill several AFE cost items, one ledger line each).
 daily-cost-check:
 	cd frontend && npm ci && \
 		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/daily-cost-check.jsx \
@@ -61,6 +63,16 @@ daily-cost-date-check:
 		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
 		--outfile=node_modules/.cache/daily-cost-date-check.mjs --external:jsdom && \
 		node node_modules/.cache/daily-cost-date-check.mjs
+
+# Dismissible cautions: the per-workspace store, the component, the page's
+# "Show dismissed cautions" affordance, expiry when the facts change and the
+# transient messages that must never be remembered.
+cautions-check:
+	cd frontend && npm ci && \
+		NODE_PATH="$$PWD/node_modules" ./node_modules/.bin/esbuild ../.agent/tools/cautions-check.jsx \
+		--bundle --platform=node --format=esm --jsx=automatic --log-level=error \
+		--outfile=node_modules/.cache/cautions-check.mjs --external:jsdom && \
+		node node_modules/.cache/cautions-check.mjs
 
 # Daily-sheet entry checks: findings beside the sheet, applying a suggestion to
 # the unsaved sheet only, keeping a value as entered (audited) and reopening it,

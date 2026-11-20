@@ -9,6 +9,7 @@ import {
   VpnKeyOutlined,
 } from '@mui/icons-material'
 import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag, type Tone } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { StatCard as SharedStatCard } from '../components/ui/StatCard'
 import { api, body } from '../lib/api'
 import { exportCsv, exportPdf, exportXlsx, type ExportColumn } from '../lib/export'
@@ -71,6 +72,8 @@ function days(value: string | null): string {
   return `${diff} day${diff === 1 ? '' : 's'} ago`
 }
 
+
+const CAUTION_PAGE = 'security-center'
 
 export default function SecurityCenter() {
   const { can, user } = useAuth()
@@ -308,6 +311,8 @@ export default function SecurityCenter() {
   const allVisibleSelected = pageAccounts.length > 0 && pageAccounts.every(account => selected.includes(account.id))
 
   return <>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     <PageHeading
       eyebrow="USER MANAGEMENT / SECURITY CENTRE"
       title="Security centre"
@@ -341,10 +346,10 @@ export default function SecurityCenter() {
         <Tab value="policy" label="Password policy"/>
       </Tabs>
 
-      {!canReadRegisters && <Alert severity="info" sx={{ borderRadius: 0 }}>
+      {!canReadRegisters && <Caution cautionKey="no-register-read" page={CAUTION_PAGE} severity="info" sx={{ borderRadius: 0 }}>
         Your role can act on password recovery but not read the full account register. The reset queue and the policy are shown;
         ask an administrator for <strong>security:read</strong> if you also need the account list.
-      </Alert>}
+      </Caution>}
       {loading ? <Box py={8} display="grid" sx={{ placeItems: 'center' }}><CircularProgress/></Box> : <>
         {tab === 'requests' && <>
           <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>

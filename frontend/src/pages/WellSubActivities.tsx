@@ -5,6 +5,7 @@ import { Alert, Box, Button, CircularProgress, MenuItem, Paper, TextField, Typog
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, useFormDirty, Tag } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { PlanStatusTag, WellStatusTag } from '../components/WellLifecycle'
 import { ImportDialog } from '../components/ImportDialog'
 import { useAuth } from '../context/AuthContext'
@@ -38,6 +39,8 @@ function isPlannedActivity(activity?: MasterActivity | null): boolean {
   if (/\bupa\b/.test(text) || text.includes('unplanned')) return false
   return true
 }
+
+const CAUTION_PAGE = 'well-sub-activities'
 
 export default function WellSubActivities() {
   const { can } = useAuth()
@@ -361,7 +364,8 @@ export default function WellSubActivities() {
     },
   ], [can])
 
-  return <>
+  return <>    <RestoreCautions page={CAUTION_PAGE}/>
+
     <PageHeading
       eyebrow="RIG & WELL MANAGEMENT / WELL-SCOPED OPERATIONS"
       title="Well sub activities"
@@ -403,9 +407,35 @@ export default function WellSubActivities() {
     </Paper>
 
     {lookupError && <Alert severity="error" sx={{ mb: 1.5 }}>{lookupError}</Alert>}
-    {!loadingLookups && !rigs.length && <Alert severity="info" sx={{ mb: 1.5 }} action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/rigs" size="small">Add a rig</Button> : undefined}>Create a rig and a well before entering well sub activities.</Alert>}
-    {!loadingLookups && rigs.length > 0 && (!selectedWellId || !selectedScope) && <Alert severity="info" sx={{ mb: 1.5 }}>Choose a rig, well and scope (Drilling or Completion) to open its sub activity register. Codes are unique within each well scope, so Drilling and Completion maintain independent sub activity lists.</Alert>}
-    {!loadingLookups && selectedWellId && selectedScope && !activities.length && <Alert severity="warning" sx={{ mb: 1.5 }} icon={<FactCheckOutlined/>} action={can('master-data:read') ? <Button component={RouterLink} to="/master-data/records?module=activities" size="small">Manage Activities</Button> : undefined}>No active Master Data Activities are available. An Activity must be configured before a sub activity can be created.</Alert>}
+    {!loadingLookups && !rigs.length && <Caution
+      cautionKey="no-rigs"
+      page={CAUTION_PAGE}
+      severity="info"
+      signature={[rigs.length]}
+      sx={{ mb: 1.5 }}
+      action={can('rig-well:create') ? <Button component={RouterLink} to="/rig-well/rigs" size="small" color="inherit">Add a rig</Button> : undefined}
+    >
+      Create a rig and a well before entering well sub activities.
+    </Caution>}
+    {!loadingLookups && rigs.length > 0 && (!selectedWellId || !selectedScope) && <Caution
+      cautionKey="no-scope-selected"
+      page={CAUTION_PAGE}
+      severity="info"
+      signature={[rigs.length, selectedWellId ?? '', selectedScope ?? '']}
+      sx={{ mb: 1.5 }}
+    >
+      Choose a rig, well and scope (Drilling or Completion) to open its sub activity register. Codes are unique within each well scope, so Drilling and Completion maintain independent sub activity lists.
+    </Caution>}
+    {!loadingLookups && selectedWellId && selectedScope && !activities.length && <Caution
+      cautionKey="no-activities"
+      page={CAUTION_PAGE}
+      icon={<FactCheckOutlined/>}
+      signature={[activities.length, selectedWellId, selectedScope]}
+      sx={{ mb: 1.5 }}
+      action={can('master-data:read') ? <Button component={RouterLink} to="/master-data/records?module=activities" size="small" color="inherit">Manage Activities</Button> : undefined}
+    >
+      No active Master Data Activities are available. An Activity must be configured before a sub activity can be created.
+    </Caution>}
     {notice && <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 1.5 }}>{notice}</Alert>}
     <ErrorMessage message={error}/>
 

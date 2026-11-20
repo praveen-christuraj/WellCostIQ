@@ -4,19 +4,23 @@ import type { EChartsOption } from 'echarts'
 import {
   ArrowForwardRounded, DescriptionOutlined, FactCheckOutlined, LayersOutlined, RefreshRounded, TaskAltOutlined,
 } from '@mui/icons-material'
-import { Alert, Box, Button, List, ListItem, ListItemText, Typography, useTheme } from '@mui/material'
+import { Box, Button, List, ListItem, ListItemText, Typography, useTheme } from '@mui/material'
 import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { ChartPanel } from '../components/ui/ChartPanel'
 import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { api } from '../lib/api'
 import { chartPalette } from '../designSystem'
 import { totalsText, type AfeOverview as AfeOverviewData } from '../lib/afe'
 import { compactMoney } from '../lib/businessDashboard'
+
+/** Local-storage namespace for the dismissible cautions shown on this page. */
+const CAUTION_PAGE = 'afe-overview'
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'info' | 'neutral'> = {
   approval: 'success', review: 'warning', submitted: 'info', draft: 'neutral',
@@ -140,9 +144,18 @@ export default function AfeOverview() {
     />
     <ErrorMessage message={error}/>
 
-    {overview && overview.warning_afes > 0 && <Alert severity="warning" sx={{ mb: 2 }} action={<Button component={RouterLink} to="/afe/register?tab=estimation" size="small">Review</Button>}>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
+    {overview && overview.warning_afes > 0 && <Caution
+      cautionKey="estimate-warnings"
+      page={CAUTION_PAGE}
+      severity="warning"
+      signature={[overview.warning_afes]}
+      action={<Button component={RouterLink} to="/afe/register?tab=estimation" size="small">Review</Button>}
+      sx={{ mb: 2 }}
+    >
       {overview.warning_afes} AFE{overview.warning_afes === 1 ? '' : 's'} carry estimate warnings. Review them in AFE cost estimation before submitting.
-    </Alert>}
+    </Caution>}
 
     {busy && !overview ? <DatasetState kind="loading" title="Loading the AFE portfolio…"/> : overview && <>
       <Box display="grid" gap={1.5} sx={{ gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', lg: 'repeat(4, minmax(0,1fr))' } }}>
@@ -158,9 +171,15 @@ export default function AfeOverview() {
         <StatCard label="Deleted AFEs" value={overview.deleted_afes.toLocaleString()} hint="Recoverable from Deleted entries" icon={<FactCheckOutlined fontSize="small"/>}/>
       </Box>
 
-      {overview.conversion_pending_afes > 0 && <Alert severity="info" sx={{ mt: 1.5 }}>
+      {overview.conversion_pending_afes > 0 && <Caution
+        cautionKey="conversion-pending"
+        page={CAUTION_PAGE}
+        severity="info"
+        signature={[overview.conversion_pending_afes]}
+        sx={{ mt: 1.5 }}
+      >
         {overview.conversion_pending_afes} AFE{overview.conversion_pending_afes === 1 ? ' is' : 's are'} left out of converted totals until its currency conversion rates are entered. Totals below remain grouped by their own currency.
-      </Alert>}
+      </Caution>}
 
       <Box display="grid" gap={2} sx={{ mt: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.15fr) minmax(0, 1fr)' } }}>
         <SectionCard

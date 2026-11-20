@@ -98,7 +98,7 @@ const SCOPE_LABELS: Record<BundleScope, string> = {
   both: 'Drilling & Completion',
 }
 
-// High-contrast print palette (harmonised with WellCostIQ Petrol & slate tokens).
+// High-contrast print palette (harmonised with WellSenseIQ Petrol & slate tokens).
 const PRINT_COLORS = {
   planned: '#15515B',
   actual: '#2B6CB0',

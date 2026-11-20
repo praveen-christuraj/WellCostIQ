@@ -7,6 +7,7 @@ import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { AfePrintSheet } from '../components/afe/AfePrintSheet'
 import { ReportViewDialog } from '../components/ui/ReportViewDialog'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { BreakdownDialog } from '../components/afe/BreakdownDialog'
 import { AfeScopeAssignmentDialog, type AfeScopeTarget } from '../components/afe/AfeScopeAssignmentDialog'
 import { BulkEstimateDialog, type BulkResult } from '../components/afe/BulkEstimateDialog'
@@ -107,6 +108,8 @@ function Card({ title, subtitle, count, actions, children }: { title: string; su
     {children}
   </Paper>
 }
+
+const CAUTION_PAGE = 'afe-estimate'
 
 export default function AfeEstimate() {
   const { afeId = '' } = useParams()
@@ -878,22 +881,46 @@ export default function AfeEstimate() {
     {costingSetError && <Alert severity="warning" onClose={() => setCostingSetError('')} sx={{ mb: 1.5 }}>
       Reusable costing sets could not be loaded: {costingSetError}. You can still edit and save this estimate as usual.
     </Alert>}
-    {saved.well.config_status !== 'configured' && <Alert severity="warning" sx={{ mb: 1.5 }}>
+    <RestoreCautions page={CAUTION_PAGE}/>
+    {saved.well.config_status !== 'configured' && <Caution
+      cautionKey="afe-well-plan"
+      page={CAUTION_PAGE}
+      signature={[saved.well.well_id, saved.well.status, saved.well.config_status]}
+      sx={{ mb: 1.5 }}
+    >
       {isOpenWellStatus(saved.well.status)
         ? 'The well plan is in Draft. Mark it as Configured in Rig & Well Management before saving or submitting this estimate.'
         : `This well scope is in ${trackingLabel(saved.well.status)} and its plan is closed, so this estimate is read-only. Return the scope to Active in Rig & Well Management to change it.`}
-    </Alert>}
-    {!editable && afe.status === 'draft' && !can('afe:estimate') && <Alert severity="info" sx={{ mb: 1.5 }}>You can view this estimate. Changing it requires the AFE estimate permission.</Alert>}
-    {editable && incompleteCount > 0 && <Alert severity="warning" sx={{ mb: 1.5 }}>
+    </Caution>}
+    {!editable && afe.status === 'draft' && !can('afe:estimate') && <Caution
+      cautionKey="afe-no-permission"
+      page={CAUTION_PAGE}
+      severity="info"
+      signature={[afe.id]}
+      sx={{ mb: 1.5 }}
+    >
+      You can view this estimate. Changing it requires the AFE estimate permission.
+    </Caution>}
+    {editable && incompleteCount > 0 && <Caution
+      cautionKey="afe-incomplete-lines"
+      page={CAUTION_PAGE}
+      signature={[incompleteCount]}
+      sx={{ mb: 1.5 }}
+    >
       {incompleteCount} line{incompleteCount === 1 ? ' is' : 's are'} incomplete. Incomplete lines are left out of the preview and block saving. Use Edit on the flagged line to complete it.
-    </Alert>}
+    </Caution>}
     {previewError ? <ErrorDetails error={previewError} title="The preview could not be calculated. Fix these issues:"/> : null}
     {saveError ? <ErrorDetails error={saveError} title="The estimate was not saved. Fix these issues:"/> : null}
-    {warningList.length > 0 && <Alert severity="warning" sx={{ mb: 1.5 }}>
+    {warningList.length > 0 && <Caution
+      cautionKey="afe-estimate-warnings"
+      page={CAUTION_PAGE}
+      signature={[warningList.length, warningList.slice(0, 6).join('|')]}
+      sx={{ mb: 1.5 }}
+    >
       <Typography fontWeight={700} fontSize={13} mb={.4}>{warningList.length} estimate warning{warningList.length === 1 ? '' : 's'}</Typography>
       {warningList.slice(0, 6).map(warning => <Typography key={warning} fontSize={12.5}>• {warning}</Typography>)}
       {warningList.length > 6 && <Typography fontSize={12.5}>…and {warningList.length - 6} more. Open the line breakdown for details.</Typography>}
-    </Alert>}
+    </Caution>}
 
     {/* Well configuration: the only source of sections, phases, depths and planned days. */}
     <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, mb: 2, borderRadius: 2 }}>
@@ -912,7 +939,7 @@ export default function AfeEstimate() {
         </Box>
       </Box>
       {wellSections.length === 0
-        ? <Alert severity="warning">This well has no sections yet. Save its plan in Rig & Well Management before estimating.</Alert>
+        ? <Caution cautionKey="afe-no-sections" page={CAUTION_PAGE} signature={[saved.well.well_id]}>This well has no sections yet. Save its plan in Rig & Well Management before estimating.</Caution>
         : <Box sx={{ overflowX: 'auto' }}>
           <Table size="small">
             <TableHead>

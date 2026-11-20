@@ -2121,12 +2121,23 @@ def _normalise_other_expense(
 
 
 def _reject_duplicate_service_sub_activity(services: list[dict[str, Any]]) -> None:
-    """One service may repeat on a date only under a different well sub activity.
+    """One *cost item* of a service may repeat only under a different sub activity.
 
-    A service operated 18h under sub activity 1, 3h under sub activity 2 and
-    3h under sub activity 3 is three separate ledger allocations. Different
-    charge categories or section/phase scopes can coexist under a sub activity;
-    an identical service/sub-activity/category/scope tuple is still a duplicate.
+    A service configured in the AFE is one service with one or more cost items
+    (its priced charge categories). The daily entry window bills any number of
+    those cost items in a single entry and saves one ordinary ledger line per
+    item, so the ledger legitimately holds several rows for one service on one
+    date. The ledger key is therefore the cost item — service, charge category
+    and scope — not the service alone:
+
+    * Operation + Standby + Mobilization of one service, recorded together under
+      one sub activity, is three cost lines of one service. That is entry, not
+      duplication.
+    * The same cost item (say Operation) twice under the same sub activity,
+      section and phase is a duplicate: one charge would be counted twice.
+    * A service operated 18h under sub activity 1, 3h under sub activity 2 and
+      3h under sub activity 3 is three separate allocations and stays valid.
+
     Time-based hourly allocations are limited to 24 hours per service/category.
     The deduplicated whole-well operational allocation is also limited to 24
     hours, so repeated simultaneous service charges cannot inflate MIS duration.
@@ -2144,11 +2155,13 @@ def _reject_duplicate_service_sub_activity(services: list[dict[str, Any]]) -> No
         code = fields.get("service_code_snapshot") or fields["service_id"]
         sub_label = fields.get("sub_activity_code_snapshot") or "the same sub activity"
         if key in seen:
+            category = fields.get("charge_category") or "charge"
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Service {code} is already entered for sub activity {sub_label} on this date. "
-                    "Use a different sub activity, charge category or section/phase for a distinct allocation."
+                    f"Service {code}: the {category} cost item is already entered for sub activity {sub_label} on this date. "
+                    "Enter a service's cost items once, in the same entry, or use a different sub activity, "
+                    "cost item or section/phase for a distinct allocation."
                 ),
             )
         seen[key] = code

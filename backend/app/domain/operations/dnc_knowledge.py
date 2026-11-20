@@ -1,4 +1,4 @@
-"""Authoritative Drilling & Completion (D&C) engineering knowledge base for WellCostIQ.
+"""Authoritative Drilling & Completion (D&C) engineering knowledge base for WellSenseIQ.
 
 Used by:
 1. Deterministic technical Q&A in Well Operations Ask & Guide and the workspace Guide.
@@ -28,7 +28,7 @@ class DncEntry:
 # Compact engineering rule-sheet injected into Ollama system prompts for qwen3:1.7b.
 DNC_CORE_PRIMER = (
     "DRILLING & COMPLETION ENGINEERING RULES:\n"
-    "- Units: 1 ft = 0.3048 m (1 m = 3.28084 ft). WellCostIQ stores all depths in metres (m), "
+    "- Units: 1 ft = 0.3048 m (1 m = 3.28084 ft). WellSenseIQ stores all depths in metres (m), "
     "fluid weight in ppg (1 SG = 8.33 ppg), pressure in psi, volume in bbl, timestamps in WAT (Africa/Lagos, UTC+1:00).\n"
     "- MD vs TVD: Measured Depth (MD) is along-hole pipe length from active datum (RT/KB). "
     "True Vertical Depth (TVD) is vertical depth from datum. In vertical wells TVD = MD; in deviated/horizontal wells TVD <= MD ALWAYS (never TVD > MD). "
@@ -66,7 +66,7 @@ DNC_ENTRIES: tuple[DncEntry, ...] = (
             "Physical invariant: TVD is always less than or equal to MD (TVD = MD in a strictly vertical well; dTVD = dMD * cos(inclination) along a tangent). TVD must never exceed MD.",
             "Bit Depth vs Hole MD: Hole MD is the deepest drilled total depth; Bit Depth is where the bit/assembly sits right now (e.g. at casing shoe during conditioning or mid-string while RIH/POOH). Tripping changes bit depth without generating drilled footage.",
             "Minimum Curvature & DLS: Surveys (MWD, magnetic multishot, or wireline gyro inside casing/high interference) measure MD, Inclination, and Azimuth and compute TVD, N/S, E/W, Vertical Section, and Dogleg Severity (DLS in deg/30m; 1 deg/100ft = 0.9843 deg/30m). Elevated DLS (>3–5 deg/30m) raises torque, drag, keyseat risk, and casing wear.",
-            "Unit standardization: WellCostIQ converts imperial depths using 1 ft = 0.3048 m exact and records whether report TVD came from the printed header, survey table, narrative MWD survey, or manual entry.",
+            "Unit standardization: WellSenseIQ converts imperial depths using 1 ft = 0.3048 m exact and records whether report TVD came from the printed header, survey table, narrative MWD survey, or manual entry.",
         ),
         follow_ups=(
             "How are ROP, time balance and lead or lag calculated?",
@@ -241,7 +241,7 @@ DNC_ENTRIES: tuple[DncEntry, ...] = (
         category="workflow",
         keywords="npt upa pt sp trouble tp01 tp02 tp03 tr01 tr02 tr03 tr04 tr05 td01 ts01 tw01 tw02 reopen timeline daily report wat west africa time utc lagos summary export",
         summary=(
-            "WellCostIQ classifies every operational block along two axes — Classification (Planned, UPA, NPT) and "
+            "WellSenseIQ classifies every operational block along two axes — Classification (Planned, UPA, NPT) and "
             "Allocation (PT, UPA, NPT, SP) — timestamps all displays and exports in West Africa Time (WAT, UTC+1:00, "
             "Africa/Lagos), compiles full multi-day Well Operation Summaries (PDF/Excel/CSV), and supports audited "
             "reopening of timelines and daily reports."

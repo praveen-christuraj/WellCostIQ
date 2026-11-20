@@ -20,6 +20,7 @@ import { WellProgressPanel } from '../components/daily-cost/WellProgressPanel'
 import { ExportReportDialog } from '../components/ui/ExportReportDialog'
 import type { ReportDocument, ReportFigure, ReportSection } from '../lib/reportPdf'
 import { CostCriteriaPivot } from '../components/daily-cost/CostCriteriaPivot'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { WellEntryChecksCard } from '../components/daily-cost/WellEntryChecksCard'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
@@ -32,6 +33,9 @@ import {
 import { compareServiceGroups } from '../lib/serviceGroups'
 import { formatDepthMeters } from '../lib/units'
 import { watNowFormatted } from '../lib/time'
+
+/** Local-storage namespace for the dismissible cautions shown on this page. */
+const CAUTION_PAGE = 'daily-cost-analysis'
 
 function StatCard({ label, value, hint, icon, tone = 'default' }: {
   label: string; value: string; hint: string; icon: ReactNode; tone?: 'default' | 'warning' | 'good'
@@ -543,7 +547,18 @@ export default function DailyCostAnalysis() {
     </Paper>}
 
     {summary && <>
-      {summary.warnings.map(warning => <Alert key={warning.code} severity={warning.severity} icon={warning.severity === 'info' ? undefined : <WarningAmberRounded/>} sx={{ mb: 1.4 }}>{warning.message}</Alert>)}
+      <RestoreCautions page={CAUTION_PAGE}/>
+      {/* Standing analysis cautions: read once, then dismissed. A re-worded or
+          re-counted caution is a new fact and shows again. */}
+      {summary.warnings.map(warning => <Caution
+        key={warning.code}
+        cautionKey={`analysis-${warning.code}`}
+        page={CAUTION_PAGE}
+        severity={warning.severity}
+        signature={[warning.message]}
+        icon={warning.severity === 'info' ? undefined : <WarningAmberRounded/>}
+        sx={{ mb: 1.4 }}
+      >{warning.message}</Caution>)}
       {/* Which daily sheets of this well still carry a value that looks mistyped. */}
       {selectedWell && <WellEntryChecksCard wellId={selectedWell} refreshKey={summary}/>}
 

@@ -712,6 +712,7 @@ const scopedReference = {
   other_expense_types: [],
 }
 scopedBaseline.service_rates.push({ ...scopedBaseline.service_rates[0], id: 'sr-mob', charge_category: 'Mobilization', unit_rate: '500' })
+scopedBaseline.service_rates.push({ ...scopedBaseline.service_rates[0], id: 'sr-standby', charge_category: 'Standby', unit_rate: '800' })
 let allocatedSave = null
 const scopedRoot = createRoot(document.createElement('div'))
 await act(async () => scopedRoot.render(<MemoryRouter><ThemeProvider theme={buildTheme('light')}>
@@ -726,7 +727,8 @@ assert.ok(document.body.textContent.includes('COMP-ONLY · Run completion tubing
 assert.ok(!document.body.textContent.includes('DRL-ONLY · Drill surface hole'), 'completion sheet excludes drilling sub-activity')
 await click([...document.querySelectorAll('button')].find(button => button.textContent === 'Add activity allocation'), 'add an activity allocation inside the service editor')
 assert.ok(document.body.textContent.includes('24 / 24 hours'), 'allocated hours are visible beside the entry')
-const mobCheckbox = [...document.querySelectorAll('label')].find(label => label.textContent.includes('Mobilization ·'))?.querySelector('input')
+const mobCheckbox = [...document.querySelectorAll('input[type="checkbox"]')].find(input => input.getAttribute('aria-label') === 'Include Mobilization cost item')
+assert.ok(mobCheckbox, 'the Mobilization cost item is tickable in the same entry')
 await click(mobCheckbox, 'include a one-time mobilization without selecting the service again')
 await click([...document.querySelectorAll('button')].find(button => button.textContent === 'Add service'), 'save operation and mobilization in one entry')
 assert.ok(allocatedSave, 'single submit produces service charge lines')
@@ -736,6 +738,77 @@ assert.equal(allocatedSave[0].quantity_unit, 'hours')
 assert.equal(allocatedSave[1].charge_category, 'Mobilization')
 assert.equal(allocatedSave[1].quantity, '1')
 assert.equal(allocatedSave[1].quantity_unit, 'unit')
+
+// A service whose AFE line carries several cost items is entered ONCE: every
+// ticked cost item becomes its own ledger line, so nobody has to add the same
+// service twice to reach a second cost item (and the duplicate guard is per item).
+await act(async () => scopedRoot.unmount())
+let multiItemSave = null
+const multiRoot = createRoot(document.createElement('div'))
+await act(async () => multiRoot.render(<MemoryRouter><ThemeProvider theme={buildTheme('light')}>
+  <DailyCostLineDialog
+    open kind="service" initialLine={null} serviceLines={[]} lineIndex={null}
+    baseline={scopedBaseline} reference={scopedReference} wellId="well-1" scope="completion"
+    onClose={() => {}} onSave={lines => { multiItemSave = lines }}
+  />
+</ThemeProvider></MemoryRouter>))
+await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+await click([...document.querySelectorAll('button')].find(button => button.textContent === 'Add activity allocation'), 'allocate 24 hours before billing the cost items')
+assert.ok(document.body.textContent.includes('AFE cost items · 1 of 3 selected'), 'one entry lists every cost item of the service, the primary selected')
+assert.ok(!document.body.textContent.includes('Matched AFE rate'), 'the single-value AFE rate dropdown is retired')
+const costItemBoxes = [...document.querySelectorAll('input[type="checkbox"]')].filter(input => input.getAttribute('aria-label')?.includes('cost item'))
+assert.equal(costItemBoxes.length, 3, 'Operation, Standby and Mobilization are all selectable, never just one')
+const standbyBox = costItemBoxes.find(input => input.getAttribute('aria-label') === 'Include Standby cost item')
+await click(standbyBox, 'tick a second cost item of the same service')
+assert.ok(document.body.textContent.includes('AFE cost items · 2 of 3 selected'), 'the count follows the ticks')
+assert.ok(document.body.textContent.includes('2 cost items will be saved as 2 lines of this one service'), 'the copy explains the expansion')
+await click([...document.querySelectorAll('button')].find(button => button.textContent === 'Add service'), 'one submit bills both cost items')
+assert.equal(multiItemSave.length, 2, 'one service entry saves one line per ticked cost item')
+assert.equal(multiItemSave[0].charge_category, 'Operation', 'the primary cost item leads')
+assert.deepEqual(multiItemSave.map(line => line.charge_category), ['Operation', 'Standby'])
+assert.deepEqual(multiItemSave.map(line => line.baseline_service_rate_id), ['sr-1', 'sr-standby'], 'each line keeps its own locked AFE cost-item rate')
+assert.ok(multiItemSave.every(line => line.service_id === 'svc-1' && line.sub_activity_id === 'sub-comp-only'), 'both lines are the same service under one sub activity')
+assert.deepEqual(multiItemSave.map(line => line.quantity + line.quantity_unit), ['24hours', '24hours'], 'both cost items are billed on the same 24-hour allocation')
+await act(async () => multiRoot.unmount())
+
+// A genuine duplicate is still refused, and the message names the cost item
+// (never "you cannot add this service twice" — the same service twice is fine,
+// the same cost item twice is not).
+await act(async () => multiRoot.unmount())
+let duplicateSave = null
+const duplicateRoot = createRoot(document.createElement('div'))
+await act(async () => duplicateRoot.render(<MemoryRouter><ThemeProvider theme={buildTheme('light')}>
+  <DailyCostLineDialog
+    open kind="service" initialLine={null} serviceLines={[{ id: 'existing', service_id: 'svc-1', sub_activity_id: 'sub-comp-only', hole_section_id: 'sec-c1', phase_id: 'ph-c1', charge_category: 'Operation', activity_id: 'act-1', quantity: '8', quantity_unit: 'hours' }]} lineIndex={null}
+    baseline={scopedBaseline} reference={scopedReference} wellId="well-1" scope="completion"
+    onClose={() => {}} onSave={lines => { duplicateSave = lines }}
+  />
+</ThemeProvider></MemoryRouter>))
+await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+await click([...document.querySelectorAll('button')].find(button => button.textContent === 'Add service'), 'submit a cost item the sheet already holds')
+assert.equal(duplicateSave, null, 'a repeated cost item is not saved')
+assert.ok(document.body.textContent.includes('Operation is already entered for this sub activity on this sheet'), 'the message names the clashing cost item')
+assert.ok(document.body.textContent.includes('add the service again under a different sub activity'), 'and says what to do instead')
+await act(async () => duplicateRoot.unmount())
+
+// A row that bills only a one-time cost item is not asked for working hours.
+let onceOnlySave = null
+const onceOnlyBaseline = { ...scopedBaseline, service_rates: scopedBaseline.service_rates.filter(rate => rate.id !== 'sr-1' && rate.id !== 'sr-standby') }
+const onceOnlyRoot = createRoot(document.createElement('div'))
+await act(async () => onceOnlyRoot.render(<MemoryRouter><ThemeProvider theme={buildTheme('light')}>
+  <DailyCostLineDialog
+    open kind="service" initialLine={null} serviceLines={[]} lineIndex={null}
+    baseline={onceOnlyBaseline} reference={scopedReference} wellId="well-1" scope="completion"
+    onClose={() => {}} onSave={lines => { onceOnlySave = lines }}
+  />
+</ThemeProvider></MemoryRouter>))
+await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+await click([...document.querySelectorAll('button')].find(button => button.textContent === 'Add service'), 'save a service that is charged once')
+assert.ok(onceOnlySave, 'a one-time-only row saves without hours')
+assert.equal(onceOnlySave[0].charge_category, 'Mobilization')
+assert.equal(onceOnlySave[0].quantity, '1')
+assert.equal(onceOnlySave[0].quantity_unit, 'unit')
+await act(async () => onceOnlyRoot.unmount())
 
 const { allocateService, allocationErrors } = await import('../../frontend/src/lib/dailyAllocations')
 const allocationReference = {
@@ -796,7 +869,7 @@ const rigWellDeletedPage = readFileSync('../frontend/src/pages/RigWellDeleted.ts
 for (const required of ['row => `${row.entity_type}:${row.id}:${row.scope ?? \'all\'}`', '? `?scope=${encodeURIComponent(target.scope)}`']) {
   assert.ok(rigWellDeletedPage.includes(required), `rig-well deleted page retains ${required}`)
 }
-console.log('Daily cost checks passed: merged group-ordered Services/Consumables cover schedule and totals, blank costing-set remarks, separate cumulative schedules, multi-activity and multi-charge entry, one-time charging, scoped depths, bulk rate upgrades, advanced selection, report-day columns, saved milestone/lead-lag, bulk first-page printing, mud/loss matrices, three-decimal presentation, print portal cleanup and register wiring.')
+console.log('Daily cost checks passed: merged group-ordered Services/Consumables cover schedule and totals, blank costing-set remarks, separate cumulative schedules, multi-activity and multi-charge entry, several cost items of one service in a single entry, per-cost-item duplicate refusal, one-time charging, scoped depths, bulk rate upgrades, advanced selection, report-day columns, saved milestone/lead-lag, bulk first-page printing, mud/loss matrices, three-decimal presentation, print portal cleanup and register wiring.')
 
 dom.window.close()
 process.exit(0)

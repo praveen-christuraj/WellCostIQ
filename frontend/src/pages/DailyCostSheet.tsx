@@ -20,6 +20,7 @@ import { CostingSetPickerDialog } from '../components/CostingSetPickerDialog'
 import { AdvancedSelectorDialog, type AdvancedSelectorItem, type AdvancedSelectorSelection } from '../components/AdvancedItemSelector'
 import { DailyCostPrintSheet, useCostPrint, type CostPrintReport } from '../components/daily-cost/DailyCostPrintSheet'
 import { PreviewPrintPortal, ReportViewDialog } from '../components/ui/ReportViewDialog'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { WellCostPrintDialog } from '../components/daily-cost/WellCostPrintDialog'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
@@ -42,6 +43,9 @@ import type { MudCostMaterialBalance, MudCostReconciliation } from '../lib/mudCo
 import type { LihCostReport } from '../lib/lihCost'
 import type { NdtEntry } from '../lib/ndtInspection'
 import { formatDepthMeters } from '../lib/units'
+
+/** Local-storage namespace for the dismissible cautions shown on each daily sheet. */
+const CAUTION_PAGE = 'daily-cost-sheet'
 import { COSTING_SET_ITEM_KIND_LABEL, type CostingSet, type CostingSetGroup } from '../lib/costingSets'
 import type { Template } from '../lib/recordTemplates'
 import { formatWatDateTime } from '../lib/time'
@@ -1386,16 +1390,30 @@ export default function DailyCostSheet() {
       </Box>
     </Paper>
 
-    {rateRefreshWarning && <Alert severity="warning" sx={{ mb: 1.5 }}>{rateRefreshWarning}</Alert>}
+    <RestoreCautions page={CAUTION_PAGE}/>
+    {rateRefreshWarning && <Caution cautionKey="rate-refresh" page={CAUTION_PAGE} signature={[rateRefreshWarning]} sx={{ mb: 1.5 }}>{rateRefreshWarning}</Caution>}
     {notice && <Alert severity="success" sx={{ mb: 1.5 }} onClose={() => setNotice('')}>{notice}</Alert>}
     {costingSetError && <Alert severity="warning" sx={{ mb: 1.5 }} onClose={() => setCostingSetError('')}>{costingSetError}</Alert>}
     <ErrorMessage message={saveError}/>
     {previewError && <Alert severity="error" sx={{ mb: 1.5 }} action={can('daily-cost:update') ? <Button color="inherit" size="small" onClick={() => { setPreviewError(''); setPreview(null); setPreviewRetry(value => value + 1) }}>Retry preview</Button> : undefined}>{previewError}</Alert>}
-    {entry.status === 'submitted' && <Alert severity="info" icon={<LockOutlined/>} sx={{ mb: 1.5 }}>
+    {entry.status === 'submitted' && <Caution
+      cautionKey="submitted-read-only"
+      page={CAUTION_PAGE}
+      severity="info"
+      icon={<LockOutlined/>}
+      signature={[entry.status_remarks ?? '', entry.submitted_at ?? '']}
+      sx={{ mb: 1.5 }}
+    >
       Submitted by {entry.submitted_by || 'workspace user'}{entry.submitted_at ? ` on ${formatWatDateTime(entry.submitted_at)}` : ''}. The daily sheet is read-only{entry.status_remarks ? ` · ${entry.status_remarks}` : ''}.
-    </Alert>}
-    {!editable && entry.status === 'draft' && <Alert severity="info" sx={{ mb: 1.5 }}>You can view this Draft. Editing requires the Daily Cost update permission.</Alert>}
-    {entry.status === 'draft' && editable && previousDay && <Alert severity="info" icon={<ContentCopyOutlined/>} sx={{ mb: 1.5 }}
+    </Caution>}
+    {!editable && entry.status === 'draft' && <Caution cautionKey="draft-no-permission" page={CAUTION_PAGE} severity="info" icon={false} sx={{ mb: 1.5 }}>You can view this Draft. Editing requires the Daily Cost update permission.</Caution>}
+    {entry.status === 'draft' && editable && previousDay && <Caution
+      cautionKey="previous-day-available"
+      page={CAUTION_PAGE}
+      severity="info"
+      icon={<ContentCopyOutlined/>}
+      signature={[previousDay.entry.id, previousDay.services.length, previousDay.consumables.length, previousDay.tangibles.length, previousDay.other_expenses.length]}
+      sx={{ mb: 1.5 }}
       action={<Box display="flex" gap={.6}>
         <Button color="inherit" size="small" disabled={copyBusy} onClick={() => void copyPreviousDay('replace')}>Replace lines</Button>
         <Button color="inherit" size="small" disabled={copyBusy} onClick={() => void copyPreviousDay('append')}>Add to current</Button>
@@ -1404,7 +1422,7 @@ export default function DailyCostSheet() {
       {previousDay.consumables.length} consumable, {previousDay.tangibles.length} tangible and{' '}
       {previousDay.other_expenses.length} other-expense line(s) totalling{' '}
       {dailyMoney(previousDay.entry.total_cost, standard)}. Copied lines keep the activity, section, vendor and locked AFE rate, and are saved as new lines on this sheet.
-    </Alert>}
+    </Caution>}
     {entry.status === 'draft' && editable && previousError && <Alert severity="info" sx={{ mb: 1.5 }}>{previousError}</Alert>}
     {previousBusy && <LinearProgress sx={{ mb: 1.5 }}/>}
     {dirty && <Alert severity="warning" sx={{ mb: 1.5 }} action={can('daily-cost:update') ? <Button color="inherit" size="small" onClick={() => { setPayload(originalPayload ?? payload); setPreview(null); setPreviewError('') }}>Discard changes</Button> : undefined}>
@@ -1493,10 +1511,16 @@ export default function DailyCostSheet() {
       <StatCard label="UPA to date" value={dailyMoney(upaToDate, standard)} hint="Unplanned Activity charges" tone={upaToDate ? 'bad' : undefined}/>
       <StatCard label="NPT to date" value={dailyMoney(nptToDate, standard)} hint="Non-Productive Time charges" tone={nptToDate ? 'bad' : undefined}/>
     </Box>
-    {amendments.length > 0 && <Alert severity="info" sx={{ mb: 1.5 }}>
+    {amendments.length > 0 && <Caution
+      cautionKey="amendments"
+      page={CAUTION_PAGE}
+      severity="info"
+      signature={[amendments.length, amendments[amendments.length - 1]?.reopened_at]}
+      sx={{ mb: 1.5 }}
+    >
       Amended {amendments.length} time{amendments.length === 1 ? '' : 's'} after its cost date
       {amendments[amendments.length - 1] ? ` — latest by ${amendments[amendments.length - 1].reopened_by || 'workspace user'} on ${formatWatDateTime(amendments[amendments.length - 1].reopened_at)}: ${amendments[amendments.length - 1].reason}` : ''}.
-    </Alert>}
+    </Caution>}
 
     <Paper variant="outlined" sx={{ p: 1.8, borderRadius: 2, mb: 1.7 }}>
       <Box display="flex" justifyContent="space-between" gap={1.5} flexWrap="wrap" alignItems="center">
@@ -1583,11 +1607,16 @@ export default function DailyCostSheet() {
         <Typography fontSize={11.5} fontWeight={700} color={lihToDate ? 'error.main' : 'text.secondary'}>Less LIH cost {dailyMoney(lihToDate, standard)}</Typography>
         <Typography fontSize={12} fontWeight={800} color={remaining < 0 ? 'error.main' : 'success.main'}>AFE available {dailyMoney(remaining, standard)}</Typography>
       </Box>
-      {Boolean(otherLineCount || day.other_expenses.length) && <Alert severity="warning" sx={{ mb: 1.4 }}>
+      {Boolean(otherLineCount || day.other_expenses.length) && <Caution
+        cautionKey="other-expenses-not-in-afe"
+        page={CAUTION_PAGE}
+        signature={[otherLineCount, workingOther, otherItemSummary ?? '']}
+        sx={{ mb: 1.4 }}
+      >
         Other expenses on this sheet: {otherLineCount} line(s) totalling {dailyMoney(workingOther, standard)}
         {otherItemSummary ? ` (${otherItemSummary})` : ''}. They are not part of the AFE estimate, so the amount is
         deducted from the AFE total rather than reconciled against a budget line.
-      </Alert>}
+      </Caution>}
       <Box sx={{ overflowX: 'auto' }}>
         <Table size="small" sx={{ minWidth: 700 }}>
           <TableHead><TableRow><TableCell>AFE budget line</TableCell><TableCell>Group</TableCell><TableCell align="right">Planned</TableCell><TableCell align="right">Actual to date</TableCell><TableCell align="right">Balance</TableCell></TableRow></TableHead>

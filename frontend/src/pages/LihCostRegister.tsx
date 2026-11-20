@@ -11,6 +11,7 @@ import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { ImportDialog } from '../components/ImportDialog'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { LihWorksheet } from '../components/lih-cost/LihWorksheet'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
@@ -24,6 +25,8 @@ import {
 } from '../lib/lihCost'
 
 type PendingAction = { kind: 'delete' | 'restore' | 'purge'; rows: LihCostEntry[] }
+
+const CAUTION_PAGE = 'lih-cost-register'
 
 export default function LihCostRegister() {
   const { can, user } = useAuth()
@@ -494,6 +497,8 @@ export default function LihCostRegister() {
     : `${selectedWell?.well_code ?? 'Well'} · LIH cost on ${displayDate(costDate)}`
 
   return <>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     <PageHeading
       eyebrow="DAILY COST MANAGEMENT / LIH COST REGISTER"
       title="LIH Cost Register"
@@ -555,9 +560,15 @@ export default function LihCostRegister() {
       {dayLocked && <Alert severity="info" sx={{ mt: 1.3, py: .4 }}>
         The worksheet has unsaved changes. Save all items or discard the changes before switching to another day.
       </Alert>}
-      {afesForWell.length > 1 && !dayLocked && <Alert severity="info" sx={{ mt: 1.3, py: .4 }}>
+      {afesForWell.length > 1 && !dayLocked && <Caution
+        cautionKey="multiple-afes"
+        page={CAUTION_PAGE}
+        severity="info"
+        signature={[afesForWell.length, wellId, afeId ?? '']}
+        sx={{ mt: 1.3, py: .4 }}
+      >
         This well has {afesForWell.length} AFEs. The LIH cost is deducted from the AFE selected above only.
-      </Alert>}
+      </Caution>}
       {!wellId && <Alert severity="info" sx={{ mt: 1.3, py: .4 }}>Choose a rig and well to open its LIH worksheet.</Alert>}
     </Paper>}
 

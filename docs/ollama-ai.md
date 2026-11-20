@@ -1,6 +1,6 @@
 # Offline LAN Ollama AI
 
-WellCostIQ supports an optional, fully offline local-area-network (LAN) AI model
+WellSenseIQ supports an optional, fully offline local-area-network (LAN) AI model
 served by **Ollama** (compact models such as `qwen3:0.6b` or `qwen3:1.7b` as well as
 `qwen3:4b-q4_K_M`) running on another PC on the same network (or locally). No
 data is ever sent to any public cloud API, and everything continues to work
@@ -8,7 +8,7 @@ deterministically when `OLLAMA_ENABLED=false` (the default) or when the remote
 AI host is temporarily offline.
 
 To add drilling, completion or well-costing PDFs independently of the model, see
-[Teach the WellCostIQ assistant](ai-knowledge.md).
+[Teach the WellSenseIQ assistant](ai-knowledge.md).
 
 ## What it does
 
@@ -55,7 +55,7 @@ To add drilling, completion or well-costing PDFs independently of the model, see
 
 ## 1. Set up the remote Ollama PC on your LAN
 
-Suppose WellCostIQ runs on `192.168.1.10` and the dedicated AI PC on the same
+Suppose WellSenseIQ runs on `192.168.1.10` and the dedicated AI PC on the same
 LAN has static/reserved IP `192.168.1.50`.
 
 ### Pull the model
@@ -73,7 +73,7 @@ ollama list
 ### Bind Ollama to the LAN interface
 
 By default Ollama listens only on `127.0.0.1:11434`. Set `OLLAMA_HOST` on the
-**AI PC** so the WellCostIQ server can reach it over the LAN:
+**AI PC** so the WellSenseIQ server can reach it over the LAN:
 
 - **Linux (`systemd`):**
   ```sh
@@ -85,7 +85,7 @@ By default Ollama listens only on `127.0.0.1:11434`. Set `OLLAMA_HOST` on the
   Environment="OLLAMA_HOST=0.0.0.0:11434"
   Environment="OLLAMA_KEEP_ALIVE=15m"
   ```
-  Then reload and restrict port `11434` to the WellCostIQ server or LAN subnet:
+  Then reload and restrict port `11434` to the WellSenseIQ server or LAN subnet:
   ```sh
   sudo systemctl daemon-reload && sudo systemctl restart ollama
   sudo ufw allow from 192.168.1.0/24 to any port 11434 proto tcp
@@ -94,7 +94,7 @@ By default Ollama listens only on `127.0.0.1:11434`. Set `OLLAMA_HOST` on the
 - **Windows (PowerShell as Administrator):**
   ```powershell
   [System.Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0:11434", "User")
-  New-NetFirewallRule -DisplayName "Ollama LAN (WellCostIQ)" `
+  New-NetFirewallRule -DisplayName "Ollama LAN (WellSenseIQ)" `
     -Direction Inbound -Protocol TCP -LocalPort 11434 `
     -RemoteAddress LocalSubnet -Action Allow
   ```
@@ -106,7 +106,7 @@ By default Ollama listens only on `127.0.0.1:11434`. Set `OLLAMA_HOST` on the
   ```
   Quit and relaunch Ollama.app.
 
-### Verify LAN connectivity from the WellCostIQ host
+### Verify LAN connectivity from the WellSenseIQ host
 
 ```sh
 curl -fsS http://192.168.1.50:11434/api/tags
@@ -116,7 +116,7 @@ You should see `"name":"qwen3:4b-q4_K_M"` in the returned JSON.
 
 ---
 
-## 2. Configure `.env` on the WellCostIQ host
+## 2. Configure `.env` on the WellSenseIQ host
 
 Add or edit these variables in `.env` (for Docker Compose) or `backend/.env`
 (for local `uvicorn` runs):
@@ -159,7 +159,7 @@ OLLAMA_CA_CERT=
 
 ---
 
-## 3. Starting WellCostIQ with LAN Ollama access
+## 3. Starting WellSenseIQ with LAN Ollama access
 
 ### Docker Compose (recommended)
 
@@ -191,7 +191,7 @@ cd backend && ../.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 4. Communication error alerts & troubleshooting
 
-Whenever WellCostIQ cannot communicate with the configured LAN Ollama model, the
+Whenever WellSenseIQ cannot communicate with the configured LAN Ollama model, the
 user receives **two clear alerts**:
 
 1. An inline accessible alert (`role="alert"`) inside the Guide or Cost

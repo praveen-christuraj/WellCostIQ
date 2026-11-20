@@ -1,4 +1,4 @@
-# Render blueprint for the WellCostIQ API.
+# Render blueprint for the WellSenseIQ API.
 # Apply via Render Dashboard -> Blueprints -> New Blueprint Instance (repo root).
 # Secrets (sync: false) are entered in the Render dashboard, never committed here.
 # Full walkthrough: docs/deployment.md

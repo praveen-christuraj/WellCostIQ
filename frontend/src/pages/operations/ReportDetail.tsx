@@ -21,6 +21,7 @@ import {
 } from '@mui/material'
 import { AiStatusAlert } from '../../components/assistant/AiStatusAlert'
 import { ErrorMessage, FormDialog, PanelDialog, useFormDirty, useUnsavedChangesGuard } from '../../components/Common'
+import { Caution, RestoreCautions } from '../../components/ui/Caution'
 import { DataTable } from '../../components/DataTable'
 import { BulkAssignDialog } from '../../components/operations/BulkAssignDialog'
 import { SourceDialog } from '../../components/operations/SourceDialog'
@@ -173,6 +174,8 @@ const depthRange = (from: string | null | undefined, to: string | null | undefin
   if (from && to && from !== to) return `${from}–${to}`
   return to || from || '—'
 }
+
+const CAUTION_PAGE = 'operations-report-detail'
 
 export default function OperationsReportDetail({
   id,
@@ -634,6 +637,7 @@ export default function OperationsReportDetail({
         }
       >
         <Stack spacing={1.25} mb={1}>
+          <RestoreCautions page={CAUTION_PAGE}/>
           {error && <ErrorMessage message={error} />}
           {notice && (
             <Alert severity="success" onClose={() => setNotice('')}>
@@ -652,14 +656,16 @@ export default function OperationsReportDetail({
             />
           )}
           {report.status === 'rejected' && (
-            <Alert severity="warning">Returned for correction: {report.rejection_reason}</Alert>
+            <Caution cautionKey="returned-for-correction" page={CAUTION_PAGE} signature={[report.id, report.rejection_reason ?? '']}>
+              Returned for correction: {report.rejection_reason}
+            </Caution>
           )}
           {report.reopened_at && (
-            <Alert severity="info">
+            <Caution cautionKey="report-reopened" page={CAUTION_PAGE} severity="info" signature={[report.id, report.reopened_at]}>
               Last reopened by <strong>{report.reopened_by || 'workspace user'}</strong> on{' '}
               <strong>{formatWatDateTime(report.reopened_at)}</strong>
               {report.reopen_reason ? ` — Reason: ${report.reopen_reason}` : ''}.
-            </Alert>
+            </Caution>
           )}
           {['submitted', 'approved'].includes(report.status) && !report.is_deleted && (
             <Alert severity="success">
@@ -673,14 +679,16 @@ export default function OperationsReportDetail({
             </Alert>
           )}
           {report.is_deleted && (
-            <Alert severity="info">This report is read-only. Restore it from the register before making changes.</Alert>
+            <Caution cautionKey="report-deleted" page={CAUTION_PAGE} severity="info" signature={[report.id]}>
+              This report is read-only. Restore it from the register before making changes.
+            </Caution>
           )}
           {!report.is_deleted && report.extraction_status === 'needs_review' && (
-            <Alert severity="info">
+            <Caution cautionKey="extraction-needs-review" page={CAUTION_PAGE} severity="info" signature={[report.id, report.current_extraction_id]}>
               Extracted fields and blocks are prefilled as suggestions — including Measured Depths (MD), True Vertical
               Depths (TVD), bit depth, casing, mud, BHA, surveys, narratives and WAT activity blocks. Verify, adjust any
               value, and save the reviewed draft.
-            </Alert>
+            </Caution>
           )}
           {editable &&
             (report.current_extraction_id || blocks.some((b) => b.review_state === 'suggested')) &&

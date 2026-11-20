@@ -1,4 +1,4 @@
-# WellCostingPro / WellCostIQ — Enterprise UI/UX Design & Implementation Master Plan
+# WellCostingPro / WellSenseIQ — Enterprise UI/UX Design & Implementation Master Plan
 
 **Document version:** 1.0  
 **Prepared:** 2026-11-02  
@@ -8,7 +8,7 @@
 **Primary stack:** React 19, TypeScript, Vite 7, MUI 7, AG Grid Community 35, Apache ECharts 6, React Router 7, FastAPI, SQLAlchemy, PostgreSQL 17  
 **Purpose:** A production-oriented, implementation-ready UI/UX modernization blueprint that improves navigation, screen composition, data comprehension, visual design, task efficiency, accessibility, and interaction quality **without breaking existing application behavior**.
 
-> **Read this first:** This is an implementation *plan*, not a claim that any proposed feature has been built. The plan is tailored to repository files inspected on the snapshot above. For any later commit, reconcile the route registry and components before implementation. The app is called **WellCostIQ** in the current README and UI branding; the GitHub repository is **WellCostingPro**. Preserve current product naming unless the owner approves a naming change.
+> **Read this first:** This is an implementation *plan*, not a claim that any proposed feature has been built. The plan is tailored to repository files inspected on the snapshot above. For any later commit, reconcile the route registry and components before implementation. The app is called **WellSenseIQ** in the current README and UI branding; the GitHub repository is **WellCostingPro**. Preserve current product naming unless the owner approves a naming change.
 
 ---
 
@@ -743,7 +743,7 @@ Skills are prompts/instructions, not a security or testing substitute. Verify Ar
 
 ### 11.4 Copyable agent prompt for the first implementation ticket
 
-> You are the lead enterprise SaaS UI/UX engineer for WellCostIQ. Before coding, read `AGENTS.md`, `.agent/memory/project.md`, `.agent/memory/design-system.md`, `.agent/skills/ui-design.md` and `docs/WellCostingPro_UI_UX_Implementation_Master_Plan.md`. Inspect `frontend/src/components/Layout.tsx`, `frontend/src/App.tsx`, the relevant page, `DataTable.tsx`, current API clients and tests. Improve one clearly scoped UX issue. Preserve all routes, permissions, tenant isolation, default currency, pricing formulas, data entry behavior, imports/exports, print outputs and unsaved-change safeguards. Reuse tokens and existing components. First return a route/component impact map, UI-only vs API dependencies, proposed before/after wireframe and test plan. Then implement only the approved slice. Verify light/dark, keyboard, desktop/mobile, build/UI checks and regression tests. Provide screenshots and a concise change log with rollback instructions.
+> You are the lead enterprise SaaS UI/UX engineer for WellSenseIQ. Before coding, read `AGENTS.md`, `.agent/memory/project.md`, `.agent/memory/design-system.md`, `.agent/skills/ui-design.md` and `docs/WellCostingPro_UI_UX_Implementation_Master_Plan.md`. Inspect `frontend/src/components/Layout.tsx`, `frontend/src/App.tsx`, the relevant page, `DataTable.tsx`, current API clients and tests. Improve one clearly scoped UX issue. Preserve all routes, permissions, tenant isolation, default currency, pricing formulas, data entry behavior, imports/exports, print outputs and unsaved-change safeguards. Reuse tokens and existing components. First return a route/component impact map, UI-only vs API dependencies, proposed before/after wireframe and test plan. Then implement only the approved slice. Verify light/dark, keyboard, desktop/mobile, build/UI checks and regression tests. Provide screenshots and a concise change log with rollback instructions.
 
 ---
 
@@ -967,6 +967,6 @@ A page is **done** only when:
 
 ## 19. Final implementation directive
 
-> **Build an exceptionally clear, fast, polished WellCostIQ workbench by improving current shared infrastructure and the most-used financial workflows first. Preserve existing accounting, scoped drilling/completions logic, AFE review, dirty-state protection, RBAC, reports and deployment safeguards. Let evidence from real end-user tasks—not decorative design trends—determine every subsequent redesign.**
+> **Build an exceptionally clear, fast, polished WellSenseIQ workbench by improving current shared infrastructure and the most-used financial workflows first. Preserve existing accounting, scoped drilling/completions logic, AFE review, dirty-state protection, RBAC, reports and deployment safeguards. Let evidence from real end-user tasks—not decorative design trends—determine every subsequent redesign.**
 
 **Recommended first coding PR:** `UX-003 — Breadcrumbs + uniform page action area`, preceded by `UX-001` screen/role audit and `UX-002` token review. This produces a visible, low-risk improvement across the application while protecting the subsequent AFE and Daily Cost transformations.

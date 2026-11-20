@@ -327,7 +327,7 @@ export default function Layout() {
             <nav className="breadcrumb-trail" aria-label="Breadcrumb">
               <RouterLink to="/">
                 <HomeOutlined sx={{ fontSize: 13 }}/>
-                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>WellCostIQ</Box>
+                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>WellSenseIQ</Box>
               </RouterLink>
               <span className="sep" aria-hidden="true">/</span>
               {businessDashboardActive || !currentModule

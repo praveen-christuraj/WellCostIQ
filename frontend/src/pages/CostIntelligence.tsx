@@ -17,11 +17,15 @@ import { ExportReportDialog } from '../components/ui/ExportReportDialog'
 import { InteractiveChart } from '../components/ui/InteractiveChart'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { chartPalette } from '../designSystem'
 import { api, body } from '../lib/api'
 import { chartData, chartDrillHandler, chartRowId } from '../lib/chartInteraction'
+
+/** Local-storage namespace for the dismissible cautions shown on this page. */
+const CAUTION_PAGE = 'cost-intelligence'
 import {
   AI_CATEGORY_LABEL, amount, BAND_LABEL, BAND_TONE, CATEGORY_LABEL, filterFindings,
   REPORT_PRESETS, REPORT_SECTIONS, SEVERITY_LABEL, SEVERITY_TONE, signedPercent,
@@ -569,8 +573,18 @@ export default function CostIntelligence() {
     {loading && !data && <DatasetState kind="loading" title="Analysing the cost record…"/>}
     {!loading && data && !wells.length && <DatasetState title="No well matches these filters" message="Widen the date range or clear the status filter."/>}
 
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     {data && kpis && wells.length > 0 && <>
-      {data.notes.map(note => <Alert key={note} severity="info" sx={{ mb: 1.5 }}>{note}</Alert>)}
+      {data.notes.map((note, index) => <Caution
+        key={note}
+        cautionKey={`ci-note-${index}`}
+        page={CAUTION_PAGE}
+        severity="info"
+        icon={false}
+        signature={[note]}
+        sx={{ mb: 1.5 }}
+      >{note}</Caution>)}
 
       <SectionCard title="Summary" subtitle={`Written from the figures below, as at ${data.as_of}.`} sx={{ mb: 2 }}
         meta={<Tag tone={BAND_TONE[kpis.band]}>{BAND_LABEL[kpis.band]}</Tag>}>
@@ -682,10 +696,24 @@ export default function CostIntelligence() {
         <ErrorMessage message={detailError}/>
         {detailLoading && !detail && <DatasetState kind="loading" compact title="Analysing the well…"/>}
         {detail && <>
-          {detail.notes.map(note => <Alert key={note} severity="info" sx={{ mb: 1.5 }}>{note}</Alert>)}
-          {detail.missing_dates.length > 0 && <Alert severity="warning" sx={{ mb: 1.5 }}>
+          {detail.notes.map((note, index) => <Caution
+            key={note}
+            cautionKey={`ci-well-note-${index}`}
+            page={CAUTION_PAGE}
+            severity="info"
+            icon={false}
+            signature={[note]}
+            sx={{ mb: 1.5 }}
+          >{note}</Caution>)}
+          {detail.missing_dates.length > 0 && <Caution
+            cautionKey="ci-missing-dates"
+            page={CAUTION_PAGE}
+            severity="warning"
+            signature={[detail.missing_dates.length, detail.missing_dates.slice(0, 8).join(',')]}
+            sx={{ mb: 1.5 }}
+          >
             No sheet for {detail.missing_dates.slice(0, 8).join(', ')}{detail.missing_dates.length > 8 ? ` and ${detail.missing_dates.length - 8} more` : ''}.
-          </Alert>}
+          </Caution>}
           <Box display="grid" gap={2} sx={{ gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' } }}>
             <ChartPanel figureKey="ci-well-daily" title="Daily cost" height={260} empty={!days.length}
               emptyMessage="No daily cost recorded for this well in the selected dates."

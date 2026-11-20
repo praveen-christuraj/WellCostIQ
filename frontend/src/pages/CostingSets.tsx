@@ -16,6 +16,7 @@ import { api, body } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { DataTable } from '../components/DataTable'
 import { FormDialog, PageHeading, useFormDirty } from '../components/Common'
+import { Caution, RestoreCautions } from '..//components/ui/Caution'
 import { ImportDialog } from '../components/ImportDialog'
 import { AdvancedSelectorDialog, type AdvancedSelectorItem } from '../components/AdvancedItemSelector'
 import type { ImportRow } from '../lib/export'
@@ -95,6 +96,8 @@ function normalizeKind(value: string): CostingSetInput['items'][number]['item_ki
   }
   return aliases[normalized] ?? null
 }
+
+const CAUTION_PAGE = 'costing-sets'
 
 export default function CostingSets() {
   const { can, user } = useAuth()
@@ -321,6 +324,8 @@ export default function CostingSets() {
   const submitDisabled = !form.name.trim() || !form.selected_items.length
 
   return <>
+    <RestoreCautions page={CAUTION_PAGE}/>
+
     <PageHeading
       eyebrow="COSTING WORKSPACE / PERSONAL SHORTCUTS"
       title="Reusable costing sets"
@@ -351,9 +356,9 @@ export default function CostingSets() {
             {can('costing-sets:create') && <Button variant="contained" startIcon={<AddRounded/>} onClick={openCreate}>Create set</Button>}
           </Box>
         </Box>
-        <Alert severity="info" sx={{ mb: 1.5 }}>
+        <Caution cautionKey="set-scope-note" page={CAUTION_PAGE} severity="info" sx={{ mb: 1.5 }}>
           Sets store catalogue references only—not prices, currencies, section assignments or quantities. AFE and daily-cost sheets keep using their existing preview, validation and save workflow. Other users in this workspace cannot see your sets.
-        </Alert>
+        </Caution>
         {notice && <Alert severity="success" onClose={() => setNotice('')} sx={{ mb: 1.5 }}>{notice}</Alert>}
         {error && <Alert severity="error" onClose={() => setError('')} sx={{ mb: 1.5 }}>{error}</Alert>}
         {loading

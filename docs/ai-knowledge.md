@@ -1,6 +1,6 @@
-# Teach the WellCostIQ assistant without retraining the model
+# Teach the WellSenseIQ assistant without retraining the model
 
-Keep the knowledge in WellCostIQ and supply it at question time. Switching from
+Keep the knowledge in WellSenseIQ and supply it at question time. Switching from
 `qwen3:0.6b` to another model supported by the configured Ollama endpoint does
 not require rebuilding the library, changing the database, or fine-tuning.
 Model quality still varies: prefer a larger model for complex synthesis if the
@@ -132,7 +132,7 @@ available.
 
 ## Configure Qwen3 0.6B
 
-On the Ollama server, run `ollama pull qwen3:0.6b`. In the WellCostIQ API `.env`,
+On the Ollama server, run `ollama pull qwen3:0.6b`. In the WellSenseIQ API `.env`,
 set `OLLAMA_ENABLED=true`, `OLLAMA_MODEL=qwen3:0.6b`, `OLLAMA_THINK=false`, and the
 correct `OLLAMA_BASE_URL`. Prefer the native `/api/chat` endpoint so the server
 can disable thinking directly. Restart or recreate the API after changing its

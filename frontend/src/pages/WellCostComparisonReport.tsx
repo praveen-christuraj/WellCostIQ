@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link as RouterLink } from 'react-router-dom'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { AccountBalanceWalletOutlined, ArrowBackRounded, DownloadOutlined, RefreshRounded, ScheduleOutlined, TrendingUpRounded } from '@mui/icons-material'
-import { Alert, Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
+import { Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, PageHeading } from '../components/Common'
+import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import type { Afe } from '../lib/afe'
@@ -12,6 +13,9 @@ import type { DailyCostEntry, WellProgressReport } from '../lib/dailyCost'
 import type { LihCostEntry } from '../lib/lihCost'
 import { formatDepth, type Well } from '../lib/rigWell'
 import { formatDepthMeters } from '../lib/units'
+
+/** Local-storage namespace for the dismissible cautions shown on this page. */
+const CAUTION_PAGE = 'well-cost-comparison'
 
 type CostRow = {
   id: string
@@ -320,19 +324,20 @@ export default function WellCostComparisonReport() {
       </Box>}
     />
     {loadErrors.map(error => <ErrorMessage key={error} message={error}/>)}
-    {!canReadAfe && <Alert severity="info" sx={{ mb: 2 }}>AFE figures are hidden because your role does not include AFE read access.</Alert>}
-    {!canReadDaily && <Alert severity="info" sx={{ mb: 2 }}>Daily actual costs are hidden because your role does not include daily cost read access.</Alert>}
+    <RestoreCautions page={CAUTION_PAGE}/>
+    {!canReadAfe && <Caution cautionKey="afe-read" page={CAUTION_PAGE} severity="info" icon={false} sx={{ mb: 2 }}>AFE figures are hidden because your role does not include AFE read access.</Caution>}
+    {!canReadDaily && <Caution cautionKey="daily-cost-read" page={CAUTION_PAGE} severity="info" icon={false} sx={{ mb: 2 }}>Daily actual costs are hidden because your role does not include daily cost read access.</Caution>}
     <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' }} gap={1.5} mb={2}>
       <StatCard label="Wells listed" value={loading ? '—' : rows.length.toLocaleString()} note="Active wells in the register" icon={<AccountBalanceWalletOutlined/>}/>
       <StatCard label="With an AFE" value={loading ? '—' : wellsWithAfe.toLocaleString()} note="Wells with current AFE records" icon={<DownloadOutlined/>}/>
       <StatCard label="With actual costs" value={loading ? '—' : wellsWithActual.toLocaleString()} note="Wells with daily cost entries" icon={<TrendingUpRounded/>}/>
       <StatCard label="Configured plans" value={loading ? '—' : wellsConfigured.toLocaleString()} note="Wells whose plan is signed off (Configured or Completed)" icon={<ScheduleOutlined/>}/>
     </Box>
-    <Alert severity="info" sx={{ mb: 2 }}>
+    <Caution cautionKey="currency-rules" page={CAUTION_PAGE} severity="info" icon={false} sx={{ mb: 2 }}>
       AFE and actual amounts are grouped by currency. Balance and cost-incurred percentage are calculated only when the well has a single AFE currency that matches its actual-cost currency.
       Where an approved SOW adjustment exists, the balance is the adjusted AFE amount less actual cost.
       LIH Cost Register cost is added to the actual cost and deducted from the AFE before the balance and the percentage are calculated.
-    </Alert>
+    </Caution>
     {loading
       ? <Paper variant="outlined" sx={{ minHeight: 220, display: 'grid', placeItems: 'center', borderRadius: 2 }}><CircularProgress size={28}/></Paper>
       : wellsWithAfe === 0 && wellsWithActual === 0 && rows.length === 0
