@@ -284,10 +284,15 @@ export type OpsWellPathSummary = {
   displacement_m: number | null
   closure_azimuth_deg: number | null
   max_inc_deg: number | null
+  /** Highest severity of any *valid* interval; null when no interval qualifies. */
   max_dls_deg_per_30m: number | null
+  /** The deeper station of the interval that carries the maximum severity. */
+  max_dls_to_md_m: number | null
+  intervals: number
+  invalid_intervals: number
   vertical_section_m: number | null
   kickoff_md_m: number | null
-  /** Closing MD of the latest report — what the KPI card and the drawing both show. */
+  /** The marker: the selected report's closing MD, else the last station. */
   current_md_m: number | null
   current_tvd_m: number | null
   current_tvd_basis: string
@@ -297,6 +302,117 @@ export type OpsWellPathSummary = {
   depth_basis: string
   casing_seats: number
   sections_drawn: number
+  survey_end_md_m: number | null
+  report_depth_md_m: number | null
+  survey_to_report_gap_m: number | null
+  position_basis: string
+}
+
+/** One integrated trajectory station. Severity is null where there is no interval. */
+export type OpsWellPathStation = {
+  md_m: number
+  inc_deg: number
+  azi_deg: number
+  tvd_m: number
+  ns_m: number
+  ew_m: number
+  vsec_m: number
+  dls_deg_per_30m: number | null
+  build_deg_per_30m: number | null
+  turn_deg_per_30m: number | null
+  is_anchor: boolean
+  interval_valid: boolean
+  interval_issue: string
+}
+
+/** One survey-to-survey interval: the unit dogleg severity is defined on. */
+export type OpsWellPathInterval = {
+  from_md_m: number
+  to_md_m: number
+  delta_md_m: number
+  inc1_deg: number
+  azi1_deg: number
+  inc2_deg: number
+  azi2_deg: number
+  beta_deg: number | null
+  dls_deg_per_30m: number | null
+  recorded_dls_deg_per_30m: number | null
+  dls_difference_deg_per_30m: number | null
+  valid: boolean
+  issue: string
+}
+
+/** Recorded provenance for a drawn station: what the record printed, not the maths. */
+export type OpsWellPathSurveyStation = {
+  survey_id: string
+  station_no: number | null
+  md_m: number
+  inc_deg: number | null
+  azi_deg: number | null
+  recorded_tvd_m: number | null
+  recorded_ns_m: number | null
+  recorded_ew_m: number | null
+  recorded_vsec_m: number | null
+  recorded_dls_deg_per_30m: number | null
+  tool: string
+  source: string
+  source_page: number | null
+  confidence: number | null
+  survey_at: string | null
+  report_id: string | null
+  report_date: string | null
+  report_no: string
+  report_status: string
+  computed_tvd_m: number | null
+  tvd_difference_m: number | null
+  rows_at_md: number
+}
+
+/** The survey as a record: endpoints, anchor basis and interval counts. */
+export type OpsWellPathSurvey = {
+  stations: number
+  first_md_m: number | null
+  last_md_m: number | null
+  first_survey_at: string | null
+  last_survey_at: string | null
+  sources: string[]
+  tools: string[]
+  anchor: OpsWellPathSurveyStation | null
+  anchor_basis: string
+  intervals: number
+  invalid_intervals: number
+  branch: string
+}
+
+/** The marker on the drawing, kept apart from the survey and from any snapshot. */
+export type OpsWellPathPosition = {
+  marker_md_m: number | null
+  marker_tvd_m: number | null
+  marker_tvd_basis: string
+  survey_end_md_m: number | null
+  report_depth_md_m: number | null
+  gap_m: number | null
+  basis: string
+  comparable: boolean
+  note: string
+}
+
+/** One report's positions. Separate from the trajectory by design. */
+export type OpsWellPathSnapshot = {
+  hole_depth_m: number | null
+  hole_tvd_m: number | null
+  bit_depth_m: number | null
+  off_bottom_m: number | null
+  off_bottom_note: string
+  report_id: string | null
+  report_date: string | null
+  report_no: string
+  status: string
+  verified: boolean
+  basis: string
+  current_status_text: string
+  tvd_source: string
+  label: string
 }
 
 /** Trajectory, casing schematic and provenance for one well and scope. */
@@ -307,18 +423,14 @@ export type OpsWellPath = {
   scope: string
   datum: string
   vertical_section_azimuth_deg: number
-  curve: {
-    md_m: number
-    inc_deg: number
-    azi_deg: number
-    tvd_m: number
-    ns_m: number
-    ew_m: number
-    vsec_m: number
-    dls_deg_per_30m: number
-    build_deg_per_30m: number
-    turn_deg_per_30m: number
-  }[]
+  curve: OpsWellPathStation[]
+  /** Intervals between accepted stations: the DLS chart reads these. */
+  intervals: OpsWellPathInterval[]
+  /** Recorded provenance per drawn station: the source drawer reads these. */
+  survey_stations: OpsWellPathSurveyStation[]
+  survey: OpsWellPathSurvey
+  position: OpsWellPathPosition
+  snapshot: OpsWellPathSnapshot
   summary: OpsWellPathSummary
   sections: OpsWellPathSection[]
   open_hole: { from_depth_m: number; to_depth_m: number; label: string } | null
@@ -339,6 +451,14 @@ export type OpsWellPath = {
     report_id: string | null
     status: string
     basis: string
+    report_no: string
+    current_status: string
+    verified: boolean
+    tvd_source: string
+    depth_start_m: number | null
+    progress_m: number | null
+    last_casing_size_in: number | null
+    last_casing_depth_m: number | null
   }
   survey_discrepancies: { md_m: number; printed_tvd_m: number; computed_tvd_m: number; difference_m: number }[]
   notes: string[]

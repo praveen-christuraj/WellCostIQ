@@ -50,9 +50,10 @@ export function WellPathPanel({
   const summary = path?.summary
   const deepest = path?.sections.length ? path.sections[path.sections.length - 1] : null
   const rows: [string, string][] = [
-    ['Current MD', fmt(summary?.current_md_m, 'm')],
-    ['Current TVD', fmt(summary?.current_tvd_m, 'm')],
-    ['Bit depth', fmt(summary?.bit_depth_m, 'm')],
+    ['Hole depth (marker)', fmt(summary?.current_md_m, 'm')],
+    ['Marker TVD', fmt(summary?.current_tvd_m, 'm')],
+    ['Survey endpoint', fmt(path?.position.survey_end_md_m, 'm')],
+    ['Bit / string depth', fmt(summary?.bit_depth_m, 'm')],
     ['Last casing', deepest ? `${deepest.casing_label} @ ${fmt(deepest.to_depth_m, 'm')}` : '—'],
     ['Open hole', path?.open_hole ? `${fmt(path.open_hole.from_depth_m)} → ${fmt(path.open_hole.to_depth_m, 'm')}` : '—'],
     ['Max inclination', summary?.max_inc_deg === null || summary?.max_inc_deg === undefined ? '—' : `${summary.max_inc_deg.toFixed(1)}°`],
@@ -63,7 +64,7 @@ export function WellPathPanel({
   return (
     <SectionCard
       title={title ?? `Well diagram — ${path?.well_code ?? ''} (${scope})`}
-      subtitle="Drawn from this well's recorded surveys and casing seats. The current depth is the closing measured depth of its latest report, and the Current depth card above reads the same figure."
+      subtitle="Drawn from this well's recorded surveys and casing seats. The marker is the closing measured depth of the latest verified report; the survey endpoint is the deepest station and is shown separately, because one is not evidence for the other."
       action={
         canOpenPath ? (
           <Box component={Link} to={`/operations/well-path?well=${encodeURIComponent(well)}&scope=${encodeURIComponent(scope)}`} sx={{ fontSize: 12.5, fontWeight: 700 }}>

@@ -72,6 +72,15 @@ TOPICS = (
            'On Operations Analytics, Time vs measured depth defaults to 300 m vertical depth steps, while Time vs completion progress chooses clean integer activity intervals so tick labels never collide. Use Axis scale on the chart to set custom X (days) and Y (MD or activity) min, max and step values or presets, and click Reset axes to return to automatic scaling.',
            'Use a confirmed completed programme activity when depth stays flat, reverses or is ambiguous. Otherwise the engine compares depth only where the programme gives an unambiguous result.',
            'Use programme start, or confirmed drilling days from spud when appropriate. Each daily report carries a suggested lead/lag comparison that the engineer accepts, edits or rejects with a note before submitting.')),
+    Topic('well-path', 'Read the well path, dogleg and casing diagram', 'How do I read the well path, dogleg charts and casing diagram?',
+          'well path trajectory survey plan view vertical section tvd md dogleg dls interval casing schematic shoe liner bit depth short string long string hole bottom off bottom snapshot unsurveyed gap azimuth inclination closure grid north datum',
+          'ops-report:read', '/operations/well-path',
+          'The well visuals answer three different questions and never mix them: where the hole was drilled (surveyed trajectory), what has been installed (casing schematic) and where the tool or string was reported (report snapshot). A line is only drawn where a survey station exists.',
+          ('Plan view means looking down, not planned well. Vertical section is the shadow of the path on a vertical plane facing the stated bearing, so sideways motion out of that plane disappears; rotating the plane changes the shadow, not the well. Select a station in either projection to highlight it in the other, the schematic and the table.',
+           'Dogleg severity belongs to an interval, not a station: it is the angle between two 3D tangent directions, normalised to 30 m. The first station has no interval and shows no severity, which is not the same as zero. A printed rate is kept as a separate mark and a printed rate in deg/100 ft is converted with 30/30.48.',
+           'The schematic is drawn on measured depth and the trajectory on true vertical depth, as two labelled axes. A casing seat ends in a shoe; only recorded seats are solid. Below the last known shoe the drawing says casing coverage unknown, and no liner, cement, packer or total depth is invented.',
+           'The marker is the selected report closing measured depth. The survey endpoint is the deepest station: any hole below it is unsurveyed and annotated, never drawn as a continuation of the line. The bit or string position is a separate observation and is only compared with the hole when both come from the same report, datum and bore.',
+           'Every mark carries an Explain this action that names the fact and its source: recorded, calculated, configured or missing, with the report, date and status. Drawings and their numbers come from the same service, so a card and a chart cannot disagree.')),
     Topic('documents', 'File and find originals', 'How do I file and find documents for a well?',
           'documents document file vault upload original folder rig well search',
           'ops-doc:read', '/operations/documents',
@@ -293,7 +302,8 @@ def answers(question, route, permissions, *, db=None, organization_id=None):
         r'codes?\s+correlations?|correlat(?:e|ed|ing)\s+(?:printed\s+|workspace\s+|operations?\s+|activity\s+|npt\s+)?codes?|'
         r'source[- ]marks?\b|batch\s+correlat\w*|code\s+links?|code\s+library|tree\s+schematic|multi[- ]criteria\s+codes?|'
         r'completion\s+rop|time\s+vs\s+(?:measured\s+depth|completion)|'
-        r'stuck pipe|lost circulation|kill mud|sidpp|sicp|maasp|dogleg|dls|scssv|gravel pack|'
+        r'stuck pipe|lost circulation|kill mud|sidpp|sicp|maasp|dogleg|dls|well\s+path|trajectory|'
+        r'vertical\s+section|casing\s+schematic|survey\s+station|unsurveyed|scssv|gravel pack|'
         r'packer|xmas tree|mud motor|bha|plastic viscosity|yield point|ecd|hole cleaning|tvd)\b',
         q,
     )

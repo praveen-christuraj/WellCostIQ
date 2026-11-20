@@ -3,48 +3,64 @@ import { Alert, Box, Chip, Stack, Typography } from '@mui/material'
 import { useColorMode } from '../../context/ThemeContext'
 import { brand, surface } from '../../designSystem'
 import type { OpsWellPath, OpsWellPathSection, OpsWellVisual } from '../../lib/operations'
+import { fmtDepth } from '../../lib/wellPath'
 
 /**
  * Well diagram — drawn from the record, never from a template.
  *
- * Two views of the same well share one vertical depth axis so a reader can put
- * them side by side:
+ * Two drawings sit side by side, and they deliberately do **not** share one axis:
  *
- * * **Casing schematic** (left): every recorded casing seat as a string whose
- *   wall width follows the pipe size, the open hole below the last shoe, and a
- *   marker at the current depth from the latest report. A section is only drawn
- *   where a seat was actually recorded; nothing is inferred.
- * * **Vertical section** (right): the integrated trajectory (TVD against
- *   horizontal departure in the well's own closure plane), with the current
- *   position marked. A vertical well is a straight line and that is exactly what
- *   it should look like.
+ * * **Casing and hole** (left) is a construction drawing on a **measured-depth**
+ *   axis. Every recorded casing seat is a string whose wall width follows the pipe
+ *   size, ending in a shoe. Width helps identify equipment; it is not a clearance
+ *   drawing.
+ * * **Vertical section** (right) is the integrated trajectory on a **true vertical
+ *   depth** axis. It is the shadow of the path on a vertical plane, not the shape
+ *   of the hole.
  *
- * The SVG is deterministic: same records, same drawing, in both themes and in
- * the PDF (the print path rasterises this component through the existing chart
- * export).
+ * Sharing one axis between the two made a deviated well look shallower than its
+ * own shoe, and made the depth caption disagree with whichever axis was drawn. The
+ * two scales are therefore labelled separately and a seat is never converted into
+ * a TVD here.
+ *
+ * Below the last survey station the section line stops. The remaining depth is
+ * annotated as *unsurveyed* — never drawn as a continuation of the line. Below the
+ * last known shoe the drawing says "casing coverage unknown" unless the record
+ * supports open hole.
+ *
+ * The SVG is deterministic: same records, same drawing, in both themes and in the
+ * PDF (the print path rasterises this component through the existing chart export).
  */
 
-const WIDTH = 520
-const TOP = 22
-const BOTTOM = 26
-const SCHEMATIC_X = 150
-const SECTION_LEFT = 44
-const SECTION_WIDTH = 212
-const DRILL_RIGHT = 300
-const DRILL_WIDTH = 200
+const WIDTH = 620
+const TOP = 36
+const BOTTOM = 98
+/** Left drawing: measured depth. */
+const MD_LABEL_X = 40
+const CASING_CX = 152
+const MAX_HALF_WIDTH = 24
+/** Right drawing: true vertical depth. */
+const TVD_LABEL_X = 356
+const SECTION_LEFT = 372
+const SECTION_RIGHT = 600
 
 function niceDepth(maxDepth: number): number {
   if (!Number.isFinite(maxDepth) || maxDepth <= 0) return 100
-  const target = maxDepth * 1.08
-  const steps = [50, 100, 200, 250, 500, 1000, 1500, 2000, 2500, 5000]
-  const step = steps.find((s) => target / s <= 6) ?? 10000
+  const target = maxDepth * 1.06
+  const steps = [50, 100, 200, 250, 500, 1000, 1500, 2000, 2500, 5000, 10000]
+  const step = steps.find((s) => target / s <= 6) ?? 20000
   return Math.ceil(target / step) * step
+}
+
+function niceAxisTicks(max: number, count: number): number[] {
+  return Array.from({ length: count + 1 }, (_, i) => (max / count) * i)
 }
 
 export function WellDiagram({
   path,
-  height = 420,
+  height = 430,
   compact = false,
+  selectedMd = null,
 }: {
   /**
    * Either the full path (trajectory, seats, provenance) or the dashboard's
@@ -54,78 +70,60 @@ export function WellDiagram({
   path: OpsWellPath | OpsWellVisual
   height?: number
   compact?: boolean
+  /** A station chosen in another view, highlighted here on the MD construction. */
+  selectedMd?: number | null
 }) {
   const { mode } = useColorMode()
   const s = surface(mode)
   const summary = path.summary
-  const currentMd = summary.current_md_m
   const curve = 'curve' in path ? path.curve : []
+  const snapshot = 'snapshot' in path ? path.snapshot : null
   const vsAzimuth = 'vertical_section_azimuth_deg' in path ? path.vertical_section_azimuth_deg : null
+  const openHole = path.open_hole
+  const currentMd = summary.current_md_m
+  const bitDepth = snapshot?.bit_depth_m ?? summary.bit_depth_m
+  const holeDepth = snapshot?.hole_depth_m ?? currentMd
 
-  /**
-   * One vertical axis has to serve both views, and the two views are measured
-   * differently: the casing seats are recorded at measured depth, while the
-   * vertical section is true vertical depth against departure. Putting a TVD
-   * curve on an MD axis makes a deviated well look shallower than its own shoe,
-   * so the axis is TVD whenever a trajectory exists and the casing depths are
-   * carried through it. Where no survey exists there is nothing to convert with,
-   * and the axis says MD.
-   */
-  const axis = useMemo(() => {
-    const points = curve
-      .filter((row) => Number.isFinite(row.md_m) && Number.isFinite(row.tvd_m))
-      .map((row) => [row.md_m, row.tvd_m] as [number, number])
-    const usable = points.length >= 2 && summary.max_inc_deg !== null && summary.max_inc_deg > 0.5
-    const toAxis = (md: number | null | undefined): number | null => {
-      if (md === null || md === undefined || !Number.isFinite(md)) return null
-      if (!usable) return md
-      if (md <= points[0][0]) return points[0][1]
-      for (let i = 1; i < points.length; i += 1) {
-        const [md0, tvd0] = points[i - 1]
-        const [md1, tvd1] = points[i]
-        if (md <= md1) {
-          const span = md1 - md0
-          return span <= 0 ? tvd1 : tvd0 + ((md - md0) / span) * (tvd1 - tvd0)
-        }
-      }
-      // Beyond the last station the well is un-surveyed: the last measured
-      // vertical rate is the only defensible extension, so use it and say so.
-      const [md0, tvd0] = points[points.length - 2]
-      const [md1, tvd1] = points[points.length - 1]
-      const span = md1 - md0
-      return span <= 0 ? tvd1 : tvd1 + ((md - md1) / span) * (tvd1 - tvd0)
-    }
-    return { label: usable ? 'TVD (m)' : 'MD (m)', toAxis, usable }
-  }, [curve, summary.max_inc_deg])
+  const plotHeight = height - TOP - (compact ? 48 : BOTTOM)
 
-  const maxDepth = useMemo(() => {
+  const mdMax = useMemo(() => {
     const values = [
-      ...path.sections.map((row) => axis.toAxis(row.to_depth_m)),
-      axis.toAxis(currentMd),
-      axis.toAxis(path.open_hole?.to_depth_m),
-      ...curve.map((row) => row.tvd_m),
-    ].filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+      ...path.sections.map((row) => row.to_depth_m),
+      holeDepth,
+      bitDepth,
+      openHole?.to_depth_m,
+      curve.length ? curve[curve.length - 1].md_m : null,
+      ...(selectedMd !== null ? [selectedMd] : []),
+    ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
     return niceDepth(Math.max(...values, 100))
-  }, [path.sections, path.open_hole, curve, currentMd, axis])
+  }, [path.sections, holeDepth, bitDepth, openHole, curve, selectedMd])
 
-  const plotHeight = height - TOP - BOTTOM
-  const y = (depth: number) => TOP + (Math.max(0, Math.min(depth, maxDepth)) / maxDepth) * plotHeight
+  const tvdMax = useMemo(() => {
+    const values = [
+      ...curve.map((row) => row.tvd_m),
+      // With no survey there is nothing to convert, so the reported TVD sets the
+      // scale and the caption says the axis is not a trajectory.
+      curve.length ? null : summary.current_tvd_m,
+    ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    return niceDepth(Math.max(...values, 100))
+  }, [curve, summary.current_tvd_m])
 
-  // The vertical section is drawn in its own horizontal scale, because a 400 m
-  // departure against a 4,000 m TVD would otherwise be a hairline.
+  const yMd = (depth: number) => TOP + (Math.max(0, Math.min(depth, mdMax)) / mdMax) * plotHeight
+  const yTvd = (depth: number) => TOP + (Math.max(0, Math.min(depth, tvdMax)) / tvdMax) * plotHeight
+
   const maxDeparture = useMemo(() => {
     const values = curve.map((row) => Math.abs(row.vsec_m))
-    return Math.max(...values, 50) * 1.05
+    return Math.max(...values, 50) * 1.08
   }, [curve])
-  const dx = (vsec: number) => DRILL_RIGHT + (vsec / maxDeparture) * DRILL_WIDTH
+  const hasNegativeDeparture = curve.some((row) => row.vsec_m < 0)
+  const sectionCentre = hasNegativeDeparture ? (SECTION_LEFT + SECTION_RIGHT) / 2 : SECTION_LEFT + 14
+  const xSection = (vsec: number) => sectionCentre + (vsec / maxDeparture) * ((SECTION_RIGHT - SECTION_LEFT) / 2 - 14)
 
-  const curvePoints = curve.map((row) => `${dx(row.vsec_m).toFixed(2)},${y(row.tvd_m).toFixed(2)}`).join(' ')
-  const sectionWidth = (row: OpsWellPathSection) => Math.max(6, Math.min(40, 4 + (row.casing_size_in / 30) * 52))
+  const curvePoints = curve.map((row) => `${xSection(row.vsec_m).toFixed(2)},${yTvd(row.tvd_m).toFixed(2)}`).join(' ')
+  const sectionWidth = (row: OpsWellPathSection) => Math.max(6, Math.min(MAX_HALF_WIDTH * 2, 6 + (row.casing_size_in / 30) * 56))
 
-  const axisTicks = useMemo(() => {
-    const count = compact ? 4 : 6
-    return Array.from({ length: count + 1 }, (_, i) => (maxDepth / count) * i)
-  }, [maxDepth, compact])
+  const mdTicks = useMemo(() => niceAxisTicks(mdMax, compact ? 4 : 6), [mdMax, compact])
+  const tvdTicks = useMemo(() => niceAxisTicks(tvdMax, compact ? 4 : 6), [tvdMax, compact])
 
   if (!path.is_surveyed && !path.sections.length) {
     return (
@@ -140,6 +138,15 @@ export function WellDiagram({
   const muted = s.textMuted
   const line = s.divider
   const accent = mode === 'dark' ? brand[300] : brand[700]
+  const brass = mode === 'dark' ? '#F2C14E' : '#B87503'
+  const deepest = path.sections.length ? path.sections[path.sections.length - 1] : null
+  const lastStation = curve.length ? curve[curve.length - 1] : null
+  const unsurveyedToHole = Boolean(lastStation && holeDepth !== null && holeDepth > lastStation.md_m + 0.5)
+  const selectedStation = selectedMd === null
+    ? null
+    : curve.find((row) => Math.abs(row.md_m - selectedMd) <= 0.05) ?? null
+  const xLeftRuleStart = 64
+  const xLeftRuleEnd = CASING_CX + 86
 
   return (
     <Box>
@@ -149,7 +156,7 @@ export function WellDiagram({
       <Box
         component="svg"
         role="img"
-        aria-label={`Well diagram for ${path.well_code}`}
+        aria-label={`Well diagram for ${path.well_code}: casing and hole on measured depth, vertical section on true vertical depth`}
         data-chart-precision="1"
         width={WIDTH}
         height={height}
@@ -157,92 +164,257 @@ export function WellDiagram({
         preserveAspectRatio="xMidYMid meet"
         sx={{ display: 'block', width: '100%', height: 'auto', maxHeight: height }}
       >
-        {/* Shared depth axis */}
-        {axisTicks.map((tick) => (
-          <g key={`tick-${tick}`}>
-            <line x1={SECTION_LEFT} x2={DRILL_RIGHT + DRILL_WIDTH} y1={y(tick)} y2={y(tick)} stroke={line} strokeWidth={0.6} strokeDasharray={tick === 0 ? '0' : '2 4'} />
-            <text x={SECTION_LEFT - 6} y={y(tick) + 3} textAnchor="end" fontSize={8.5} fill={muted}>
+        {/* Headings name the axis each drawing uses */}
+        <text x={MD_LABEL_X} y={12} fontSize={8.5} fontWeight={700} fill={muted}>
+          MD
+        </text>
+        <text x={CASING_CX} y={12} textAnchor="middle" fontSize={9} fontWeight={700} fill={muted}>
+          CASING &amp; HOLE
+        </text>
+        <text x={CASING_CX} y={23} textAnchor="middle" fontSize={8} fill={muted}>
+          measured depth
+        </text>
+        <text x={(SECTION_LEFT + SECTION_RIGHT) / 2} y={12} textAnchor="middle" fontSize={9} fontWeight={700} fill={muted}>
+          VERTICAL SECTION
+        </text>
+        <text x={(SECTION_LEFT + SECTION_RIGHT) / 2} y={23} textAnchor="middle" fontSize={8} fill={muted}>
+          {`true vertical depth${vsAzimuth === null ? '' : ` · facing ${vsAzimuth.toFixed(1)}°`}`}
+        </text>
+
+        {/* Left: measured-depth grid */}
+        {mdTicks.map((tick) => (
+          <g key={`md-${tick}`}>
+            <line
+              x1={MD_LABEL_X}
+              x2={CASING_CX + 88}
+              y1={yMd(tick)}
+              y2={yMd(tick)}
+              stroke={line}
+              strokeWidth={0.6}
+              strokeDasharray={tick === 0 ? '0' : '2 4'}
+            />
+            <text x={MD_LABEL_X - 5} y={yMd(tick) + 3} textAnchor="end" fontSize={8.5} fill={muted}>
               {Math.round(tick).toLocaleString()}
             </text>
           </g>
         ))}
-        <text x={SECTION_LEFT - 6} y={TOP - 8} textAnchor="end" fontSize={8.5} fill={muted} fontWeight={700}>
-          {axis.label}
+        <text x={MD_LABEL_X} y={TOP + plotHeight + 14} fontSize={8.5} fontWeight={700} fill={muted}>
+          m
         </text>
 
-        {/* Casing schematic */}
-        <text x={SECTION_LEFT + SECTION_WIDTH / 2} y={TOP - 8} textAnchor="middle" fontSize={9} fill={muted} fontWeight={700}>
-          CASING &amp; HOLE
-        </text>
-        <line x1={SCHEMATIC_X} x2={SCHEMATIC_X} y1={TOP} y2={TOP + plotHeight} stroke={muted} strokeWidth={1.2} />
+        {/* Casing spine: the construction is drawn about a central axis */}
+        <line x1={CASING_CX} x2={CASING_CX} y1={TOP} y2={TOP + plotHeight} stroke={muted} strokeWidth={1} opacity={0.6} />
+        {path.sections.length === 0 && (
+          <text x={CASING_CX} y={TOP + plotHeight / 2} textAnchor="middle" fontSize={8.5} fill={muted}>
+            no casing seat recorded
+          </text>
+        )}
         {path.sections.map((row) => {
           const width = sectionWidth(row)
-          const top = y(axis.toAxis(row.from_depth_m) ?? 0)
-          const bottom = y(axis.toAxis(row.to_depth_m) ?? 0)
+          const top = yMd(row.from_depth_m)
+          const bottom = yMd(row.to_depth_m)
+          const barHeight = Math.max(1.5, bottom - top)
           return (
             <g key={`${row.casing_label}-${row.from_depth_m}`}>
-              <title>{`${row.casing_label} casing: ${row.from_depth_m.toLocaleString()} m MD → ${row.to_depth_m.toLocaleString()} m MD (${row.source})`}</title>
-              <rect x={SCHEMATIC_X - width / 2} y={top} width={width} height={Math.max(1.5, bottom - top)} fill="none" stroke={accent} strokeWidth={1.6} />
-              <rect x={SCHEMATIC_X - width / 2 + 1.4} y={top} width={Math.max(1.5, width * 0.22)} height={Math.max(1.5, bottom - top)} fill={accent} opacity={0.22} />
-              <rect x={SCHEMATIC_X + width / 2 - 1.4 - Math.max(1.5, width * 0.22)} y={top} width={Math.max(1.5, width * 0.22)} height={Math.max(1.5, bottom - top)} fill={accent} opacity={0.22} />
+              <title>{`${row.casing_label} casing: ${row.from_depth_m.toLocaleString()} m MD → ${row.to_depth_m.toLocaleString()} m MD (${row.source}); shoe at ${row.to_depth_m.toLocaleString()} m MD`}</title>
+              <rect x={CASING_CX - width / 2} y={top} width={width} height={barHeight} fill="none" stroke={accent} strokeWidth={1.6} />
+              <rect x={CASING_CX - width / 2 + 1.4} y={top} width={Math.max(1.5, width * 0.22)} height={barHeight} fill={accent} opacity={0.22} />
+              <rect x={CASING_CX + width / 2 - 1.4 - Math.max(1.5, width * 0.22)} y={top} width={Math.max(1.5, width * 0.22)} height={barHeight} fill={accent} opacity={0.22} />
               {/* The shoe, drawn as the standard angled wedge */}
-              <path d={`M ${SCHEMATIC_X - width / 2} ${bottom} L ${SCHEMATIC_X} ${bottom + 5} L ${SCHEMATIC_X + width / 2} ${bottom}`} fill="none" stroke={accent} strokeWidth={1.6} />
+              <path d={`M ${CASING_CX - width / 2} ${bottom} L ${CASING_CX} ${bottom + 5} L ${CASING_CX + width / 2} ${bottom}`} fill="none" stroke={accent} strokeWidth={1.6} />
               {!compact && (
-                <text x={SCHEMATIC_X + Math.max(28, width / 2) + 6} y={top + 9} fontSize={8.5} fill={ink}>
-                  {row.casing_label} · {row.to_depth_m.toLocaleString()} m
+                <text x={CASING_CX + Math.max(28, width / 2) + 6} y={top + 9} fontSize={8.5} fill={ink}>
+                  {row.casing_label} · shoe {row.to_depth_m.toLocaleString()} m
                 </text>
               )}
             </g>
           )
         })}
-        {path.open_hole && (
+
+        {/* Below the last shoe: open hole only when the record supports it */}
+        {openHole ? (
           <g>
-            <title>{`Open hole ${path.open_hole.from_depth_m} → ${path.open_hole.to_depth_m} m MD`}</title>
+            <title>{`Open hole ${openHole.from_depth_m} → ${openHole.to_depth_m} m MD`}</title>
             <line
-              x1={SCHEMATIC_X - 12}
-              x2={SCHEMATIC_X + 12}
-              y1={y(axis.toAxis(path.open_hole.from_depth_m) ?? 0)}
-              y2={y(axis.toAxis(path.open_hole.to_depth_m) ?? 0)}
+              x1={CASING_CX - 13}
+              x2={CASING_CX + 13}
+              y1={yMd(openHole.from_depth_m)}
+              y2={yMd(openHole.to_depth_m)}
               stroke={accent}
-              strokeWidth={0.8}
+              strokeWidth={0.9}
               strokeDasharray="3 3"
             />
+            <text x={CASING_CX + 30} y={yMd(openHole.to_depth_m) - 4} fontSize={8} fill={muted}>
+              open hole
+            </text>
           </g>
-        )}
+        ) : deepest && holeDepth !== null && holeDepth <= deepest.to_depth_m + 0.5 ? (
+          <text x={CASING_CX + 30} y={Math.min(yMd(deepest.to_depth_m) + 16, TOP + plotHeight)} fontSize={8} fill={muted}>
+            coverage unknown below shoe
+          </text>
+        ) : deepest && !compact ? (
+          <text x={CASING_CX + 30} y={Math.min(yMd(deepest.to_depth_m) + 16, TOP + plotHeight)} fontSize={8} fill={muted}>
+            below the last shoe: coverage unknown
+          </text>
+        ) : null}
 
-        {/* Current depth marker across both views */}
-        {currentMd !== null && axis.toAxis(currentMd) !== null && (
+        {/* Hole depth: the selected report's closing MD. A rule, not pipe. */}
+        {holeDepth !== null && (
           <g>
-            <title>{`Current depth ${currentMd.toLocaleString()} m MD (${summary.depth_basis})`}</title>
-            <line x1={SECTION_LEFT} x2={DRILL_RIGHT + DRILL_WIDTH} y1={y(axis.toAxis(currentMd) ?? 0)} y2={y(axis.toAxis(currentMd) ?? 0)} stroke={mode === 'dark' ? '#F2C14E' : '#B87503'} strokeWidth={1} strokeDasharray="5 3" />
-            <polygon points={`${SCHEMATIC_X + 26},${y(axis.toAxis(currentMd) ?? 0) - 4} ${SCHEMATIC_X + 36},${y(axis.toAxis(currentMd) ?? 0)} ${SCHEMATIC_X + 26},${y(axis.toAxis(currentMd) ?? 0) + 4}`} fill={mode === 'dark' ? '#F2C14E' : '#B87503'} />
-            <text x={SCHEMATIC_X + 40} y={y(axis.toAxis(currentMd) ?? 0) + 3} fontSize={8.5} fontWeight={700} fill={mode === 'dark' ? '#F2C14E' : '#B87503'}>
-              {currentMd.toLocaleString()} m MD
+            <title>{`Hole depth ${holeDepth.toLocaleString()} m MD (${snapshot?.basis || summary.depth_basis || 'report'})`}</title>
+            <line
+              x1={xLeftRuleStart}
+              x2={xLeftRuleEnd}
+              y1={yMd(holeDepth)}
+              y2={yMd(holeDepth)}
+              stroke={brass}
+              strokeWidth={1.1}
+              strokeDasharray="6 3"
+            />
+            <Halo
+              x={xLeftRuleStart}
+              y={yMd(holeDepth) - 14}
+              width={labelWidth(holeLabel(holeDepth, snapshot?.report_date ?? null), 8.5)}
+              height={12}
+              fill={s.paper}
+            />
+            <text x={xLeftRuleStart} y={yMd(holeDepth) - 4} fontSize={8.5} fontWeight={700} fill={brass}>
+              {holeLabel(holeDepth, snapshot?.report_date ?? null)}
             </text>
           </g>
         )}
 
-        {/* Vertical section */}
-        <text x={DRILL_RIGHT + DRILL_WIDTH / 2} y={TOP - 8} textAnchor="middle" fontSize={9} fill={muted} fontWeight={700}>
-          VERTICAL SECTION
-        </text>
-        <line x1={DRILL_RIGHT} x2={DRILL_RIGHT + DRILL_WIDTH} y1={TOP + plotHeight} y2={TOP + plotHeight} stroke={line} strokeWidth={1} />
-        <text x={DRILL_RIGHT + DRILL_WIDTH / 2} y={height - 6} textAnchor="middle" fontSize={8} fill={muted}>
-          departure (m) · depth {axis.usable ? 'TVD' : 'MD'}
-          {vsAzimuth === null ? '' : ` · VS azimuth ${vsAzimuth.toFixed(1)}°`}
-        </text>
-        {curve.length > 1 ? (
-          <polyline points={curvePoints} fill="none" stroke={accent} strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round" />
-        ) : curve.length === 1 ? (
-          <circle cx={dx(curve[0].vsec_m)} cy={y(curve[0].tvd_m)} r={2.6} fill={accent} />
-        ) : null}
-        {curve.length > 1 && (
-          <circle cx={dx(curve[curve.length - 1].vsec_m)} cy={y(curve[curve.length - 1].tvd_m)} r={3} fill={accent} />
+        {/* Bit / string: a distinctly labelled triangle at the reported depth */}
+        {bitDepth !== null && bitDepth !== undefined && (
+          <g>
+            <title>{`${snapshot?.label || 'Reported bit / string depth'} ${bitDepth.toLocaleString()} m MD${snapshot?.off_bottom_m !== null && snapshot?.off_bottom_m !== undefined ? `; ${snapshot.off_bottom_m.toLocaleString()} m off bottom` : ''}`}</title>
+            <line x1={CASING_CX - 26} x2={CASING_CX - 18} y1={yMd(bitDepth)} y2={yMd(bitDepth)} stroke={brass} strokeWidth={1} />
+            <polygon
+              points={`${CASING_CX - 26},${yMd(bitDepth) - 5} ${CASING_CX - 26},${yMd(bitDepth) + 5} ${CASING_CX - 18},${yMd(bitDepth)}`}
+              fill={brass}
+            />
+            <Halo
+              x={CASING_CX - 34 - labelWidth(`Bit ${bitDepth.toLocaleString()} m`, 8.5)}
+              y={yMd(bitDepth) - 8}
+              width={labelWidth(`Bit ${bitDepth.toLocaleString()} m`, 8.5)}
+              height={12}
+              fill={s.paper}
+            />
+            <text x={CASING_CX - 30} y={yMd(bitDepth) + 3} textAnchor="end" fontSize={8.5} fontWeight={700} fill={brass}>
+              {`Bit ${bitDepth.toLocaleString()} m`}
+            </text>
+          </g>
         )}
+
+        {/* Selected survey station, on the measured-depth construction */}
+        {selectedStation && (
+          <g>
+            <line x1={CASING_CX - 4} x2={CASING_CX + 4} y1={yMd(selectedStation.md_m)} y2={yMd(selectedStation.md_m)} stroke={brass} strokeWidth={2.2} />
+            <circle cx={CASING_CX + 10} cy={yMd(selectedStation.md_m)} r={3.4} fill="none" stroke={brass} strokeWidth={1.6} />
+            <text x={CASING_CX + 18} y={yMd(selectedStation.md_m) + 3} fontSize={8} fill={brass}>
+              {`station ${selectedStation.md_m.toLocaleString()} m`}
+            </text>
+          </g>
+        )}
+        {!compact && lastStation && (
+          <text x={CASING_CX - 8} y={yMd(lastStation.md_m) + 3} textAnchor="end" fontSize={8} fill={muted}>
+            {`last station ${lastStation.md_m.toLocaleString()} m`}
+          </text>
+        )}
+
+        {/* Right: true vertical depth grid */}
+        {tvdTicks.map((tick) => (
+          <g key={`tvd-${tick}`}>
+            <line
+              x1={TVD_LABEL_X}
+              x2={SECTION_RIGHT}
+              y1={yTvd(tick)}
+              y2={yTvd(tick)}
+              stroke={line}
+              strokeWidth={0.6}
+              strokeDasharray={tick === 0 ? '0' : '2 4'}
+            />
+            <text x={TVD_LABEL_X - 5} y={yTvd(tick) + 3} textAnchor="end" fontSize={8.5} fill={muted}>
+              {Math.round(tick).toLocaleString()}
+            </text>
+          </g>
+        ))}
+        <text x={TVD_LABEL_X - 5} y={TOP - 6} textAnchor="end" fontSize={8.5} fontWeight={700} fill={muted}>
+          TVD (m)
+        </text>
+
+        <line x1={SECTION_LEFT} x2={SECTION_RIGHT} y1={yTvd(0)} y2={yTvd(0)} stroke={muted} strokeWidth={1} />
+
+        {curve.length > 1 ? (
+          <g>
+            <title>{`Integrated trajectory from ${curve[0].md_m.toLocaleString()} m to ${curve[curve.length - 1].md_m.toLocaleString()} m MD`}</title>
+            <polyline points={curvePoints} fill="none" stroke={accent} strokeWidth={2.6} strokeLinejoin="round" strokeLinecap="round" />
+          </g>
+        ) : curve.length === 1 ? (
+          <circle cx={xSection(curve[0].vsec_m)} cy={yTvd(curve[0].tvd_m)} r={2.8} fill={accent} />
+        ) : null}
+
+        {lastStation && (
+          <g>
+            <circle cx={xSection(lastStation.vsec_m)} cy={yTvd(lastStation.tvd_m)} r={3.4} fill={accent} />
+            {!compact && (
+              <text x={xSection(lastStation.vsec_m) + 7} y={yTvd(lastStation.tvd_m) - 4} fontSize={8} fill={muted}>
+                last station
+              </text>
+            )}
+          </g>
+        )}
+
+        {selectedStation && (
+          <g>
+            <circle cx={xSection(selectedStation.vsec_m)} cy={yTvd(selectedStation.tvd_m)} r={4.6} fill="none" stroke={brass} strokeWidth={1.8} />
+          </g>
+        )}
+
         {!curve.length && (
-          <text x={DRILL_RIGHT + DRILL_WIDTH / 2} y={TOP + plotHeight / 2} textAnchor="middle" fontSize={8.5} fill={muted}>
+          <text x={(SECTION_LEFT + SECTION_RIGHT) / 2} y={TOP + plotHeight / 2} textAnchor="middle" fontSize={8.5} fill={muted}>
             {path.is_surveyed ? 'open the well path page for the trajectory' : 'no survey stations recorded'}
           </text>
+        )}
+
+        {/* Unsurveyed depth is an annotation, never a continuation of the line */}
+        {unsurveyedToHole && lastStation && holeDepth !== null && (
+          <g>
+            <text x={(SECTION_LEFT + SECTION_RIGHT) / 2} y={TOP + plotHeight + 30} textAnchor="middle" fontSize={8} fill={brass}>
+              {`unsurveyed below ${fmtDepth(lastStation.md_m, 2)} m MD — no TVD for the remaining ${fmtDepth(holeDepth - lastStation.md_m, 2)} m`}
+            </text>
+          </g>
+        )}
+
+        {/* Axis captions say which scale each drawing uses */}
+        <text x={CASING_CX} y={TOP + plotHeight + 30} textAnchor="middle" fontSize={8} fill={muted}>
+          measured depth (m) ↓
+        </text>
+        <text x={(SECTION_LEFT + SECTION_RIGHT) / 2} y={TOP + plotHeight + (unsurveyedToHole ? 42 : 30)} textAnchor="middle" fontSize={8} fill={muted}>
+          departure from the section plane (m) · TVD (m) ↓
+        </text>
+
+        {/* Symbol key */}
+        {!compact && (
+          <g fontSize={8} fill={muted}>
+            <g transform={`translate(${MD_LABEL_X}, ${height - 44})`}>
+              <rect x={0} y={-6} width={9} height={9} fill="none" stroke={accent} strokeWidth={1.2} />
+              <text x={13} y={2}>casing</text>
+              <path d="M 66 -6 L 71 0 L 76 -6" fill="none" stroke={accent} strokeWidth={1.2} />
+              <text x={81} y={2}>shoe</text>
+              <line x1={118} x2={128} y1={-1} y2={-1} stroke={accent} strokeDasharray="3 2" />
+              <text x={133} y={2}>open hole</text>
+            </g>
+            <g transform={`translate(${MD_LABEL_X}, ${height - 28})`}>
+              <line x1={0} x2={14} y1={-3} y2={-3} stroke={brass} strokeDasharray="4 2" strokeWidth={1.1} />
+              <text x={18} y={0}>hole depth (report MD)</text>
+              <polygon points={`66,-7 66,1 73,-3`} fill={brass} />
+              <text x={78} y={0}>bit / string depth</text>
+              <circle cx={166} cy={-3} r={3} fill={accent} />
+              <text x={174} y={0}>survey station</text>
+              <text x={244} y={0}>shapes carry meaning in both themes</text>
+            </g>
+          </g>
         )}
       </Box>
       {!compact && (
@@ -250,8 +422,8 @@ export function WellDiagram({
           <Chip size="small" variant="outlined" label={`${path.sections.length} casing seat${path.sections.length === 1 ? '' : 's'}`} sx={{ height: 22, fontSize: 10.5 }} />
           <Chip size="small" variant="outlined" label={`${curve.length || summary.stations} survey station${(curve.length || summary.stations) === 1 ? '' : 's'}`} sx={{ height: 22, fontSize: 10.5 }} />
           {summary.max_inc_deg !== null && <Chip size="small" variant="outlined" label={`max inc ${summary.max_inc_deg}°`} sx={{ height: 22, fontSize: 10.5 }} />}
-          {summary.departure_m !== null && summary.departure_m > 0 && (
-            <Chip size="small" variant="outlined" label={`departure ${summary.departure_m.toLocaleString()} m`} sx={{ height: 22, fontSize: 10.5 }} />
+          {summary.max_dls_deg_per_30m !== null && (
+            <Chip size="small" variant="outlined" label={`max DLS ${summary.max_dls_deg_per_30m} °/30 m`} sx={{ height: 22, fontSize: 10.5 }} />
           )}
           <Chip size="small" variant="outlined" label={summary.depth_basis || 'no report'} sx={{ height: 22, fontSize: 10.5 }} />
         </Stack>
@@ -263,6 +435,21 @@ export function WellDiagram({
       )}
     </Box>
   )
+}
+
+/** A label painted over the drawing keeps its own surface behind it. */
+function Halo({ x, y, width, height, fill }: { x: number; y: number; width: number; height: number; fill: string }) {
+  return <rect x={x} y={y} width={width} height={height} fill={fill} opacity={0.9} rx={2} />
+}
+
+/** Rough advance width at a small type size; the label backs itself, so close is enough. */
+function labelWidth(text: string, fontSize: number): number {
+  return text.length * fontSize * 0.56 + 6
+}
+
+function holeLabel(depth: number, reportDate: string | null): string {
+  const value = depth.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `Hole ${value} m${reportDate ? ` · ${reportDate}` : ''}`
 }
 
 export default WellDiagram
