@@ -265,6 +265,25 @@ def _study_answer(question: str, permissions) -> AssistantAnswer | None:
     )
 
 
+def _dnc_outscores_study(question: str, study: AssistantAnswer) -> bool:
+    """Whether the DNC entry for this question is a better match than the study one.
+
+    Both knowledge bases score keyword overlap, and the study matcher is the
+    stricter of the two, so a DNC entry that still scores higher is the better
+    evidence. The study answer is only worth pre-empting when the DNC match is
+    genuinely stronger; ties stay with the study books.
+    """
+    hits = match_dnc_entries(question, limit=1)
+    if not hits:
+        return False
+    dnc_score, dnc_entry = hits[0]
+    study_hits = match_study_entries(question, limit=1, minimum=0)
+    study_score = study_hits[0][0] if study_hits else 0
+    if dnc_entry.key in (study.memory_key or ''):
+        return False
+    return dnc_score > study_score
+
+
 def answers(question, route, permissions, *, db=None, organization_id=None):
     """Return None for non-operations questions so costing intents are unchanged."""
     q = question.casefold()
@@ -298,6 +317,15 @@ def answers(question, route, permissions, *, db=None, organization_id=None):
             'operations-abbreviations',
         ):
             return exact_term
+        # The study books and the DNC knowledge base cover overlapping ground, and
+        # neither is always the better answer. "How do I prevent pack-off and
+        # differential stuck pipe?" names *two* mechanisms: the DNC entry answers
+        # both, while the top study entry covers only the mechanical one. A study
+        # entry therefore only pre-empts the knowledge base when it matches more
+        # strongly; otherwise the two are compared on their scores below.
+        if _dnc_outscores_study(question, study):
+            study = None
+    if study is not None:
         return study
     if not explicit and (not contextual or re.search(r'\b(?:costing|afe|invoice|catalogue)\b', q)):
         return None

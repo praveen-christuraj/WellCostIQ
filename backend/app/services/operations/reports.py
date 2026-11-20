@@ -971,14 +971,24 @@ def review_timeline(db: Session, organization_id: str, report_id: str, data, use
         planned = _as_decimal(block.timeline_planned_hours)
         actual = _as_decimal(block.timeline_actual_hours)
         if planned is None or actual is None:
-            block.timeline_comparison = "on"
+            # With no comparable hours the comparison is whatever the engineer
+            # stated and no more. An explicit mark survives — it is their
+            # judgement of the schedule, which the time log cannot overrule — but
+            # no variance can be computed, so none is invented.
+            block.timeline_comparison = data.comparison or "on"
             block.timeline_variance_hours = None
             block.timeline_variance_days = None
             continue
         variance = planned - actual
         block.timeline_variance_hours = rounded(variance)
         block.timeline_variance_days = rounded(variance / Decimal(24))
-        block.timeline_comparison = "ahead" if variance > 0 else ("behind" if variance < 0 else "on")
+        # The hours decide the mark by default, because they are evidence. When
+        # the engineer states one instead — "the rig moved late, this is behind
+        # regardless of the printed days" — their mark is kept and the variance
+        # still shows beside it, so a reader sees both the figure and the call.
+        block.timeline_comparison = data.comparison or (
+            "ahead" if variance > 0 else ("behind" if variance < 0 else "on")
+        )
         block.timeline_basis = (block.timeline_basis or "programme")[:50]
     audit_record(
         db,

@@ -128,3 +128,47 @@ def test_legacy_evidence_retains_code_and_its_meaning():
                             source_page=0, source_operation_code='', phase_raw='', source_mark='', source_cause_code='')
     assert _block_source_codes(block)['source_activity_label'] == '06 — Wiper trip and reaming'
     assert block.classification_evidence == 'Programme v1 · Code 06'
+
+
+def test_a_question_sharing_only_domain_vocabulary_is_not_answered_from_a_study_entry():
+    """A live-workspace question must not be captured by a loosely related entry.
+
+    "What is the drilling depth and NPT summary for <well>?" shares the words
+    *drilling*, *depth*, *well* and *npt* with the time-depth/cost entry. Those
+    are the vocabulary of the whole discipline, not evidence of the subject, so
+    no study entry may claim the question. The live database answer (which needs
+    the request's db) is the one that should serve it.
+    """
+    from app.domain.operations.study_knowledge import match_study_entries
+    from app.services.operations.guide import answers
+
+    question = "What is the drilling depth and NPT summary for AI-WELL-01?"
+    assert match_study_entries(question, limit=3) == []
+    answer = answers(question, '/operations/guide', {'ops-report:read'})
+    assert answer is None or not (answer.memory_key or '').startswith('study-')
+
+
+def test_a_study_entry_does_not_shadow_a_stronger_dnc_answer():
+    """The study books and the DNC knowledge base must compete on merit.
+
+    "How do I prevent pack-off and differential stuck pipe?" names two
+    mechanisms. The DNC entry covers both; the strongest study entry covers only
+    the mechanical one. Before the arbitration the study step returned first and
+    the DNC answer could never be reached, however well it matched.
+    """
+    from app.domain.operations.dnc_knowledge import match_dnc_entries
+    from app.domain.operations.study_knowledge import match_study_entries
+    from app.services.operations.guide import answers
+
+    question = "How do I prevent pack-off and differential stuck pipe?"
+    dnc = match_dnc_entries(question, limit=1)
+    study = match_study_entries(question, limit=1, minimum=0)
+    assert dnc and study and dnc[0][0] > study[0][0]
+
+    answer = answers(question, '/operations/guide', {'ops-report:read'})
+    assert answer is not None
+    assert answer.memory_key == dnc[0][1].key
+    # A subject the book covers better still comes from the book.
+    assert answers("what is kick tolerance?", '/operations/guide', {'ops-report:read'}).memory_key == (
+        'study-kick-tolerance'
+    )

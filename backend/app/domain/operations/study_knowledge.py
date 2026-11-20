@@ -86,7 +86,7 @@ class StudyEntry:
     symbols: tuple[str, ...] = ()
     applies_to: str = ""
     checks: tuple[str, ...] = ()
-    #: (source key, chapter/section label, printed page)
+    #: One (source id, chapter/section label, printed page) triple per citation.
     pages: tuple[tuple[str, str, str], ...] = ()
     follow_ups: tuple[str, ...] = ()
 
@@ -1063,16 +1063,31 @@ _PHRASES = (
 )
 
 
+#: Words every well question contains. They earn nothing toward a match: a
+#: question naming "drilling depth and NPT summary" must not be answered from an
+#: entry about time–depth cost curves merely because both mention depth and
+#: drilling. Distinctive words are what carry a match.
+_COMMON_DOMAIN_WORDS = frozenset("""
+    bit bha casing cement depth drill drilled driller drilling formation hole
+    log mud oil field gas npt operation operations pipe pressure report rig
+    section string summary tool well wells welle wellbore
+""".split())
+
+
 def match_study_entries(question: str, *, limit: int = 3, minimum: int = 6) -> list[tuple[int, StudyEntry]]:
     """Rank the study entries against a free-text engineering question.
 
     The threshold exists because a weak match is worse than no match: an entry
     about cost per foot must not be offered for a question about mud weight.
+    A match must also rest on at least one *distinctive* word, so a question
+    that only shares the vocabulary of the domain with an entry is not answered
+    from it.
     """
     q = (question or "").lower()
     tokens = _tokens(q)
     if not tokens:
         return []
+    distinctive = tokens - _COMMON_DOMAIN_WORDS
     scored: list[tuple[int, StudyEntry]] = []
     for entry in STUDY_ENTRIES:
         keyword_tokens = _tokens(entry.keywords)
@@ -1081,6 +1096,9 @@ def match_study_entries(question: str, *, limit: int = 3, minimum: int = 6) -> l
         overlap = tokens & keyword_tokens
         if not overlap:
             # A title or topic hit alone is a hint, never a match.
+            continue
+        if not (distinctive & (keyword_tokens | title_tokens)):
+            # Only domain-wide words agree: no evidence this entry is the subject.
             continue
         score = len(overlap) * 3 + len(tokens & title_tokens) * 2 + len(tokens & topic_tokens)
         if any(phrase in q for phrase in _PHRASES):
