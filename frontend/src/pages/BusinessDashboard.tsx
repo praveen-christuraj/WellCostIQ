@@ -17,6 +17,8 @@ import { ErrorMessage, PageHeading, Tag } from '../components/Common'
 import { trackingLabel, wellStatusTone, WELL_STATUSES } from '../lib/rigWell'
 import { ChartPanel } from '../components/ui/ChartPanel'
 import { InteractiveChart } from '../components/ui/InteractiveChart'
+import { ChartInspector } from '../components/ui/ChartInspector'
+import { VisualExpand } from '../components/ui/VisualExpand'
 import { DatasetState } from '../components/ui/DatasetState'
 import { SectionCard } from '../components/ui/SectionCard'
 import { StatCard } from '../components/ui/StatCard'
@@ -325,6 +327,24 @@ export default function BusinessDashboard() {
       }],
     }
   }, [data, currency, theme.palette.background.paper, palette, axis])
+
+  const classificationOption: EChartsOption = useMemo(() => {
+    const rows = data?.classification ?? []
+    return {
+      grid: { left: 75, top: 15, right: 32, bottom: 60 },
+      tooltip: { trigger: 'item', renderMode: 'richText', formatter: raw => {
+        const row = rows[(Array.isArray(raw) ? raw[0] : raw).dataIndex]
+        return row ? `${row.key} · ${percent(row.share)} of cost\n${days(row.days)} · ${money(row.actual, currency)}` : ''
+      } },
+      xAxis: { type: 'value', name: 'Share of cost (%)', nameLocation: 'middle', nameGap: 28, min: 0, max: 100,
+        axisLabel: { color: axis.text, formatter: '{value}%' }, splitLine: { lineStyle: { color: axis.line } } },
+      yAxis: { type: 'category', inverse: true, data: rows.map(row => row.key), axisLabel: { color: axis.text } },
+      series: [{ type: 'bar', name: 'Share of cost', barMaxWidth: 28,
+        data: rows.map((row, index) => ({ value: row.share === null ? null : Number(row.share), itemStyle: { color: palette.series[index % palette.series.length] } })),
+        label: { formatter: '{c}%' },
+      }],
+    }
+  }, [data, axis, currency, palette])
 
   const depthRows = useMemo(() => [...(data?.wells ?? [])]
     .filter(row => row.depth_progress_percent !== null)
@@ -1124,7 +1144,11 @@ export default function BusinessDashboard() {
             onEvents={{ click: drillToDaysWell }}
           />
         </ChartPanel>
-        <SectionCard title="Time classification" subtitle="Days and recorded cost under each classification." sx={{ height: '100%' }}>
+        <SectionCard title="Time classification" subtitle="Days and recorded cost under each classification." sx={{ height: '100%' }}
+          action={data.classification.some(row => row.share != null) && <VisualExpand visual={{ title: 'Time classification', subtitle: 'Share of recorded cost by time classification. Inspect a bar for its days and cost.' }}>
+            {() => <ChartInspector option={classificationOption} renderChart={(option, key) =>
+              <InteractiveChart key={key} option={option} expandable={false} notMerge />} />}
+          </VisualExpand>}>
           <Box>
             {data.classification.map(row => <Box key={row.key} sx={{ py: 1.15, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}>
               <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>

@@ -4,6 +4,9 @@ import { Alert, Box, Button, Chip, MenuItem, Stack, TextField, Typography } from
 import { WellDiagram } from '../../components/operations/WellDiagram'
 import { DoglegIntervals } from '../../components/operations/DoglegIntervals'
 import { WellPlanSectionViews, WellSteeringTracks } from '../../components/operations/WellTrajectory'
+import { TrajectoryComparisonPanel, TrajectoryExpand } from '../../components/operations/TrajectoryComparison'
+import { DoglegExpand, WellDiagramExpand } from '../../components/operations/WellVisualInspectors'
+import { validRange } from '../../components/operations/VisualDepthControls'
 import { WellSourceDialog, type WellMark } from '../../components/operations/WellSourceDialog'
 import { DataTable } from '../../components/DataTable'
 import { ChartPanel } from '../../components/ui/ChartPanel'
@@ -85,7 +88,7 @@ export default function OperationsWellPath() {
     // rebuilds the default plane anyway, so drop it to keep the picture honest.
     if (key === 'scope') next.delete('vs')
     setParams(next, { replace })
-    if (key === 'well') {
+    if (key === 'well' || key === 'scope') {
       setSelectedMd(null)
       setWindowState(EMPTY_WINDOW)
       setExplain(null)
@@ -124,11 +127,12 @@ export default function OperationsWellPath() {
       return
     }
     setLoading(true)
+    setPath(current => current?.well_id === well && current.scope === scope ? current : null)
     opsWellPath(well, scope, vsAzimuth === '' ? undefined : vsAzimuth)
       .then((d) => {
         if (current) {
           setPath(d)
-          setSelectedMd((md) => (md !== null && stationAt(d.curve, md) ? md : null))
+          setSelectedMd((md) => (md !== null && (stationAt(d.curve, md) || stationAt(d.planned_trajectory?.curve ?? [], md)) ? md : null))
         }
       })
       .catch((e) => {
@@ -146,10 +150,15 @@ export default function OperationsWellPath() {
   }, [well, scope, vsAzimuth])
 
   const curve = path?.curve ?? []
+  const plannedCurve = path?.planned_trajectory?.curve ?? []
+  const hasPlanCurve = plannedCurve.length > 0
+  const trajectory = path ? { ...path, planned_trajectory: path.planned_trajectory ?? null } : null
   const summary = path?.summary
   const surveyEnd = path?.position.survey_end_md_m ?? null
   const holeDepth = path?.snapshot.hole_depth_m ?? summary?.current_md_m ?? null
-  const depthWindow = { from: toNumber(windowState.from), to: toNumber(windowState.to) }
+  const requestedWindow = { from: toNumber(windowState.from), to: toNumber(windowState.to) }
+  const windowInvalid = !validRange(requestedWindow)
+  const depthWindow = windowInvalid ? { from: null, to: null } : requestedWindow
   const selectedStation = stationAt(curve, selectedMd)
   const selectedInterval = selectedMd === null
     ? null
@@ -185,7 +194,11 @@ export default function OperationsWellPath() {
     return options
   }, [path, holeDepth])
 
-  const curveSpan = curve.length ? { from: curve[0].md_m, to: curve[curve.length - 1].md_m } : null
+  const availableCurves = [curve, plannedCurve].filter(row => row.length)
+  const curveSpan = availableCurves.length ? {
+    from: Math.min(...availableCurves.map(row => row[0].md_m)),
+    to: Math.max(...availableCurves.map(row => row[row.length - 1].md_m)),
+  } : null
 
   /**
    * Zoom narrows or widens the drawn window about its own centre. It never
@@ -310,6 +323,7 @@ export default function OperationsWellPath() {
             size="small"
             type="number"
             label="Window from (m MD)"
+            error={windowInvalid}
             value={windowState.from}
             onChange={(e) => setWindowState((current) => ({ ...current, from: e.target.value }))}
             sx={{ width: 176 }}
@@ -318,19 +332,21 @@ export default function OperationsWellPath() {
             size="small"
             type="number"
             label="Window to (m MD)"
+            error={windowInvalid}
             value={windowState.to}
             onChange={(e) => setWindowState((current) => ({ ...current, to: e.target.value }))}
             sx={{ width: 176 }}
           />
-          <Button variant="outlined" size="small" onClick={() => zoomWindow('in')} disabled={!curveSpan || (depthWindow.from !== null && depthWindow.to !== null && depthWindow.to - depthWindow.from <= 10)}>
+          <Button variant="outlined" size="small" onClick={() => zoomWindow('in')} disabled={windowInvalid || !curveSpan || (depthWindow.from !== null && depthWindow.to !== null && depthWindow.to - depthWindow.from <= 10)}>
             Zoom in
           </Button>
-          <Button variant="outlined" size="small" onClick={() => zoomWindow('out')} disabled={!curveSpan}>
+          <Button variant="outlined" size="small" onClick={() => zoomWindow('out')} disabled={windowInvalid || !curveSpan}>
             Zoom out
           </Button>
           <Button variant="outlined" size="small" onClick={() => setWindowState(EMPTY_WINDOW)}>
             Fit well
           </Button>
+          {windowInvalid && <Typography role="alert" variant="caption" color="error.main">Enter a non-negative, ordered MD range.</Typography>}
           <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
             The window clips the plots, not the record. Export always carries the whole well unless the window is
             stated in the caption. Zoom in by narrowing it; nothing is resampled or decimated.
@@ -405,9 +421,17 @@ export default function OperationsWellPath() {
           </Box>
 
           <Stack spacing={2}>
-            <ChartPanel
+            {!hasPlanCurve && can('ops-plan:read') && <Caution page={CAUTION_PAGE} cautionKey="planned-survey-missing"
+              signature={[path.well_id, path.scope, path.planned_trajectory?.plan_version_id ?? 'none']} severity="info">
+              {path.planned_trajectory ? `Active plan v${path.planned_trajectory.version_no} has no planned directional survey.` : 'No active plan for this well and scope.'}{' '}
+              <Link to="/operations/plans">Open Plans &amp; timeline</Link> to review the plan survey.
+            </Caution>}
+            {hasPlanCurve && trajectory ? <TrajectoryComparisonPanel path={trajectory} figureKey="well-plan-section" selectedMd={selectedMd}
+              onSelectMd={setSelectedMd} window={depthWindow} /> : <ChartPanel
               title="Trajectory — plan view and vertical section"
               figureKey="well-plan-section"
+              action={trajectory && <TrajectoryExpand path={trajectory} title="Trajectory — plan view and vertical section"
+                subtitle="Actual survey projected onto the selected vertical-section plane." window={depthWindow} selectedMd={selectedMd} />}
               subtitle="Two projections of exactly the same stations. Select a station in either one to highlight it in the other, the schematic and the table."
               caption={`Grid north · ${path.datum}. The plan view uses an equal north/east scale; the vertical section is a projection on the plane facing ${fmtAngle(path.vertical_section_azimuth_deg, 1)}.`}
               empty={!curve.length}
@@ -415,11 +439,12 @@ export default function OperationsWellPath() {
               height={452}
             >
               <WellPlanSectionViews path={path} selectedMd={selectedMd} onSelectMd={setSelectedMd} window={depthWindow} height={340} />
-            </ChartPanel>
+            </ChartPanel>}
 
             <ChartPanel
               title="Dogleg severity by interval"
               figureKey="well-dogleg"
+              action={<DoglegExpand path={path} selectedMd={selectedMd} window={depthWindow} />}
               subtitle="Each rectangle spans the measured-depth interval between two stations, not one calendar day. Height is the average directional change normalised to 30 m."
               meta={
                 selectedInterval ? (
@@ -458,15 +483,19 @@ export default function OperationsWellPath() {
             >
               <DoglegIntervals
                 intervals={path.intervals}
+                window={depthWindow}
                 selectedMd={selectedMd}
                 onSelectMd={setSelectedMd}
                 height={280}
               />
             </ChartPanel>
 
-            <ChartPanel
+            {hasPlanCurve && trajectory ? <TrajectoryComparisonPanel path={trajectory} part="steering" figureKey="well-steering" selectedMd={selectedMd}
+              onSelectMd={setSelectedMd} window={depthWindow} /> : <ChartPanel
               title="Inclination and azimuth along measured depth"
               figureKey="well-steering"
+              action={trajectory && <TrajectoryExpand path={trajectory} part="steering" title="Inclination and azimuth along measured depth"
+                window={depthWindow} selectedMd={selectedMd} />}
               subtitle="The steering record, on separate scales. Azimuth is clockwise from grid north and breaks at the 360° wrap instead of drawing a false full turn."
               caption="Build is the inclination change per 30 m. Turn is inclination-weighted and is not the raw azimuth difference, so the two are never compared as the same quantity."
               empty={curve.length < 2}
@@ -474,11 +503,12 @@ export default function OperationsWellPath() {
               height={336}
             >
               <WellSteeringTracks path={path} selectedMd={selectedMd} onSelectMd={setSelectedMd} window={depthWindow} height={230} />
-            </ChartPanel>
+            </ChartPanel>}
 
             <ChartPanel
               title="Casing, hole and trajectory"
               figureKey="well-diagram"
+              action={<WellDiagramExpand path={path} selectedMd={selectedMd} window={depthWindow} />}
               subtitle="Left is a construction drawing on measured depth; right is the integrated trajectory on true vertical depth. The two axes are labelled separately and no casing seat is converted into a TVD."
               toolbar={
                 <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
@@ -508,11 +538,11 @@ export default function OperationsWellPath() {
                 </Stack>
               }
               caption={`Drawn from ${summary?.sections_drawn ?? 0} casing seat(s) and ${summary?.stations ?? 0} survey station(s). Shapes and labels carry meaning as well as colour. ${path.assumption || 'No fallback was applied.'}`}
-              empty={!path.is_surveyed && !path.sections.length}
+              empty={!path.is_surveyed && !path.sections.length && !hasPlanCurve}
               emptyMessage={path.assumption || 'No surveys or casing seats are recorded for this well and scope.'}
               height={586}
             >
-              <WellDiagram path={path} height={500} selectedMd={selectedMd} />
+              <WellDiagram path={path} height={500} selectedMd={selectedMd} mdWindow={depthWindow} />
             </ChartPanel>
           </Stack>
 

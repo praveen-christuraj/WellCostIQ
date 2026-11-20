@@ -31,10 +31,11 @@ completion interval end.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from math import isfinite
 from typing import Any, Iterable, Sequence
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.operations.trajectory import (
@@ -51,10 +52,10 @@ from app.domain.operations.trajectory import (
 from app.models.operations import (
     OpsDailyReport,
     OpsPlanItem,
-    OpsPlanVersion,
     OpsSurvey,
 )
 from app.models.rig_well import Well, WellSection
+from app.services.operations import plan_surveys, plans
 
 VERIFIED = ("submitted", "approved")
 #: A printed TVD differing from the integrated TVD by more than this is flagged.
@@ -65,7 +66,8 @@ def _num(value: Any) -> float | None:
     if value is None:
         return None
     try:
-        return float(value)
+        number = float(value)
+        return number if isfinite(number) else None
     except (TypeError, ValueError):
         return None
 
@@ -96,8 +98,15 @@ def _survey_rows(db: Session, organization_id: str, well_id: str, scope: str) ->
                 OpsSurvey.scope == scope,
                 OpsSurvey.is_deleted.is_(False),
                 OpsSurvey.is_current.is_(True),
+                or_(OpsSurvey.report_id.is_(None), exists().where(
+                    OpsDailyReport.id == OpsSurvey.report_id,
+                    OpsDailyReport.organization_id == organization_id,
+                    OpsDailyReport.well_id == well_id,
+                    OpsDailyReport.scope == scope,
+                    OpsDailyReport.is_deleted.is_(False),
+                )),
             )
-            .order_by(OpsSurvey.md_m.asc(), OpsSurvey.station_no.asc(), OpsSurvey.created_at.asc())
+            .order_by(OpsSurvey.md_m.asc(), OpsSurvey.created_at.asc(), OpsSurvey.station_no.asc(), OpsSurvey.id.asc())
         ).all()
     )
 
@@ -131,6 +140,9 @@ def _survey_stations(
                 f"{'measured depth' if md is None else 'inclination'} and cannot be plotted."
             )
             continue
+        if not 0 <= inc <= 180:
+            notes.append(f"Survey at {md:,.2f} m has an out-of-range inclination and cannot be plotted.")
+            continue
         if md < 0:
             notes.append(f"Survey station {row.station_no or '?'} has a negative measured depth and cannot be plotted.")
             continue
@@ -144,6 +156,9 @@ def _survey_stations(
                 )
                 continue
             azi = 0.0
+        if not 0 <= azi <= 360:
+            notes.append(f"Survey at {md:,.2f} m has an out-of-range azimuth and cannot be plotted.")
+            continue
         station = Station(
             md_m=round(md, 3),
             inc_deg=inc,
@@ -187,9 +202,12 @@ def _station_lineage(
         if md is None:
             continue
         key = round(md, 3)
-        if key not in accepted:
+        inc, azi = _num(row.inc_deg), _num(row.azi_deg)
+        if key not in accepted or md < 0 or inc is None or not 0 <= inc <= 180:
             continue
         rows_at_md[key] = rows_at_md.get(key, 0) + 1
+        if (azi is None and abs(inc) >= 1) or (azi is not None and not 0 <= azi <= 360):
+            continue
         # Rows arrive oldest first, so the last row at an MD is the one used.
         chosen[key] = row
     out: list[dict[str, Any]] = []
@@ -345,15 +363,7 @@ def _casing_seats(
 
 def _plan_curve(db: Session, organization_id: str, well_id: str, scope: str) -> dict[str, Any]:
     """Planned depth against planned days from the active programme."""
-    version = db.scalar(
-        select(OpsPlanVersion).where(
-            OpsPlanVersion.organization_id == organization_id,
-            OpsPlanVersion.well_id == well_id,
-            OpsPlanVersion.scope == scope,
-            OpsPlanVersion.status == "active",
-            OpsPlanVersion.is_deleted.is_(False),
-        )
-    )
+    version = plans.active_plan(db, organization_id, well_id, scope)
     if version is None:
         return {"label": "", "version_no": None, "points": [], "planned_days": None, "planned_start_at": None}
     items = db.scalars(
@@ -436,6 +446,85 @@ def _section_intervals(
     return intervals
 
 
+def _curve_payload(curve):
+    return [
+        {
+            "md_m": round(s.md_m, 3),
+            "inc_deg": round(s.inc_deg, 3),
+            "azi_deg": round(s.azi_deg, 3),
+            "tvd_m": round(s.tvd_m, 3),
+            "ns_m": round(s.ns_m, 3),
+            "ew_m": round(s.ew_m, 3),
+            "vsec_m": round(s.vsec_m, 3),
+            "dls_deg_per_30m": round(s.dls_deg_per_30m, 3) if s.dls_deg_per_30m is not None else None,
+            "build_deg_per_30m": round(s.build_deg_per_30m, 3) if s.build_deg_per_30m is not None else None,
+            "turn_deg_per_30m": round(s.turn_deg_per_30m, 3) if s.turn_deg_per_30m is not None else None,
+            "is_anchor": s.is_anchor,
+            "interval_valid": s.interval_valid,
+            "interval_issue": s.interval_issue,
+        }
+        for s in curve
+    ]
+
+
+def _anchor_reference(first):
+    if first is None:
+        return "no survey stations", False
+    if all(value is not None for value in (first.tvd_m, first.ns_m, first.ew_m)):
+        return "recorded TVD and north/east tie-on", True
+    if first.md_m == 0 and all(value in (0, None) for value in (first.tvd_m, first.ns_m, first.ew_m)):
+        return "MD zero at the surface origin", True
+    return "incomplete tie-on; geometry uses assumed values", False
+
+
+def _planned_trajectory(plan, rows, stations, az):
+    basis, _ = _anchor_reference(stations[0] if stations else None)
+    return {
+        "plan_version_id": plan.id, "label": plan.label, "version_no": plan.version_no, "status": plan.status,
+        "curve": _curve_payload(integrate(stations, vertical_section_azimuth=az)),
+        "shared_reference": plan.survey_shared_reference,
+        "anchor_basis": basis,
+        "sources": sorted({" · ".join(filter(None, (row.source_file or row.source, row.source_sheet))) for row in rows}),
+    }
+
+
+def _comparison_basis(plan, planned_stations, actual_stations):
+    if not planned_stations or not actual_stations:
+        return False, "Both surveys are needed to compare positions."
+    if not plan.survey_shared_reference:
+        return False, "The plan has no confirmed shared datum, depth reference and north/east origin. Align the reference before comparing offsets."
+    if not all(_anchor_reference(stations[0])[1] for stations in (planned_stations, actual_stations)):
+        return False, "At least one survey begins below surface without a complete TVD and north/east tie-on. No position differences are calculated."
+    return True, "Shared depth and coordinate references confirmed on the plan. Differences are calculated only at overlapping, usable MDs."
+
+
+def _projection_azimuth(stations):
+    seed = integrate(stations)
+    for index, station in enumerate(seed[1:], 1):
+        if not station.interval_valid:
+            seed = seed[:index]
+            break
+    return survey_azimuth_from_departure(seed[-1].ns_m, seed[-1].ew_m) if seed else 0.0
+
+
+def plan_comparison(db, plan, *, include_actual, vertical_section_azimuth=None):
+    planned_rows = plan_surveys.rows_for_plan(db, plan)
+    planned_stations = [plan_surveys.geometry_station(row) for row in planned_rows]
+    rows = _survey_rows(db, plan.organization_id, plan.well_id, plan.scope) if include_actual else []
+    stations, _ = _survey_stations(db, plan.organization_id, plan.well_id, plan.scope, rows=rows)
+    az = vertical_section_azimuth if vertical_section_azimuth is not None else _projection_azimuth(stations or planned_stations)
+    actual_curve = integrate(stations, vertical_section_azimuth=az)
+    reports = _reports(db, plan.organization_id, plan.well_id, plan.scope) if rows else []
+    comparable, basis = _comparison_basis(plan, planned_stations, stations)
+    return {
+        "vertical_section_azimuth_deg": round(az, 3),
+        "planned_trajectory": _planned_trajectory(plan, planned_rows, planned_stations, az),
+        "curve": _curve_payload(actual_curve),
+        "survey_stations": _station_lineage(rows, actual_curve, reports),
+        "comparable": comparable, "comparison_basis": basis, "actual_visible": include_actual,
+    }
+
+
 def well_path(
     db: Session,
     organization_id: str,
@@ -443,6 +532,7 @@ def well_path(
     scope: str = "drilling",
     *,
     vertical_section_azimuth: float | None = None,
+    include_planned_trajectory: bool = False,
 ) -> dict[str, Any]:
     """Full well path payload: curve, KPI summary, sections, provenance, warnings."""
     well = db.scalar(
@@ -459,18 +549,13 @@ def well_path(
     stations, notes = _survey_stations(db, organization_id, well_id, scope, rows=rows)
     reports = _reports(db, organization_id, well_id, scope)
     depth = _latest_depth(reports)
-    az = vertical_section_azimuth
-    if az is None:
-        # The vertical-section plane follows the well's own closure direction, so
-        # the first pass integrates at zero azimuth and the curve is rebuilt in
-        # the plane the well actually reached.
-        seed = integrate(stations, vertical_section_azimuth=0.0)
-        az = (
-            survey_azimuth_from_departure(seed[-1].ns_m, seed[-1].ew_m)
-            if seed
-            else 0.0
-        )
+    plan_version = plans.active_plan(db, organization_id, well_id, scope) if include_planned_trajectory else None
+    planned_rows = plan_surveys.rows_for_plan(db, plan_version) if plan_version else []
+    planned_stations = [plan_surveys.geometry_station(row) for row in planned_rows]
+    az = vertical_section_azimuth if vertical_section_azimuth is not None else _projection_azimuth(stations or planned_stations)
     curve = integrate(stations, vertical_section_azimuth=az)
+    planned_trajectory = _planned_trajectory(plan_version, planned_rows, planned_stations, az) if plan_version else None
+    comparable, comparison_basis = _comparison_basis(plan_version, planned_stations, stations)
 
     # A printed TVD that the integration does not reproduce is a data question for
     # the engineer, not something to paper over with either number.
@@ -673,24 +758,10 @@ def well_path(
         "scope": scope,
         "datum": "Rotary table / kelly bushing as printed on the reports",
         "vertical_section_azimuth_deg": round(az, 3),
-        "curve": [
-            {
-                "md_m": round(s.md_m, 3),
-                "inc_deg": round(s.inc_deg, 3),
-                "azi_deg": round(s.azi_deg, 3),
-                "tvd_m": round(s.tvd_m, 3),
-                "ns_m": round(s.ns_m, 3),
-                "ew_m": round(s.ew_m, 3),
-                "vsec_m": round(s.vsec_m, 3),
-                "dls_deg_per_30m": round(s.dls_deg_per_30m, 3) if s.dls_deg_per_30m is not None else None,
-                "build_deg_per_30m": round(s.build_deg_per_30m, 3) if s.build_deg_per_30m is not None else None,
-                "turn_deg_per_30m": round(s.turn_deg_per_30m, 3) if s.turn_deg_per_30m is not None else None,
-                "is_anchor": s.is_anchor,
-                "interval_valid": s.interval_valid,
-                "interval_issue": s.interval_issue,
-            }
-            for s in curve
-        ],
+        "curve": _curve_payload(curve),
+        "planned_trajectory": planned_trajectory,
+        "comparable": comparable,
+        "comparison_basis": comparison_basis,
         "survey_stations": stations_payload,
         "intervals": [
             {

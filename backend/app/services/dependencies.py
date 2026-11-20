@@ -72,6 +72,7 @@ REFERENCE_LABELS: dict[str, str] = {
     "ops_activity_blocks": "daily operations report block(s)",
     "ops_daily_reports": "daily operations report(s)",
     "ops_plan_items": "operations timeline item(s)",
+    "ops_plan_survey_stations": "planned directional survey station(s)",
     "ops_plan_versions": "operations timeline version(s)",
     "ops_documents": "operations source document(s)",
     "ops_operations": "operations code(s)",

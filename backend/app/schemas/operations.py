@@ -601,6 +601,26 @@ class OpsSurveyIn(_Strict):
     survey_at: datetime | None = None
 
 
+class OpsPlanSurveyStationIn(OpsSurveyIn):
+    md_m: Decimal3 = Field(ge=0)
+    inc_deg: Decimal3 = Field(ge=0, le=180)
+    dls_deg_per_30m: Decimal3 | None = Field(default=None, ge=0)
+    source_file: str = Field(default="", max_length=255)
+    source_sheet: str = Field(default="", max_length=100)
+
+
+class OpsPlanSurveyIn(_Strict):
+    expected_updated_at: datetime
+    shared_reference: bool = False
+    stations: list[OpsPlanSurveyStationIn] = Field(max_length=5000)
+
+
+class OpsPlanSurveyOut(_Strict):
+    updated_at: datetime
+    shared_reference: bool
+    stations: list[OpsPlanSurveyStationIn]
+
+
 class OpsSurveyPreviewStation(_Strict):
     """A station as read from a file, with the file's own numbers kept as-is.
 
@@ -1229,6 +1249,27 @@ class OpsWellPathPlan(_Strict):
     items: int = 0
 
 
+class OpsPlannedTrajectory(_Strict):
+    plan_version_id: str
+    label: str
+    version_no: int
+    status: str
+    curve: list[OpsWellPathStation]
+    shared_reference: bool
+    anchor_basis: str
+    sources: list[str] = Field(default_factory=list)
+
+
+class OpsTrajectoryComparison(_Strict):
+    vertical_section_azimuth_deg: float
+    planned_trajectory: OpsPlannedTrajectory
+    curve: list[OpsWellPathStation]
+    survey_stations: list[OpsWellPathSurveyStation]
+    comparison_basis: str = ""
+    comparable: bool = False
+    actual_visible: bool
+
+
 class OpsWellPathOut(_Strict):
     """A well's trajectory and drawing, with the provenance of every figure.
 
@@ -1256,6 +1297,9 @@ class OpsWellPathOut(_Strict):
     open_hole: dict[str, Any] | None = None
     casing_seats: list[dict[str, Any]] = []
     planned: OpsWellPathPlan = OpsWellPathPlan()
+    planned_trajectory: OpsPlannedTrajectory | None = None
+    comparison_basis: str = ""
+    comparable: bool = False
     depth: dict[str, Any] = {}
     survey_discrepancies: list[dict[str, Any]] = []
     notes: list[str] = []

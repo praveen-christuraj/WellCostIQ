@@ -114,9 +114,9 @@ has('unsurveyed', 'depth below the last station is annotated as unsurveyed')
 has('— no interval', 'a station with no interval is not given a severity')
 has('Max dogleg', 'the peak severity has a card')
 // The divided drawing states both axes.
-const diagram = document.querySelector('svg[aria-label*="casing and hole on measured depth"]')
+const diagram = document.querySelector('svg[aria-label*="well construction on measured depth"]')
 assert.ok(diagram, 'the well diagram renders with both axis names in its accessible label')
-assert.ok(diagram.textContent.includes('CASING & HOLE'), 'the construction drawing is labelled')
+assert.ok(diagram.textContent.includes('WELL CONSTRUCTION'), 'the construction drawing is labelled')
 assert.ok(diagram.textContent.includes('VERTICAL SECTION'), 'the section drawing is labelled')
 assert.ok(diagram.textContent.includes('measured depth'), 'the construction axis is measured depth')
 assert.ok(diagram.textContent.includes('true vertical depth'), 'the section axis is true vertical depth')
@@ -131,8 +131,8 @@ has('Report snapshot', 'the report snapshot has its own card')
 has('A short string above the hole bottom is normal', 'the snapshot explains equipment vs hole')
 
 // "Explain this" names the source and the rule, not just a number.
-const click = async (label) => {
-  const button = [...document.querySelectorAll('button')].find((node) => (node.textContent ?? '').trim() === label)
+const click = async (label, within = document) => {
+  const button = [...within.querySelectorAll('button')].find((node) => (node.textContent ?? '').trim() === label)
   assert.ok(button, `button "${label}" is present`)
   await act(async () => button.dispatchEvent(new window.MouseEvent('click', { bubbles: true })))
 }
@@ -142,6 +142,19 @@ await click('Close')
 await click('Explain last shoe')
 has('Only what the record describes is drawn', 'the shoe drawer states what is not fabricated')
 await click('Close')
+
+// The two custom SVGs expose their own meaningful interval / axis controls.
+for (const [name, expected] of [
+  ['Expand Dogleg severity by interval', 'Severity axis max'],
+  ['Expand Casing, hole and trajectory · OGUALI-19WD', 'To (m TVD)'],
+]) {
+  const trigger = document.querySelector(`button[aria-label="${name}"]`)
+  assert.ok(trigger, name)
+  await act(async () => trigger.click())
+  const dialog = [...document.querySelectorAll('[role=dialog]')].find(node => node.textContent.includes(expected))
+  assert.ok(dialog, expected)
+  await click('Close', dialog)
+}
 
 await act(async () => root.unmount())
 window.close()

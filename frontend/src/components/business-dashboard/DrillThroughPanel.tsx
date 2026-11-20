@@ -348,7 +348,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
           <Typography fontWeight={800} fontSize={13.5}>Daily actual and cumulative cost</Typography>
           <Typography color="text.secondary" fontSize={11.5} mb={1}>Every saved sheet in the current date range, in {currency || 'the selected currency'}.</Typography>
           {detail.daily.length
-            ? <Box height={230}><InteractiveChart option={dailyOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
+            ? <Box height={230}><InteractiveChart expandTitle="Daily cost and depth" option={dailyOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No cost sheets in this range.</Typography>}
         </Paper>
         <Paper
@@ -360,7 +360,7 @@ export function DrillThroughPanel({ wellId, filters, onClose }: {
           <Typography fontWeight={800} fontSize={13.5}>Recorded time split</Typography>
           <Typography color="text.secondary" fontSize={11.5} mb={1}>Distinct cost dates per classification.</Typography>
           {classification.length
-            ? <Box height={230}><InteractiveChart option={timeOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
+            ? <Box height={230}><InteractiveChart expandTitle="Time vs depth" option={timeOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No classified activity recorded.</Typography>}
         </Paper>
       </Box>

@@ -22,6 +22,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import false as sa_false
 from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -615,7 +616,7 @@ class OpsActivityBlock(Base):
     #: Cumulative programme position after this activity, in days.
     timeline_cum_planned_days: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     #: True when an engineer entered actual hours that differ from the log.
-    timeline_actual_edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    timeline_actual_edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
     timeline_edited_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     timeline_edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Engineer-facing mark: the system's own comparison of the block with the
@@ -749,6 +750,7 @@ class OpsPlanVersion(Base):
     reopened_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     reopen_reason: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    survey_shared_reference: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false(), nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
@@ -791,6 +793,33 @@ class OpsPlanItem(Base):
 # ---------------------------------------------------------------------------
 # Surveys
 # ---------------------------------------------------------------------------
+class OpsPlanSurveyStation(Base):
+    """Directional design stations, independent of daily-report surveys."""
+
+    __tablename__ = "ops_plan_survey_stations"
+    __table_args__ = (
+        UniqueConstraint("plan_version_id", "md_m", name="uq_ops_plan_survey_md"),
+        Index("ix_ops_plan_survey_org_plan", "organization_id", "plan_version_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    plan_version_id: Mapped[str] = mapped_column(ForeignKey("ops_plan_versions.id", ondelete="CASCADE"), nullable=False)
+    md_m: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    inc_deg: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    azi_deg: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES))
+    tvd_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES))
+    ns_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES))
+    ew_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES))
+    vsec_m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES))
+    dls_deg_per_30m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES))
+    tool: Mapped[str] = mapped_column(String(100), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_file: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_sheet: Mapped[str] = mapped_column(String(100), nullable=False)
+    survey_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class OpsSurvey(Base):
     __tablename__ = "ops_surveys"
     __table_args__ = (

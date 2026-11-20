@@ -145,6 +145,7 @@ from app.models.operations import (  # noqa: F401
     OpsDailyMetric,
     OpsPlanVersion,
     OpsPlanItem,
+    OpsPlanSurveyStation,
     OpsSurvey,
     OpsUnaccountedTime,
 )

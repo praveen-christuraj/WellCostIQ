@@ -4,6 +4,7 @@ import {
   Box,
   Button,
   FormControlLabel,
+  MenuItem,
   Radio,
   RadioGroup,
   Stack,
@@ -11,13 +12,14 @@ import {
   TableBody,
   TableCell,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
 } from '@mui/material'
 import { DeleteOutlineRounded, UploadRounded } from '@mui/icons-material'
 import { FormDialog } from '../Common'
-import { previewSurvey, type OpsSurvey, type OpsSurveyPreview } from '../../lib/operations'
+import { previewPlannedSurvey, previewSurvey, type OpsSurvey, type OpsSurveyPreview } from '../../lib/operations'
 
 const FIELDS: { key: keyof OpsSurvey; label: string; width: number }[] = [
   { key: 'md_m', label: 'MD (m)', width: 96 },
@@ -45,28 +47,38 @@ const isNumberish = (value: string | null | undefined) =>
 export function SurveyImportDialog({
   open,
   reportId,
+  planId,
   existingCount,
   busy,
   onClose,
   onApply,
 }: {
   open: boolean
-  reportId: string
+  reportId?: string
+  planId?: string
   existingCount: number
   busy: boolean
   onClose: () => void
-  onApply: (stations: OpsSurvey[], mode: 'append' | 'replace') => void
+  onApply: (stations: OpsSurvey[], mode: 'append' | 'replace', preview: OpsSurveyPreview) => void
 }) {
   const [rows, setRows] = useState<OpsSurvey[] | null>(null)
   const [preview, setPreview] = useState<OpsSurveyPreview | null>(null)
   const [error, setError] = useState('')
   const [busyStudy, setBusyStudy] = useState(false)
+  const [page, setPage] = useState(0)
+  const [size, setSize] = useState(20)
+  const [file, setFile] = useState<File | null>(null)
+  const [edited, setEdited] = useState(false)
+  const [confirmPreview, setConfirmPreview] = useState<{ file: File; sheet: string } | null>(null)
   const [mode, setMode] = useState<'append' | 'replace'>('append')
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   const reset = () => {
     setRows(null)
     setPreview(null)
+    setFile(null)
+    setEdited(false)
+    setPage(0)
     setError('')
     setMode('append')
   }
@@ -74,13 +86,17 @@ export function SurveyImportDialog({
     reset()
     onClose()
   }
-  const study = async (file: File) => {
+  const study = async (file: File, sheet = '') => {
     setBusyStudy(true)
     setError('')
     try {
-      const result = await previewSurvey(reportId, file)
+      const result = planId ? await previewPlannedSurvey(planId, file, sheet) : await previewSurvey(reportId ?? '', file)
+      setFile(file)
+      setEdited(false)
+      setPage(0)
       setPreview(result)
-      setRows(result.stations.map((station) => ({ ...station })))
+      setRows(result.stations.map(({ md_m, inc_deg, azi_deg, tvd_m, ns_m, ew_m, vsec_m, dls_deg_per_30m, tool, source, survey_at }) =>
+        ({ md_m, inc_deg, azi_deg, tvd_m, ns_m, ew_m, vsec_m, dls_deg_per_30m, tool, source, survey_at })))
       setMode(existingCount > 0 ? 'append' : 'replace')
     } catch (e) {
       setError((e as Error).message)
@@ -88,39 +104,46 @@ export function SurveyImportDialog({
       setBusyStudy(false)
     }
   }
+  const requestStudy = (file: File, sheet = '') => {
+    if (edited) setConfirmPreview({ file, sheet })
+    else void study(file, sheet)
+  }
   const change = (idx: number, patch: Partial<OpsSurvey>) => {
+    setEdited(true)
     setRows((prev) => (prev ? prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)) : prev))
   }
   const invalidRow = useMemo(() => {
     if (!rows) return null
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i]
-      if (!row.md_m || !isNumberish(row.md_m)) return i
+      if (!row.md_m || !isNumberish(row.md_m) || (planId && Number(row.md_m) < 0)) return i
       for (const key of ['inc_deg', 'azi_deg', 'tvd_m', 'ns_m', 'ew_m', 'vsec_m', 'dls_deg_per_30m'] as const) {
         if (!isNumberish(row[key])) return i
       }
       const inc = Number(row.inc_deg)
       if (row.inc_deg != null && row.inc_deg !== '' && (!Number.isFinite(inc) || inc < 0 || inc > 180)) return i
+      if (planId && (!row.inc_deg || (inc >= 1 && !row.azi_deg))) return i
       const azi = Number(row.azi_deg)
       if (row.azi_deg != null && row.azi_deg !== '' && (!Number.isFinite(azi) || azi < 0 || azi > 360)) return i
     }
     return null
-  }, [rows])
+  }, [rows, planId])
   const unit = preview?.unit ?? 'm'
-  return (
+  return (<>
     <FormDialog
       open={open}
-      title="Import directional survey"
-      subtitle="Choose a filled template (CSV/Excel), a DDR-style Excel sheet with a survey table, or an OpenWells PDF. The file is studied and every station is shown for review — nothing is written until you save the report."
+      title={planId ? "Import planned directional survey" : "Import directional survey"}
+      subtitle={`Choose a CSV, Excel workbook or supported text PDF. Review the extracted stations before applying them. Nothing is written until you ${planId ? "save the planned survey" : "save the report"}.`}
       onSubmit={() => {
-        if (!rows || busy || invalidRow !== null) return
-        onApply(rows, mode)
+        if (!rows?.length || !preview || busy || busyStudy || invalidRow !== null) return
+        onApply(rows, mode, preview)
         close()
       }}
       onClose={close}
       busy={busy || busyStudy}
-      submitDisabled={!rows || busy || invalidRow !== null}
-      submitLabel="Add reviewed stations"
+      dirty={planId ? Boolean(rows) : undefined}
+      submitDisabled={!rows?.length || busy || invalidRow !== null}
+      submitLabel={planId ? "Apply to draft" : "Add reviewed stations"}
       maxWidth={false}
     >
       <Stack spacing={1.5} pt={1}>
@@ -131,11 +154,11 @@ export function SurveyImportDialog({
               ref={inputRef}
               hidden
               type="file"
-              accept=".csv,.xlsx,.xlsm,.pdf"
+              accept={planId ? ".csv,.xlsx,.xlsm,.xls,.pdf" : ".csv,.xlsx,.xlsm,.pdf"}
               data-testid="survey-file-input"
               onChange={(event) => {
                 const file = event.target.files?.[0]
-                if (file) void study(file)
+                if (file) requestStudy(file)
                 event.target.value = ''
               }}
             />
@@ -147,6 +170,12 @@ export function SurveyImportDialog({
           )}
         </Box>
 
+        {planId && file && preview && preview.format === 'excel' && preview.sheets.length > 1 && (
+          <TextField select size="small" label="Survey sheet" value={preview.detected_sheet ?? ''} disabled={busyStudy}
+            onChange={event => requestStudy(file, event.target.value)}>
+            {preview.sheets.map(sheet => <MenuItem key={sheet} value={sheet}>{sheet}</MenuItem>)}
+          </TextField>
+        )}
         {error && <Alert severity="error">{error}</Alert>}
 
         {preview && preview.warnings.length > 0 && (
@@ -174,13 +203,16 @@ export function SurveyImportDialog({
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {rows.map((row, idx) => (
+                  {rows.slice(page * size, (page + 1) * size).map((row, index) => {
+                    const idx = page * size + index
+                    return (
                     <TableRow key={idx} sx={idx === invalidRow ? { bgcolor: 'error.light' } : undefined}>
                       <TableCell>{idx + 1}</TableCell>
                       {FIELDS.map(({ key, width }) => (
                         <TableCell key={key} sx={{ p: 0.25 }}>
                           <TextField
                             size="small"
+                            disabled={busy || busyStudy}
                             value={(row[key] as string | null) ?? ''}
                             onChange={(event) => change(idx, { [key]: event.target.value === '' ? (key === 'tool' || key === 'survey_at' ? '' : null) : event.target.value } as Partial<OpsSurvey>)}
                             sx={{ width }}
@@ -189,18 +221,24 @@ export function SurveyImportDialog({
                         </TableCell>
                       ))}
                       <TableCell>
-                        <Button size="small" color="error" onClick={() => setRows((prev) => (prev ? prev.filter((_, i) => i !== idx) : prev))} aria-label={`Remove station ${idx + 1}`}>
+                        <Button size="small" color="error" disabled={busy || busyStudy} onClick={() => {
+                          setEdited(true)
+                          setRows(rows.filter((_, i) => i !== idx))
+                          setPage(Math.min(page, Math.max(0, Math.ceil((rows.length - 1) / size) - 1)))
+                        }} aria-label={`Remove station ${idx + 1}`}>
                           <DeleteOutlineRounded fontSize="small" />
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  )})}
                 </TableBody>
               </Table>
             </Box>
+            <TablePagination component="div" count={rows.length} page={page} rowsPerPage={size} rowsPerPageOptions={[20, 50, 100]}
+              onPageChange={(_, next) => setPage(next)} onRowsPerPageChange={event => { setSize(Number(event.target.value)); setPage(0) }} />
             {invalidRow !== null && (
               <Alert severity="error">
-                Station {invalidRow + 1}: MD must be a non-negative number and inclination 0–180° / azimuth 0–360°.
+                Station {invalidRow + 1}: check MD and the angle ranges (inclination 0–180°, azimuth 0–360°).{planId ? " Inclination is required; deviated stations also need azimuth." : ""}
               </Alert>
             )}
             <RadioGroup
@@ -213,7 +251,7 @@ export function SurveyImportDialog({
               <FormControlLabel value="replace" control={<Radio size="small" />} label="Replace the existing stations" />
             </RadioGroup>
             <Typography variant="caption" color="text.secondary">
-              Applying stages the stations in this form. Press “Save report” to write them. Depths are metres; feet from the file have already been converted.
+              Applying only stages the stations. Press “{planId ? "Save planned survey" : "Save report"}” to write them. Feet from the file have already been converted to metres.
             </Typography>
           </>
         )}
@@ -226,5 +264,12 @@ export function SurveyImportDialog({
         )}
       </Stack>
     </FormDialog>
-  )
+    {confirmPreview && <FormDialog open title="Discard reviewed preview edits?"
+      subtitle="Switching the file or sheet will replace the extracted rows you edited in this preview." submitLabel="Discard and read file"
+      onClose={() => setConfirmPreview(null)} onSubmit={() => {
+        const next = confirmPreview
+        setConfirmPreview(null)
+        void study(next.file, next.sheet)
+      }}>{null}</FormDialog>}
+  </>)
 }

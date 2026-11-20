@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Alert, Box, Stack, Typography } from '@mui/material'
 import { WellDiagram } from './WellDiagram'
+import { WellDiagramExpand } from './WellVisualInspectors'
 import { SectionCard } from '../ui/SectionCard'
 import { opsWellPath, type OpsWellPath } from '../../lib/operations'
 
@@ -66,11 +67,14 @@ export function WellPathPanel({
       title={title ?? `Well diagram — ${path?.well_code ?? ''} (${scope})`}
       subtitle="Drawn from this well's recorded surveys and casing seats. The marker is the closing measured depth of the latest verified report; the survey endpoint is the deepest station and is shown separately, because one is not evidence for the other."
       action={
-        canOpenPath ? (
+        <>
+        {path && <WellDiagramExpand path={path} />}
+        {canOpenPath && (
           <Box component={Link} to={`/operations/well-path?well=${encodeURIComponent(well)}&scope=${encodeURIComponent(scope)}`} sx={{ fontSize: 12.5, fontWeight: 700 }}>
             Open well path
           </Box>
-        ) : undefined
+        )}
+        </>
       }
     >
       {error && <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>}
@@ -99,6 +103,7 @@ export function WellPathPanel({
               {summary?.latest_report_date ? ` · ${summary.latest_report_date}` : ''} · TVD basis:{' '}
               {summary?.current_tvd_basis || '—'}
             </Typography>
+            {path.planned_trajectory?.curve.length ? <Typography variant="caption" color="text.secondary">{path.comparison_basis}</Typography> : null}
             {Boolean(path.survey_discrepancies.length) && (
               <Alert severity="warning" sx={{ fontSize: 12 }}>
                 {path.survey_discrepancies.length} survey station(s) print a TVD that contradicts the

@@ -588,7 +588,7 @@ export default function DailyCostAnalysis() {
             Running total from the first recorded day, with the straight-line AFE plan for the same period.
           </Typography>
           {summary.daily.length
-            ? <Box height={250} mt={1}><InteractiveChart option={progressOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
+            ? <Box height={250} mt={1}><InteractiveChart expandTitle="Well progress and AFE" option={progressOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No daily sheets match this filter.</Typography>}
         </Paper>
         <Paper
@@ -600,7 +600,7 @@ export default function DailyCostAnalysis() {
           <Typography fontWeight={800} fontSize={15}>Cost group by day</Typography>
           <Typography color="text.secondary" fontSize={11.5} mt={.25}>Services, consumables, tangibles and other expenses stacked per well-day, with NPT overlaid.</Typography>
           {summary.daily.length
-            ? <Box height={250} mt={1}><InteractiveChart option={groupOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
+            ? <Box height={250} mt={1}><InteractiveChart expandTitle="Well cost by group and day" option={groupOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/></Box>
             : <Typography color="text.secondary" fontSize={12.5} py={6} textAlign="center">No daily sheets match this filter.</Typography>}
         </Paper>
       </Box>

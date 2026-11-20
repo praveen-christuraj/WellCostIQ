@@ -1,9 +1,9 @@
-import { useMemo } from 'react'
+import { useId, useMemo } from 'react'
 import { Alert, Box, Chip, Stack, Typography } from '@mui/material'
 import { useColorMode } from '../../context/ThemeContext'
-import { brand, surface } from '../../designSystem'
+import { brand, chartPalette, surface } from '../../designSystem'
 import type { OpsWellPath, OpsWellPathSection, OpsWellVisual } from '../../lib/operations'
-import { fmtDepth } from '../../lib/wellPath'
+import { fmtDepth, usableTrajectory, type DepthWindow } from '../../lib/wellPath'
 
 /**
  * Well diagram — drawn from the record, never from a template.
@@ -52,8 +52,8 @@ function niceDepth(maxDepth: number): number {
   return Math.ceil(target / step) * step
 }
 
-function niceAxisTicks(max: number, count: number): number[] {
-  return Array.from({ length: count + 1 }, (_, i) => (max / count) * i)
+function niceAxisTicks(min: number, max: number, count: number): number[] {
+  return Array.from({ length: count + 1 }, (_, i) => min + ((max - min) / count) * i)
 }
 
 export function WellDiagram({
@@ -61,6 +61,9 @@ export function WellDiagram({
   height = 430,
   compact = false,
   selectedMd = null,
+  mdWindow,
+  tvdWindow,
+  annotations = true,
 }: {
   /**
    * Either the full path (trajectory, seats, provenance) or the dashboard's
@@ -72,11 +75,19 @@ export function WellDiagram({
   compact?: boolean
   /** A station chosen in another view, highlighted here on the MD construction. */
   selectedMd?: number | null
+  mdWindow?: DepthWindow
+  tvdWindow?: DepthWindow
+  annotations?: boolean
 }) {
   const { mode } = useColorMode()
+  const sectionClip = `well-section-${useId()}`
+  const colors = chartPalette(mode)
   const s = surface(mode)
   const summary = path.summary
-  const curve = 'curve' in path ? path.curve : []
+  const plan = 'planned_trajectory' in path ? path.planned_trajectory : null
+  const plannedCurve = plan?.curve ?? []
+  const curve = 'curve' in path ? (plannedCurve.length ? usableTrajectory(path.curve) : path.curve) : []
+  const allPoints = [...curve, ...plannedCurve]
   const snapshot = 'snapshot' in path ? path.snapshot : null
   const vsAzimuth = 'vertical_section_azimuth_deg' in path ? path.vertical_section_azimuth_deg : null
   const openHole = path.open_hole
@@ -86,7 +97,7 @@ export function WellDiagram({
 
   const plotHeight = height - TOP - (compact ? 48 : BOTTOM)
 
-  const mdMax = useMemo(() => {
+  const mdAutoMax = useMemo(() => {
     const values = [
       ...path.sections.map((row) => row.to_depth_m),
       holeDepth,
@@ -98,34 +109,38 @@ export function WellDiagram({
     return niceDepth(Math.max(...values, 100))
   }, [path.sections, holeDepth, bitDepth, openHole, curve, selectedMd])
 
-  const tvdMax = useMemo(() => {
+  const tvdAutoMax = useMemo(() => {
     const values = [
       ...curve.map((row) => row.tvd_m),
+      ...plannedCurve.map((row) => row.tvd_m),
       // With no survey there is nothing to convert, so the reported TVD sets the
       // scale and the caption says the axis is not a trajectory.
       curve.length ? null : summary.current_tvd_m,
     ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
     return niceDepth(Math.max(...values, 100))
-  }, [curve, summary.current_tvd_m])
+  }, [curve, plannedCurve, summary.current_tvd_m])
 
-  const yMd = (depth: number) => TOP + (Math.max(0, Math.min(depth, mdMax)) / mdMax) * plotHeight
-  const yTvd = (depth: number) => TOP + (Math.max(0, Math.min(depth, tvdMax)) / tvdMax) * plotHeight
-
-  const maxDeparture = useMemo(() => {
-    const values = curve.map((row) => Math.abs(row.vsec_m))
-    return Math.max(...values, 50) * 1.08
-  }, [curve])
-  const hasNegativeDeparture = curve.some((row) => row.vsec_m < 0)
+  const mdMin = mdWindow?.from ?? 0
+  const mdMax = Math.max(mdWindow?.to ?? mdAutoMax, mdMin + 0.001)
+  const tvdMin = tvdWindow?.from ?? Math.min(0, ...allPoints.map(row => row.tvd_m))
+  const tvdMax = Math.max(tvdWindow?.to ?? tvdAutoMax, tvdMin + 0.001)
+  const inMd = (depth: number) => depth >= mdMin && depth <= mdMax
+  const inTvd = (depth: number) => depth >= tvdMin && depth <= tvdMax
+  const yMd = (depth: number) => TOP + ((Math.max(mdMin, Math.min(depth, mdMax)) - mdMin) / (mdMax - mdMin)) * plotHeight
+  const yTvd = (depth: number) => TOP + ((depth - tvdMin) / (tvdMax - tvdMin)) * plotHeight
+  const visibleSections = path.sections.filter(row => row.from_depth_m < mdMax && row.to_depth_m >= mdMin)
+  const openHoleVisible = openHole && openHole.from_depth_m < mdMax && openHole.to_depth_m > mdMin
+  const maxDeparture = Math.max(...allPoints.map(row => Math.abs(row.vsec_m)), 50) * 1.08
+  const hasNegativeDeparture = allPoints.some(row => row.vsec_m < 0)
   const sectionCentre = hasNegativeDeparture ? (SECTION_LEFT + SECTION_RIGHT) / 2 : SECTION_LEFT + 14
   const xSection = (vsec: number) => sectionCentre + (vsec / maxDeparture) * ((SECTION_RIGHT - SECTION_LEFT) / 2 - 14)
-
-  const curvePoints = curve.map((row) => `${xSection(row.vsec_m).toFixed(2)},${yTvd(row.tvd_m).toFixed(2)}`).join(' ')
+  const points = (stations: typeof curve) => stations.map(row => `${xSection(row.vsec_m).toFixed(2)},${yTvd(row.tvd_m).toFixed(2)}`).join(' ')
   const sectionWidth = (row: OpsWellPathSection) => Math.max(6, Math.min(MAX_HALF_WIDTH * 2, 6 + (row.casing_size_in / 30) * 56))
+  const mdTicks = niceAxisTicks(mdMin, mdMax, compact ? 4 : 6)
+  const tvdTicks = niceAxisTicks(tvdMin, tvdMax, compact ? 4 : 6)
+  const tickValue = (tick: number, span: number) => tick.toLocaleString(undefined, { maximumFractionDigits: span < 10 ? 3 : 0 })
 
-  const mdTicks = useMemo(() => niceAxisTicks(mdMax, compact ? 4 : 6), [mdMax, compact])
-  const tvdTicks = useMemo(() => niceAxisTicks(tvdMax, compact ? 4 : 6), [tvdMax, compact])
-
-  if (!path.is_surveyed && !path.sections.length) {
+  if (!path.is_surveyed && !path.sections.length && !plannedCurve.length) {
     return (
       <Alert severity="info" sx={{ fontSize: 12.5 }}>
         No surveys or casing seats are recorded for {path.well_code} ({path.scope}), so a diagram would be
@@ -162,8 +177,9 @@ export function WellDiagram({
         height={height}
         viewBox={`0 0 ${WIDTH} ${height}`}
         preserveAspectRatio="xMidYMid meet"
-        sx={{ display: 'block', width: '100%', height: 'auto', maxHeight: height }}
+        sx={{ display: 'block', width: '100%', height: 'auto', maxHeight: height, ...(!annotations && { '& .well-diagram-annotation': { display: 'none' } }) }}
       >
+        <defs><clipPath id={sectionClip}><rect x={SECTION_LEFT} y={TOP} width={SECTION_RIGHT - SECTION_LEFT} height={plotHeight} /></clipPath></defs>
         {/* Headings name the axis each drawing uses */}
         <text x={MD_LABEL_X} y={12} fontSize={8.5} fontWeight={700} fill={muted}>
           MD
@@ -194,7 +210,7 @@ export function WellDiagram({
               strokeDasharray={tick === 0 ? '0' : '2 4'}
             />
             <text x={MD_LABEL_X - 5} y={yMd(tick) + 3} textAnchor="end" fontSize={8.5} fill={muted}>
-              {Math.round(tick).toLocaleString()}
+              {tickValue(tick, mdMax - mdMin)}
             </text>
           </g>
         ))}
@@ -203,13 +219,13 @@ export function WellDiagram({
         </text>
 
         {/* Ground line at surface: a short hatched rule across the construction */}
-        <g opacity={0.75}>
+        {inMd(0) && <g opacity={0.75}>
           <line x1={CASING_CX - 44} x2={CASING_CX + 44} y1={yMd(0)} y2={yMd(0)} stroke={muted} strokeWidth={1.4} />
           {[-36, -24, -12, 0, 12, 24, 36].map((dx) => (
             <line key={dx} x1={CASING_CX + dx - 4} x2={CASING_CX + dx + 2} y1={yMd(0)} y2={yMd(0) + 6} stroke={muted} strokeWidth={0.8} />
           ))}
           <text x={CASING_CX - 50} y={yMd(0) + 3} textAnchor="end" fontSize={8} fill={muted}>surface</text>
-        </g>
+        </g>}
 
         {/* Casing spine: the construction is drawn about a central axis */}
         <line x1={CASING_CX} x2={CASING_CX} y1={TOP} y2={TOP + plotHeight} stroke={muted} strokeWidth={1} opacity={0.6} />
@@ -218,7 +234,7 @@ export function WellDiagram({
             no casing seat recorded
           </text>
         )}
-        {path.sections.map((row) => {
+        {visibleSections.map((row) => {
           const width = sectionWidth(row)
           const top = yMd(row.from_depth_m)
           const bottom = yMd(row.to_depth_m)
@@ -230,9 +246,9 @@ export function WellDiagram({
               <rect x={CASING_CX - width / 2 + 1.4} y={top} width={Math.max(1.5, width * 0.22)} height={barHeight} fill={accent} opacity={0.22} />
               <rect x={CASING_CX + width / 2 - 1.4 - Math.max(1.5, width * 0.22)} y={top} width={Math.max(1.5, width * 0.22)} height={barHeight} fill={accent} opacity={0.22} />
               {/* The shoe, drawn as the standard angled wedge */}
-              <path d={`M ${CASING_CX - width / 2} ${bottom} L ${CASING_CX} ${bottom + 5} L ${CASING_CX + width / 2} ${bottom}`} fill="none" stroke={accent} strokeWidth={1.6} />
+              {inMd(row.to_depth_m) && <path d={`M ${CASING_CX - width / 2} ${bottom} L ${CASING_CX} ${bottom + 5} L ${CASING_CX + width / 2} ${bottom}`} fill="none" stroke={accent} strokeWidth={1.6} />}
               {!compact && (
-                <text x={CASING_CX + Math.max(28, width / 2) + 6} y={top + 9} fontSize={8.5} fill={ink}>
+                <text className="well-diagram-annotation" x={CASING_CX + Math.max(28, width / 2) + 6} y={top + 9} fontSize={8.5} fill={ink}>
                   {row.casing_label} · shoe {row.to_depth_m.toLocaleString()} m
                 </text>
               )}
@@ -243,29 +259,29 @@ export function WellDiagram({
         {/* Below the last shoe: open hole only when the record supports it.
             Drawn as two thin parallel walls about the centreline — never a
             casing-coloured line, so uncased hole cannot read as pipe. */}
-        {openHole ? (
+        {openHoleVisible ? (
           <g>
             <title>{`Open hole (uncased) ${openHole.from_depth_m} → ${openHole.to_depth_m} m MD`}</title>
             <line x1={CASING_CX - 11} x2={CASING_CX - 11} y1={yMd(openHole.from_depth_m)} y2={yMd(openHole.to_depth_m)} stroke={muted} strokeWidth={1.3} />
             <line x1={CASING_CX + 11} x2={CASING_CX + 11} y1={yMd(openHole.from_depth_m)} y2={yMd(openHole.to_depth_m)} stroke={muted} strokeWidth={1.3} />
             {/* ragged wall ends at the current hole bottom */}
-            <line x1={CASING_CX - 11} x2={CASING_CX + 11} y1={yMd(openHole.to_depth_m)} y2={yMd(openHole.to_depth_m)} stroke={muted} strokeWidth={1} strokeDasharray="2 2" />
+            {inMd(openHole.to_depth_m) && <line x1={CASING_CX - 11} x2={CASING_CX + 11} y1={yMd(openHole.to_depth_m)} y2={yMd(openHole.to_depth_m)} stroke={muted} strokeWidth={1} strokeDasharray="2 2" />}
             <text x={CASING_CX + 30} y={(yMd(openHole.from_depth_m) + yMd(openHole.to_depth_m)) / 2 + 3} fontSize={8} fill={muted}>
               open hole (uncased)
             </text>
           </g>
-        ) : deepest && holeDepth !== null && holeDepth <= deepest.to_depth_m + 0.5 ? (
+        ) : !openHole && deepest && inMd(deepest.to_depth_m) && holeDepth !== null && holeDepth <= deepest.to_depth_m + 0.5 ? (
           <text x={CASING_CX + 30} y={Math.min(yMd(deepest.to_depth_m) + 16, TOP + plotHeight)} fontSize={8} fill={muted}>
             coverage unknown below shoe
           </text>
-        ) : deepest && !compact ? (
+        ) : !openHole && deepest && inMd(deepest.to_depth_m) && !compact ? (
           <text x={CASING_CX + 30} y={Math.min(yMd(deepest.to_depth_m) + 16, TOP + plotHeight)} fontSize={8} fill={muted}>
             below the last shoe: coverage unknown
           </text>
         ) : null}
 
         {/* Hole depth: the selected report's closing MD. A rule, not pipe. */}
-        {holeDepth !== null && (
+        {holeDepth !== null && inMd(holeDepth) && (
           <g>
             <title>{`Hole depth ${holeDepth.toLocaleString()} m MD (${snapshot?.basis || summary.depth_basis || 'report'})`}</title>
             <line
@@ -277,7 +293,7 @@ export function WellDiagram({
               strokeWidth={1.1}
               strokeDasharray="6 3"
             />
-            <Halo
+            <g className="well-diagram-annotation"><Halo
               x={xLeftRuleStart}
               y={yMd(holeDepth) - 14}
               width={labelWidth(holeLabel(holeDepth, snapshot?.report_date ?? null), 8.5)}
@@ -286,12 +302,12 @@ export function WellDiagram({
             />
             <text x={xLeftRuleStart} y={yMd(holeDepth) - 4} fontSize={8.5} fontWeight={700} fill={brass}>
               {holeLabel(holeDepth, snapshot?.report_date ?? null)}
-            </text>
+            </text></g>
           </g>
         )}
 
         {/* Bit / string: a distinctly labelled triangle at the reported depth */}
-        {bitDepth !== null && bitDepth !== undefined && (
+        {bitDepth != null && inMd(bitDepth) && (
           <g>
             <title>{`${snapshot?.label || 'Reported bit / string depth'} ${bitDepth.toLocaleString()} m MD${snapshot?.off_bottom_m !== null && snapshot?.off_bottom_m !== undefined ? `; ${snapshot.off_bottom_m.toLocaleString()} m off bottom` : ''}`}</title>
             <line x1={CASING_CX - 26} x2={CASING_CX - 18} y1={yMd(bitDepth)} y2={yMd(bitDepth)} stroke={brass} strokeWidth={1} />
@@ -299,7 +315,7 @@ export function WellDiagram({
               points={`${CASING_CX - 26},${yMd(bitDepth) - 5} ${CASING_CX - 26},${yMd(bitDepth) + 5} ${CASING_CX - 18},${yMd(bitDepth)}`}
               fill={brass}
             />
-            <Halo
+            <g className="well-diagram-annotation"><Halo
               x={CASING_CX - 34 - labelWidth(`Bit ${bitDepth.toLocaleString()} m`, 8.5)}
               y={yMd(bitDepth) - 8}
               width={labelWidth(`Bit ${bitDepth.toLocaleString()} m`, 8.5)}
@@ -308,12 +324,12 @@ export function WellDiagram({
             />
             <text x={CASING_CX - 30} y={yMd(bitDepth) + 3} textAnchor="end" fontSize={8.5} fontWeight={700} fill={brass}>
               {`Bit ${bitDepth.toLocaleString()} m`}
-            </text>
+            </text></g>
           </g>
         )}
 
         {/* Selected survey station, on the measured-depth construction */}
-        {selectedStation && (
+        {selectedStation && inMd(selectedStation.md_m) && (
           <g>
             <line x1={CASING_CX - 4} x2={CASING_CX + 4} y1={yMd(selectedStation.md_m)} y2={yMd(selectedStation.md_m)} stroke={brass} strokeWidth={2.2} />
             <circle cx={CASING_CX + 10} cy={yMd(selectedStation.md_m)} r={3.4} fill="none" stroke={brass} strokeWidth={1.6} />
@@ -322,7 +338,7 @@ export function WellDiagram({
             </text>
           </g>
         )}
-        {!compact && lastStation && (
+        {!compact && lastStation && inMd(lastStation.md_m) && (
           <text x={CASING_CX - 8} y={yMd(lastStation.md_m) + 3} textAnchor="end" fontSize={8} fill={muted}>
             {`last station ${lastStation.md_m.toLocaleString()} m`}
           </text>
@@ -341,7 +357,7 @@ export function WellDiagram({
               strokeDasharray={tick === 0 ? '0' : '2 4'}
             />
             <text x={TVD_LABEL_X - 5} y={yTvd(tick) + 3} textAnchor="end" fontSize={8.5} fill={muted}>
-              {Math.round(tick).toLocaleString()}
+              {tickValue(tick, tvdMax - tvdMin)}
             </text>
           </g>
         ))}
@@ -349,12 +365,14 @@ export function WellDiagram({
           TVD (m)
         </text>
 
-        <line x1={SECTION_LEFT} x2={SECTION_RIGHT} y1={yTvd(0)} y2={yTvd(0)} stroke={muted} strokeWidth={1} />
+        {inTvd(0) && <line x1={SECTION_LEFT} x2={SECTION_RIGHT} y1={yTvd(0)} y2={yTvd(0)} stroke={muted} strokeWidth={1} />}
+
+        <g clipPath={`url(#${sectionClip})`}>
 
         {curve.length > 1 ? (
           <g>
             <title>{`Integrated trajectory from ${curve[0].md_m.toLocaleString()} m to ${curve[curve.length - 1].md_m.toLocaleString()} m MD`}</title>
-            <polyline points={curvePoints} fill="none" stroke={accent} strokeWidth={2.6} strokeLinejoin="round" strokeLinecap="round" />
+            <polyline points={points(curve)} fill="none" stroke={accent} strokeWidth={2.6} strokeLinejoin="round" strokeLinecap="round" />
           </g>
         ) : curve.length === 1 ? (
           <circle cx={xSection(curve[0].vsec_m)} cy={yTvd(curve[0].tvd_m)} r={2.8} fill={accent} />
@@ -377,7 +395,18 @@ export function WellDiagram({
           </g>
         )}
 
-        {!curve.length && (
+        {plannedCurve.length > 1 ? <polyline points={points(plannedCurve)} fill="none" stroke={colors.planned} strokeWidth={2.6} strokeDasharray="5 3">
+          <title>{`Planned survey · v${plan?.version_no} (${plan?.status})`}</title>
+        </polyline> : plannedCurve.length === 1 ? <circle cx={xSection(plannedCurve[0].vsec_m)} cy={yTvd(plannedCurve[0].tvd_m)}
+          r={3.4} fill="none" stroke={colors.planned} strokeWidth={2} /> : null}
+        </g>
+        {plannedCurve.length > 0 && <g fontSize={8} fill={muted} transform={`translate(${SECTION_LEFT + 8}, ${TOP - 7})`}>
+          <line x1={0} x2={16} y1={0} y2={0} stroke={colors.planned} strokeWidth={1.8} strokeDasharray="4 2" />
+          <text x={20} y={3}>Planned v{plan?.version_no}</text>
+          {curve.length > 0 && <><line x1={93} x2={109} y1={0} y2={0} stroke={accent} strokeWidth={1.8} /><text x={113} y={3}>Actual</text></>}
+        </g>}
+
+        {!curve.length && !plannedCurve.length && (
           <text x={(SECTION_LEFT + SECTION_RIGHT) / 2} y={TOP + plotHeight / 2} textAnchor="middle" fontSize={8.5} fill={muted}>
             {path.is_surveyed ? 'open the well path page for the trajectory' : 'no survey stations recorded'}
           </text>
@@ -385,7 +414,7 @@ export function WellDiagram({
 
         {/* Unsurveyed depth is an annotation, never a continuation of the line */}
         {unsurveyedToHole && lastStation && holeDepth !== null && (
-          <g>
+          <g className="well-diagram-annotation">
             <text x={(SECTION_LEFT + SECTION_RIGHT) / 2} y={TOP + plotHeight + 30} textAnchor="middle" fontSize={8} fill={brass}>
               {`unsurveyed below ${fmtDepth(lastStation.md_m, 2)} m MD — no TVD for the remaining ${fmtDepth(holeDepth - lastStation.md_m, 2)} m`}
             </text>
@@ -397,7 +426,7 @@ export function WellDiagram({
           measured depth (m) ↓
         </text>
         <text x={(SECTION_LEFT + SECTION_RIGHT) / 2} y={TOP + plotHeight + (unsurveyedToHole ? 42 : 30)} textAnchor="middle" fontSize={8} fill={muted}>
-          departure from the section plane (m) · TVD (m) ↓
+          projected distance along section (m) · TVD (m) ↓
         </text>
 
         {/* Symbol key */}

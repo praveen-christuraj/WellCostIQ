@@ -38,50 +38,47 @@ export function WellSourceDialog({
   path: OpsWellPath
   mark: WellMark | null
 }) {
-  const title = mark ? titleFor(mark) : 'Explain this mark'
-  const station: OpsWellPathSurveyStation | null = mark?.kind === 'station'
+  return <PanelDialog open={open} onClose={onClose} maxWidth="md"
+    title={mark ? titleFor(mark) : 'Explain this mark'}
+    subtitle={`${path.well_code} · ${path.scope} · stations are points, severity belongs to an interval`}>
+    {mark && <WellSourceContent path={path} mark={mark} />}
+  </PanelDialog>
+}
+
+export function WellSourceContent({ path, mark }: { path: OpsWellPath; mark: WellMark }) {
+  const station: OpsWellPathSurveyStation | null = mark.kind === 'station'
     ? path.survey_stations.find((row) => Math.abs(row.md_m - mark.md) <= 0.05) ?? null
-    : mark?.kind === 'interval'
+    : mark.kind === 'interval'
       ? path.survey_stations.find((row) => Math.abs(row.md_m - mark.toMd) <= 0.05) ?? null
       : null
-  const interval: OpsWellPathInterval | null = mark?.kind === 'interval'
+  const interval: OpsWellPathInterval | null = mark.kind === 'interval'
     ? intervalEndingAt(path.intervals, mark.toMd)
-    : mark?.kind === 'station'
+    : mark.kind === 'station'
       ? intervalEndingAt(path.intervals, mark.md)
       : null
 
   return (
-    <PanelDialog
-      open={open}
-      onClose={onClose}
-      maxWidth="md"
-      title={title}
-      subtitle={`${path.well_code} · ${path.scope} · stations are points, severity belongs to an interval`}
-    >
-      {!mark ? null : (
-        <Stack spacing={2.25}>
-          <ScopeBlock path={path} />
+    <Stack spacing={2.25}>
+      <ScopeBlock path={path} />
 
-          {mark.kind === 'station' && (
-            <StationBlock path={path} station={station} md={mark.md} interval={interval} />
-          )}
-
-          {mark.kind === 'interval' && (
-            <IntervalBlock path={path} interval={interval} station={station} toMd={mark.toMd} />
-          )}
-
-          {mark.kind === 'hole' && <HoleBlock path={path} />}
-          {mark.kind === 'bit' && <BitBlock path={path} />}
-          {mark.kind === 'seat' && <SeatBlock path={path} depth={mark.depth} />}
-
-          <Divider />
-          <Typography sx={{ fontSize: 11, color: 'text.secondary', lineHeight: 1.55 }}>
-            Calculation: {CALCULATION_VERSION}. Original report and workbook values stay attached to the record;
-            nothing here re-writes a printed figure to make the drawing agree with it.
-          </Typography>
-        </Stack>
+      {mark.kind === 'station' && (
+        <StationBlock path={path} station={station} md={mark.md} interval={interval} />
       )}
-    </PanelDialog>
+
+      {mark.kind === 'interval' && (
+        <IntervalBlock path={path} interval={interval} station={station} toMd={mark.toMd} />
+      )}
+
+      {mark.kind === 'hole' && <HoleBlock path={path} />}
+      {mark.kind === 'bit' && <BitBlock path={path} />}
+      {mark.kind === 'seat' && <SeatBlock path={path} depth={mark.depth} />}
+
+      <Divider />
+      <Typography sx={{ fontSize: 11, color: 'text.secondary', lineHeight: 1.55 }}>
+        Calculation: {CALCULATION_VERSION}. Original report and workbook values stay attached to the record;
+        nothing here re-writes a printed figure to make the drawing agree with it.
+      </Typography>
+    </Stack>
   )
 }
 

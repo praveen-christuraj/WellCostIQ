@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AddOutlined, LockOpenOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, Chip, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, Stack, Tab, Tabs, TextField, Typography } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
 import { ErrorMessage, FormDialog, PageHeading, PanelDialog, Tag, type Tone } from '../../components/Common'
 import { Caution, RestoreCautions } from '../../components/ui/Caution'
@@ -12,6 +12,7 @@ import {
   type Folder,
 } from '../../components/operations/ScopeDirectory'
 import { StudyPanel } from '../../components/operations/StudyPanel'
+import { PlannedSurveyPanel } from '../../components/operations/PlannedSurveyPanel'
 import { TimelineEditor } from '../../components/operations/TimelineEditor'
 import { useAuth } from '../../context/AuthContext'
 import { api } from '../../lib/api'
@@ -56,7 +57,7 @@ export default function OperationsPlans() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [formError, setFormError] = useState('')
-  const [editor, setEditor] = useState<{ plan: OpsPlan; edit: boolean } | null>(null)
+  const [editor, setEditor] = useState<{ plan: OpsPlan; edit: boolean; survey?: boolean } | null>(null)
   const [metaEdit, setMetaEdit] = useState<OpsPlan | null>(null)
   const [reopenTarget, setReopenTarget] = useState<OpsPlan | null>(null)
   const [reopenRemarks, setReopenRemarks] = useState('')
@@ -127,11 +128,11 @@ export default function OperationsPlans() {
     }
   }
 
-  const open = async (id: string, edit: boolean) => {
+  const open = async (id: string, edit: boolean, survey = false) => {
     setBusy(true)
     setError('')
     try {
-      setEditor({ plan: await getOpsPlan(id), edit })
+      setEditor({ plan: await getOpsPlan(id), edit, survey })
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -233,13 +234,14 @@ export default function OperationsPlans() {
               },
               {
                 headerName: 'Actions',
-                width: 390,
+                width: 506,
                 sortable: false,
                 cellRenderer: ({ data: p }: { data: OpsPlan }) => (
                   <>
                     <Button size="small" disabled={busy} onClick={() => void open(p.id, false)}>
                       View timeline
                     </Button>
+                    <Button size="small" disabled={busy} onClick={() => void open(p.id, false, true)}>Planned survey</Button>
                     {!deleted && p.status === 'draft' && can('ops-plan:update') && (
                       <>
                         <Button size="small" disabled={busy} onClick={() => void open(p.id, true)}>
@@ -402,7 +404,9 @@ export default function OperationsPlans() {
           <TimelineEditor plan={editor.plan} onClose={() => setEditor(null)} onSaved={refresh} />
         ) : (
           <PlanView
+            key={editor.plan.id}
             plan={editor.plan}
+            initialSurvey={editor.survey}
             onClose={() => setEditor(null)}
             onReopen={
               !editor.plan.is_deleted &&
@@ -473,12 +477,15 @@ function PlanView({
   plan,
   onClose,
   onReopen,
+  initialSurvey,
 }: {
   plan: OpsPlan
   onClose: () => void
   onReopen?: () => void
+  initialSurvey?: boolean
 }) {
   const { can } = useAuth()
+  const [tab, setTab] = useState(initialSurvey ? 'survey' : 'timeline')
   const [rollup, setRollup] = useState<OpsTimelineRollup | null>(null)
   const [rollupError, setRollupError] = useState('')
   useEffect(() => {
@@ -538,6 +545,12 @@ function PlanView({
         </>
       }
     >
+      <Tabs value={tab} onChange={(_, value: 'timeline' | 'survey') => setTab(value)} aria-label="Plan version sections" sx={{ mb: 2 }}>
+        <Tab value="timeline" label="Timeline activities" id="plan-timeline-tab" aria-controls="plan-timeline-panel" />
+        <Tab value="survey" label="Planned survey" id="plan-survey-tab" aria-controls="plan-survey-panel" />
+      </Tabs>
+      {tab === 'survey' ? <Box role="tabpanel" id="plan-survey-panel" aria-labelledby="plan-survey-tab"><PlannedSurveyPanel plan={plan} /></Box> :
+        <Box role="tabpanel" id="plan-timeline-panel" aria-labelledby="plan-timeline-tab">
       {plan.reopened_at && (
         <Caution cautionKey="plan-reopened" page={CAUTION_PAGE} severity="info" signature={[plan.id, plan.reopened_at]} sx={{ mb: 2 }}>
           Last reopened by <strong>{plan.reopened_by || 'workspace user'}</strong> on{' '}
@@ -592,6 +605,7 @@ function PlanView({
         <Typography variant="h6">Timeline study</Typography>
         <StudyPanel runLabel="Study saved timeline" run={(useAi) => studyTimeline(plan.id, useAi)} />
       </Box>
+        </Box>}
     </PanelDialog>
   )
 }

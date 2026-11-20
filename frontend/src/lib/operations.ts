@@ -43,6 +43,9 @@ export type OpsSurvey = {
   survey_at?: string | null
 }
 
+export type OpsPlanSurveyStation = OpsSurvey & { source_file: string; source_sheet: string }
+export type OpsPlanSurvey = { stations: OpsPlanSurveyStation[]; updated_at: string; shared_reference: boolean }
+
 export type OpsTimelineCode = {
   sequence_no: number
   description: string
@@ -494,6 +497,28 @@ export type OpsWellPathSnapshot = {
 }
 
 /** Trajectory, casing schematic and provenance for one well and scope. */
+export type OpsPlannedTrajectory = {
+  plan_version_id: string
+  label: string
+  version_no: number
+  status: string
+  curve: OpsWellPathStation[]
+  shared_reference: boolean
+  anchor_basis: string
+  sources: string[]
+}
+
+export type OpsTrajectoryComparison = {
+  vertical_section_azimuth_deg: number
+  planned_trajectory: OpsPlannedTrajectory | null
+  curve: OpsWellPathStation[]
+  survey_stations: OpsWellPathSurveyStation[]
+  comparable?: boolean
+  comparison_basis?: string
+  actual_visible?: boolean
+  position?: Pick<OpsWellPathPosition, 'report_depth_md_m'>
+}
+
 export type OpsWellPath = {
   well_id: string
   well_code: string
@@ -513,6 +538,9 @@ export type OpsWellPath = {
   sections: OpsWellPathSection[]
   open_hole: { from_depth_m: number; to_depth_m: number; label: string } | null
   casing_seats: { size_in: number; size_label: string; depth_m: number; source: string; report_date: string | null }[]
+  planned_trajectory?: OpsPlannedTrajectory | null
+  comparable?: boolean
+  comparison_basis?: string
   planned: {
     label: string
     version_no: number | null
@@ -1344,6 +1372,26 @@ export function uploadDocument(file: File, fields: Record<string, string>) {
 
 export function previewSurvey(reportId: string, file: File) {
   return uploadFiles<OpsSurveyPreview>(`/operations/reports/${reportId}/surveys/preview`, [file], {}, 'file')
+}
+
+export function previewPlannedSurvey(planId: string, file: File, sheet = '') {
+  return uploadFiles<OpsSurveyPreview>(`/operations/plans/${planId}/surveys/preview`, [file], { sheet }, 'file')
+}
+
+export function getPlannedSurvey(planId: string) {
+  return api<OpsPlanSurvey>(`/operations/plans/${planId}/surveys`, { action: 'Load planned survey' })
+}
+
+export function savePlannedSurvey(planId: string, survey: OpsPlanSurvey) {
+  return api<OpsPlanSurvey>(`/operations/plans/${planId}/surveys`, {
+    method: 'PUT', body: body({ stations: survey.stations, shared_reference: survey.shared_reference, expected_updated_at: survey.updated_at }),
+    action: 'Save planned survey',
+  })
+}
+
+export function planTrajectory(planId: string, azimuth?: string) {
+  const query = azimuth ? `?${new URLSearchParams({ vs_azimuth: azimuth })}` : ''
+  return api<OpsTrajectoryComparison>(`/operations/plans/${planId}/trajectory${query}`, { action: 'Load trajectory comparison' })
 }
 
 export function extractReport(document_id: string, report_date: string, reportId?: string, use_ai = false) {

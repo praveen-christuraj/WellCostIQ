@@ -191,7 +191,7 @@ export default function AfeOverview() {
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1.15fr) minmax(0, .85fr)' }, alignItems: 'center' }}>
             <Box sx={{ height: 292, px: 1 }}>
               {overview.statuses.some(row => row.count > 0)
-                ? <InteractiveChart option={statusOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+                ? <InteractiveChart expandTitle="AFE status mix" option={statusOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
                 : <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}><Typography fontSize={12.5} color="text.secondary">No AFEs to show yet.</Typography></Box>}
             </Box>
             <Box sx={{ px: 2, py: 1.5, borderLeft: { sm: '1px solid' }, borderTop: { xs: '1px solid', sm: 0 }, borderColor: 'divider', height: '100%' }}>
@@ -218,7 +218,7 @@ export default function AfeOverview() {
             ? `${wellGroups.otherWells} further well${wellGroups.otherWells === 1 ? '' : 's'} cost in another currency and cannot share this axis; open the AFE register to compare them.`
             : 'Bar length is the estimated value in each AFE\'s own standard currency; convert in the AFE estimate, never on this chart.'}
         >
-          <InteractiveChart option={wellOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
+          <InteractiveChart expandTitle="Approved budgets by well" option={wellOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }}/>
         </ChartPanel>
       </Box>
 

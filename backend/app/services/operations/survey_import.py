@@ -14,7 +14,7 @@ Two source families are supported:
   inclination-like column), not by position, so title rows, logos and header
   blocks above the table do not matter. Units are read from the header cells
   (``md_ft``, ``TVD (ft)`` …) and default to metres; feet are converted exactly
-  as everywhere else in the product (1 ft = 0.3048 m).
+  with the same standardized depth factor as the daily reports (ft ÷ 3.281).
 * **PDF** — delegated to the OpenWells study engine (``parse_pdf``), the same
   deterministic parser the DDR extraction uses, so the stations an engineer
   already trusts from DDR extraction come out of a standalone survey PDF
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import csv
 import re
+from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
@@ -44,6 +45,7 @@ from app.services.operations.workbooks import key, measured_depth, number, workb
 MAX_STATIONS = 200
 MAX_SCAN_ROWS = 60
 MAX_TABULAR_ROWS = 5000
+MAX_PLANNED_STATIONS = 5000
 
 # Unit markers inside a header cell, e.g. "MD (ft)" -> key "md ft".
 _FT = re.compile(r"\b(ft|feet|foot)\b")
@@ -68,7 +70,7 @@ _COLUMNS: dict[str, tuple[str, ...]] = {
              "vertical section m", "vertical section ft", "departure", "departure m", "departure ft",
              "v s"),
     "dls": ("dls", "dogleg", "dogleg severity", "dog leg", "dog leg severity", "dls 30m", "dls per 30m",
-            "dls deg 30m", "severity"),
+            "dls deg 30m", "dls deg per 30m", "dls deg", "dls deg per", "severity"),
     "tool": ("tool", "mwd", "survey tool", "mwd tool", "tool type", "instrument", "run"),
     "survey_at": ("date", "time", "date time", "datetime", "date and time", "timestamp", "time stamp",
                   "survey at", "survey date", "surveyed at", "survey time", "recorded at", "mwd time"),
@@ -167,7 +169,7 @@ def _fmt_depth(value) -> str | None:
     return plain_decimal(Decimal(value).quantize(Decimal("0.001")))
 
 
-def _validate(stations: list[dict[str, Any]], unit: str) -> list[str]:
+def _validate(stations: list[dict[str, Any]], limit: int) -> list[str]:
     warnings: list[str] = []
     previous_md: Decimal | None = None
     for idx, st in enumerate(stations, 1):
@@ -192,20 +194,15 @@ def _validate(stations: list[dict[str, Any]], unit: str) -> list[str]:
             warnings.append(f"Station {idx}: TVD {tvd} m is deeper than MD {md} m — check the unit basis and the column mapping.")
         if st.get("dls_deg_per_30m") is not None and Decimal(st["dls_deg_per_30m"]) < 0:
             warnings.append(f"Station {idx}: dogleg severity is negative.")
-    seen: dict[str, int] = {}
-    for idx, st in enumerate(stations, 1):
-        if st["md_m"] is None:
-            continue
-        seen.setdefault(st["md_m"], idx)
-    duplicates = [md for md, first in seen.items() if sum(1 for s in stations if s["md_m"] == md) > 1]
-    for md in sorted(set(duplicates)):
+    counts = Counter(st["md_m"] for st in stations if st["md_m"] is not None)
+    for md in sorted(md for md, count in counts.items() if count > 1):
         warnings.append(f"Duplicate station at MD {md} m appears more than once; remove the duplicate before applying.")
-    if len(stations) > MAX_STATIONS:
-        warnings.append(f"The file holds {len(stations)} stations; only the first {MAX_STATIONS} can be saved.")
+    if len(stations) > limit:
+        warnings.append(f"The file holds more than {limit} stations; only the first {limit} are shown.")
     return warnings
 
 
-def _decode(rows, header_at: int, cols: dict[str, int], unit: str, source: str) -> dict[str, Any]:
+def _decode(rows, header_at: int, cols: dict[str, int], unit: str, source: str, limit: int) -> dict[str, Any]:
     stations: list[dict[str, Any]] = []
     warnings: list[str] = []
     dls_per_100ft = False
@@ -216,8 +213,10 @@ def _decode(rows, header_at: int, cols: dict[str, int], unit: str, source: str) 
     # Depth-like columns each may declare their own unit; MD wins for the file.
     depth_unit = unit
     skipped = 0
-    for row_no, row in enumerate(islice(rows[header_at + 1:], MAX_TABULAR_ROWS), header_at + 2):
-        if stations and len(stations) >= MAX_STATIONS:
+    if len(rows) - header_at - 1 > MAX_TABULAR_ROWS:
+        raise ValueError("The survey sheet exceeds 5 000 rows after the header; export only the survey table.")
+    for row in rows[header_at + 1:]:
+        if stations and len(stations) > limit:
             break
         if not any(cell is not None and str(cell).strip() for cell in row):
             continue
@@ -267,8 +266,8 @@ def _decode(rows, header_at: int, cols: dict[str, int], unit: str, source: str) 
         warnings.append(f"{skipped} row(s) without a measured depth were skipped.")
     if not stations:
         raise ValueError("The sheet has a survey header but no measured-depth rows under it.")
-    warnings.extend(_validate(stations, unit))
-    return {"stations": stations[:MAX_STATIONS], "warnings": warnings}
+    warnings.extend(_validate(stations, limit))
+    return {"stations": stations[:limit], "warnings": warnings}
 
 
 def _read_csv(content: bytes) -> list[list[Any]]:
@@ -282,7 +281,7 @@ def _read_csv(content: bytes) -> list[list[Any]]:
     return rows
 
 
-def survey_preview(filename: str, content: bytes) -> dict[str, Any]:
+def survey_preview(filename: str, content: bytes, *, limit: int = MAX_STATIONS, preferred_sheet: str = "") -> dict[str, Any]:
     """Study a survey file and return the stations it contains. Never writes."""
     lower = (filename or "").lower()
 
@@ -319,7 +318,7 @@ def survey_preview(filename: str, content: bytes) -> dict[str, Any]:
                 "Expected the OpenWells-style table with columns MD, INC, AZI, TVD, N/S, E/W, VS, DLS."
             )
         warnings = [f"{w}" for w in parsed.get("warnings", []) if "survey" in str(w).lower()]
-        warnings.extend(_validate(stations, "m"))
+        warnings.extend(_validate(stations, limit))
         warnings.insert(0, f"PDF studied: {len(stations)} survey station(s) found. Review every value before applying.")
         return {
             "format": "pdf",
@@ -328,7 +327,7 @@ def survey_preview(filename: str, content: bytes) -> dict[str, Any]:
             "detected_sheet": None,
             "sheets": [],
             "station_count": len(stations),
-            "stations": stations[:MAX_STATIONS],
+            "stations": stations[:limit],
             "warnings": warnings,
         }
 
@@ -341,7 +340,7 @@ def survey_preview(filename: str, content: bytes) -> dict[str, Any]:
             raise ValueError("No survey table found in the CSV. Expected at least MD and INC columns (template: md_m, inc_deg, azi_deg, tvd_m, …).")
         header_at, cols = found
         unit = _header_unit(rows, header_at, cols)
-        decoded = _decode(rows, header_at, cols, unit, "CSV")
+        decoded = _decode(rows, header_at, cols, unit, "CSV", limit)
         return {
             "format": "csv",
             "file_name": filename,
@@ -375,18 +374,20 @@ def survey_preview(filename: str, content: bytes) -> dict[str, Any]:
                 _, cols = matches[title]
                 return (1 if "tvd" in cols else 0, len(cols))
 
-            sheet = max(matches, key=rank)
+            if preferred_sheet and preferred_sheet not in matches:
+                raise ValueError("The selected sheet has no readable directional survey table.")
+            sheet = preferred_sheet or max(matches, key=rank)
             header_at, cols = matches[sheet]
             ws = wb[sheet]
             if (ws.max_row or 0) > MAX_TABULAR_ROWS + MAX_SCAN_ROWS:
                 raise ValueError("The survey sheet exceeds 5 000 rows; export only the survey table.")
             rows = list(islice(ws.iter_rows(max_col=60, values_only=True), MAX_SCAN_ROWS + MAX_TABULAR_ROWS + 1))
         unit = _header_unit(rows, header_at, cols)
-        decoded = _decode(rows, header_at, cols, unit, "Excel")
+        decoded = _decode(rows, header_at, cols, unit, "Excel", limit)
         others = [name for name in matches if name != sheet]
         warnings = list(decoded["warnings"])
         if others:
-            warnings.insert(0, f"Other sheets also look like survey tables: {', '.join(others)}. The richest one ({sheet}) was used.")
+            warnings.insert(0, f"Other sheets also look like survey tables: {', '.join(others)}. The preview uses {sheet}.")
         return {
             "format": "excel",
             "file_name": filename,
@@ -398,4 +399,6 @@ def survey_preview(filename: str, content: bytes) -> dict[str, Any]:
             "warnings": warnings,
         }
 
+    if lower.endswith(".xls"):
+        raise ValueError("Legacy .xls is not supported. Open the workbook, save an unencrypted .xlsx copy, and upload it again.")
     raise ValueError("Choose a .csv, .xlsx, .xlsm or .pdf survey file.")
