@@ -11,6 +11,7 @@ from app.domain.operations.reference_knowledge import (
     glossary_definition,
     glossary_term,
 )
+from app.domain.operations.study_knowledge import match_study_entries
 from app.schemas.assistant import AssistantAnswer, AssistantSource
 
 
@@ -92,16 +93,37 @@ _STUDY_SOURCES = [
 
 #: Words that only introduce a definition request, stripped before lookup.
 _ASK_PREFIX = re.compile(
-    r"^(?:what\s+(?:does|is|are|do)\s+|what's\s+|define\s+|meaning\s+of\s+|explain\s+|tell\s+me\s+about\s+|"
-    r"full\s+form\s+of\s+|expand\s+)",
+    r"^(?:what\s+(?:does|is|are|do)\s+|what's\s+|define\s+|the\s+meaning\s+of\s+|meaning\s+of\s+|explain\s+|"
+    r"tell\s+me\s+about\s+|full\s+form\s+of\s+|expand\s+)",
     re.IGNORECASE,
+)
+
+
+#: Ordinary words that are never a printed code or a defined term. A question
+#: such as "how much does the well cost" must reach the costing modules, not be
+#: answered as the four-letter token ``cost``.
+_NOT_A_TERM = frozenset(
+    """
+    a an and any are as at be by can cost costs did do does for from get got had has have how i if in
+    into is it its just like many may me more much my no not of on or our out over should so some
+    than that the their them then there these they this those to too up us was we were what when
+    where whether which while who why will with would you your well wells
+    """.split()
 )
 
 
 def _asked_token(question: str) -> str:
     text = (question or "").strip().rstrip("?.! ")
-    text = _ASK_PREFIX.sub("", text)
+    # "what is the meaning of RIH" asks twice — "what is" and "meaning of" — so
+    # the prefix strip runs until nothing more is removed.
+    for _ in range(3):
+        stripped = _ASK_PREFIX.sub("", text)
+        if stripped == text:
+            break
+        text = stripped
     text = re.sub(r"^(?:the\s+)?(?:abbreviation|term|acronym)\s+", "", text, flags=re.IGNORECASE)
+    # "what is a kick?" asks about *kick*, not about the letter a.
+    text = re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^(?:the\s+)?full\s+form\s+of\s+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s+(?:mean|means|stand\s+for|stands\s+for)$", "", text, flags=re.IGNORECASE)
     return text.strip(" '\"?.!")
@@ -111,10 +133,15 @@ def _reference_answer(question: str, q: str, permissions) -> AssistantAnswer | N
     """Answer an abbreviation or glossary question from the supplied study modules."""
     asks_abbreviation = re.search(r"\b(?:abbreviation|acronym|stand(?:s)? for|full form|expand)\b", q)
     token = _asked_token(question)
-    if not token:
+    if not token or token.casefold() in _NOT_A_TERM:
         return None
     plain_words = len(token.split()) <= 5
     meanings = abbreviation_meanings(token.split(" ", 1)[0]) if plain_words else ()
+    # A phrase the glossary defines exactly is a definition question, not an
+    # acronym question: "what is mud weight" is the density term, while the sheet
+    # also lists MUD as "Mud Log". The exact glossary entry wins.
+    if glossary_definition(token) and len(token.split()) > 1:
+        meanings = ()
     if meanings and (asks_abbreviation or len(token.split()) <= 2):
         shown = token.split(" ", 1)[0].upper()
         every = "; ".join(meanings)
@@ -132,7 +159,7 @@ def _reference_answer(question: str, q: str, permissions) -> AssistantAnswer | N
     # A code token: name the family, because the same number differs per family.
     code = re.search(r"\b(?:code|operation|activity)\s+(\S+)", q)
     token = code.group(1) if code else token
-    if re.fullmatch(r"[a-z0-9][a-z0-9/-]{0,11}", token, re.IGNORECASE):
+    if re.fullmatch(r"[a-z0-9][a-z0-9/-]{0,11}", token, re.IGNORECASE) and token.casefold() not in _NOT_A_TERM:
         described = describe_code_token(
             token,
             ("OpenWells operation code", "Activity", "OpenWells code token", "Trouble / NPT", "Cause"),
@@ -153,6 +180,16 @@ def _reference_answer(question: str, q: str, permissions) -> AssistantAnswer | N
     if not definition and len(token.split()) > 1:
         key = glossary_term(token.split()[0])
         definition = glossary_definition(key)
+    # ``kick tolerance`` starts with ``kick``, a defined term whose meaning
+    # (an influx) is not the question. A multi-word phrase that names a distinct
+    # subject is left to the study books rather than answered from one word.
+    if (
+        definition
+        and len(token.split()) > 1
+        and key.casefold() != token.casefold()
+        and any(term in " ".join(token.lower().split()) for term in _COMPOUND_SUBJECTS)
+    ):
+        return None
     if definition and len(token.split()) <= 6:
         return AssistantAnswer(
             answer=f"{key}: {definition}",
@@ -163,6 +200,69 @@ def _reference_answer(question: str, q: str, permissions) -> AssistantAnswer | N
             sources=_STUDY_SOURCES,
         )
     return None
+
+
+#: Phrases a glossary splits into a narrower first word. ``Kick tolerance`` is not
+#: ``kick``; ``mud weight`` is not ``mud``. Each is a subject in its own right and
+#: is answered from the study books when one covers it.
+_COMPOUND_SUBJECTS = (
+    "kick tolerance",
+    "mud weight",
+    "leak off",
+    "lot test",
+    "fit test",
+    "d exponent",
+    "dc exponent",
+    "hole cleaning",
+    "neutral point",
+    "tool face",
+)
+
+
+def _study_answer(question: str, permissions) -> AssistantAnswer | None:
+    """Answer a drilling-engineering question from the supplied study books.
+
+    Only a confident match answers. A formula, its symbols and the page it came
+    from are what a reader can check, so the answer is the derivation rather than
+    a paraphrase, and the citation names the book, the section and the page.
+    """
+    matches = match_study_entries(question, limit=2, minimum=9)
+    if not matches:
+        return None
+    _score, entry = matches[0]
+    related = [other for _, other in matches[1:]]
+    # "What is the difference between differential and mechanical sticking?" names
+    # two subjects: naming the second and where it is answered is more honest than
+    # answering only the first and leaving the reader to notice.
+    related_titles = [other.title for other in related if other.topic == entry.topic]
+    steps = [f"{entry.title}."]
+    if entry.formula:
+        steps = [f"Formula: {entry.formula}"]
+        if entry.symbols:
+            steps.append("Where: " + "; ".join(entry.symbols) + ".")
+    elif entry.symbols:
+        steps = ["Where: " + "; ".join(entry.symbols) + "."]
+    if entry.applies_to:
+        steps.append(f"Applies to: {entry.applies_to}")
+    steps.extend(entry.checks)
+    if related_titles:
+        steps.append(
+            "A related subject is also covered: " + "; ".join(related_titles) + "."
+        )
+    citations = entry.citations()
+    return AssistantAnswer(
+        answer=entry.summary,
+        intent='knowledge',
+        confidence='high',
+        category='calculation' if entry.formula else 'faq',
+        memory_key=entry.key,
+        steps=steps,
+        sources=[
+            *(AssistantSource(label=citation, route='') for citation in citations),
+            AssistantSource(label='Operations guide', route='/operations/guide'),
+        ],
+        follow_ups=list(entry.follow_ups),
+    )
 
 
 def answers(question, route, permissions, *, db=None, organization_id=None):
@@ -181,6 +281,24 @@ def answers(question, route, permissions, *, db=None, organization_id=None):
     cost_explicit = re.search(r'\b(?:costing|cost of|total cost|afe|invoice|idvs|catalogue|budget|spend|usd|ngn)\b', q)
     if cost_explicit and not contextual:
         return None
+    # A study-book question is answered from the book itself — the derivation, the
+    # symbol list, what it applies to, and the page — before any manual topic or
+    # model is consulted. The arithmetic is the answer; prose adds nothing to it.
+    # It runs ahead of the operations-only gate because a drilling-engineering
+    # question ("what is kick tolerance?") is legitimate from any screen, while a
+    # costing question stays with the costing modules.
+    study = _study_answer(question, permissions)
+    if study is not None:
+        # A term the printed glossary defines *exactly* is still the shorter, more
+        # direct answer: "what is mud weight" is a definition, not a kick-tolerance
+        # discussion. Only a term the reader named verbatim earns that precedence.
+        exact_term = _reference_answer(question, q, permissions)
+        if exact_term is not None and exact_term.memory_key in (
+            'operations-glossary',
+            'operations-abbreviations',
+        ):
+            return exact_term
+        return study
     if not explicit and (not contextual or re.search(r'\b(?:costing|afe|invoice|catalogue)\b', q)):
         return None
     topics = manual(permissions)

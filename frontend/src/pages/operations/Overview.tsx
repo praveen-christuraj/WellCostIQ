@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Alert, Box, Button, MenuItem, TextField, Typography } from '@mui/material'
+import { WellPathPanel } from '../../components/operations/WellPathPanel'
 import { ChartPanel } from '../../components/ui/ChartPanel'
 import { InteractiveChart } from '../../components/ui/InteractiveChart'
 import { SectionCard } from '../../components/ui/SectionCard'
@@ -9,7 +10,20 @@ import { ErrorMessage, PageHeading } from '../../components/Common'
 import { useAuth } from '../../context/AuthContext'
 import { useColorMode } from '../../context/ThemeContext'
 import { chartPalette } from '../../designSystem'
-import { opsDashboard, opsScopeReference, type OpsDashboard, type OpsScopeReference } from '../../lib/operations'
+import {
+  opsDashboard,
+  opsScopeReference,
+  type OpsDashboard,
+  type OpsScopeReference,
+  type OpsWellVisual,
+} from '../../lib/operations'
+
+/** A depth or a dash: a zero is a real reading (a spudded well), a null is not. */
+function fmtDepth(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${value.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} m`
+    : '—'
+}
 
 export default function OperationsOverview() {
   const { can } = useAuth(),
@@ -43,6 +57,7 @@ export default function OperationsOverview() {
       current = false
     }
   }, [well, rig, scope, from, to])
+  const visual: OpsWellVisual | null = data?.well_visual ?? null
   const k = data?.kpis,
     trend = data?.daily_trend ?? [],
     codes = data?.npt_by_code ?? [],
@@ -155,7 +170,7 @@ export default function OperationsOverview() {
         </Box>
       </SectionCard>
       {k && (
-        <Box display="grid" gap={2} my={2} gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4,minmax(0,1fr))' }}>
+        <Box display="grid" gap={2} my={2} gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr', lg: 'repeat(auto-fit,minmax(196px,1fr))' }}>
           <StatCard
             label="Reports"
             value={k.total_reports}
@@ -180,7 +195,29 @@ export default function OperationsOverview() {
             value={k.lag_days === null ? '—' : `${k.lag_days} d`}
             hint="Single well and scope · positive is lead, negative is lag"
           />
+          {visual && (
+            <StatCard
+              label="Current depth"
+              value={fmtDepth(visual.depth?.current_md_m ?? visual.summary.current_md_m)}
+              hint={
+                <>
+                  {visual.well_code} · TVD {fmtDepth(visual.depth?.current_tvd_m ?? visual.summary.current_tvd_m)} ·{' '}
+                  {visual.depth?.basis || visual.summary.depth_basis || 'no report'}
+                  {visual.depth?.date_reported ? ` · as at ${visual.depth.date_reported}` : ''}
+                </>
+              }
+              title={visual.assumption || undefined}
+            />
+          )}
         </Box>
+      )}
+      {well && scope ? (
+        <WellPathPanel well={well} scope={scope} canOpenPath={can('ops-report:read') || can('ops-dashboard:read')} />
+      ) : (
+        <Alert severity="info">
+          Select one well and one scope to draw its path and casing diagram. A single drawing cannot represent
+          several wells, and the record differs well to well.
+        </Alert>
       )}
       <Box display="grid" gap={2} gridTemplateColumns="minmax(0,1fr)">
         <ChartPanel

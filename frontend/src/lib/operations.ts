@@ -209,6 +209,20 @@ export type OpsBlock = {
   timeline_basis?: string
   timeline_reviewed_by?: string
   timeline_reviewed_at?: string | null
+  // Plan against actual hours for the programme row this block logs. ``actual``
+  // is the engineer's figure when one was entered (``timeline_actual_edited``),
+  // otherwise the system's duration-derived hours.
+  timeline_plan_item_id?: string | null
+  timeline_plan_step_no?: number | null
+  timeline_plan_label?: string
+  timeline_planned_hours?: string | null
+  timeline_actual_hours?: string | null
+  timeline_system_actual_hours?: string | null
+  timeline_variance_hours?: string | null
+  timeline_cum_planned_days?: string | null
+  timeline_actual_edited?: boolean
+  timeline_edited_by?: string
+  timeline_edited_at?: string | null
   is_deleted: boolean
   created_at: string
   updated_at: string
@@ -246,6 +260,118 @@ export type OpsDashboard = {
   daily_trend: { date: string; logged_hours: number; npt_hours: number; planned_hours: number; upa_hours: number }[]
   recent_reports: OpsReport[]
   missing_reports: { well_code: string; scope: string; date: string; reason: string }[]
+  /** Casing schematic for the selected well; null when a multi-well filter is shown. */
+  well_visual: OpsWellVisual | null
+}
+
+/** One drawn casing string: from the shoe above it down to its own shoe. */
+export type OpsWellPathSection = {
+  from_depth_m: number
+  to_depth_m: number
+  length_m: number
+  casing_size_in: number
+  casing_label: string
+  source: string
+  hole_size_in: number | null
+  is_deepest: boolean
+}
+
+export type OpsWellPathSummary = {
+  stations: number
+  md_m: number | null
+  tvd_m: number | null
+  departure_m: number | null
+  displacement_m: number | null
+  closure_azimuth_deg: number | null
+  max_inc_deg: number | null
+  max_dls_deg_per_30m: number | null
+  vertical_section_m: number | null
+  kickoff_md_m: number | null
+  /** Closing MD of the latest report — what the KPI card and the drawing both show. */
+  current_md_m: number | null
+  current_tvd_m: number | null
+  current_tvd_basis: string
+  bit_depth_m: number | null
+  latest_report_date: string | null
+  latest_report_status: string
+  depth_basis: string
+  casing_seats: number
+  sections_drawn: number
+}
+
+/** Trajectory, casing schematic and provenance for one well and scope. */
+export type OpsWellPath = {
+  well_id: string
+  well_code: string
+  well_name: string
+  scope: string
+  datum: string
+  vertical_section_azimuth_deg: number
+  curve: {
+    md_m: number
+    inc_deg: number
+    azi_deg: number
+    tvd_m: number
+    ns_m: number
+    ew_m: number
+    vsec_m: number
+    dls_deg_per_30m: number
+    build_deg_per_30m: number
+    turn_deg_per_30m: number
+  }[]
+  summary: OpsWellPathSummary
+  sections: OpsWellPathSection[]
+  open_hole: { from_depth_m: number; to_depth_m: number; label: string } | null
+  casing_seats: { size_in: number; size_label: string; depth_m: number; source: string; report_date: string | null }[]
+  planned: {
+    label: string
+    version_no: number | null
+    points: { cum_days: number | null; md_m: number | null; sequence_no: number; description: string }[]
+    planned_days: number | null
+    planned_start_at: string | null
+    items: number
+  }
+  depth: {
+    md_m: number | null
+    tvd_m: number | null
+    bit_depth_m: number | null
+    report_date: string | null
+    report_id: string | null
+    status: string
+    basis: string
+  }
+  survey_discrepancies: { md_m: number; printed_tvd_m: number; computed_tvd_m: number; difference_m: number }[]
+  notes: string[]
+  /** Words, not a guess: any fallback the engine applied to draw something. */
+  assumption: string
+  is_surveyed: boolean
+  generated_at: string
+}
+
+export type OpsWellDiagram = { scope: string; wells: OpsWellPath[] }
+
+/** The dashboard's single-well picture: schematic plus current depth. */
+export type OpsWellVisual = {
+  well_id: string
+  well_code: string
+  well_name: string
+  scope: string
+  summary: OpsWellPathSummary
+  sections: OpsWellPathSection[]
+  open_hole: { from_depth_m: number; to_depth_m: number; label: string } | null
+  assumption: string
+  is_surveyed: boolean
+  /** Live depth, taken from the same service as the drawing so the card agrees. */
+  depth?: {
+    current_md_m: number | null
+    current_tvd_m: number | null
+    tvd_basis: string
+    bit_depth_m: number | null
+    date_reported: string | null
+    report_no: string | null
+    report_status: string | null
+    basis: string
+  }
 }
 
 export type OpsTimeDepth = {
@@ -592,6 +718,23 @@ export function opsTimeDepth(wellId: string, scope: string) {
   )
 }
 
+/** Trajectory, casing schematic and current depth for one well and scope. */
+export function opsWellPath(wellId: string, scope: string, vsAzimuth?: number | string) {
+  const q = new URLSearchParams({ well_id: wellId, scope })
+  if (vsAzimuth !== undefined && vsAzimuth !== '') q.set('vs_azimuth', String(vsAzimuth))
+  return api<OpsWellPath>(`/operations/well-path?${q.toString()}`, { action: 'Load well path' })
+}
+
+/** Every configured well of a scope, drawn from its own record. */
+export function opsWellDiagram(params: { scope?: string; rig_id?: string; well_id?: string } = {}) {
+  const q = new URLSearchParams()
+  if (params.scope) q.set('scope', params.scope)
+  if (params.rig_id) q.set('rig_id', params.rig_id)
+  if (params.well_id) q.set('well_id', params.well_id)
+  const suffix = q.toString() ? `?${q.toString()}` : ''
+  return api<OpsWellDiagram>(`/operations/well-diagram${suffix}`, { action: 'Load well diagram' })
+}
+
 /** Preview a bulk assignment. Nothing is written; the dialog shows before/after. */
 export function opsBulkAssignPreview(data: OpsBulkAssignInput) {
   return api<OpsBulkAssignPreview>('/operations/reports/bulk-assign/preview', {
@@ -609,15 +752,39 @@ export function opsBulkAssign(data: OpsBulkAssignInput) {
   })
 }
 
-/** Accept, edit or reject the system's suggested lead/lag comparison. */
+/** The server's answer to a timeline review: what it recomputed, for which blocks. */
+export type ReviewTimelineResult = {
+  review_state: string
+  updated_count: number
+  comparison: string
+  summary: string
+  variance_hours: string | null
+  total_variance_hours: string | null
+  corrected_blocks: number
+}
+
+/**
+ * Accept, correct or reject the system's plan-vs-timeline comparison.
+ *
+ * ``hours`` carries the engineer's correction to the actual hours of a block;
+ * the server recomputes the variance (planned − actual) and the lead/lag mark
+ * from the corrected value, so every later day and chart follows it.
+ */
 export function opsReviewTimeline(
   reportId: string,
-  data: { review_state: 'accepted' | 'edited' | 'rejected'; comparison?: 'ahead' | 'behind' | 'on'; note?: string; block_ids?: string[] },
+  data: {
+    review_state: 'accepted' | 'edited' | 'rejected'
+    comparison?: 'ahead' | 'behind' | 'on'
+    note?: string
+    block_ids?: string[]
+    hours?: { block_id: string; actual_hours: string | null }[]
+  },
 ) {
-  return api<{ review_state: string; updated_count: number; comparison: string; summary: string }>(
-    `/operations/reports/${reportId}/timeline-review`,
-    { method: 'POST', body: body(data), action: 'Review timeline comparison' },
-  )
+  return api<ReviewTimelineResult>(`/operations/reports/${reportId}/timeline-review`, {
+    method: 'POST',
+    body: body(data),
+    action: 'Review timeline comparison',
+  })
 }
 
 export function opsCorrelations(params: { kind?: string; deleted?: boolean } = {}) {
@@ -1161,6 +1328,29 @@ export const getOpsPlan = (id: string) => api<OpsPlan>(`/operations/plans/${id}`
 
 export type OpsGuideTopic = { id: string; title: string; question: string; body: string; steps: string[]; route: string }
 export const opsGuide = () => api<OpsGuideTopic[]>('/operations/guide', { action: 'Load Well Operations guide' })
+
+/** One entry of the drilling engineering study books, with its citation. */
+export type OpsStudyEntry = {
+  key: string
+  title: string
+  topic: string
+  summary: string
+  formula: string
+  symbols: string[]
+  applies_to: string
+  checks: string[]
+  citations: string[]
+  follow_ups: string[]
+}
+
+export type OpsStudyLibrary = {
+  sources: { key: string; author: string; title: string }[]
+  topics: { topic: string; label: string; entries: OpsStudyEntry[] }[]
+}
+
+/** The study books as reference material: readable without a model in the loop. */
+export const opsGuideStudy = () =>
+  api<OpsStudyLibrary>('/operations/guide/study', { action: 'Load the study library' })
 
 export type OpsStudy = {
   summary: string

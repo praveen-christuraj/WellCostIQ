@@ -18,33 +18,83 @@ import {
 //: Hole Sections, Phases, Activities and vendors are Master Data and are
 //: maintained on the Master Data page; a field links to it rather than duplicating
 //: the list here.
+//:
+//: ``importColumns`` mirrors the server's ``IMPORT_COLUMNS`` (served by
+//: ``GET /operations/masters/{kind}/import-template``) so the downloaded
+//: template, the preview and the accepted file are the same contract. A
+//: sub-phase is a child of a Master Data phase, so its template carries the phase
+//: column the create form also asks for; omitting it was what made an imported
+//: sub-phase silently differ from a typed one.
 const kinds = {
   operations: {
     label: 'Operations',
     code: 'operation_code',
     name: 'operation_name',
     defaults: { family: 'other', category: 'other' },
+    importRequired: ['operation_code', 'operation_name'],
+    importOptional: [
+      'family',
+      'category',
+      'default_responsible_party',
+      'is_chargeable',
+      'is_company_caused',
+      'is_contractor_caused',
+      'description',
+      'sort_order',
+      'is_active',
+    ],
   },
   'sub-phases': {
     label: 'Sub-Phases',
     code: 'sub_phase_code',
     name: 'sub_phase_name',
     defaults: {},
+    importRequired: ['sub_phase_code', 'sub_phase_name', 'phase_code'],
+    importOptional: ['description', 'sort_order', 'is_active'],
   },
-  causes: { label: 'Cause Codes', code: 'cause_code', name: 'cause_name', defaults: {} },
+  causes: {
+    label: 'Cause Codes',
+    code: 'cause_code',
+    name: 'cause_name',
+    defaults: {},
+    importRequired: ['cause_code', 'cause_name'],
+    importOptional: ['description', 'sort_order', 'is_active'],
+  },
   agencies: {
     label: 'Responsible Agency labels',
     code: 'agency_code',
     name: 'agency_name',
     defaults: { category: 'other' },
+    importRequired: ['agency_code', 'agency_name'],
+    importOptional: ['category', 'description', 'sort_order', 'is_active'],
   },
   'source-marks': {
     label: 'Source mark rules',
     code: 'mark_code',
     name: 'mark_name',
     defaults: { default_classification: 'Planned', default_allocation: 'PT' },
+    importRequired: ['mark_code', 'mark_name'],
+    importOptional: ['default_classification', 'default_allocation', 'description', 'is_active'],
   },
 } as const
+
+/** Friendly heading → server column, matching the server's alias map. */
+const IMPORT_ALIASES: Record<string, string> = {
+  Code: '',
+  Name: '',
+  Description: 'description',
+  Phase: 'phase_code',
+  'Responsible party': 'default_responsible_party',
+  Category: 'category',
+  Family: 'family',
+  Chargeable: 'is_chargeable',
+  'Company caused': 'is_company_caused',
+  'Contractor caused': 'is_contractor_caused',
+  Order: 'sort_order',
+  Active: 'is_active',
+  'Activity type': 'default_classification',
+  Allocation: 'default_allocation',
+}
 type Kind = keyof typeof kinds
 type Row = { id: string; is_deleted: boolean; correlation_count?: number } & Record<string, unknown>
 
@@ -538,16 +588,34 @@ export default function OperationsLibrary() {
             <ImportDialog
               open
               title={`Import ${spec.label.toLowerCase()}`}
+              subtitle={
+                kind === 'sub-phases'
+                  ? 'Include the Phase code (Master Data) on every row: a sub-phase belongs to one phase, exactly as on the create form.'
+                  : undefined
+              }
               onClose={() => setImporting(false)}
-              headers={[spec.code, spec.name]}
-              optionalHeaders={[...Object.keys(spec.defaults), 'description']}
+              headers={[
+                spec.code,
+                spec.name,
+                ...(spec.importRequired as readonly string[]).filter((c) => c !== spec.code && c !== spec.name),
+              ]}
+              optionalHeaders={[...spec.importOptional]}
               templateName={`${kind}.csv`}
-              headerAliases={{
-                Code: spec.code,
-                Name: spec.name,
-                Description: 'description',
-                ...Object.fromEntries(Object.keys(spec.defaults).map((k) => [k.replaceAll('_', ' '), k])),
-              }}
+              headerAliases={Object.fromEntries(
+                [
+                  ['Code', spec.code],
+                  ['Name', spec.name],
+                  ...Object.entries(IMPORT_ALIASES)
+                    .filter(([, target]) => Boolean(target))
+                    .map(([heading, target]) => [heading, target] as [string, string]),
+                  ...(spec.importOptional as readonly string[]).map(
+                    (column) => [column.replaceAll('_', ' '), column] as [string, string],
+                  ),
+                  ...((spec.importRequired as readonly string[])
+                    .filter((column) => column !== spec.code && column !== spec.name)
+                    .map((column) => [column.replaceAll('_', ' '), column] as [string, string])),
+                ],
+              )}
               onRows={async (rows) => {
                 const result = await api<{ errors: string[] }>(path + '/import', {
                   method: 'POST',

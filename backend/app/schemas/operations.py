@@ -364,6 +364,18 @@ class OpsActivityBlockOut(OpsActivityBlockIn):
     timeline_basis: str = ""
     timeline_reviewed_by: str = ""
     timeline_reviewed_at: datetime | None = None
+    #: The programme row this block logs, and the hours each side took.
+    timeline_plan_item_id: str | None = None
+    timeline_plan_step_no: int | None = None
+    timeline_plan_label: str = ""
+    timeline_planned_hours: Decimal | None = None
+    timeline_actual_hours: Decimal | None = None
+    timeline_system_actual_hours: Decimal | None = None
+    timeline_variance_hours: Decimal | None = None
+    timeline_cum_planned_days: Decimal | None = None
+    timeline_actual_edited: bool = False
+    timeline_edited_by: str = ""
+    timeline_edited_at: datetime | None = None
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
@@ -624,13 +636,34 @@ class OpsBulkAssignPreviewOut(_Strict):
     assigned_fields: list[str] = []
 
 
+class OpsTimelineHoursEdit(_Strict):
+    """One engineer correction to the hours an activity actually took.
+
+    ``actual_hours = None`` clears a correction and restores the logged
+    duration as the proposal; a value recomputes the variance and the lead/lag
+    mark for that block.
+    """
+
+    block_id: str = Field(min_length=1, max_length=36)
+    actual_hours: Decimal3 | None = Field(default=None, ge=0)
+
+
 class OpsTimelineReviewIn(_Strict):
-    """Confirm or override the system's lead/lag suggestion for a whole report."""
+    """Confirm, correct or reject the system's plan-vs-timeline comparison.
+
+    Lead and lag come from the hours, not from a remark: each block is compared
+    with the programme activity it logged, and ``hours`` carries the engineer's
+    correction to the actual hours. ``note`` explains why a corrected figure
+    differs from the time log.
+    """
 
     review_state: Literal["accepted", "edited", "rejected"] = "accepted"
     comparison: Literal["ahead", "behind", "on"] | None = None
     note: str = Field(default="", max_length=500)
     block_ids: list[str] = Field(default_factory=list, max_length=2000)
+    #: Engineer corrections, one row per block. Empty means "the system read the
+    #: log correctly and I am only accepting or rejecting it".
+    hours: list[OpsTimelineHoursEdit] = Field(default_factory=list, max_length=2000)
 
 
 class OpsTimelineReviewOut(_Strict):
@@ -638,6 +671,11 @@ class OpsTimelineReviewOut(_Strict):
     updated_count: int = 0
     comparison: str = "on"
     summary: str = ""
+    #: planned − actual for the first reviewed block, in hours (lead positive).
+    variance_hours: Decimal | None = None
+    #: Sum of the reviewed blocks' variances, in hours.
+    total_variance_hours: Decimal | None = None
+    corrected_blocks: int = 0
 
 
 # Source kinds describe where to look for a printed token, not which field to pre-fill.
@@ -863,6 +901,10 @@ class OpsDashboardOut(_Strict):
     daily_trend: list[dict[str, Any]]
     recent_reports: list[OpsReportOut]
     missing_reports: list[dict[str, Any]]
+    #: Casing schematic and current depth for one selected well (null for a
+    #: multi-well filter, where one drawing would misrepresent the rest). The
+    #: full trajectory is on ``GET /operations/well-path``.
+    well_visual: dict[str, Any] | None = None
 
 
 class OpsTimeDepthPoint(_Strict):
@@ -891,6 +933,103 @@ class OpsTimeDepthOut(_Strict):
     milestones: list[dict[str, Any]]
     lag_series: list[dict[str, Any]]
     projection: list[dict[str, Any]] = []
+
+
+# ---------------------------------------------------------------------------
+# Well path and well diagram (vertical section, plan view and casing schematic)
+# ---------------------------------------------------------------------------
+class OpsWellPathStation(_Strict):
+    """One integrated trajectory station. Every value is arithmetic on surveys."""
+
+    md_m: float
+    inc_deg: float
+    azi_deg: float
+    tvd_m: float
+    ns_m: float
+    ew_m: float
+    vsec_m: float
+    dls_deg_per_30m: float
+    build_deg_per_30m: float = 0.0
+    turn_deg_per_30m: float = 0.0
+
+
+class OpsWellPathSummary(_Strict):
+    stations: int
+    md_m: float | None = None
+    tvd_m: float | None = None
+    departure_m: float | None = None
+    displacement_m: float | None = None
+    closure_azimuth_deg: float | None = None
+    max_inc_deg: float | None = None
+    max_dls_deg_per_30m: float | None = None
+    vertical_section_m: float | None = None
+    kickoff_md_m: float | None = None
+    current_md_m: float | None = None
+    current_tvd_m: float | None = None
+    current_tvd_basis: str = ""
+    bit_depth_m: float | None = None
+    latest_report_date: str | None = None
+    latest_report_status: str = ""
+    depth_basis: str = ""
+    casing_seats: int = 0
+    sections_drawn: int = 0
+
+
+class OpsWellDiagramSection(_Strict):
+    """One drawn casing string, from the shoe above it down to its own shoe."""
+
+    from_depth_m: float
+    to_depth_m: float
+    length_m: float
+    casing_size_in: float
+    casing_label: str
+    source: str
+    hole_size_in: float | None = None
+    is_deepest: bool = False
+
+
+class OpsWellPathPlan(_Strict):
+    label: str = ""
+    version_no: int | None = None
+    points: list[dict[str, Any]] = []
+    planned_days: float | None = None
+    planned_start_at: str | None = None
+    items: int = 0
+
+
+class OpsWellPathOut(_Strict):
+    """A well's trajectory and drawing, with the provenance of every figure.
+
+    ``is_surveyed`` is false when no usable station exists: the pages must then
+    show the diagram as unavailable rather than a straight line that was never
+    drilled. ``assumption`` states, in words, any fallback that *was* applied.
+    """
+
+    well_id: str
+    well_code: str
+    well_name: str
+    scope: str
+    datum: str = ""
+    vertical_section_azimuth_deg: float = 0.0
+    curve: list[OpsWellPathStation] = []
+    summary: OpsWellPathSummary
+    sections: list[OpsWellDiagramSection] = []
+    open_hole: dict[str, Any] | None = None
+    casing_seats: list[dict[str, Any]] = []
+    planned: OpsWellPathPlan = OpsWellPathPlan()
+    depth: dict[str, Any] = {}
+    survey_discrepancies: list[dict[str, Any]] = []
+    notes: list[str] = []
+    assumption: str = ""
+    is_surveyed: bool = False
+    generated_at: str = ""
+
+
+class OpsWellDiagramOut(_Strict):
+    """Trajectory drawing across every configured well of the current filter."""
+
+    scope: str
+    wells: list[OpsWellPathOut]
 
 
 class OpsNptParetoItem(_Strict):

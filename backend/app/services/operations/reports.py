@@ -1,7 +1,9 @@
 """Reports service — CRUD, workflow, metrics."""
 
+import re
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
@@ -76,65 +78,190 @@ def _validate_blocks(blocks: list[dict], period_start: datetime | None, period_e
             raise HTTPException(409, f"Block {block['sequence_no']} overlaps another block.")
 
 
+def _norm_text(value: str | None) -> str:
+    """Normalise a description for activity matching (case, punctuation, spacing)."""
+    return " ".join(re.findall(r"[a-z0-9]+", (value or "").lower()))
+
+
+def _similarity(a: str, b: str) -> float:
+    """Token overlap ratio (Jaccard) between two normalised descriptions."""
+    left, right = set(a.split()), set(b.split())
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _match_plan_item(
+    description: str, items: dict[str, "OpsPlanItem"], used: set[str]
+) -> "OpsPlanItem | None":
+    """Pick the programme activity this block is logging.
+
+    Matching is deliberately conservative and explainable: a block is only tied
+    to a programme row when the words agree strongly. A weak match would be worse
+    than none, because it would put the whole lead/lag on the wrong activity.
+    """
+    target = _norm_text(description)
+    if not target:
+        return None
+    best: tuple[float, OpsPlanItem] | None = None
+    for item in items.values():
+        candidate = _norm_text(item.description)
+        if not candidate:
+            continue
+        score = _similarity(target, candidate)
+        if target == candidate:
+            score = 1.0
+        elif target.startswith(candidate) or candidate.startswith(target):
+            # "Drill 12-1/4\" hole to 2800 m" against the programme's "Drill
+            # 12-1/4\" hole as per Directional Plan to ±2800m" — the shorter is
+            # genuinely part of the longer.
+            score = max(score, 0.72)
+        if item.id in used:
+            score -= 0.15  # a second block can still log the same activity, but later
+        if best is None or score > best[0]:
+            best = (score, item)
+    if best is None or best[0] < 0.5:
+        return None
+    return best[1]
+
+
 def _suggest_comparison(db: Session, report: OpsDailyReport, blocks: list[OpsActivityBlock]) -> None:
-    """Fill each block's timeline comparison against the report's baseline.
+    """Propose plan-vs-actual hours for each block against the active programme.
 
-    The comparison is generated, never asserted: the block keeps
-    ``timeline_review_state='suggested'`` until an engineer accepts, edits or
-    rejects it. A reviewed row is never overwritten by a later recalculation, so a
-    person's judgement outlives a background recompute.
+    Lead and lag are the engineer's comparison of the same job's planned hours
+    with the hours the job actually took — the formula this workspace's own
+    "Input-lookahead" sheet uses, where ``variance = planned − actual`` and a
+    positive value is a lead. It is **not** a note, and it is not a variance of
+    elapsed calendar days: each block is matched to the programme activity it
+    logged, and compared hours with hours.
 
-    Lead is positive, lag negative — the same convention as analytics, the guide
-    and the dashboard, so one number never means two things.
+    Three guards keep the number honest:
+
+    * a block is matched only where the descriptions genuinely agree, because a
+      wrong match silently attributes another activity's time;
+    * the plan is the baseline and is never rewritten by a daily log — an
+      engineer corrects the *actual* hours, which is what the log may have wrong;
+    * a reviewed or edited row is never overwritten by a later recalculation, so
+      the engineer's judgement outlives a background recompute and every later
+      day, chart and summary follows the corrected value.
+
+    ``timeline_variance_days`` is filled as well (hours ÷ 24) so the existing
+    report list, analytics and dashboards keep one convention: lead positive,
+    lag negative.
     """
     baseline = db.get(OpsPlanVersion, report.baseline_plan_id) if report.baseline_plan_id else None
-    if not baseline:
+    if baseline is None:
+        baseline = _active_baseline_id(db, report)
+    if baseline is None:
         for block in blocks:
-            if block.timeline_review_state not in ("accepted", "edited", "rejected"):
-                block.timeline_comparison = "on"
-                block.timeline_basis = "no active baseline"
+            if block.timeline_review_state in ("accepted", "edited", "rejected"):
+                continue
+            block.timeline_comparison = "on"
+            block.timeline_basis = "no active programme"
+            block.timeline_plan_item_id = None
+            block.timeline_planned_hours = None
+            block.timeline_variance_hours = None
+            block.timeline_review_state = "suggested"
         return
-    elapsed = None
-    basis = ""
-    if baseline.planned_start_at and report.period_end_at:
-        elapsed = (utc(report.period_end_at) - utc(baseline.planned_start_at)).total_seconds() / 86400
-        basis = "programme start"
-    elif report.scope == "drilling" and report.dfs_days is not None:
-        elapsed = float(report.dfs_days)
-        basis = "reported DFS"
-    checkpoints = {
-        item.id: float(item.cum_planned_days)
+    items = {
+        item.id: item
         for item in db.scalars(
-            select(OpsPlanItem).where(
+            select(OpsPlanItem)
+            .where(
                 OpsPlanItem.organization_id == report.organization_id,
                 OpsPlanItem.plan_version_id == baseline.id,
             )
+            .order_by(OpsPlanItem.sequence_no)
         )
-        if item.cum_planned_days is not None
     }
-    planned = checkpoints.get(report.completed_plan_item_id) if report.completed_plan_item_id else None
-    if planned is None:
-        basis = basis or "no confirmed programme activity"
+    used: set[str] = set()
+    basis = f"programme {baseline.label or f'v{baseline.version_no}'}"
     for block in blocks:
         if block.timeline_review_state in ("accepted", "edited", "rejected"):
-            continue  # a reviewed comparison is the engineer's, not the system's
-        if elapsed is None or planned is None:
+            continue
+        # An engineer's own correction always survives a re-suggest.
+        if block.timeline_actual_edited and block.timeline_actual_hours is not None:
+            planned = block.timeline_planned_hours
+            actual = block.timeline_actual_hours
+        else:
+            item = _match_plan_item(block.narrative, items, used)
+            if item is None:
+                block.timeline_comparison = "on"
+                block.timeline_basis = "no matching programme activity"
+                block.timeline_plan_item_id = None
+                block.timeline_plan_step_no = None
+                block.timeline_plan_label = ""
+                block.timeline_planned_hours = None
+                block.timeline_system_actual_hours = _hours_from_minutes(block.duration_minutes)
+                block.timeline_actual_hours = None
+                block.timeline_variance_hours = None
+                block.timeline_cum_planned_days = None
+                block.timeline_variance_days = None
+                block.timeline_planned_days = None
+                block.timeline_actual_days = None
+                block.timeline_review_state = "suggested"
+                continue
+            used.add(item.id)
+            block.timeline_plan_item_id = item.id
+            block.timeline_plan_step_no = item.sequence_no
+            block.timeline_plan_label = (item.description or "")[:500]
+            block.timeline_cum_planned_days = item.cum_planned_days
+            planned = item.planned_hours
+            actual = _hours_from_minutes(block.duration_minutes)
+            block.timeline_system_actual_hours = actual
+            block.timeline_planned_hours = planned
+            block.timeline_actual_hours = actual
+        if planned is None or actual is None:
             block.timeline_comparison = "on"
-            block.timeline_variance_days = None
-            block.timeline_planned_days = Decimal(str(planned)) if planned is not None else None
-            block.timeline_actual_days = Decimal(str(round(elapsed, 3))) if elapsed is not None else None
-            block.timeline_basis = basis[:50]
+            block.timeline_basis = "planned or actual hours missing"
+            block.timeline_variance_hours = None
             block.timeline_review_state = "suggested"
             continue
-        plan_days = Decimal(str(round(planned, 3)))
-        actual_days = Decimal(str(round(elapsed, 3)))
-        variance = plan_days - actual_days
-        block.timeline_variance_days = rounded(variance)
-        block.timeline_planned_days = rounded(plan_days)
-        block.timeline_actual_days = rounded(actual_days)
+        variance = _as_decimal(planned) - _as_decimal(actual)
+        block.timeline_variance_hours = rounded(variance)
+        block.timeline_variance_days = rounded(variance / Decimal(24))
+        block.timeline_planned_days = rounded(
+            (block.timeline_cum_planned_days if block.timeline_cum_planned_days is not None else Decimal(0))
+        ) if block.timeline_cum_planned_days is not None else None
         block.timeline_comparison = "ahead" if variance > 0 else ("behind" if variance < 0 else "on")
         block.timeline_basis = basis[:50]
         block.timeline_review_state = "suggested"
+
+
+def _as_decimal(value: Any) -> Decimal | None:
+    """Read a stored number as Decimal.
+
+    A model default can hand back a plain Python number before the row is
+    flushed, and ``Decimal(float)`` would carry the binary residue of a fraction
+    into the result. ``str`` keeps the printed value exact.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _hours_from_minutes(minutes: int | None) -> Decimal | None:
+    if minutes is None:
+        return None
+    return rounded(Decimal(minutes) / Decimal(60))
+
+
+def _active_baseline_id(db: Session, report: OpsDailyReport) -> OpsPlanVersion | None:
+    """Fall back to the well/scope's active programme when the report has no saved baseline."""
+    return db.scalar(
+        select(OpsPlanVersion).where(
+            OpsPlanVersion.organization_id == report.organization_id,
+            OpsPlanVersion.well_id == report.well_id,
+            OpsPlanVersion.scope == report.scope,
+            OpsPlanVersion.status == "active",
+            OpsPlanVersion.is_deleted.is_(False),
+        )
+    )
 
 
 def _compute_metrics(db: Session, report: OpsDailyReport, blocks: list[OpsActivityBlock]):
@@ -671,11 +798,23 @@ def save_report(
                 "reason",
                 "narrative",
                 "review_state",
-                "timeline_review_state",
-                "timeline_note",
             ):
                 setattr(block, field, bd[field])
-            if bd.get("timeline_review_state") in ("accepted", "edited", "rejected"):
+            # A block whose hours or duration changed is re-compared with the
+            # programme, unless an engineer has already corrected it by hand —
+            # in which case the correction is the record and only the variance
+            # against the (unchanged) plan is recomputed.
+            if block.timeline_actual_edited:
+                planned = _as_decimal(block.timeline_planned_hours)
+                actual = _as_decimal(block.timeline_actual_hours)
+                if planned is not None and actual is not None:
+                    variance = planned - actual
+                    block.timeline_variance_hours = rounded(variance)
+                    block.timeline_variance_days = rounded(variance / Decimal(24))
+                    block.timeline_comparison = (
+                        "ahead" if variance > 0 else ("behind" if variance < 0 else "on")
+                    )
+            elif bd.get("timeline_review_state") in ("accepted", "edited", "rejected"):
                 # Only a reviewer records who compared the plan with the actual.
                 block.timeline_reviewed_by = _actor(user)
                 block.timeline_reviewed_at = datetime.now(UTC)
@@ -745,13 +884,25 @@ def save_report(
 
 
 def review_timeline(db: Session, organization_id: str, report_id: str, data, user: User, request=None):
-    """Confirm, edit or reject the suggested lead/lag comparison on a report.
+    """Confirm, correct or reject the plan-vs-timeline comparison on a report.
 
-    The suggestion is never deleted: the row keeps its computed planned/actual
-    days and variance so an audit can compare what the system proposed with what
-    the engineer confirmed, and only the review stamp and the visible mark move.
-    Editing requires a note; accepting and rejecting do not, because neither
-    claims new information.
+    The engineer's real question is not "was this day ahead?" but "did this job
+    take the hours the programme said?". So the review carries **actual hours per
+    activity**: the system fills them from the block's logged duration, and the
+    engineer changes any figure the log got wrong. The variance and the lead/lag
+    mark then recompute from the corrected hours, and every later day, chart and
+    summary reads the corrected value because it is stored on the block.
+
+    Rules, each of which exists to stop a plausible-but-wrong number:
+
+    * Planned hours are the programme's and are never altered here. A daily log
+      cannot rewrite the baseline; it can only disagree with it.
+    * An edited actual needs a reason, because the value now differs from the
+      time log and a reader must be able to tell why.
+    * Rejecting blanks the comparison rather than zeroing it: "not comparable"
+      and "on plan" are different statements.
+    * The pre-edit figures stay on the row (``timeline_system_actual_hours``) so
+      an audit can see what the system proposed and what was applied.
     """
     report = get_report(db, organization_id, report_id, lock=True)
     if report.status not in ("draft", "in_review"):
@@ -759,19 +910,76 @@ def review_timeline(db: Session, organization_id: str, report_id: str, data, use
     blocks = getattr(report, "_blocks", [])
     if not blocks:
         raise HTTPException(422, "Add time blocks before reviewing the timeline comparison.")
-    targets = [b for b in blocks if not data.block_ids or b.id in data.block_ids]
+    by_id = {b.id: b for b in blocks}
+    targets = [by_id[b] for b in (data.block_ids or [])] if data.block_ids else list(blocks)
+    missing = [b for b in (data.block_ids or []) if b not in by_id]
+    if missing:
+        raise HTTPException(422, "A selected block is not in this report.")
     if not targets:
         raise HTTPException(422, "The selected blocks are not in this report.")
-    if data.review_state == "edited" and not data.note.strip():
-        raise HTTPException(422, "A manual comparison needs a note explaining the change.")
-    now = datetime.now(UTC)
+    if data.review_state == "edited" and not data.note.strip() and not data.hours:
+        raise HTTPException(422, "A manual comparison needs a note or corrected actual hours.")
+
+    # A correction that names a block this report does not hold is a stale screen,
+    # not a small mistake: applying the rest and reporting success would leave the
+    # engineer believing a figure was saved when it was dropped.
+    unknown = sorted({row.block_id for row in data.hours} - set(by_id))
+    if unknown:
+        raise HTTPException(
+            422,
+            "A corrected actual belongs to a block that is no longer in this report. "
+            "Reload the report and enter the hours again.",
+        )
+    outside = sorted({row.block_id for row in data.hours} - {b.id for b in targets})
+    if outside:
+        raise HTTPException(
+            422, "A corrected actual was sent for a block that is not part of this review."
+        )
+    corrections = {row.block_id: row for row in data.hours}
+    stamp = datetime.now(UTC)
+    actor = _actor(user)
     for block in targets:
+        correction = corrections.get(block.id)
+        if correction is not None:
+            if correction.actual_hours is None:
+                # Clearing an edit restores the logged duration as the proposal.
+                block.timeline_actual_hours = block.timeline_system_actual_hours
+                block.timeline_actual_edited = False
+                block.timeline_edited_by = ""
+                block.timeline_edited_at = None
+            else:
+                if correction.actual_hours < 0:
+                    raise HTTPException(422, "Actual hours cannot be negative.")
+                block.timeline_actual_hours = rounded(correction.actual_hours)
+                block.timeline_actual_edited = rounded(correction.actual_hours) != (
+                    block.timeline_system_actual_hours
+                )
+                block.timeline_edited_by = actor
+                block.timeline_edited_at = stamp
+        elif block.timeline_actual_edited and block.timeline_actual_hours is not None:
+            # Keep an earlier correction; recompute its variance below.
+            pass
         block.timeline_review_state = data.review_state
-        block.timeline_note = data.note.strip()
-        block.timeline_reviewed_by = _actor(user)
-        block.timeline_reviewed_at = now
-        if data.comparison is not None and data.review_state != "rejected":
-            block.timeline_comparison = data.comparison
+        block.timeline_note = data.note.strip()[:500]
+        block.timeline_reviewed_by = actor
+        block.timeline_reviewed_at = stamp
+        if data.review_state == "rejected":
+            block.timeline_comparison = "on"
+            block.timeline_variance_hours = None
+            block.timeline_variance_days = None
+            continue
+        planned = _as_decimal(block.timeline_planned_hours)
+        actual = _as_decimal(block.timeline_actual_hours)
+        if planned is None or actual is None:
+            block.timeline_comparison = "on"
+            block.timeline_variance_hours = None
+            block.timeline_variance_days = None
+            continue
+        variance = planned - actual
+        block.timeline_variance_hours = rounded(variance)
+        block.timeline_variance_days = rounded(variance / Decimal(24))
+        block.timeline_comparison = "ahead" if variance > 0 else ("behind" if variance < 0 else "on")
+        block.timeline_basis = (block.timeline_basis or "programme")[:50]
     audit_record(
         db,
         organization_id=organization_id,
@@ -781,17 +989,31 @@ def review_timeline(db: Session, organization_id: str, report_id: str, data, use
         entity_id=report.id,
         entity_label=f"{report.well_code_snapshot} {report.report_date}",
         summary=(
-            f"{data.review_state.capitalize()} the suggested timeline comparison on {len(targets)} block(s)"
+            f"{data.review_state.capitalize()} the plan-vs-timeline comparison on {len(targets)} block(s)"
+            + (f" with {len(corrections)} corrected actual hour(s)" if corrections else "")
             + (f": {data.note.strip()}" if data.note.strip() else "")
         ),
         request=request,
     )
     db.commit()
+    first = targets[0]
     return {
         "review_state": data.review_state,
         "updated_count": len(targets),
-        "comparison": data.comparison or (targets[0].timeline_comparison if targets else "on"),
+        "comparison": first.timeline_comparison if data.review_state != "rejected" else "on",
         "summary": f"{data.review_state} on {len(targets)} block(s)",
+        "variance_hours": first.timeline_variance_hours,
+        "total_variance_hours": rounded(
+            sum(
+                (
+                    (_as_decimal(b.timeline_variance_hours) or Decimal(0))
+                    for b in targets
+                    if b.timeline_review_state != "rejected" and b.timeline_variance_hours is not None
+                ),
+                Decimal(0),
+            )
+        ),
+        "corrected_blocks": len([c for c in corrections.values() if c.actual_hours is not None]),
     }
 
 

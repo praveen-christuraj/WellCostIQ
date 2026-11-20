@@ -67,6 +67,189 @@ def _sync_sub_phase_phase(db: Session, organization_id: str, row: OpsSubPhase) -
     row.phase_name_snapshot = (phase.phase_name or "")[:150]
 
 
+#: Import columns per Code Library list, with the alternate headings a user's
+#: spreadsheet may carry. The template, the preview and the server all read this
+#: one map, so a column the page offers is never rejected on the way in.
+IMPORT_COLUMNS: dict[str, dict[str, Any]] = {
+    "operations": {
+        "required": ("operation_code", "operation_name"),
+        "optional": (
+            "family",
+            "category",
+            "default_responsible_party",
+            "is_chargeable",
+            "is_company_caused",
+            "is_contractor_caused",
+            "description",
+            "sort_order",
+            "is_active",
+        ),
+        "aliases": {
+            "code": "operation_code",
+            "operation": "operation_name",
+            "name": "operation_name",
+            "description": "description",
+            "responsible party": "default_responsible_party",
+            "chargeable": "is_chargeable",
+            "company caused": "is_company_caused",
+            "contractor caused": "is_contractor_caused",
+            "order": "sort_order",
+            "active": "is_active",
+        },
+    },
+    "sub-phases": {
+        # A sub-phase is a child of a Master Data phase, so the phase is part of
+        # the identity of the row and must be importable — by code or by name.
+        "required": ("sub_phase_code", "sub_phase_name", "phase_code"),
+        "optional": ("description", "sort_order", "is_active"),
+        "aliases": {
+            "code": "sub_phase_code",
+            "name": "sub_phase_name",
+            "phase": "phase_code",
+            "phase name": "phase_name",
+            "phase code": "phase_code",
+            "order": "sort_order",
+            "active": "is_active",
+        },
+    },
+    "causes": {
+        "required": ("cause_code", "cause_name"),
+        "optional": ("description", "sort_order", "is_active"),
+        "aliases": {
+            "code": "cause_code",
+            "name": "cause_name",
+            "order": "sort_order",
+            "active": "is_active",
+        },
+    },
+    "agencies": {
+        "required": ("agency_code", "agency_name"),
+        "optional": ("category", "description", "sort_order", "is_active"),
+        "aliases": {
+            "code": "agency_code",
+            "name": "agency_name",
+            "order": "sort_order",
+            "active": "is_active",
+        },
+    },
+    "source-marks": {
+        "required": ("mark_code", "mark_name"),
+        "optional": ("default_classification", "default_allocation", "description", "is_active"),
+        "aliases": {
+            "code": "mark_code",
+            "name": "mark_name",
+            "activity type": "default_classification",
+            "classification": "default_classification",
+            "allocation": "default_allocation",
+            "active": "is_active",
+        },
+    },
+}
+
+_BOOL_TRUE = {"true", "yes", "y", "1", "active", "x"}
+_BOOL_FALSE = {"false", "no", "n", "0", "inactive"}
+
+
+def normalise_import_row(kind: str, row: dict[str, Any]) -> dict[str, Any]:
+    """Map a spreadsheet row onto the create schema for this list.
+
+    Two rules keep an import predictable:
+
+    * a heading the page prints is accepted under its own name, its spaced
+      variant and the friendly alias (``Code`` → ``operation_code``);
+    * a value is converted, not guessed — a boolean column reads yes/no, and a
+      blank optional cell is dropped so the schema default applies rather than
+      being overwritten with an empty string.
+    """
+    spec = IMPORT_COLUMNS[kind]
+    aliases = spec["aliases"]
+    allowed = set(spec["required"]) | set(spec["optional"]) | {"phase_name"}
+    out: dict[str, Any] = {}
+    for raw_key, raw_value in row.items():
+        key = "_".join(str(raw_key).strip().lower().replace("-", " ").split())
+        if key not in allowed:
+            key = aliases.get(" ".join(str(raw_key).strip().lower().replace("_", " ").split()), key)
+        if key not in allowed:
+            continue
+        value = raw_value
+        if isinstance(value, str):
+            value = value.strip()
+        if value in ("", None):
+            continue
+        if key in ("is_chargeable", "is_company_caused", "is_contractor_caused", "is_active"):
+            folded = str(value).strip().lower()
+            if folded in _BOOL_TRUE:
+                value = True
+            elif folded in _BOOL_FALSE:
+                value = False
+            else:
+                raise ValueError(f"'{raw_key}' must be yes or no, not '{value}'.")
+        elif key == "sort_order":
+            try:
+                value = int(float(str(value)))
+            except ValueError as exc:
+                raise ValueError(f"'{raw_key}' must be a whole number, not '{value}'.") from exc
+        out[key] = value
+    return out
+
+
+def resolve_import_phase(db: Session, organization_id: str, row: dict[str, Any]) -> str | None:
+    """Find the Master Data phase a sub-phase row names, by code and then by name.
+
+    The Code Library page shows the phase beside every sub-phase, so the import
+    has to accept that column. A phase code is the identifier; a name is accepted
+    only when it matches exactly one phase, because two phases may share a name
+    and picking one would silently file the sub-phase under the wrong parent.
+    """
+    from app.models.master_data import Phase
+
+    code = str(row.pop("phase_code", "") or "").strip()
+    name = str(row.pop("phase_name", "") or "").strip()
+    if not code and not name:
+        raise ValueError("Add the Phase (its Master Data code) this sub-phase belongs to.")
+    if code:
+        phase = db.scalar(
+            select(Phase).where(
+                Phase.organization_id == organization_id,
+                Phase.is_deleted.is_(False),
+                func.upper(Phase.phase_code) == code.upper(),
+            )
+        )
+        if phase is not None:
+            return phase.id
+        matches = list(
+            db.scalars(
+                select(Phase).where(
+                    Phase.organization_id == organization_id,
+                    Phase.is_deleted.is_(False),
+                    func.upper(Phase.phase_name) == (name or code).upper(),
+                )
+            ).all()
+        )
+    else:
+        matches = list(
+            db.scalars(
+                select(Phase).where(
+                    Phase.organization_id == organization_id,
+                    Phase.is_deleted.is_(False),
+                    func.upper(Phase.phase_name) == name.upper(),
+                )
+            ).all()
+        )
+    if len(matches) == 1:
+        return matches[0].id
+    if len(matches) > 1:
+        raise ValueError(f"Phase '{name or code}' matches more than one Master Data phase; use its phase code.")
+    known = db.scalars(
+        select(Phase.phase_code)
+        .where(Phase.organization_id == organization_id, Phase.is_deleted.is_(False))
+        .order_by(Phase.phase_code)
+        .limit(12)
+    ).all()
+    hint = ", ".join(str(value) for value in known) if known else "none configured"
+    raise ValueError(f"Phase '{name or code}' is not in Master Data (available: {hint}).")
+
+
 def ensure_default_operations(db: Session, organization_id: str) -> int:
     """Seed the built-in downtime operations list for a workspace that has none.
 
