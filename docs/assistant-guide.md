@@ -37,7 +37,12 @@ For model-independent workspace notes and an offline PDF reference library, see
   reopening submitted/approved daily reports, multi-day Well Operation Summary
   PDF/Excel/CSV exports, printed code meanings, code correlations and multi-criteria code links (the Correlations tab, its batch forms and tree schematic), completion ROP reported as N/A, NPT/UPA, directional/mud/well-control
   practices, and live workspace Well Operations queries under your role's RBAC
-  permissions, with an optional **Use Offline AI (Ollama)** toggle.
+  permissions, with an optional **Use Offline AI (Ollama)** toggle. It also carries
+  the **Drilling engineering reference books** — the derivations, symbol lists,
+  printed ranges and page citations from the two supplied study works (Rabia;
+  Baker Hughes INTEQ), searchable and browsable with no model in the loop, and
+  answered with the same arithmetic when asked as a question. See
+  [Teach the WellCostIQ assistant](ai-knowledge.md).
 
 ## What an answer contains
 

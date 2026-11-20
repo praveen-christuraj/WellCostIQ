@@ -1,6 +1,6 @@
 # Well Operations: from programme to reviewed daily log
 
-**API 0.20.0 · schema revision `e8b4c1d92f30`**
+**API 0.21.0 · schema revision `e2f4c9b71a38`**
 
 Use **Well Operations → Operations Dashboard** for operational time, depth and schedule. **Costing Dashboard** (`/business-dashboard`) still shows the existing AFE and cost figures. Neither dashboard writes to the other module. A plan in Operations is a programme of activities, **not** the costing well plan.
 

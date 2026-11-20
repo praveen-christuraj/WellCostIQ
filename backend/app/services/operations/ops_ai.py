@@ -31,6 +31,7 @@ from app.core.precision import rounded
 from app.core.time import WAT_LABEL, format_wat, wat_now
 from app.domain.operations.default_codes import describe_code, find_code
 from app.domain.operations.dnc_knowledge import DNC_CORE_PRIMER, format_dnc_context
+from app.domain.operations.study_knowledge import study_context
 from app.domain.operations.reference_knowledge import format_reference_context
 from app.domain.operations.metrics import compute_rop, penetration
 from app.domain.operations.taxonomy import code_key
@@ -728,6 +729,12 @@ def build_ops_context_block(
     sections: list[str] = []
     if include_dnc_primer:
         sections.append(format_dnc_context(question, max_entries=2))
+        # The two supplied study books, matched to the question: derivation, symbols
+        # and the printed page, so a model can reason with the arithmetic instead of
+        # remembering a rule of thumb.
+        study = study_context(question, max_entries=2)
+        if study:
+            sections.append(study)
         # The supplied glossary and abbreviation study material, matched to what was
         # actually asked. It names the family of a printed code so "06" is never
         # silently read as the activity code when the question meant the operation code.
@@ -1443,6 +1450,11 @@ def refine_report_prefill(
     reference_context = format_reference_context(source_text[:2000] if source_text else "")
     if reference_context:
         prompt_lines.append(reference_context[:2200])
+    # The study books name the arithmetic a report's own numbers imply; only a
+    # matching derivation is added so the prompt stays short on a small model.
+    study = study_context(source_text[:1500] if source_text else "", max_entries=1)
+    if study:
+        prompt_lines.append(study[:1400])
 
     db.rollback()
     system_prompt = (
@@ -1956,6 +1968,7 @@ def run_ai_review(
         "You are WellCostIQ's senior Drilling & Completion Performance Analyst AI.\n"
         f"{DNC_CORE_PRIMER}\n"
         f"{format_reference_context(' '.join(prompt_parts)[:2000])}\n"
+        f"{study_context(' '.join(prompt_parts)[:1500], max_entries=1)}\n"
         "Analyze ONLY the verified workspace operational data provided. Do NOT fabricate numbers, depths, incidents, or costs. "
         "Return ONLY valid JSON with exact keys:\n"
         '{"executive_summary": "3-5 sentence engineering performance & NPT synthesis", '

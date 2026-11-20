@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link as RouterLink, useNavigate } from 'react-router-dom'
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, Button, Chip, MenuItem, Stack, TextField, Typography } from '@mui/material'
 import { RestartAlt, Tune } from '@mui/icons-material'
 import { ErrorMessage, PageHeading } from '../../components/Common'
@@ -37,6 +37,7 @@ const ACTIVITY_PRESETS = ['1', '2', '5', '10', '20']
 export default function OperationsAnalytics() {
   const { can } = useAuth()
   const go = useNavigate()
+  const [search] = useSearchParams()
   const { mode } = useColorMode()
   const colors = chartPalette(mode)
 
@@ -52,12 +53,30 @@ export default function OperationsAnalytics() {
     opsScopeReference()
       .then((r) => {
         setRef(r)
+        // A link from the dashboard or the well path page names its own well and
+        // scope; only fall back to the first configured well when it does not.
+        const asked = search.get('well') ?? ''
+        const askedScope = search.get('scope') === 'completion' ? 'completion' : 'drilling'
+        const target = r.wells.find((w) => w.id === asked)
+        if (target) {
+          setWell(target.id)
+          setScope(
+            askedScope === 'completion' && target.completion_available
+              ? 'completion'
+              : target.drilling_available
+                ? 'drilling'
+                : 'completion',
+          )
+          return
+        }
         if (r.wells[0]) {
           setWell(r.wells[0].id)
           setScope(r.wells[0].drilling_available ? 'drilling' : 'completion')
         }
       })
       .catch((e) => setError(e.message))
+    // The URL is read once on mount: the page owns its filters from then on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

@@ -76,6 +76,7 @@ const OperationsAnalytics = lazy(() => import('./pages/operations/Analytics'))
 const OperationsLibrary = lazy(() => import('./pages/operations/Library'))
 const OperationsSettings = lazy(() => import('./pages/operations/Settings'))
 const OperationsPlans = lazy(() => import('./pages/operations/Plans'))
+const OperationsWellPath = lazy(() => import('./pages/operations/WellPath'))
 const CostIntelligence = lazy(() => import('./pages/CostIntelligence'))
 
 // Every listed permission is required (AND).
@@ -198,6 +199,7 @@ export default function App() {
           <Route path="operations/library" element={<Guard permission="ops-master:read"><OperationsLibrary/></Guard>}/>
           <Route path="operations/settings" element={<Guard permission="ops-settings:read"><OperationsSettings/></Guard>}/>
           <Route path="operations/plans" element={<Guard permission="ops-plan:read"><OperationsPlans/></Guard>}/>
+          <Route path="operations/well-path" element={<GuardAny permissions={['ops-dashboard:read', 'ops-report:read', 'ops-analytics:read']}><OperationsWellPath/></GuardAny>}/>
           {/* An unknown address says so, and offers the way back, instead of
               silently pretending the user asked for the landing page. */}
           <Route path="*" element={<NotFound/>}/>

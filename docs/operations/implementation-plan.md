@@ -515,6 +515,34 @@ Computed per **well, scope, hole section, phase and plan item**, stored in `ops_
 `ops_plan_item_actuals`, recomputed on report save/approve, never hand-typed. Current-workbook defects
 (study §1.8) cannot recur because the server owns the arithmetic.
 
+### 7.3a Hours, and the engineer's correction (the reference workbook's Input-lookahead sheet)
+
+The workbook set the requirement: lead and lag are **hours**, not opinions. Each activity block carries:
+
+| Column | Meaning | Who sets it |
+| --- | --- | --- |
+| `timeline_planned_hours` | the active programme's hours for the matched item | programme, read-only |
+| `timeline_system_actual_hours` | the block's logged duration ÷ 60 at the time it was compared | the time log |
+| `timeline_actual_hours` | the engineer's actual hours — the logged figure until edited | the engineer |
+| `timeline_variance_hours` | `planned − actual`, lead positive | recomputed from the two rows above |
+
+- `_match_plan_item` maps a block to a programme row by normalised description (Jaccard, exact match = 1.0,
+  prefix ≥ 0.72, a −0.15 penalty for reusing an item already matched, threshold 0.5). No confident match is
+  better than a wrong one: an unmatched block reports `no matching programme activity` and no variance.
+- `POST /operations/reports/{id}/timeline-review` accepts `hours: [{block_id, actual_hours}]`.
+  `null` clears a correction and restores the logged hours. `rejected` blanks the variance rather than
+  zeroing it — "not comparable" and "on plan" are different statements.
+- The **edited value is stored on the block**, so the next day, the dashboard, the charts and the guide all
+  read it. A later re-suggest skips a block whose `timeline_actual_edited` is set, and a report save with an
+  edited actual recomputes only the variance, never overwriting the engineer's figure.
+- An edit needs a reason, recorded with the actor and the timestamp and written to the Audit Log, because the
+  value now differs from the time log.
+- `reports.review_timeline` returns the recomputed `variance_hours`, `total_variance_hours` and
+  `corrected_blocks`; the report editor's **Review hours & lead / lag** dialog shows planned, system,
+  editable actual, cumulative planned/actual and the variance per row, with the totals above the table.
+- The `timeline_review_state` and `timeline_note` are **not** part of the bulk block save: a report save must
+  not silently replace a human review decision.
+
 ### 7.4 Time vs depth curves
 
 `GET /operations/analytics/time-depth` returns, for a well/scope (or several wells):
@@ -580,8 +608,38 @@ ops_hole_sections_actual id, org, well_id, scope, hole_section_id, size_in, top_
 - Position (N/S, E/W, vertical section) is stored when reported; a minimum-curvature calculation fills
   TVD/NS/EW/DLS only when the module is asked to and the inputs are complete, and the calculated rows are
   marked `calculated` so a reported value always wins.
-- The **well path panel** shows plan vs actual trajectory (vertical section and plan view) and the survey
-  table; 3-D comes later (Phase 6, optional).
+- **Implemented as a service, not a view.** `backend/app/domain/operations/trajectory.py` is a pure
+  minimum-curvature engine (`integrate()`, `interpolate_tvd()`, `survey_azimuth_from_departure()`); it has no
+  database or HTTP dependency and is unit-testable on its own. `backend/app/services/operations/well_path.py`
+  assembles a single payload from the record:
+  * `GET /operations/well-path?well_id&scope&vs_azimuth` — stations, summary, casing sections, open hole,
+    planned curve, current depth with its basis, survey discrepancies, notes and one `assumption` sentence;
+  * `GET /operations/well-diagram?scope&rig_id&well_id` — the same payload per configured well of a scope;
+  * `OpsDashboardOut.well_visual` — schematic plus depth for a single-well filter (null for a multi-well
+    filter, where one drawing would misrepresent the rest).
+- **Provenance rules, each of which stops a plausible-but-wrong number:**
+  * current MD = max(last survey station MD, latest report's closing depth). Verified (submitted/approved)
+    reports beat drafts; the draft is used only when nothing is verified, and `depth_basis` says which;
+  * current TVD = survey interpolation at the current MD; falls back to the report header TVD, then to MD with
+    `assumed vertical (no surveys)` stated in words;
+  * casing seats come from the report header pair (`last_casing_size_in`, `last_casing_depth_m`) first, then
+    from configured `well_sections`; the deepest printed shoe wins for a given size; a size without a depth
+    is not a seat;
+  * a printed TVD that contradicts the integration beyond tolerance is **reported, not overwritten**
+    (`survey_discrepancies`); the drawing uses the integrated value and the page shows both numbers;
+  * the vertical-section plane is the well's own closure azimuth by default (two-pass integration); an
+    explicit `vs_azimuth` rebuilds the curve in a reference plane;
+  * surveys are de-duplicated by measured depth on `is_current`, so a re-extracted report cannot draw the same
+    station twice.
+- **Pages.** `/operations/well-path` (route guarded by `ops-dashboard:read` | `ops-report:read` |
+  `ops-analytics:read`) draws the schematic + vertical section on one shared depth axis, a north/east plan
+  view, inclination and dogleg, the station table and a provenance panel. The Operations Dashboard embeds the
+  same panel for the selected well and scope, and its **Current depth** KPI card reads the same service, so the
+  card and the drawing cannot disagree. The daily report dialog links straight to the well's own drawing.
+- Casing sizes are parsed from either the imperial fraction the reports print (`13-3/8"`, `8 1/2"`) or the
+  configuration's hole-section name; dogleg is normalised to degrees per 30 m from the printed per-100 ft
+  value. 3-D remains optional and later: the two 2-D views answer the operational question without a
+  WebGL dependency.
 
 ---
 

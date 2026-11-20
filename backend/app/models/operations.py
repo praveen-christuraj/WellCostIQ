@@ -22,6 +22,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.precision import DECIMAL_PLACES
@@ -570,6 +571,45 @@ class OpsActivityBlock(Base):
     classification: Mapped[str] = mapped_column(String(10), default="Planned", nullable=False)
     allocation: Mapped[str] = mapped_column(String(10), default="PT", nullable=False)
     is_productive: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # ---------------------------------------------------------------------
+    # Plan vs timeline review (lead / lag), one row per programme activity
+    # ---------------------------------------------------------------------
+    # Lead and lag are NOT read off a clock and hidden in a note. The engineer
+    # compares the same job's planned hours with the hours the job actually took,
+    # exactly as the organisation's "Input-lookahead" sheet does:
+    #
+    #     variance (hours) = planned hours - actual hours
+    #     lead  = variance > 0 (finished early)   lag = variance < 0 (overran)
+    #
+    # The system proposes: planned hours from the active programme's matching
+    # activity, actual hours from this block's own logged duration. An engineer
+    # may edit the actual hours (the plan is the baseline and is never rewritten
+    # by a daily log), and the variance recomputes from the edited value so every
+    # later day, chart and summary follows the engineer's figure.
+    #
+    # ``timeline_plan_item_id`` is the programme row being compared, so a review
+    # survives a re-suggest even when the description text was re-worded.
+    timeline_plan_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ops_plan_items.id", ondelete="SET NULL"), nullable=True
+    )
+    timeline_plan_step_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timeline_plan_label: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
+    #: Planned hours from the programme (Decimal3).
+    timeline_planned_hours: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    #: Hours actually taken — logged duration, or the engineer's correction.
+    timeline_actual_hours: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    #: What the system read from the log before any correction (kept as evidence).
+    timeline_system_actual_hours: Mapped[Decimal | None] = mapped_column(
+        Numeric(28, DECIMAL_PLACES), nullable=True
+    )
+    #: planned − actual, in hours. Positive = lead, negative = lag.
+    timeline_variance_hours: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    #: Cumulative programme position after this activity, in days.
+    timeline_cum_planned_days: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    #: True when an engineer entered actual hours that differ from the log.
+    timeline_actual_edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    timeline_edited_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    timeline_edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Engineer-facing mark: the system's own comparison of the block with the
     # saved baseline, still under review until the engineer confirms it, then
     # editable by hand with a recorded reason.
@@ -766,6 +806,10 @@ class OpsSurvey(Base):
     dls_deg_per_30m: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     tool: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     source: Mapped[str] = mapped_column(String(20), default="manual", nullable=False)
+    # A re-extracted station supersedes an earlier one without deleting the
+    # evidence, and the diagram can say which page printed it.
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true(), nullable=False)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("0.50"), nullable=False)
     survey_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

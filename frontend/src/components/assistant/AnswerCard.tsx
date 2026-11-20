@@ -152,7 +152,16 @@ export function AnswerCard({ answer, onAsk, onRetryAi, onCheckAi }: {
     </Box>}
 
     {referenceSources.length > 0 && <Box sx={{ mt: 1.6 }}>
-      <Typography className="eyebrow" sx={{ mb: .6 }}>PDF reference excerpts provided to AI</Typography>
+      {/* Two kinds of block source reach this list: an excerpt retrieved from a
+          workspace PDF index, and a printed page in a study book. They are cited
+          differently — a PDF index names the file and page, a study book names
+          the author, the work, the section and the page — so the heading follows
+          the content rather than the transport. */}
+      <Typography className="eyebrow" sx={{ mb: .6 }}>
+        {referenceSources.some(source => /Well Engineering & Construction|Drilling Engineering Workbook/.test(source.label))
+          ? 'From the drilling engineering study books'
+          : 'PDF reference excerpts provided to AI'}
+      </Typography>
       {referenceSources.map(source => <Typography key={source.label} variant="caption" display="block">
         {source.label}
       </Typography>)}

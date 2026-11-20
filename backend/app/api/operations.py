@@ -81,6 +81,8 @@ from app.schemas.operations import (
     OpsTimeDepthOut,
     OpsTimelineReviewIn,
     OpsTimelineReviewOut,
+    OpsWellDiagramOut,
+    OpsWellPathOut,
     OpsWellSummaryOut,
 )
 from app.services.audit import record as audit_record
@@ -99,6 +101,7 @@ from app.services.operations import reports as reports_svc
 from app.services.operations import scope as scope_svc
 from app.services.operations import settings as settings_svc
 from app.services.operations import summary as summary_svc
+from app.services.operations import well_path as well_path_svc
 from app.services.operations.study_ai import with_ai
 from app.services.operations.workbooks import timeline_preview
 
@@ -133,6 +136,20 @@ def register_records(
 @router.get('/guide', dependencies=[Depends(require_any('ops-report:read', 'ops-plan:read', 'ops-doc:read', 'ops-master:read'))])
 def guide(user: Current):
     return guide_svc.manual({'*'} if owner(user) else granted(user))
+
+
+@router.get('/guide/study', dependencies=[Depends(require_any('ops-report:read', 'ops-plan:read', 'ops-doc:read', 'ops-master:read'))])
+def guide_study():
+    """The drilling engineering study books, grouped by subject.
+
+    The same entries the guide answers from and the AI prompt carries, exposed
+    without a model so a reader can use the arithmetic and the page references
+    directly. Read-only reference material: there is nothing here about a
+    workspace's own records, so no record-level capability is required.
+    """
+    from app.domain.operations.study_knowledge import study_library, study_sources
+
+    return {'sources': study_sources(), 'topics': study_library()}
 
 
 @router.get(
@@ -435,6 +452,18 @@ def _block_out(b, db=None, organization_id: str | None = None) -> dict:
         "timeline_basis": getattr(b, "timeline_basis", "") or "",
         "timeline_reviewed_by": getattr(b, "timeline_reviewed_by", "") or "",
         "timeline_reviewed_at": getattr(b, "timeline_reviewed_at", None),
+        # Plan-vs-actual hours: the figures the engineer compares and edits.
+        "timeline_plan_item_id": getattr(b, "timeline_plan_item_id", None),
+        "timeline_plan_step_no": getattr(b, "timeline_plan_step_no", None),
+        "timeline_plan_label": getattr(b, "timeline_plan_label", "") or "",
+        "timeline_planned_hours": getattr(b, "timeline_planned_hours", None),
+        "timeline_actual_hours": getattr(b, "timeline_actual_hours", None),
+        "timeline_system_actual_hours": getattr(b, "timeline_system_actual_hours", None),
+        "timeline_variance_hours": getattr(b, "timeline_variance_hours", None),
+        "timeline_cum_planned_days": getattr(b, "timeline_cum_planned_days", None),
+        "timeline_actual_edited": bool(getattr(b, "timeline_actual_edited", False)),
+        "timeline_edited_by": getattr(b, "timeline_edited_by", "") or "",
+        "timeline_edited_at": getattr(b, "timeline_edited_at", None),
         "reviewer_user_id": b.reviewer_user_id,
         "reviewed_at": b.reviewed_at,
         "is_deleted": b.is_deleted,
@@ -1338,6 +1367,64 @@ def time_depth(
 
 
 # ---------------------------------------------------------------------------
+# Well path and well diagram
+# ---------------------------------------------------------------------------
+@router.get(
+    "/well-path",
+    response_model=OpsWellPathOut,
+    dependencies=[Depends(require_any("ops-dashboard:read", "ops-report:read", "ops-analytics:read"))],
+)
+def well_path(
+    db: Db,
+    user: Current,
+    well_id: str = Query(..., min_length=1),
+    scope: Literal["drilling", "completion"] = Query("drilling"),
+    vs_azimuth: float | None = Query(default=None, ge=0, le=360),
+):
+    """Trajectory, casing diagram, current depth and planned curve for one well.
+
+    Read-only geometry: surveys are integrated with minimum curvature and every
+    number names its source. The same service feeds the Operations Dashboard
+    cards, so the drawing and the KPI cannot disagree.
+    """
+    return well_path_svc.well_path(
+        db, user.organization_id, well_id, scope, vertical_section_azimuth=vs_azimuth
+    )
+
+
+@router.get(
+    "/well-diagram",
+    response_model=OpsWellDiagramOut,
+    dependencies=[Depends(require_any("ops-dashboard:read", "ops-report:read", "ops-analytics:read"))],
+)
+def well_diagram(
+    db: Db,
+    user: Current,
+    scope: Literal["drilling", "completion"] = Query("drilling"),
+    rig_id: str = "",
+    well_id: str = "",
+):
+    """Every well in the current filter, drawn from its own surveys and casing seats."""
+    from app.models.rig_well import Well
+
+    stmt = select(Well).where(
+        Well.organization_id == user.organization_id,
+        Well.is_deleted.is_(False),
+    )
+    if rig_id:
+        stmt = stmt.where(Well.rig_id == rig_id)
+    if well_id:
+        stmt = stmt.where(Well.id == well_id)
+    wells = db.scalars(stmt.order_by(Well.well_code.asc())).all()
+    drawn = [
+        well_path_svc.well_path(db, user.organization_id, well.id, scope)
+        for well in wells
+        if scope_svc.available(well, scope)
+    ]
+    return {"scope": scope, "wells": drawn}
+
+
+# ---------------------------------------------------------------------------
 # Masters
 # ---------------------------------------------------------------------------
 MASTER_SCHEMAS = {
@@ -1410,17 +1497,37 @@ def import_codes(
     db: Db,
     user: Current,
 ):
+    """Import a Code Library list from a spreadsheet.
+
+    Every published column is accepted: a blank optional cell keeps the schema
+    default instead of clearing the field, ``Phase`` resolves to a Master Data
+    phase for sub-phases (the page shows it beside every row), and booleans read
+    yes/no. A row that cannot be read is reported with its own number and the
+    rest of the file is still imported, so one bad line does not cost a 500-row
+    list.
+    """
     kind = _master_kind(kind)
     schema = MASTER_SCHEMAS[kind]
-    errors = []
+    errors: list[str] = []
     created = 0
     for idx, row in enumerate(rows, 2):
         try:
-            data = schema.model_validate(row)
+            payload = masters_svc.normalise_import_row(kind, row)
+            if kind == "sub-phases":
+                payload["phase_id"] = masters_svc.resolve_import_phase(db, user.organization_id, payload)
+            data = schema.model_validate(payload)
             masters_svc.create_master(db, user.organization_id, kind, data, user, request)
             created += 1
-        except (HTTPException, ValidationError) as exc:
-            errors.append(f"Row {idx}: {exc.detail if isinstance(exc, HTTPException) else exc.errors()[0]['msg']}")
+        except (HTTPException, ValidationError, ValueError) as exc:
+            if isinstance(exc, HTTPException):
+                detail = exc.detail
+            elif isinstance(exc, ValidationError):
+                first = exc.errors()[0]
+                location = ".".join(str(part) for part in first.get("loc", ()) if part != "body")
+                detail = f"{location}: {first['msg']}" if location else str(first["msg"])
+            else:
+                detail = str(exc)
+            errors.append(f"Row {idx}: {detail}")
     audit_record(
         db,
         organization_id=user.organization_id,
@@ -1434,6 +1541,30 @@ def import_codes(
     )
     db.commit()
     return {"created_count": created, "errors": errors}
+
+
+@router.get("/masters/{kind}/import-template", dependencies=[Depends(require("ops-master:import"))])
+def code_import_template(kind: str):
+    """The exact columns this list's import accepts, in the order the page prints them.
+
+    Serving the template from the same map the importer reads means the file a
+    user downloads can never drift from the file the server accepts.
+    """
+    kind = _master_kind(kind)
+    spec = masters_svc.IMPORT_COLUMNS[kind]
+    required = list(spec["required"])
+    optional = list(spec["optional"])
+    if kind == "sub-phases":
+        # ``phase_name`` is an accepted alternative to ``phase_code``; the template
+        # prints the code, because it is the identifier that cannot be ambiguous.
+        optional = [column for column in optional if column != "phase_name"]
+    return {
+        "kind": kind,
+        "required": required,
+        "optional": optional,
+        "columns": required + optional,
+        "aliases": spec["aliases"],
+    }
 
 
 @router.post(

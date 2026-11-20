@@ -25,6 +25,7 @@ import { DataTable } from '../../components/DataTable'
 import { BulkAssignDialog } from '../../components/operations/BulkAssignDialog'
 import { SourceDialog } from '../../components/operations/SourceDialog'
 import { StudyPanel } from '../../components/operations/StudyPanel'
+import { TimelineHoursReview } from '../../components/operations/TimelineHoursReview'
 import { SectionCard } from '../../components/ui/SectionCard'
 import { useAuth } from '../../context/AuthContext'
 import { downloadFile } from '../../lib/api'
@@ -131,6 +132,16 @@ type Block = Pick<
   | 'timeline_basis'
   | 'timeline_reviewed_by'
   | 'timeline_reviewed_at'
+  // Hours: planned comes from the programme, actual from the engineer (or the
+  // logged duration when nobody corrected it), and the variance follows.
+  | 'timeline_plan_item_id'
+  | 'timeline_plan_step_no'
+  | 'timeline_plan_label'
+  | 'timeline_planned_hours'
+  | 'timeline_actual_hours'
+  | 'timeline_system_actual_hours'
+  | 'timeline_variance_hours'
+  | 'timeline_actual_edited'
 > & { id: string }
 
 const surveyFields = {
@@ -199,11 +210,10 @@ export default function OperationsReportDetail({
   const [selected, setSelected] = useState<Block[]>([])
   // Bumped on every load so a stale selection never carries onto a new report.
   const [selectionKey, setSelectionKey] = useState(0)
-  const [timelineReview, setTimelineReview] = useState<{
-    open: boolean
-    state: 'accepted' | 'edited' | 'rejected'
-  }>({ open: false, state: 'accepted' })
-  const [timelineNote, setTimelineNote] = useState('')
+  // The hours review is a controlled dialog: the page owns the submission so it
+  // can reload the report and echo the server's own variance back to the user.
+  const [timelineOpen, setTimelineOpen] = useState(false)
+  const [timelineError, setTimelineError] = useState('')
 
   // Offline AI narrative generator & AI extraction prefill state
   const [narUseAi, setNarUseAi] = useState(true)
@@ -550,12 +560,22 @@ export default function OperationsReportDetail({
               {editable ? 'Cancel' : 'Close'}
             </Button>
             {!dirty && (
-              <Button
-                component={RouterLink}
-                to={`/operations/summary?well=${encodeURIComponent(report.well_id)}&scope=${encodeURIComponent(report.scope)}`}
-              >
-                Well summary
-              </Button>
+              <>
+                <Button
+                  component={RouterLink}
+                  to={`/operations/summary?well=${encodeURIComponent(report.well_id)}&scope=${encodeURIComponent(report.scope)}`}
+                >
+                  Well summary
+                </Button>
+                {/* The drawing is derived from this report's survey table and
+                    casing header, so the report can always show its own well. */}
+                <Button
+                  component={RouterLink}
+                  to={`/operations/well-path?well=${encodeURIComponent(report.well_id)}&scope=${encodeURIComponent(report.scope)}`}
+                >
+                  Well path &amp; diagram
+                </Button>
+              </>
             )}
             {can('ops-report:print') && (
               <Button onClick={print} disabled={busy || dirty}>
@@ -726,12 +746,9 @@ export default function OperationsReportDetail({
                     variant="outlined"
                     size="small"
                     disabled={!blocks.length}
-                    onClick={() => {
-                      setTimelineNote('')
-                      setTimelineReview({ open: true, state: 'accepted' })
-                    }}
+                    onClick={() => setTimelineOpen(true)}
                   >
-                    Review lead / lag
+                    Review hours & lead / lag
                   </Button>
                   <Button variant="contained" size="small" onClick={addBlock}>
                     Add block
@@ -838,16 +855,33 @@ export default function OperationsReportDetail({
                   tooltipField: 'responsible_agency_label',
                 },
                 {
+                  // Plan against actual hours is what lead and lag is computed
+                  // from, so the register shows both sides rather than a verdict
+                  // a reader cannot check.
+                  field: 'timeline_planned_hours',
+                  headerName: 'Plan / actual (h)',
+                  minWidth: 140,
+                  valueGetter: ({ data }) => {
+                    const planned = data?.timeline_planned_hours
+                    const actual = data?.timeline_actual_hours
+                    if (planned === null || planned === undefined) return '—'
+                    return `${Number(planned).toFixed(2)} / ${actual === null || actual === undefined ? '—' : Number(actual).toFixed(2)}${
+                      data?.timeline_actual_edited ? ' (edited)' : ''
+                    }`
+                  },
+                },
+                {
                   field: 'timeline_comparison',
                   headerName: 'Lead (+/−)',
                   minWidth: 150,
                   valueGetter: ({ data }) => {
-                    const variance = data?.timeline_variance_days
+                    const variance = data?.timeline_variance_hours
                     const mark = data?.timeline_comparison
                     if (!mark) return ''
                     const label = mark === 'ahead' ? 'Lead' : mark === 'behind' ? 'Lag' : 'On plan'
-                    const days = variance === null || variance === undefined ? '' : ` ${Math.abs(Number(variance)).toFixed(3)} d`
-                    return `${label}${days} · ${data?.timeline_review_state ?? 'suggested'}`
+                    const hours =
+                      variance === null || variance === undefined ? '' : ` ${Math.abs(Number(variance)).toFixed(2)} h`
+                    return `${label}${hours} · ${data?.timeline_review_state ?? 'suggested'}`
                   },
                 },
                 {
@@ -1287,65 +1321,38 @@ export default function OperationsReportDetail({
           }}
         />
 
-        <FormDialog
-          open={timelineReview.open}
-          title="Review the timeline comparison"
-          subtitle="The system compares this day with the active programme. Accept it, or mark your own lead or lag with a note. A reviewed comparison is kept through later recalculations."
-          onClose={() => setTimelineReview({ ...timelineReview, open: false })}
-          onSubmit={async () => {
+        <TimelineHoursReview
+          open={timelineOpen}
+          rows={selected.length ? selected : blocks}
+          busy={busy}
+          error={timelineError}
+          canEdit={Boolean(editable)}
+          onClose={() => setTimelineOpen(false)}
+          onSubmit={async (submission) => {
             if (!report) return
             setBusy(true)
-            setError('')
+            setTimelineError('')
             try {
-              await opsReviewTimeline(report.id, {
-                review_state: timelineReview.state,
-                note: timelineNote.trim(),
+              const result = await opsReviewTimeline(report.id, {
+                ...submission,
                 block_ids: (selected.length ? selected : blocks).map((b) => b.id),
               })
-              setTimelineReview({ ...timelineReview, open: false })
+              setTimelineOpen(false)
               await load()
-              setNotice('Timeline comparison reviewed.')
+              const total = result.total_variance_hours
+              const corrected = result.corrected_blocks
+              setNotice(
+                total === null
+                  ? 'Timeline review saved.'
+                  : `Timeline review saved — ${Number(total) > 0 ? '+' : ''}${Number(total).toFixed(3)} h variance across ${result.updated_count} activit${result.updated_count === 1 ? 'y' : 'ies'}${corrected ? `, ${corrected} corrected by hand` : ''}.`,
+              )
             } catch (e) {
-              setError((e as Error).message)
+              setTimelineError((e as Error).message)
             } finally {
               setBusy(false)
             }
           }}
-          submitLabel="Save review"
-          busy={busy}
-          submitDisabled={timelineReview.state === 'edited' && !timelineNote.trim()}
-          maxWidth="sm"
-        >
-          <Stack spacing={2} pt={0.5}>
-            {error && <Alert severity="error">{error}</Alert>}
-            <TextField
-              select
-              label="Decision"
-              value={timelineReview.state}
-              onChange={(e) =>
-                setTimelineReview({ ...timelineReview, state: e.target.value as typeof timelineReview.state })
-              }
-            >
-              <MenuItem value="accepted">Accept the system comparison</MenuItem>
-              <MenuItem value="edited">Edit the comparison myself</MenuItem>
-              <MenuItem value="rejected">Reject the comparison</MenuItem>
-            </TextField>
-            <TextField
-              label="Note"
-              value={timelineNote}
-              onChange={(e) => setTimelineNote(e.target.value)}
-              multiline
-              minRows={2}
-              required={timelineReview.state === 'edited'}
-              helperText="Required when you edit the comparison; recorded in the Audit Log."
-            />
-            <Typography variant="caption" color="text.secondary">
-              {(selected.length ? selected : blocks).length} block(s) will be marked{' '}
-              {timelineReview.state}. A positive number is a lead ahead of plan; a negative number is a lag
-              behind it.
-            </Typography>
-          </Stack>
-        </FormDialog>
+        />
 
         {editor && (
           <FormDialog

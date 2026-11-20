@@ -19,7 +19,7 @@ import { SectionCard } from '../../components/ui/SectionCard'
 import { useAuth } from '../../context/AuthContext'
 import type { AiConnectionStatus } from '../../lib/ai'
 import { askGuide, type AssistantAnswer } from '../../lib/assistant'
-import { opsAiStatus, opsGuide, type OpsGuideTopic } from '../../lib/operations'
+import { opsAiStatus, opsGuide, opsGuideStudy, type OpsGuideTopic, type OpsStudyLibrary } from '../../lib/operations'
 import { WAT_LABEL } from '../../lib/time'
 
 const DNC_SAMPLE_PROMPTS = [
@@ -29,6 +29,10 @@ const DNC_SAMPLE_PROMPTS = [
   'What causes differential and mechanical stuck pipe?',
   'Explain LOT, FIT, MAASP and Driller’s Method',
   'How do completion packers, SCSSV and tubing testing work?',
+  'What is kick tolerance and how is it calculated?',
+  'How do I calculate the d exponent for pore pressure?',
+  'How are bit nozzles sized and what is nozzle velocity?',
+  'How is cost per foot calculated?',
 ]
 
 export default function OperationsGuide() {
@@ -42,6 +46,9 @@ export default function OperationsGuide() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [askError, setAskError] = useState('')
+  const [study, setStudy] = useState<OpsStudyLibrary | null>(null)
+  const [studyTopic, setStudyTopic] = useState('')
+  const [studySearch, setStudySearch] = useState('')
 
   useEffect(() => {
     let current = true
@@ -51,6 +58,25 @@ export default function OperationsGuide() {
       })
       .catch((e) => {
         if (current) setError((e as Error).message)
+      })
+    return () => {
+      current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let current = true
+    opsGuideStudy()
+      .then((lib) => {
+        if (!current) return
+        setStudy(lib)
+        // Open on the first subject so the library is visible, not a blank tab strip.
+        setStudyTopic((existing) => existing || lib.topics[0]?.topic || '')
+      })
+      .catch(() => {
+        // The library is supplementary: its absence must not break the manual or
+        // the ask box, both of which load independently.
+        if (current) setStudy(null)
       })
     return () => {
       current = false
@@ -218,6 +244,135 @@ export default function OperationsGuide() {
               />
             )}
             {answer && <AnswerCard answer={answer} onAsk={(p) => void ask(p)} />}
+          </Stack>
+        </SectionCard>
+      )}
+
+      {study && (
+        <SectionCard
+          title="Drilling engineering reference books"
+          subtitle={`Worked arithmetic from ${study.sources.map((s) => `${s.author}, ${s.title}`).join(' and ')}. Each entry names the page it came from. These are derivations and printed ranges, not measurements of your wells.`}
+          action={
+            <TextField
+              size="small"
+              placeholder="Search the reference"
+              value={studySearch}
+              onChange={(e) => setStudySearch(e.target.value)}
+              sx={{ width: 240 }}
+            />
+          }
+        >
+          <Stack spacing={2}>
+            <Box display="flex" gap={0.75} flexWrap="wrap">
+              {study.topics.map((group) => (
+                <Button
+                  key={group.topic}
+                  size="small"
+                  variant={studyTopic === group.topic ? 'contained' : 'outlined'}
+                  onClick={() => setStudyTopic(group.topic)}
+                >
+                  {group.label} ({group.entries.length})
+                </Button>
+              ))}
+            </Box>
+            {(() => {
+              const needle = studySearch.trim().toLowerCase()
+              const matches = (entry: { title: string; summary: string; formula: string; citations: string[] }) =>
+                !needle ||
+                [entry.title, entry.summary, entry.formula, ...entry.citations]
+                  .join(' ')
+                  .toLowerCase()
+                  .includes(needle)
+              // A search reads across every subject: a reader who types “nozzle”
+              // should not have to guess which tab it sits under.
+              const groups = needle
+                ? study.topics
+                    .map((group) => ({ ...group, entries: group.entries.filter(matches) }))
+                    .filter((group) => group.entries.length)
+                : study.topics.filter((group) => group.topic === studyTopic)
+              if (!groups.length) {
+                return (
+                  <Typography variant="body2" color="text.secondary">
+                    No reference entry matches “{studySearch.trim()}”.
+                  </Typography>
+                )
+              }
+              return groups.map((group) => (
+                <Box key={group.topic}>
+                  <Typography className="eyebrow" sx={{ mb: 1 }}>
+                    {group.label}
+                  </Typography>
+                  <Stack spacing={1.25}>
+                    {group.entries.map((entry) => (
+                      <Box
+                        key={entry.key}
+                        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.6 }}
+                      >
+                        <Typography fontWeight={800} fontSize={13.5}>
+                          {entry.title}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mt: 0.5 }}>
+                          {entry.summary}
+                        </Typography>
+                        {entry.formula && (
+                          <Typography
+                            component="pre"
+                            sx={{
+                              mt: 1,
+                              mb: 0.6,
+                              p: 1.1,
+                              borderRadius: 1.5,
+                              bgcolor: 'action.hover',
+                              fontFamily: 'monospace',
+                              fontSize: 11.5,
+                              whiteSpace: 'pre-wrap',
+                              overflowWrap: 'anywhere',
+                            }}
+                          >
+                            {entry.formula}
+                          </Typography>
+                        )}
+                        {entry.symbols.length > 0 && (
+                          <Box component="ul" sx={{ mt: 0.5, mb: 0.5, pl: 2.4 }}>
+                            {entry.symbols.map((symbol) => (
+                              <Typography key={symbol} component="li" variant="caption" display="list-item">
+                                {symbol}
+                              </Typography>
+                            ))}
+                          </Box>
+                        )}
+                        {entry.applies_to && (
+                          <Typography variant="caption" display="block" color="text.secondary">
+                            <strong>Applies to:</strong> {entry.applies_to}
+                          </Typography>
+                        )}
+                        {entry.checks.map((check) => (
+                          <Typography key={check} variant="caption" display="block" color="text.secondary">
+                            · {check}
+                          </Typography>
+                        ))}
+                        <Stack direction="row" gap={1} flexWrap="wrap" useFlexGap mt={0.8} alignItems="center">
+                          {entry.citations.map((citation) => (
+                            <Typography key={citation} variant="caption" sx={{ fontStyle: 'italic' }}>
+                              {citation}
+                            </Typography>
+                          ))}
+                          <Button
+                            size="small"
+                            variant="text"
+                            disabled={loading}
+                            onClick={() => void ask(entry.title)}
+                            sx={{ ml: 'auto' }}
+                          >
+                            Ask about this
+                          </Button>
+                        </Stack>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              ))
+            })()}
           </Stack>
         </SectionCard>
       )}

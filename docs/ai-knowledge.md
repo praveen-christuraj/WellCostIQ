@@ -11,6 +11,7 @@ small model struggles. Exact figures and rule-based checks do not depend on it.
 | Product steps, calculations, codes, caution rules | The shipped Assistant memory and Operations guide. Update them alongside product changes. |
 | A workspace-specific rule, checklist, or approved process | **Assistant → Memory**. An `assistant:manage` user can add or revise a note, set keywords and a matching screen, and set a required capability if the note is restricted. |
 | Drilling, completion, or well-costing manuals and training material | Publish a workspace PDF reference index using the steps below. |
+| The two supplied drilling engineering books (Rabia; Baker Hughes INTEQ) | Shipped inside the product: `backend/app/domain/operations/study_knowledge.py`. No indexing, no operator step — see below. |
 | A live total, rate, daily report, depth, budget, or suspected entry error | Ask for the record, well, scope, or item by name. Existing permission-checked searches and calculations supply the evidence. Unsupported queries should be treated as unverified, not as zero. |
 
 The model does not receive database credentials, execute SQL, approve reports,
@@ -20,6 +21,44 @@ separately from model commentary when a live answer is available. The daily
 brief and report drafting controls use saved report evidence, not PDFs; a
 reference must never be mistaken for an event, an HSE outcome, an approved
 programme, or a value from the cost ledger.
+
+## The supplied study books (shipped, no operator step)
+
+Two references are part of the product rather than a workspace upload:
+
+* H. Rabia, *Well Engineering & Construction* — pressure and the dc exponent,
+  formation integrity and fracture gradient, kick tolerance, casing properties
+  and design, wellbore stability, hole problems, fishing, horizontal and
+  multilateral wells, HPHT, rig components, well costing.
+* Baker Hughes INTEQ, *Drilling Engineering Workbook* (P/N 80270H Rev. B) —
+  fluids and material balance, hydraulics and bit optimisation, casing and
+  cementing, bit technology, drillstring and buoyancy, directional drilling,
+  stuck pipe, well control, cost-per-foot.
+
+`study_knowledge.py` stores, for each subject, **the derivation** (formula,
+symbol definitions, the decision it informs), **printed ranges** where the book
+states them, and **the page reference**. It does not store the books' prose:
+the wording is ours, the arithmetic and the page are theirs. That keeps the
+knowledge attributable and avoids reproducing copyrighted text.
+
+The same entries feed three consumers, which is why an answer cannot drift
+between them:
+
+1. **The guide without AI** — `guide._study_answer()` answers a matching
+   question with the formula, the symbols, what it applies to, the checks and
+   the citation. No model is consulted.
+2. **The offline AI prompt** — `study_context()` adds the matching derivation to
+   the Ollama system prompt for guide answers, report extraction and the
+   performance analyst, so a small model reasons with the arithmetic instead of
+   recalling a rule of thumb.
+3. **The reference library on `/operations/guide`** — `GET /operations/guide/study`
+   lists every entry by subject, searchable, with its citation and an “Ask about
+   this” jump into the ask box.
+
+A value that depends on the well (a casing grade, a fracture gradient, a safe
+mud weight) is never asserted. The entry says what must be measured and which
+test measures it. When a printed value is offered, both the page and the range
+are given.
 
 ## Add PDFs (server operator)
 

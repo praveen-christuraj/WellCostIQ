@@ -132,11 +132,47 @@ def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, da
     counts = Counter(r.status for r in reports)
     lag = None
     if well_id and scope:
-        series = time_depth(db, organization_id, well_id, scope)["lag_series"]
-        included = {r.id for r in reports}
-        series = [p for p in series if p["report_id"] in included]
-        lag = series[-1]["lag_days"] if series else None
+        # One basis for lead/lag across the product: whatever the report list
+        # shows for these reports, in date order, is what the dashboard reports.
+        recorded = _recorded_lag_from_time_depth(
+            db, organization_id, well_id, scope, [r.id for r in reports]
+        )
+        ordered = [recorded[r.id] for r in reports if r.id in recorded]
+        lag = ordered[0]["lag_days"] if ordered else None
     wells = db.scalars(well_q).all()
+    # The well picture on the dashboard: current depth from the latest report,
+    # casing seats and surveys exactly as the Well Path page reads them.
+    from app.services.operations import well_path as well_path_svc
+
+    drawn_well = None
+    if well_id and scope:
+        drawn = well_path_svc.well_path(db, organization_id, well_id, scope)
+        drawn_well = {
+            "well_id": drawn["well_id"],
+            "well_code": drawn["well_code"],
+            "well_name": drawn["well_name"],
+            "scope": drawn["scope"],
+            "summary": drawn["summary"],
+            "sections": drawn["sections"],
+            "open_hole": drawn["open_hole"],
+            "assumption": drawn["assumption"],
+            "is_surveyed": drawn["is_surveyed"],
+        }
+        # The same numbers the card shows, taken from the drawing's own service so
+        # a KPI and its picture can never disagree. ``date_reported`` is the last
+        # day with a report inside the selected period, which tells a reader how
+        # fresh the depth is.
+        last_report = reports[0] if reports else None
+        drawn_well["depth"] = {
+            "current_md_m": drawn["summary"]["current_md_m"],
+            "current_tvd_m": drawn["summary"]["current_tvd_m"],
+            "tvd_basis": drawn["summary"]["current_tvd_basis"],
+            "bit_depth_m": drawn["summary"]["bit_depth_m"],
+            "date_reported": last_report.report_date.isoformat() if last_report else None,
+            "report_no": last_report.report_no_text if last_report else None,
+            "report_status": last_report.status if last_report else None,
+            "basis": drawn["summary"]["depth_basis"],
+        }
     return {
         "kpis": {
             "total_reports": len(reports),
@@ -167,6 +203,7 @@ def dashboard(db, organization_id, well_id=None, rig_id=None, date_from=None, da
         },
         "recent_reports": reports[:10],
         "missing_reports": _gaps(db, organization_id, wells, reports, scope, date_from, date_to),
+        "well_visual": drawn_well,
         # The Operations code is what a downtime block is grouped by; ``code``/``name``
         # stay for the existing chart series.
         "npt_by_code": [
@@ -202,6 +239,19 @@ def planned_at_depth(points, depth):
         if lo is not None and hi is not None and min(lo, hi) < depth < max(lo, hi):
             candidates.add(a["cum_days"] + (b["cum_days"] - a["cum_days"]) * (depth - lo) / (hi - lo))
     return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def _recorded_lag_from_time_depth(db, organization_id, well_id, scope, report_ids):
+    """The lead/lag the engineer can see on the report list, one per report.
+
+    ``time_depth`` interpolates planned days at a measured depth, so it is the
+    only place that can compare a day against a programme that prints depth but
+    no confirmed checkpoint. The dashboard reuses it instead of computing a
+    second, differently-basis number.
+    """
+    series = time_depth(db, organization_id, well_id, scope)["lag_series"]
+    included = set(report_ids)
+    return {row["report_id"]: row for row in series if row["report_id"] in included}
 
 
 def time_depth(db, organization_id, well_id, scope="drilling"):

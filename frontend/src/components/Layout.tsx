@@ -13,7 +13,7 @@ import {
   InsightsOutlined, SettingsOutlined, StorageOutlined, PlaylistAddCheckRounded, WaterDropOutlined,
   AssessmentOutlined, LocalGasStationOutlined, ScienceOutlined, Inventory2Outlined, ScheduleRounded,
   FactCheckOutlined, SecurityRounded, NotificationsOutlined, TuneRounded, BackupOutlined, HomeOutlined,
-  ReceiptLongOutlined, PostAddOutlined, ContentCopyOutlined, SupportAgentOutlined,
+  ReceiptLongOutlined, PostAddOutlined, ContentCopyOutlined, SupportAgentOutlined, TimelineOutlined,
 } from '@mui/icons-material'
 import Brand, { BrandIcon } from './Brand'
 import { FormDialog, ErrorMessage } from './Common'
@@ -84,6 +84,7 @@ const modules: NavModule[] = [
     { label: 'Daily reports', path: '/operations/reports', icon: ScheduleRounded, permission: 'ops-report:read' },
     { label: 'Operation summary', path: '/operations/summary', icon: TableChartOutlined, permission: 'ops-report:read' },
     { label: 'Analytics', path: '/operations/analytics', icon: InsightsOutlined, permission: 'ops-analytics:read' },
+    { label: 'Well path', path: '/operations/well-path', icon: TimelineOutlined, anyOf: ['ops-dashboard:read', 'ops-report:read', 'ops-analytics:read'] },
     { label: 'Documents', path: '/operations/documents', icon: DescriptionOutlined, permission: 'ops-doc:read' },
     { label: 'Code library', path: '/operations/library', icon: ListAltOutlined, permission: 'ops-master:read' },
     { label: 'Ask & guide', path: '/operations/guide', icon: SupportAgentOutlined, anyOf: ['ops-report:read', 'ops-plan:read', 'ops-doc:read', 'ops-master:read'] },
