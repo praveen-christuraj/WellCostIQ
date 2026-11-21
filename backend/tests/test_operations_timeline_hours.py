@@ -119,11 +119,67 @@ def _report_with_blocks(client, headers, rig, well, blocks):
     return body
 
 
+def _items(client, headers, plan):
+    return good(client.get(OPS + f"/plans/{plan['id']}", headers=headers))["items"]
+
+
+def _close(client, headers, plan_id, item_id, *, actual_hours=None, note=""):
+    """Close a programme activity: the only route to a lead or a lag.
+
+    An activity that has logged hours but is still open reports progress and
+    remaining hours, never a variance — a 100 h activity with 12 h logged is not
+    88 h early, it is a job in its seventh hour of ten.
+    """
+    body = {"note": note}
+    if actual_hours is not None:
+        body["actual_hours"] = actual_hours
+    return good(
+        client.post(
+            OPS + f"/plans/{plan_id}/items/{item_id}/close", headers=headers, json=body
+        )
+    )
+
+
+def test_an_open_activity_reports_progress_not_a_lead():
+    """The 12-of-100 case: hours logged against a code nobody has finished.
+
+    The old arithmetic printed ``planned − actual`` for a job still in progress,
+    so a 100 h activity with 12 h logged read as an 88 h lead. It has progress and
+    it owes hours; the verdict waits until the engineer closes it.
+    """
+    with TestClient(app) as client:
+        headers = login(client)
+        rig, well = _well(client, headers)
+        plan = _programme(client, headers, rig, well)
+        report = _report_with_blocks(
+            client, headers, rig, well, [('Drill 12-1/4" directional hole to section TD', 12)]
+        )
+        block = report["blocks"][0]
+        # 12 h of 12 planned is *at* plan, but still open: no verdict yet either way.
+        assert block["timeline_plan_step_no"] == 1
+        assert block["timeline_planned_hours"] == "12.000"
+        assert block["timeline_actual_hours"] == "12.000"
+        assert block["timeline_sequence_state"] == "in_progress"
+        assert block["timeline_variance_hours"] is None
+        assert block["timeline_variance_days"] is None
+        assert "in progress" in block["timeline_basis"]
+        assert "remaining" in block["timeline_basis"]
+        # Closing it is what turns the hours into a verdict.
+        item = _items(client, headers, plan)[0]
+        closed = _close(client, headers, plan["id"], item["id"])
+        assert closed["state"] == "complete"
+        assert closed["variance_hours"] == "0.000"
+        refreshed = good(client.get(OPS + f"/reports/{report['id']}", headers=headers))["blocks"][0]
+        assert refreshed["timeline_sequence_state"] == "complete"
+        assert refreshed["timeline_variance_hours"] == "0.000"
+        assert refreshed["timeline_comparison"] == "on"
+
+
 def test_the_system_compares_the_matched_activity_in_hours_not_calendar_days():
     with TestClient(app) as client:
         headers = login(client)
         rig, well = _well(client, headers)
-        _programme(client, headers, rig, well)
+        plan = _programme(client, headers, rig, well)
         report = _report_with_blocks(
             client,
             headers,
@@ -132,30 +188,40 @@ def test_the_system_compares_the_matched_activity_in_hours_not_calendar_days():
             [('Drill 12-1/4" directional hole to section TD', 15), ("Perform a wiper trip to shoe", 4)],
         )
         first, second = report["blocks"]
-        # 'Drill … to section TD' planned 12 h, logged 15 h → 3 h over plan = a lag.
+        # The system proposes the programme row from the narrative, before any close.
         assert first["timeline_plan_step_no"] == 1
         assert first["timeline_planned_hours"] == "12.000"
         assert first["timeline_actual_hours"] == "15.000"
-        assert first["timeline_variance_hours"] == "-3.000"
-        assert first["timeline_comparison"] == "behind"
-        # The wiper trip planned 6 h and took 4 h → 2 h early = a lead.
+        # The wiper trip planned 6 h and took 4 h.
         assert second["timeline_plan_step_no"] == 2
-        assert second["timeline_variance_hours"] == "2.000"
-        assert second["timeline_comparison"] == "ahead"
         # The block's own logged duration is preserved as the system's figure.
         assert second["timeline_system_actual_hours"] == "4.000"
         assert second["timeline_actual_edited"] is False
+
+        raw, trip = _items(client, headers, plan)
+        # 'Drill … to section TD' planned 12 h, logged 15 h → 3 h over plan = a lag.
+        assert _close(client, headers, plan["id"], raw["id"])["variance_hours"] == "-3.000"
+        # The wiper trip planned 6 h and took 4 h → 2 h early = a lead.
+        assert _close(client, headers, plan["id"], trip["id"])["variance_hours"] == "2.000"
+        rows = good(client.get(OPS + f"/reports/{report['id']}", headers=headers))["blocks"]
+        assert rows[0]["timeline_variance_hours"] == "-3.000"
+        assert rows[0]["timeline_variance_days"] == "-0.125"
+        assert rows[0]["timeline_comparison"] == "behind"
+        assert rows[1]["timeline_variance_hours"] == "2.000"
+        assert rows[1]["timeline_comparison"] == "ahead"
 
 
 def test_an_engineer_correction_recomputes_the_variance_and_survives_a_resuggest():
     with TestClient(app) as client:
         headers = login(client)
         rig, well = _well(client, headers)
-        _programme(client, headers, rig, well)
+        plan = _programme(client, headers, rig, well)
         report = _report_with_blocks(
             client, headers, rig, well, [('Drill 12-1/4" directional hole to section TD', 15)]
         )
         block = report["blocks"][0]
+        # The correction is stored on an open code: it changes the hours, and it
+        # still writes no variance, because the code has not finished.
         review = good(
             client.post(
                 OPS + f"/reports/{report['id']}/timeline-review",
@@ -168,12 +234,19 @@ def test_an_engineer_correction_recomputes_the_variance_and_survives_a_resuggest
             )
         )
         assert review["corrected_blocks"] == 1
-        assert review["variance_hours"] == "-1.000"
+        assert review["variance_hours"] is None
+        assert review["total_variance_hours"] is None
+        assert "no reviewed activity is closed" in review["summary"]
         refreshed = good(client.get(OPS + f"/reports/{report['id']}", headers=headers))["blocks"][0]
         assert refreshed["timeline_actual_hours"] == "13.000"
-        assert refreshed["timeline_variance_hours"] == "-1.000"
-        assert refreshed["timeline_comparison"] == "behind"
+        assert refreshed["timeline_variance_hours"] is None
         assert refreshed["timeline_review_state"] == "edited"
+        # Closing the activity turns the corrected 13 h into the verdict: 1 h late.
+        item = _items(client, headers, plan)[0]
+        assert _close(client, headers, plan["id"], item["id"])["variance_hours"] == "-1.000"
+        closed = good(client.get(OPS + f"/reports/{report['id']}", headers=headers))["blocks"][0]
+        assert closed["timeline_variance_hours"] == "-1.000"
+        assert closed["timeline_comparison"] == "behind"
         assert refreshed["timeline_actual_edited"] is True
         assert refreshed["timeline_edited_by"]
 
@@ -209,9 +282,11 @@ def test_accepting_and_clearing_a_correction_restores_the_logged_duration():
     with TestClient(app) as client:
         headers = login(client)
         rig, well = _well(client, headers)
-        _programme(client, headers, rig, well)
+        plan = _programme(client, headers, rig, well)
         report = _report_with_blocks(client, headers, rig, well, [("Perform a wiper trip to shoe", 4)])
         block = report["blocks"][0]
+        item = _items(client, headers, plan)[1]
+        assert _close(client, headers, plan["id"], item["id"])["variance_hours"] == "2.000"
         good(
             client.post(
                 OPS + f"/reports/{report['id']}/timeline-review",
@@ -284,19 +359,44 @@ def test_rejecting_removes_the_comparison_instead_of_zeroing_it():
         assert block["timeline_variance_hours"] is None
 
 
-def test_an_unmatched_block_reports_no_comparison_rather_than_a_wrong_activity():
+def test_a_line_with_no_matching_activity_is_unplanned_and_can_only_lag():
+    """Hours nobody filed against a code are Unplanned Activity, not a footnote.
+
+    They used to be excluded from the comparison and told so, which quietly
+    flattered the month: real work with no plan cannot be a lead over a plan it
+    was never in.
+    """
     with TestClient(app) as client:
         headers = login(client)
         rig, well = _well(client, headers)
-        _programme(client, headers, rig, well)
+        plan = _programme(client, headers, rig, well)
         report = _report_with_blocks(
             client, headers, rig, well, [("Catering standby for weather", 3)]
         )
         block = report["blocks"][0]
         assert block["timeline_planned_hours"] is None
-        assert block["timeline_variance_hours"] is None
-        assert block["timeline_comparison"] == "on"
-        assert block["timeline_basis"] == "no matching programme activity"
+        assert block["timeline_sequence_state"] == ""
+        # 0 planned − 3 logged: lag, and never anything else.
+        assert block["timeline_variance_hours"] == "-3.000"
+        assert block["timeline_variance_days"] == "-0.125"
+        assert block["timeline_comparison"] == "behind"
+        assert block["timeline_basis"] == "unplanned activity"
+
+        # A draft does not vote: the bucket shows the hours, marked as waiting, and
+        # the submitted-month figures stay exactly as they were.
+        rollup = good(client.get(OPS + f"/plans/{plan['id']}/timeline-rollup", headers=headers))
+        assert rollup["unplanned"]["provisional_hours"] == "3.000"
+        assert rollup["unplanned"]["line_count"] == 0
+        assert rollup["unplanned"]["actual_hours"] is None
+        assert rollup["totals"]["actual_unplanned"] is None
+        assert rollup["totals"]["realised_variance"] is None
+        assert rollup["totals"]["closed_code_count"] == 0
+        # The bucket is one the page must render, so it is always present.
+        assert rollup["unplanned"]["code"] == "—"
+        assert rollup["policy"]["uncoded"] == "lag"
+        # The line says so itself, and no code is claimed for it.
+        assert all(row["state"] == "not_started" for row in rollup["codes"])
+        assert all(row["actual_hours"] is None for row in rollup["codes"])
 
 
 def test_a_report_without_an_active_programme_says_so():
@@ -430,9 +530,12 @@ def test_an_engineer_can_state_the_comparison_when_the_hours_say_otherwise():
     with TestClient(app) as client:
         headers = login(client)
         rig, well = _well(client, headers)
-        _programme(client, headers, rig, well)
+        plan = _programme(client, headers, rig, well)
         report = _report_with_blocks(client, headers, rig, well, [("Perform a wiper trip to shoe", 4)])
         block = report["blocks"][0]
+        # Closed, so the hours do say "ahead" and the engineer's "behind" is a
+        # genuine disagreement with the evidence rather than a verdict on nothing.
+        assert _close(client, headers, plan["id"], _items(client, headers, plan)[1]["id"])["variance_hours"] == "2.000"
         edited = client.post(
             OPS + f"/reports/{report['id']}/timeline-review",
             headers=headers,

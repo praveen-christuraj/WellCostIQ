@@ -67,6 +67,47 @@ class OpsSettings(Base):
     default_depth_unit: Mapped[str] = mapped_column(String(5), default="m", nullable=False)
     default_rop_basis: Mapped[str] = mapped_column(String(20), default="rotating", nullable=False)
     plan_contingency_hours: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    # ---------------------------------------------------------------------
+    # Sequence codes, lead / lag (see ``domain.operations.sequence``)
+    # ---------------------------------------------------------------------
+    #: ``lag`` — hours against no sequence code add to actual hours and produce lag
+    #: (the organisation's rule). ``exclude`` — shown but not subtracted.
+    sequence_uncoded_policy: Mapped[str] = mapped_column(
+        String(12), default="lag", server_default="lag", nullable=False
+    )
+    #: ``include`` — NPT hours inside the unplanned lag. ``exclude`` — shown only.
+    sequence_npt_policy: Mapped[str] = mapped_column(
+        String(12), default="include", server_default="include", nullable=False
+    )
+    #: ``separate`` — a skipped activity's hours are reported as saved and are not
+    #: netted into the variance. ``net`` — added to the variance as a lead.
+    sequence_skipped_credit: Mapped[str] = mapped_column(
+        String(12), default="separate", server_default="separate", nullable=False
+    )
+    #: Over-plan percentage at which the system *suggests* closing an activity.
+    sequence_auto_close_tolerance_pct: Mapped[Decimal] = mapped_column(
+        # Precision and scale follow every other decimal column in the schema: one
+        # contract for stored numbers, so a tolerance cannot quietly round differently
+        # from the hours it is compared against.
+        Numeric(28, DECIMAL_PLACES),
+        default=Decimal(0),
+        server_default="0",
+        nullable=False,
+    )
+    #: Apply that suggestion without a reviewer. Off by default, deliberately.
+    sequence_auto_close: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false(), nullable=False
+    )
+    #: Refuse to submit a report whose line carries no sequence code and no
+    #: explicit unplanned acknowledgement.
+    sequence_require_code_on_submit: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false(), nullable=False
+    )
+    #: The confirmed figure uses the latest live report revision per date; a
+    #: superseded revision never votes.
+    sequence_current_run_only: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=sa_true(), nullable=False
+    )
     document_max_mb: Mapped[int] = mapped_column(Integer, default=25, nullable=False)
     retention_years: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     extraction_timeout_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
@@ -627,7 +668,16 @@ class OpsActivityBlock(Base):
     timeline_variance_days: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     timeline_planned_days: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     timeline_actual_days: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
-    timeline_basis: Mapped[str] = mapped_column(String(50), default="", server_default="", nullable=False)
+    timeline_basis: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
+    # The state of the code this line logs, as the last recompute read it. A code
+    # that has started and not finished is IN PROGRESS, not "88 hours early": the
+    # cached state is what lets the register say so without re-deriving the ledger.
+    timeline_sequence_state: Mapped[str] = mapped_column(
+        String(16), default="", server_default="", nullable=False
+    )
+    #: Set when this line's hours are shared between codes; ``remainder`` marks the
+    #: part that stayed unplanned, so a split can never quietly lose hours.
+    timeline_split_state: Mapped[str] = mapped_column(String(12), default="", server_default="", nullable=False)
     timeline_review_state: Mapped[str] = mapped_column(String(20), default="suggested", server_default="suggested", nullable=False)
     timeline_note: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     timeline_reviewed_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
@@ -786,8 +836,78 @@ class OpsPlanItem(Base):
     contingency_hours: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal(0), nullable=False)
     is_critical_path: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notes: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    # ---------------------------------------------------------------------
+    # Sequence-code state: skipped, and closed (finished)
+    # ---------------------------------------------------------------------
+    # A planned activity can end in exactly three business ways: it was done, it
+    # was skipped, or it is still open. "Still open" is the absence of both marks,
+    # so no workflow status is invented here. The two marks below are the only
+    # stored state: everything else — progress, remaining hours, in progress,
+    # overrun — is derived from the hours by ``domain.operations.sequence``.
+    #
+    # **Skipped.** The activity will never be done. Its planned hours leave the
+    # plan's scope, are reported once as saved, and stop counting in the cumulative
+    # curve every later activity is measured against. The saved curve itself is
+    # never rewritten, so a submitted day keeps reading as it was signed.
+    state: Mapped[str] = mapped_column(String(16), default="planned", server_default="planned", nullable=False)
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    skipped_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    skip_reason: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
+    # **Closed.** The engineer states the activity is finished, and it is then a
+    # lead or a lag. Closing is an explicit, audited act: 100 h finished in 90 and
+    # 100 h burned without finishing the hole are not the same event, so completion
+    # is never inferred from the hours alone.
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    close_source: Mapped[str] = mapped_column(String(12), default="", server_default="", nullable=False)
+    close_note: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
+    #: The actual the engineer confirmed at close, when it differs from the log sum.
+    closed_actual_hours: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+
+
+class OpsActivityBlockCode(Base):
+    """Hours of one daily-report line that belong to one sequence code.
+
+    A narrative line can genuinely do two programme activities ("drill ahead and
+    ream, then run casing"). One column cannot hold two codes honestly, and picking
+    one makes the other code's actual wrong by construction. Splitting is explicit
+    and column-wise: a row here carries the hours this line spends on that code.
+
+    * ``Σ hours ≤ the line's own contribution`` — enforced by the service, at three
+      decimal places, never "roughly". Any remainder stays in the unplanned bucket
+      and is named in the response, so a split can never lose hours.
+    * A line with no split rows keeps using its single ``timeline_code``. Nothing
+      historical is rewritten.
+    * ``sequence_no_snapshot`` keeps the code the engineer saw when they split it.
+      ``plan_item_id`` is the identity: sequence numbers are positional, so the id
+      is what a later re-save cannot re-point sideways.
+    """
+
+    __tablename__ = "ops_activity_block_codes"
+    __table_args__ = (
+        UniqueConstraint("block_id", "plan_item_id", name="uq_ops_block_codes_block_item"),
+        Index("ix_ops_block_codes_org_item", "organization_id", "plan_item_id"),
+        Index("ix_ops_block_codes_org_block", "organization_id", "block_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    block_id: Mapped[str] = mapped_column(
+        ForeignKey("ops_activity_blocks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    plan_item_id: Mapped[str] = mapped_column(
+        ForeignKey("ops_plan_items.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    sequence_no_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    hours: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(255), default="", nullable=False)
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Box, Button, FormControlLabel, MenuItem, Switch, TextField } from '@mui/material'
+import { Alert, Box, Button, FormControlLabel, MenuItem, Switch, TextField, Typography } from '@mui/material'
 import { ErrorMessage, PageHeading, useUnsavedChangesGuard } from '../../components/Common'
 import { SectionCard } from '../../components/ui/SectionCard'
 import { useAuth } from '../../context/AuthContext'
@@ -158,6 +158,93 @@ export default function OperationsSettings() {
                 disabled={!write}
                 onChange={(e) => change({ max_daily_hours: Number(e.target.value) })}
               />
+            </Box>
+          </SectionCard>
+          <SectionCard
+            title="Lead and lag"
+            subtitle="What a sequence-code comparison means in this workspace. Every choice here is printed beside the figure it produces, so two months are never compared across a silent change of rule."
+          >
+            <Box display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: 'repeat(3,minmax(0,1fr))' }}>
+              <TextField
+                select
+                label="Hours with no sequence code"
+                value={draft.sequence_uncoded_policy}
+                disabled={!write}
+                onChange={(e) =>
+                  change({ sequence_uncoded_policy: e.target.value as OpsSettings['sequence_uncoded_policy'] })
+                }
+                helperText="Unplanned Activity has no planned hours, so it can only read as lag. Excluding it flatters the month."
+              >
+                <MenuItem value="lag">Unplanned Activity — reads as lag</MenuItem>
+                <MenuItem value="exclude">Show, but do not count against the verdict</MenuItem>
+              </TextField>
+              <TextField
+                select
+                label="Non-productive time"
+                value={draft.sequence_npt_policy}
+                disabled={!write}
+                onChange={(e) => change({ sequence_npt_policy: e.target.value as OpsSettings['sequence_npt_policy'] })}
+                helperText="Whether NPT hours count against the sequence variance."
+              >
+                <MenuItem value="include">Count NPT against the variance</MenuItem>
+                <MenuItem value="exclude">Show NPT, exclude it from the variance</MenuItem>
+              </TextField>
+              <TextField
+                select
+                label="Skipped activities"
+                value={draft.sequence_skipped_credit}
+                disabled={!write}
+                onChange={(e) =>
+                  change({ sequence_skipped_credit: e.target.value as OpsSettings['sequence_skipped_credit'] })
+                }
+                helperText="Saved planned hours are always reported; this says whether they also move the verdict."
+              >
+                <MenuItem value="separate">Report as saved, do not net into the verdict</MenuItem>
+                <MenuItem value="net">Net the saved hours into the verdict</MenuItem>
+              </TextField>
+              <TextField
+                type="number"
+                label="Auto-close suggestion (%)"
+                value={Number(draft.sequence_auto_close_tolerance_pct)}
+                disabled={!write}
+                onChange={(e) =>
+                  change({ sequence_auto_close_tolerance_pct: String(Math.max(0, Number(e.target.value) || 0)) })
+                }
+                helperText="How far over plan an activity may be before closing it is suggested."
+              />
+            </Box>
+            <Box display="grid" mt={1}>
+              {(
+                [
+                  [
+                    'sequence_auto_close',
+                    'Close activities automatically once they exceed the tolerance',
+                    'Off by default. A plan of 100 h finished in 90 and a plan of 100 h where 100 h were burned without finishing the hole are not the same event.',
+                  ],
+                  [
+                    'sequence_require_code_on_submit',
+                    'Require a sequence code (or an Unplanned Activity reason) before submitting',
+                    'The refusal names every uncoded line instead of submitting work the programme cannot account for.',
+                  ],
+                  [
+                    'sequence_current_run_only',
+                    'Only the current revision of a report votes',
+                    'A superseded revision is history: it is shown, but it never moves a figure that was signed.',
+                  ],
+                ] as const
+              ).map(([k, label, hint]) => (
+                <Box key={k}>
+                  <FormControlLabel
+                    label={label}
+                    control={
+                      <Switch checked={draft[k]} disabled={!write} onChange={(e) => change({ [k]: e.target.checked })} />
+                    }
+                  />
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 6, mb: 1 }}>
+                    {hint}
+                  </Typography>
+                </Box>
+              ))}
             </Box>
           </SectionCard>
           <SectionCard title="Submission checks">

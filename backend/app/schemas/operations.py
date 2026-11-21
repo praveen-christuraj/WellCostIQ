@@ -44,6 +44,26 @@ class OpsSettingsIn(_Strict):
     default_rop_basis: str = Field(min_length=1, max_length=20)
     document_max_mb: int = Field(ge=1, le=100)
 
+    # Sequence codes and lead / lag. Every default is the requested behaviour, so a
+    # workspace that never opens this screen gets the corrected arithmetic.
+    #: ``lag`` — hours against no sequence code raise actual hours and produce lag.
+    #: ``exclude`` — the hours are shown but not subtracted.
+    sequence_uncoded_policy: Literal["lag", "exclude"] = "lag"
+    #: Whether NPT hours take part in the unplanned lag or are only shown.
+    sequence_npt_policy: Literal["include", "exclude"] = "include"
+    #: ``separate`` — a skipped activity's hours are reported as saved;
+    #: ``net`` — they are also added to the sequence variance as a lead.
+    sequence_skipped_credit: Literal["separate", "net"] = "separate"
+    #: Over-plan percentage at which closing an activity is suggested to a reviewer.
+    sequence_auto_close_tolerance_pct: Decimal = Field(default=Decimal(0), ge=0, le=1000)
+    #: Apply that suggestion with nobody confirming it. Deliberately off by default.
+    sequence_auto_close: bool = False
+    #: Refuse to submit a line that carries no sequence code and no unplanned
+    #: acknowledgement. Off by default: it advises, it does not block a report.
+    sequence_require_code_on_submit: bool = False
+    #: Only current report revisions vote on the confirmed figure.
+    sequence_current_run_only: bool = True
+
     document_types: list[Annotated[str, Field(min_length=1, max_length=20)]] | None = Field(
         default=None, min_length=1, max_length=80
     )
@@ -370,6 +390,11 @@ class OpsActivityBlockOut(OpsActivityBlockIn):
     timeline_planned_days: Decimal | None = None
     timeline_actual_days: Decimal | None = None
     timeline_basis: str = ""
+    #: The state of the code this line logs (``in_progress``, ``complete``, ...).
+    #: An open code has no lead and no lag — only progress and remaining hours.
+    timeline_sequence_state: str = ""
+    #: ``split`` when the line's hours are shared between several codes.
+    timeline_split_state: str = ""
     timeline_reviewed_by: str = ""
     timeline_reviewed_at: datetime | None = None
     #: The programme row this block logs, and the hours each side took.
@@ -710,6 +735,18 @@ class OpsTimelineCodeOut(_Strict):
     planned_hours: Decimal | None = None
     target_depth_m: Decimal | None = None
     cum_planned_days: Decimal | None = None
+    #: The identity of the code. Sequence numbers are positional, so a link made
+    #: today is stored against this id and cannot slide sideways on a later save.
+    item_id: str | None = None
+    state: str = "not_started"
+    allowed_states: list[str] = Field(
+        default_factory=lambda: ["not_started", "in_progress", "overrun_open", "complete", "skipped"]
+    )
+    remaining_hours: Decimal | None = None
+    actual_hours: Decimal | None = None
+    is_skipped: bool = False
+    closed: bool = False
+    effective_cum_days: Decimal | None = None
 
 
 class OpsReportTimelineCodesOut(_Strict):
@@ -720,19 +757,55 @@ class OpsReportTimelineCodesOut(_Strict):
     plan_status: str = ""
     basis: str = ""
     codes: list[OpsTimelineCodeOut] = Field(default_factory=list)
+    policy: "OpsSequencePolicyOut | None" = None
 
 
 class OpsSeqCodeIn(_Strict):
-    """Link the selected daily-report lines to one programme sequence code."""
+    """Link the selected daily-report lines to one programme sequence code.
+
+    ``item_id`` is preferred: it is the code's identity. ``sequence_no`` stays for
+    existing callers and for a code that was typed from a printed programme.
+    """
 
     block_ids: list[str] = Field(min_length=1, max_length=500)
-    sequence_no: int = Field(ge=1)
+    sequence_no: int | None = Field(default=None, ge=1)
+    item_id: str | None = Field(default=None, max_length=36)
+
+    @field_validator("sequence_no")
+    @classmethod
+    def _need_one(cls, value, info):
+        return value
 
 
 class OpsSeqCodeSkip(_Strict):
     block_id: str
     sequence_no: int | None = None
     reason: str
+
+
+class OpsSeqCodeSplitLine(_Strict):
+    """Hours of one line that belong to one code."""
+
+    sequence_no: int | None = Field(default=None, ge=1)
+    item_id: str | None = Field(default=None, max_length=36)
+    hours: Decimal3 = Field(ge=0)
+
+
+class OpsSeqCodeSplitIn(_Strict):
+    """Share one daily-report line's hours between several programme codes."""
+
+    block_id: str = Field(min_length=1, max_length=36)
+    allocations: list[OpsSeqCodeSplitLine] = Field(min_length=1, max_length=20)
+    #: The hours left over stay in the unplanned bucket and are named, never dropped.
+    remainder_to_unplanned: bool = True
+    note: str = Field(default="", max_length=500)
+
+
+class OpsSeqCodeClearIn(_Strict):
+    """Remove the code from these lines, deliberately making them unplanned."""
+
+    block_ids: list[str] = Field(min_length=1, max_length=500)
+    acknowledge_unplanned: bool = True
 
 
 class OpsSeqCodePreviewOut(_Strict):
@@ -743,13 +816,86 @@ class OpsSeqCodePreviewOut(_Strict):
     lines: list[dict] = Field(default_factory=list)
     skipped: list[OpsSeqCodeSkip] = Field(default_factory=list)
     summary: str = ""
+    #: What the code's arithmetic will say once these lines carry it. Work in
+    #: progress has no verdict: it has progress and remaining hours.
+    code_state: str = ""
+    actual_hours: Decimal | None = None
+    remaining_hours: Decimal | None = None
+    variance_hours: Decimal | None = None
+    variance_days: Decimal | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class OpsSeqCodeApplyOut(_Strict):
     applied_count: int = 0
-    sequence_no: int
+    sequence_no: int | None = None
+    item_id: str | None = None
     skipped: list[OpsSeqCodeSkip] = Field(default_factory=list)
     summary: str = ""
+    code_state: str = ""
+    variance_hours: Decimal | None = None
+    variance_days: Decimal | None = None
+
+
+class OpsSeqCodeSplitOut(_Strict):
+    block_id: str
+    item_id: str | None = None
+    allocated_hours: Decimal | None = None
+    line_hours: Decimal | None = None
+    remainder_hours: Decimal | None = None
+    allocations: list[dict] = Field(default_factory=list)
+    summary: str = ""
+
+
+class OpsSequenceStateIn(_Strict):
+    """Skip or un-skip a planned activity, with a reason that is kept."""
+
+    state: Literal["planned", "skipped"]
+    reason: str = Field(default="", max_length=500)
+    #: A stale screen must not overwrite a fresher decision.
+    expected_updated_at: datetime | None = None
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def trim(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OpsSequenceCloseIn(_Strict):
+    """State that a planned activity is finished, and record on what evidence."""
+
+    #: The actual hours to close on, when they differ from the summed logs.
+    actual_hours: Decimal3 | None = Field(default=None, ge=0)
+    note: str = Field(default="", max_length=500)
+    block_ids: list[str] = Field(default_factory=list, max_length=2000)
+    expected_updated_at: datetime | None = None
+
+    @field_validator("note", mode="before")
+    @classmethod
+    def trim(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OpsSequenceCloseOut(_Strict):
+    item_id: str
+    sequence_no: int
+    state: str
+    planned_hours: Decimal | None = None
+    actual_hours: Decimal | None = None
+    variance_hours: Decimal | None = None
+    variance_days: Decimal | None = None
+    comparison: Literal["ahead", "behind", "on"] = "on"
+    summary: str = ""
+
+
+class OpsSequencePolicyOut(_Strict):
+    """The policy every figure in the ledger was produced under."""
+
+    uncoded: str = "lag"
+    npt: str = "include"
+    skipped_credit: str = "separate"
+    auto_close_tolerance_pct: Decimal = Decimal(0)
+    auto_close: bool = False
 
 
 class OpsTimelineRollupCodeOut(_Strict):
@@ -763,6 +909,77 @@ class OpsTimelineRollupCodeOut(_Strict):
     comparison: Literal["ahead", "behind", "on"] = "on"
     line_count: int = 0
     report_count: int = 0
+    # --- the state model -----------------------------------------------------
+    item_id: str = ""
+    state: str = "not_started"
+    #: reported − but only meaningful while the code is open.
+    progress_pct: Decimal | None = None
+    remaining_hours: Decimal | None = None
+    #: True when the hours look finished but no engineer has closed the activity.
+    close_suggested: bool = False
+    closed_at: datetime | None = None
+    close_source: str = ""
+    close_note: str = ""
+    saved_planned_hours: Decimal | None = None
+    skip_reason: str = ""
+    skipped_by: str = ""
+    skipped_at: datetime | None = None
+    #: Cumulative days on the curve with skipped activities removed, and the shift
+    #: from the saved curve. The saving reaches the schedule here, once.
+    effective_cum_days: Decimal | None = None
+    cum_shift_days: Decimal | None = None
+    saved_cum_days: Decimal | None = None
+    provisional_actual_hours: Decimal | None = None
+
+
+class OpsTimelineUnplannedOut(_Strict):
+    """Hours logged against no sequence code — they can only produce lag."""
+
+    code: str = "—"
+    actual_hours: Decimal | None = None
+    upa_hours: Decimal | None = None
+    npt_hours: Decimal | None = None
+    other_hours: Decimal | None = None
+    variance_hours: Decimal | None = None
+    variance_days: Decimal | None = None
+    comparison: Literal["ahead", "behind", "on"] = "on"
+    line_count: int = 0
+    provisional_hours: Decimal | None = None
+    unmatched_hours: Decimal | None = None
+
+
+class OpsTimelineTotalsOut(_Strict):
+    """The totals, each named for the question it answers."""
+
+    planned_in_scope: Decimal | None = None
+    planned_in_scope_days: Decimal | None = None
+    planned_saved: Decimal | None = None
+    actual_coded: Decimal | None = None
+    actual_unplanned: Decimal | None = None
+    actual_total: Decimal | None = None
+    #: Did the work we finished take the hours allowed? Closed codes only.
+    realised_variance: Decimal | None = None
+    realised_variance_days: Decimal | None = None
+    comparison: Literal["ahead", "behind", "on"] = "on"
+    closed_coverage_pct: Decimal | None = None
+    #: Actual ÷ plan over the whole plan. Burn, not a verdict.
+    plan_coverage_pct: Decimal | None = None
+    plan_coverage_days: Decimal | None = None
+    provisional_actual_hours: Decimal | None = None
+    closed_code_count: int = 0
+    open_code_count: int = 0
+    not_started_count: int = 0
+    skipped_count: int = 0
+    missing_planned_hours: int = 0
+    unattributed_hours: Decimal | None = None
+
+
+class OpsTimelineFindingOut(_Strict):
+    kind: str
+    message: str
+    item_id: str | None = None
+    block_id: str | None = None
+    severity: Literal["note", "warning"] = "note"
 
 
 class OpsTimelineRollupOut(_Strict):
@@ -776,6 +993,16 @@ class OpsTimelineRollupOut(_Strict):
     comparison: Literal["ahead", "behind", "on"] = "on"
     codes: list[OpsTimelineRollupCodeOut] = Field(default_factory=list)
     uncoded_lines: int = 0
+    # --- the state model and the honest totals -------------------------------
+    unplanned: OpsTimelineUnplannedOut | None = None
+    totals: OpsTimelineTotalsOut | None = None
+    findings: list[OpsTimelineFindingOut] = Field(default_factory=list)
+    policy: OpsSequencePolicyOut | None = None
+    confirmed_report_count: int = 0
+    provisional_report_count: int = 0
+    #: Days ahead (+) or behind (−) the programme on the effective curve.
+    schedule_position_days: Decimal | None = None
+    schedule_position_basis: str = ""
 
 
 class OpsTimelineHoursEdit(_Strict):
@@ -1029,6 +1256,8 @@ class OpsKpiOut(_Strict):
     npt_pct: float
     unaccounted_hours: float
     avg_rop: float | None
+    #: **Schedule position**, not the sequence variance: planned cumulative days at the
+    #: confirmed checkpoint minus elapsed days. Negative = ahead of the programme.
     lag_days: float | None
     wells_covered: int
     wells_total: int
@@ -1395,6 +1624,10 @@ class OpsPlanUpdateIn(_Strict):
 
 
 class OpsPlanItemIn(_Strict):
+    #: The row's identity, when the editor is re-saving a row it already holds.
+    #: Sequence numbers are positional, so without this the save would have to
+    #: delete and re-create every item — which re-points every historical link.
+    item_id: str | None = Field(default=None, max_length=36)
     sequence_no: int = Field(ge=1)
     hole_section_id: str | None = None
     phase_id: str | None = None

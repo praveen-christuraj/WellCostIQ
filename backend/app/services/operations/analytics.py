@@ -284,6 +284,11 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
     }
     timelines = defaultdict(list)
     checkpoints = {}
+    # The effective curve: the saved cumulative days with skipped activities
+    # removed. A saving reaches the schedule here, once, without rewriting the
+    # baseline a submitted month was signed against.
+    effective_hours = defaultdict(float)
+    effective = {}
     for item in db.scalars(
         select(OpsPlanItem)
         .where(OpsPlanItem.organization_id == organization_id, OpsPlanItem.plan_version_id.in_(versions))
@@ -291,6 +296,9 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
     ):
         days = float(item.cum_planned_days or 0)
         checkpoints[item.id] = days
+        if getattr(item, "state", "planned") != "skipped":
+            effective_hours[item.plan_version_id] += float(item.planned_hours or 0)
+        effective[item.id] = round(effective_hours[item.plan_version_id] / 24, 3)
         # Completions have no meaningful depth axis: the same programme measured in
         # activity numbers (1..n) is what the engineer can read against days.
         sequence = len(timelines[item.plan_version_id]) + 1
@@ -362,10 +370,21 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
                 "basis": basis,
             }
         )
-        planned = checkpoints.get(r.completed_plan_item_id)
+        planned = effective.get(r.completed_plan_item_id)
+        shifted = (
+            planned is not None
+            and checkpoints.get(r.completed_plan_item_id) is not None
+            and round(checkpoints[r.completed_plan_item_id], 3) != planned
+        )
         activity_no = activity_numbers.get(r.completed_plan_item_id) if r.completed_plan_item_id else None
         actual[-1]["activity_no"] = activity_no
-        comparison = "confirmed programme activity" if planned is not None else "at measured depth"
+        comparison = (
+            "confirmed programme activity (skipped activities removed)"
+            if shifted
+            else "confirmed programme activity"
+            if planned is not None
+            else "at measured depth"
+        )
         if planned is None and baseline and depth is not None:
             planned = planned_at_depth(timelines[baseline.id], depth)
         if planned is not None and baseline and basis != "first submitted period":
@@ -374,6 +393,8 @@ def time_depth(db, organization_id, well_id, scope="drilling"):
                     "report_date": str(r.report_date),
                     "report_id": r.id,
                     # Lead positive, lag negative — the same sign the UI and guide use.
+                    # This is the *schedule position*: where the well is against the
+                    # programme today, not the hours a finished activity overran.
                     "lag_days": round(planned - elapsed, 3),
                     "depth_m": depth,
                     "basis": comparison,

@@ -12,14 +12,14 @@ import {
 } from '@mui/material'
 import { RestartAlt } from '@mui/icons-material'
 import { PanelDialog } from '../Common'
-import type { ReviewTimelineResult } from '../../lib/operations'
+import type { OpsSequenceState, ReviewTimelineResult } from '../../lib/operations'
 
 /**
  * Editable plan-vs-actual hours: the review surface for lead and lag.
  *
- * The question this panel answers is "did this job take the hours the
- * programme allowed?" — and the answer is grouped by sequence code, because
- * that is the correlation the whole comparison rests on:
+ * The question this panel answers is "did this job take the hours the programme
+ * allowed?" — and the answer is grouped by sequence code, because that is the
+ * correlation the whole comparison rests on:
  *
  * * every line of the baseline programme carries a sequence code;
  * * a daily-report line opts in by carrying the same code (edit it in the
@@ -27,9 +27,17 @@ import type { ReviewTimelineResult } from '../../lib/operations'
  *   action);
  * * the panel sums the hours of the lines in each code and compares the total
  *   with the programme's planned hours for that code — positive variance is a
- *   lead, negative is a lag;
- * * lines without a code are listed under "Uncoded" and are excluded from the
- *   arithmetic: nothing is guessed from the wording of a narrative.
+ *   lead, negative is a lag, and ``difference / 24`` is the figure in days.
+ *
+ * **Only a finished activity carries that verdict.** A code with 12 of its 100
+ * hours logged is in progress: the panel shows 12 %, and the 88 hours it still
+ * owes, instead of printing 88 hours of lead. Finishing the activity is a
+ * separate, explicit act on the programme — it is what turns the hours into a
+ * lead or a lag.
+ *
+ * Lines without a code are **Unplanned Activity**, not a footnote. Their hours
+ * add to actual hours while planned hours stay put, so they can only ever read
+ * as lag, and they are shown in their own row with that arithmetic.
  *
  * Only changed rows are posted, and a correction needs a reason, because the
  * value then differs from the time log. Clearing a field restores the logged
@@ -56,6 +64,14 @@ export type TimelineHoursRow = {
   timeline_comparison?: 'ahead' | 'behind' | 'on'
   timeline_variance_hours?: string | null
   timeline_review_state?: 'suggested' | 'accepted' | 'edited' | 'rejected'
+  /**
+   * The state of the code this line logs, from the server's ledger. `in_progress`
+   * and `overrun_open` carry no verdict; only `complete` does. `skipped` means the
+   * planned work will never be done, so its hours are released, not counted as a lag.
+   */
+  timeline_sequence_state?: OpsSequenceState | ''
+  /** `split` when this line's hours are shared between several codes. */
+  timeline_split_state?: string
   timeline_basis?: string
 }
 
@@ -80,6 +96,36 @@ function hours(value: number | null): string {
 function normalise(value: string): string {
   const parsed = num(value)
   return parsed === null ? '' : parsed.toFixed(3)
+}
+
+const STATE_LABELS: Record<string, string> = {
+  not_started: 'not started',
+  in_progress: 'in progress',
+  overrun_open: 'over plan, still open',
+  complete: 'finished',
+  skipped: 'skipped',
+}
+
+/** True only for a code the engineer has finished: the one state with a verdict. */
+function hasVerdict(state: string | undefined): boolean {
+  return state === 'complete'
+}
+
+/** What a group's verdict cell says, in words that cannot be misread as a lead. */
+function stateSentence(state: string | undefined, planned: number | null, actual: number | null): string {
+  const logged = actual === null ? 0 : actual
+  const progress = planned !== null && planned > 0 ? Math.min(100, (logged / planned) * 100) : null
+  const remaining = planned !== null ? Math.max(0, planned - logged) : null
+  if (state === 'skipped') return 'skipped — planned hours released, not a lag'
+  if (state === 'not_started') return 'not started'
+  if (state === 'complete') return ''
+  if (state === 'overrun_open') {
+    return planned === null
+      ? `over plan · ${logged.toFixed(3)} h logged, not finished`
+      : `over plan by ${(logged - planned).toFixed(3)} h, not finished`
+  }
+  if (progress === null) return 'in progress · no planned hours to compare'
+  return `in progress · ${logged.toFixed(3)} / ${planned?.toFixed(3)} h (${progress.toFixed(0)}%) · ${remaining?.toFixed(3)} h remaining`
 }
 
 export function TimelineHoursReview({
@@ -147,9 +193,13 @@ export function TimelineHoursReview({
 
   /**
    * Group the rows by sequence code: coded groups first in code order, the
-   * uncoded group last. The group is the unit lead/lag is computed on, so the
+   * unplanned group last. The group is the unit lead/lag is computed on, so the
    * panel adds up by code, never by line — planned hours belong to the
    * programme row, not to any single line that logs against it.
+   *
+   * The group's *state* comes from the server's ledger, not from the hours on
+   * this screen: whether an activity is finished is a fact about the programme,
+   * decided by a person, and no amount of typing here changes it.
    */
   const groups = useMemo(() => {
     const byCode = new Map<string, TimelineHoursRow[]>()
@@ -166,9 +216,11 @@ export function TimelineHoursReview({
       const actualSum = members.reduce((sum, m) => sum + (actualOf(m) ?? 0), 0)
       const hasActual = members.some((m) => actualOf(m) !== null)
       const actual = hasActual ? actualSum : null
-      const variance = planned !== null && actual !== null ? planned - actual : null
+      // A verdict exists only for a finished activity that has planned hours.
+      const state = code === '' ? '' : (members[0]?.timeline_sequence_state ?? '')
+      const variance = hasVerdict(state) && planned !== null && actual !== null ? planned - actual : null
       const codeNo = /^\d+$/.test(code) ? Number(code) : Number.POSITIVE_INFINITY
-      return { code, members, planned, actual, variance, codeNo }
+      return { code, members, planned, actual, variance, state, codeNo }
     })
     entries.sort((a, b) => (a.code === '' ? 1 : b.code === '' ? -1 : a.codeNo - b.codeNo))
     return entries
@@ -194,24 +246,63 @@ export function TimelineHoursReview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groups])
 
-  /** Totals across the distinct coded groups, plus the uncoded line count. */
+  /**
+   * Totals that cannot flatter the month.
+   *
+   * `verdict` is the printed lead/lag: the sum of the *finished* activities'
+   * variances, less the hours nobody could code. `burn` is how much of the plan
+   * has been spent — a different question, named as such, and deliberately never
+   * added to `verdict`. A plan with nothing finished has no verdict at all.
+   */
   const totals = useMemo(() => {
     let planned = 0
     let actual = 0
+    let verdict = 0
+    let finished = 0
+    let open = 0
+    let unplanned = 0
+    let skipped = 0
     let matched = 0
     let uncoded = 0
     let corrected = 0
     for (const group of groups) {
       if (group.code === '') {
         uncoded += group.members.length
+        unplanned += group.actual ?? 0
         continue
       }
       matched += 1
+      if (group.state === 'skipped') {
+        skipped += 1
+        continue
+      }
       if (group.planned !== null) planned += group.planned
       if (group.actual !== null) actual += group.actual
+      if (hasVerdict(group.state)) {
+        finished += 1
+        if (group.variance !== null) verdict += group.variance
+      } else {
+        open += 1
+      }
     }
-    for (const row of rows) if (row.timeline_actual_edited || draft[row.id] !== undefined) corrected += 1
-    return { planned, actual, variance: planned - actual, matched, uncoded, corrected }
+    for (const row of rows) {
+      if (row.timeline_actual_edited || draft[row.id] !== undefined) corrected += 1
+    }
+    const realised = verdict - unplanned
+    return {
+      planned,
+      actual,
+      realised,
+      hasVerdict: finished > 0,
+      finished,
+      open,
+      unplanned,
+      skipped,
+      matched,
+      uncoded,
+      corrected,
+      burn: actual + unplanned,
+    }
   }, [groups, rows, draft])
 
   /** The decision follows the work: a correction is an edit, a confirmation an accept. */
@@ -233,7 +324,7 @@ export function TimelineHoursReview({
     setState('accepted')
   }
 
-  const worstCase = totals.variance > 0 ? 'lead' : totals.variance < 0 ? 'lag' : 'on plan'
+  const verdictLabel = totals.realised > 0 ? 'lead' : totals.realised < 0 ? 'lag' : 'on plan'
   const gridColumns = 'minmax(0,2.2fr) 96px 120px 112px 120px'
 
   return (
@@ -271,12 +362,23 @@ export function TimelineHoursReview({
           gridTemplateColumns={{ xs: 'repeat(2,minmax(0,1fr))', md: 'repeat(4,minmax(0,1fr))' }}
         >
           {[
-            ['Planned hours', hours(totals.planned), `${totals.matched} coded activit${totals.matched === 1 ? 'y' : 'ies'}${totals.uncoded ? ` · ${totals.uncoded} uncoded line(s) excluded` : ''}`],
-            ['Actual hours', hours(totals.actual), `${totals.corrected} line(s) corrected by hand`],
             [
-              'Variance',
-              `${totals.variance > 0 ? '+' : ''}${hours(totals.variance)} h`,
-              `${totals.variance > 0 ? '+' : ''}${(totals.variance / 24).toFixed(3)} d · ${worstCase}`,
+              'Planned hours',
+              hours(totals.planned),
+              `${totals.matched} coded activit${totals.matched === 1 ? 'y' : 'ies'} in scope${totals.skipped ? ` · ${totals.skipped} skipped` : ''}`,
+            ],
+            [
+              'Hours spent',
+              hours(totals.burn),
+              `${hours(totals.actual)} coded${totals.unplanned ? ` + ${hours(totals.unplanned)} unplanned` : ''}`,
+            ],
+            [
+              // The printed lead/lag, and only ever from finished work.
+              'Lead / lag',
+              totals.hasVerdict ? `${totals.realised > 0 ? '+' : ''}${hours(totals.realised)} h` : 'no verdict yet',
+              totals.hasVerdict
+                ? `${totals.realised > 0 ? '+' : ''}${(totals.realised / 24).toFixed(3)} d · ${verdictLabel}`
+                : `${totals.open} activit${totals.open === 1 ? 'y' : 'ies'} still open — finish one to see a verdict`,
             ],
           ].map(([label, value, hint]) => (
             <Box
@@ -321,7 +423,7 @@ export function TimelineHoursReview({
             py={1}
             sx={{ bgcolor: 'background.default', borderBottom: '1px solid', borderColor: 'divider' }}
           >
-            {['Activity', 'System (h)', 'Your actual (h)', 'Code Σ (h)', 'Lead / Lag'].map((label) => (
+            {['Activity', 'System (h)', 'Your actual (h)', 'Code Σ (h)', 'Verdict'].map((label) => (
               <Typography key={label} variant="caption" fontWeight={700} color="text.secondary">
                 {label}
               </Typography>
@@ -348,37 +450,58 @@ export function TimelineHoursReview({
                   flexWrap="wrap"
                   px={1.5}
                   py={0.75}
-                  sx={{ bgcolor: isUncoded ? 'warning.lighter' : 'action.hover', borderTop: '1px solid', borderColor: 'divider' }}
+                  sx={{
+                    bgcolor: isUncoded ? 'warning.lighter' : 'action.hover',
+                    borderTop: '1px solid',
+                    borderColor: 'divider',
+                  }}
                 >
                   <Typography variant="caption" fontWeight={800} noWrap sx={{ maxWidth: '100%' }}>
-                    {isUncoded ? 'Uncoded lines — excluded from lead/lag' : `Code ${group.code} · ${groupLabel || 'programme activity'}`}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
                     {isUncoded
-                      ? `${group.members.length} line(s) · code them in the register’s Seq column`
-                      : `planned ${hours(group.planned)} h · logged ${hours(group.actual)} h · ${group.members.length} line(s)`}
+                      ? 'Unplanned activity — no sequence code'
+                      : `Code ${group.code} · ${groupLabel || 'programme activity'}`}
                   </Typography>
-                  {!isUncoded && (
+                  {!isUncoded && group.state && (
                     <Typography
                       variant="caption"
-                      fontWeight={800}
-                      color={
-                        !compared
+                      sx={{
+                        px: 0.75,
+                        borderRadius: 1,
+                        fontWeight: 700,
+                        bgcolor: hasVerdict(group.state) ? 'success.lighter' : group.state === 'skipped' ? 'action.disabledBackground' : 'info.lighter',
+                      }}
+                    >
+                      {STATE_LABELS[group.state] ?? group.state}
+                    </Typography>
+                  )}
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                    {isUncoded
+                      ? `${group.members.length} line(s) · ${hours(group.actual)} h raise actual hours and can only lag`
+                      : `planned ${hours(group.planned)} h · logged ${hours(group.actual)} h · ${group.members.length} line(s)`}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    fontWeight={800}
+                    color={
+                      isUncoded
+                        ? 'warning.main'
+                        : !compared
                           ? 'text.secondary'
                           : (group.variance ?? 0) > 0
                             ? 'success.main'
                             : (group.variance ?? 0) < 0
                               ? 'warning.main'
                               : 'text.primary'
-                      }
-                    >
-                      {compared
+                    }
+                  >
+                    {isUncoded
+                      ? 'unplanned — reads as lag'
+                      : compared
                         ? `${(group.variance ?? 0) > 0 ? '+' : ''}${hours(group.variance)} h (${((group.variance ?? 0) / 24).toFixed(3)} d) · ${(group.variance ?? 0) > 0 ? 'lead' : (group.variance ?? 0) < 0 ? 'lag' : 'on plan'}`
-                        : group.planned === null
-                          ? 'planned hours missing'
-                          : 'no hours logged'}
-                    </Typography>
-                  )}
+                        : group.state === 'skipped'
+                          ? 'hours released — not a lag'
+                          : stateSentence(group.state, group.planned, group.actual)}
+                  </Typography>
                 </Box>
                 {group.members.map((row) => {
                   const system = systemOf(row)
@@ -407,7 +530,8 @@ export function TimelineHoursReview({
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {row.phase_label || 'Unphased'}
-                          {isUncoded ? ' · uncoded' : ` · code ${group.code}`}
+                          {isUncoded ? ' · unplanned activity' : ` · code ${group.code}`}
+                          {row.timeline_split_state === 'split' ? ' · hours split between codes' : ''}
                           {row.timeline_review_state && row.timeline_review_state !== 'suggested'
                             ? ` · ${row.timeline_review_state}`
                             : ''}
@@ -483,8 +607,10 @@ export function TimelineHoursReview({
                       >
                         {isUncoded || group.variance === null
                           ? isUncoded
-                            ? 'excluded'
-                            : '—'
+                            ? 'unplanned'
+                            : group.state === 'skipped'
+                              ? 'skipped'
+                              : 'no verdict'
                           : `${group.variance > 0 ? '+' : ''}${group.variance.toFixed(3)} h · ${group.variance > 0 ? 'lead' : group.variance < 0 ? 'lag' : 'on plan'}`}
                       </Typography>
                     </Box>
@@ -520,11 +646,21 @@ export function TimelineHoursReview({
           </Alert>
         )}
 
+        {totals.unplanned > 0 && (
+          <Alert severity="warning">
+            {hours(totals.unplanned)} h in this selection carry no sequence code. They raise actual hours while planned
+            hours stay put, so they read as {hours(totals.unplanned)} h ({(-totals.unplanned / 24).toFixed(3)} d) of lag
+            on their own. Code them to the activity that did the work, or classify the work as Unplanned Activity with
+            a reason, before submitting.
+          </Alert>
+        )}
+
         <Typography variant="caption" color="text.secondary">
           Planned hours belong to the baseline programme and are read-only here; each group’s plan is the programme
           row’s hours, not the sum of its lines. An edited actual is stored on the activity, not on the report, so it
           survives later recalculations and carries into the next day. The Σ code column adds the group up after each
-          line, the same way you would on paper.
+          line, the same way you would on paper. A group only shows a lead or a lag once the activity is finished:
+          until then the difference is the work still owed, which is why it is printed as remaining hours.
         </Typography>
       </Stack>
     </PanelDialog>

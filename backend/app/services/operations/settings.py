@@ -26,9 +26,29 @@ def get_settings(db: Session, organization_id: str) -> OpsSettings:
     return row
 
 
+#: Settings that change what a lead or a lag *means* for this workspace. A change to
+#: one is named in the audit trail, because a reader comparing two months needs to
+#: know the rule underneath the numbers changed between them.
+SEQUENCE_SETTINGS = (
+    "sequence_uncoded_policy",
+    "sequence_npt_policy",
+    "sequence_skipped_credit",
+    "sequence_auto_close_tolerance_pct",
+    "sequence_auto_close",
+    "sequence_require_code_on_submit",
+    "sequence_current_run_only",
+)
+
+
 def update_settings(db: Session, organization_id: str, data, user: User, request=None) -> OpsSettings:
     row = get_or_create(db, organization_id)
-    for key, value in data.model_dump(exclude_unset=True, exclude={"document_types"}).items():
+    values = data.model_dump(exclude_unset=True, exclude={"document_types"})
+    changed_sequence = [
+        f"{key.replace('sequence_', '')}: {getattr(row, key, None)!r} → {value!r}"
+        for key, value in values.items()
+        if key in SEQUENCE_SETTINGS and getattr(row, key, None) != value
+    ]
+    for key, value in values.items():
         setattr(row, key, value)
     if data.document_types is not None:
         db.execute(delete(OpsDocumentType).where(OpsDocumentType.organization_id == organization_id))
@@ -47,7 +67,10 @@ def update_settings(db: Session, organization_id: str, data, user: User, request
         entity_type="ops_settings",
         entity_id=row.id,
         entity_label="Operations settings",
-        summary="Updated operations settings",
+        summary=(
+            "Updated operations settings"
+            + (" — sequence policy changed: " + "; ".join(changed_sequence) if changed_sequence else "")
+        ),
         request=request,
     )
     db.commit()
