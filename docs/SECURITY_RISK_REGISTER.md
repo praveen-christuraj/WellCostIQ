@@ -58,3 +58,14 @@ not be mixed into the permission-only audit patch.
 - **Owner:** UNASSIGNED
 - **Review:** Next architecture/security design cycle, with a dated decision before
   public SaaS launch.
+
+## 2026-11-21 source-remediation update (not operational closure)
+
+Receive-level body caps, bounded backup parsing and serialized database request
+budgets are implemented; see `SECURITY_IMPLEMENTATION_2026-11-21.md` for policy
+limits, exact validation performed, and remaining release gates. The mounted
+route inventory is authentication/dependency evidence, not proof of tenant/owner
+isolation. Regression cases were added but not executed at the user's request.
+R-2026-001, R-2026-002 and R-2026-003 retain their statuses and unassigned approval
+fields. Provider edge, backup durability/PITR, scheduler singleton, MFA/SSO,
+RLS and full-history scanning are not established by these source fixes.

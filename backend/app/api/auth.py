@@ -97,6 +97,8 @@ def login(data: LoginInput, request: Request, response: Response, db: Db):
     # Applies even when the workspace or account does not exist, which is exactly
     # the case account lockout alone cannot slow down.
     throttle(db, request, "login", settings.login_attempt_limit)
+    throttle(db, request, "login", settings.login_attempt_limit,
+             subject=f"{data.organization.strip().lower()}:{str(data.email).strip().lower()}")
 
     org = db.scalar(select(Organization).where(Organization.slug == data.organization.strip().lower()))
     user = db.scalar(select(User).where(User.organization_id == org.id, User.email == data.email.lower())) if org else None

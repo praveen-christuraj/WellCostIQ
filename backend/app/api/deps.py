@@ -80,6 +80,8 @@ def require(key: str):
                 f"Permission denied. This action needs {key}.",
             )
         return user
+    check.security_capabilities = (key,)
+    check.security_capability_mode = "all"
     return check
 
 
@@ -97,4 +99,6 @@ def require_any(*keys: str):
                 f"Permission denied. This action needs one of: {', '.join(keys)}.",
             )
         return user
+    check.security_capabilities = keys
+    check.security_capability_mode = "any"
     return check

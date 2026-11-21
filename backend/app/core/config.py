@@ -204,6 +204,7 @@ class Settings(BaseSettings):
     # Swagger/ReDoc/OpenAPI are development aids; production defaults them off.
     enable_api_docs: bool | None = None
     max_json_body_mb: int = 10
+    max_multipart_body_mb: int = 128
 
     # First-run administrator bootstrap. Ask at startup when the database has no owner.
     bootstrap_admin_on_startup: bool = True
@@ -349,6 +350,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_deployment(self):
+        for name, maximum in (("max_json_body_mb", 128), ("max_multipart_body_mb", 4096), ("backup_max_upload_mb", 4096)):
+            if not 1 <= getattr(self, name) <= maximum:
+                raise ValueError(f"{name.upper()} must be between 1 and {maximum}")
         self.environment = self.environment.strip().lower()
         if self.environment not in ENVIRONMENTS:
             raise ValueError(f"ENVIRONMENT must be one of: {', '.join(ENVIRONMENTS)}")

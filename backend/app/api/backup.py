@@ -426,11 +426,10 @@ def import_archive(
         )
     except service.BackupError as error:
         db.rollback()
-        Path(handle.name).unlink(missing_ok=True)
         raise _fail(error) from error
-    except Exception:
+    finally:
+        handle.close()
         Path(handle.name).unlink(missing_ok=True)
-        raise
     return _job_out(db, user, job)
 
 
