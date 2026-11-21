@@ -185,6 +185,25 @@ def test_spud_sets_fractional_actual_days_from_the_spud_instant():
         assert Decimal(before.json()["scopes"][0]["actual_days"]) == Decimal("0.000")
 
 
+def test_browser_utc_instants_are_normalized_to_wat_for_progress():
+    """The datetime-local UI submits UTC ISO instants; progress stores WAT wall time."""
+    with TestClient(app) as client:
+        headers = login(client)
+        well, *_ = setup_well(client)
+        path = f"/api/v1/daily-cost/wells/{well['id']}/progress"
+
+        saved = client.put(path, headers=headers, json={
+            "scope": "drilling",
+            "spud_at": "2026-10-19T09:00:00Z",  # 10:00 WAT
+            "progress_completed_at": "2026-10-19T11:00:00+00:00",  # 12:00 WAT
+        })
+        assert saved.status_code == 200, saved.text
+        drilling = saved.json()["scopes"][0]
+        assert drilling["spud_at"].startswith("2026-10-19T10:00:00")
+        assert drilling["progress_completed_at"].startswith("2026-10-19T12:00:00")
+        assert Decimal(drilling["actual_days"]) == Decimal("0.083")
+
+
 def test_spud_cannot_be_cleared_only_edited_and_days_recalculate():
     with TestClient(app) as client:
         headers = login(client)

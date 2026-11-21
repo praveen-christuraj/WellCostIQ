@@ -7,7 +7,19 @@ import type { WellProgressReport, WellProgressScope } from '../../lib/dailyCost'
 import { fromWatDateTimeInput, toWatDateTimeInput, WAT_LABEL } from '../../lib/time'
 
 /** datetime-local inputs display and capture West Africa Time (WAT UTC+1:00). */
-const toInput = (value: string | null) => toWatDateTimeInput(value)
+const toInput = (value: string | null) => {
+  if (!value) return ''
+  // Progress API fields are stored and returned as naive WAT wall times. Do not
+  // pass those through the shared parser, which correctly assumes naive API
+  // timestamps elsewhere are UTC and would shift this value forward by an hour.
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
+    const local = value.trim().match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/)
+    if (local) return `${local[1]}T${local[2]}`
+  }
+  // Explicitly zoned values are instants; convert them to the WAT input zone.
+  return toWatDateTimeInput(value)
+}
+// Send an ISO instant; the progress API normalizes it back to its WAT storage convention.
 const fromInput = (value: string) => fromWatDateTimeInput(value)
 
 const formatDays = (value: string | null) =>

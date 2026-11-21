@@ -4538,14 +4538,29 @@ def _progress_datetime_text(value: datetime | None) -> str:
     return value.strftime(PROGRESS_DATE_FORMAT) if value else "—"
 
 
+def _progress_wat_naive(value: datetime) -> datetime:
+    """Normalize an incoming instant to the progress columns' naive WAT convention.
+
+    The browser sends timezone-aware ISO timestamps (UTC); progress columns and
+    report-date boundaries intentionally store/compare site-entered WAT wall
+    time without a timezone. Naive API values are already in that convention.
+    """
+    from app.core.time import WAT
+
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value
+    return value.astimezone(WAT).replace(tzinfo=None)
+
+
 def _progress_now() -> datetime:
-    """Naive WAT (UTC+1:00) now, comparable with the naive site-entered milestone values."""
+    """Naive WAT (UTC+1:00) now, comparable with stored progress milestones."""
     from app.core.time import wat_now
 
     return wat_now().replace(tzinfo=None)
 
 
 def _reject_future_milestone(value: datetime, label: str) -> None:
+    value = _progress_wat_naive(value)
     if value > _progress_now() + timedelta(days=1):
         raise HTTPException(
             status_code=422,
@@ -4929,8 +4944,8 @@ def update_well_progress(
                         detail="The Well Spud Date & Time cannot be cleared once entered. Edit it instead — "
                                "the actual days recalculate from the edited date & time.",
                     )
-                _reject_future_milestone(data.spud_at, "Well Spud Date & Time")
-                new_spud = data.spud_at.replace(second=0, microsecond=0)
+                new_spud = _progress_wat_naive(data.spud_at).replace(second=0, microsecond=0)
+                _reject_future_milestone(new_spud, "Well Spud Date & Time")
                 spud_changed = new_spud != current_spud
             elif current_spud is None and data.progress_completed_at is not None:
                 # The label can be saved before the spud date; a completion
@@ -4944,7 +4959,10 @@ def update_well_progress(
             new_completed = current_completed
             completed_changed = False
             if "progress_completed_at" in fields_set:
-                new_completed = data.progress_completed_at
+                new_completed = (
+                    _progress_wat_naive(data.progress_completed_at)
+                    if data.progress_completed_at is not None else None
+                )
                 completed_changed = new_completed != current_completed
                 if new_completed is not None:
                     _reject_future_milestone(new_completed, "Progress Completed Date & Time")
