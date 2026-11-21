@@ -28,12 +28,18 @@ Timestamps are UTC (the whole application stores UTC).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import re
+import zlib
+import contextlib
 import base64
 import gzip
 import hashlib
 import io
 import json
 import logging
+import math
+import binascii
 import os
 import shutil
 import threading
@@ -360,7 +366,7 @@ def to_column_value(value, column):
         return None
     type_ = column.type
     if isinstance(value, dict) and "__bytes__" in value:
-        return base64.b64decode(value["__bytes__"])
+        return base64.b64decode(value["__bytes__"], validate=True)
     if isinstance(value, str) and value == "" and not isinstance(type_, String):
         return None
     try:
@@ -427,12 +433,12 @@ def write_archive(
     compress: bool = True,
 ) -> dict:
     """Stream the archive to disk; return the counted manifest facts."""
-    directory = Path(job.file_path).parent if job.file_path else None
+    directory = ensure_within_root(Path(job.file_path)).parent if job.file_path else None
     if directory is None:
         raise BackupError(500, "The backup destination has not been prepared")
     directory.mkdir(parents=True, exist_ok=True)
-    final_path = Path(job.file_path)
-    partial_path = final_path.with_name(final_path.name + ".partial")
+    final_path = ensure_within_root(Path(job.file_path))
+    partial_path = ensure_within_root(final_path.with_name(final_path.name + ".partial"))
     order = table_order(plan)
     metadata = _archive_metadata(db, job.scope, organization_id)
     metadata["tables"] = [
@@ -506,79 +512,160 @@ def write_archive(
 # ---------------------------------------------------------------------------
 
 
-def read_manifest(path: Path) -> dict:
-    if not path.exists() or not path.is_file():
+@dataclass(frozen=True)
+class ArchivePolicy:
+    compressed_bytes: int = MAX_ARCHIVE_BYTES
+    expanded_bytes: int = 32 * 1024**3
+    manifest_bytes: int = 4 * 1024**2
+    record_bytes: int = 64 * 1024**2
+    expansion_ratio: int = 1000
+    records: int = 2_000_000
+    tables: int = 2048
+    columns: int = 2048
+    rows_per_table: int = 10_000_000
+    total_rows: int = 50_000_000
+
+
+ARCHIVE_POLICY = ArchivePolicy()
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _invalid_archive():
+    return BackupError(422, "The archive is malformed or exceeds the server's validation limits.")
+
+
+def _json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise _invalid_archive()
+        result[key] = value
+    return result
+
+
+def _archive_records(path: Path):
+    """Bound reads before UTF-8 decoding or JSON allocation, on every pass."""
+    policy = ARCHIVE_POLICY
+    if not path.is_file():
         raise BackupError(404, "The backup file is not on the server any more.")
-    if path.stat().st_size > MAX_ARCHIVE_BYTES:
-        raise BackupError(422, "The backup file is larger than this server can validate (4 GiB).")
+    size = path.stat().st_size
+    if size > policy.compressed_bytes:
+        raise _invalid_archive()
+    budget = min(policy.expanded_bytes, max(size, 1) * policy.expansion_ratio)
+    expanded = 0
     try:
-        with gzip.open(path, "rt", encoding="utf-8") as stream:
-            first = stream.readline()
-    except (OSError, EOFError, UnicodeDecodeError) as error:
-        raise BackupError(422, "This file is not a readable WellSenseIQ archive (it may be corrupt or truncated).") from error
-    try:
-        manifest = json.loads(first)
-    except json.JSONDecodeError as error:
-        raise BackupError(422, "This file is not a WellSenseIQ archive: its header could not be read.") from error
-    if not isinstance(manifest, dict) or manifest.get("type") != "manifest" or manifest.get("kind") != ARCHIVE_KIND:
-        raise BackupError(422, "This file is not a WellSenseIQ archive.")
-    if int(manifest.get("format_version") or 0) != ARCHIVE_FORMAT_VERSION:
-        raise BackupError(422, "This archive was written by a different WellSenseIQ version and cannot be read here.")
+        with gzip.open(path, "rb") as stream:
+            for index in range(policy.records + 1):
+                ceiling = policy.manifest_bytes if index == 0 else policy.record_bytes
+                line = stream.readline(min(ceiling, budget - expanded) + 1)
+                if not line:
+                    return
+                expanded += len(line)
+                if index == policy.records or len(line) > ceiling or expanded > budget:
+                    raise _invalid_archive()
+                record = json.loads(line.decode("utf-8"), object_pairs_hook=_json_object,
+                                    parse_constant=lambda value: (_ for _ in ()).throw(_invalid_archive()))
+                if not isinstance(record, dict):
+                    raise _invalid_archive()
+                yield record
+    except (OSError, EOFError, UnicodeError, ValueError, RecursionError, zlib.error) as error:
+        raise _invalid_archive() from error
+
+
+def _validate_manifest(manifest: dict) -> dict:
+    if (manifest.get("type") != "manifest" or manifest.get("kind") != ARCHIVE_KIND
+            or type(manifest.get("format_version")) is not int
+            or manifest["format_version"] != ARCHIVE_FORMAT_VERSION
+            or manifest.get("scope") not in ("workspace", "full")
+            or not isinstance(manifest.get("organization"), dict)
+            or not isinstance(manifest["organization"].get("id"), str)
+            or not isinstance(manifest.get("schema_revision"), str)):
+        raise _invalid_archive()
+    tables = manifest.get("tables")
+    if not isinstance(tables, list) or not tables or len(tables) > ARCHIVE_POLICY.tables:
+        raise _invalid_archive()
+    names = set()
+    for entry in tables:
+        if not isinstance(entry, dict):
+            raise _invalid_archive()
+        name = entry.get("name")
+        columns = entry.get("columns")
+        primary = entry.get("primary_key")
+        if (not isinstance(name, str) or not _IDENTIFIER.fullmatch(name) or name in names
+                or name in EXCLUDED_TABLES or name.startswith(EXCLUDED_PREFIXES)
+                or not isinstance(columns, list) or not columns or len(columns) > ARCHIVE_POLICY.columns
+                or any(not isinstance(c, str) or not _IDENTIFIER.fullmatch(c) for c in columns)
+                or len(set(columns)) != len(columns)
+                or not isinstance(primary, list) or any(not isinstance(c, str) or c not in columns for c in primary)
+                or len(set(primary)) != len(primary)):
+            raise _invalid_archive()
+        names.add(name)
     return manifest
 
 
-def scan_archive(path: Path, expected_counts: dict[str, int] | None = None) -> dict:
-    """Walk the whole archive once, verifying structure and counting rows."""
-    manifest = read_manifest(path)
-    counts: dict[str, int] = {}
-    trailer: dict[str, int] | None = None
-    tables_with_columns: dict[str, list[str]] = {
-        entry.get("name"): list(entry.get("columns") or []) for entry in manifest.get("tables") or [] if entry.get("name")
-    }
+def read_manifest(path: Path) -> dict:
+    records = _archive_records(path)
     try:
-        with gzip.open(path, "rt", encoding="utf-8") as stream:
-            stream.readline()  # manifest
-            for line in stream:
-                if not line.strip():
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError as error:
-                    raise BackupError(422, "The archive is damaged: one of its records could not be read.") from error
-                kind = record.get("type")
-                if kind == "table":
-                    name = record.get("table")
-                    rows = record.get("rows") or []
-                    if name not in tables_with_columns:
-                        raise BackupError(422, f"The archive contains a table ({name}) that its own header does not describe.")
-                    if not isinstance(rows, list):
-                        raise BackupError(422, f"The archive stores {name} in an unreadable shape.")
-                    counts[name] = counts.get(name, 0) + len(rows)
-                elif kind == "trailer":
-                    trailer = {str(key): int(value) for key, value in (record.get("tables") or {}).items()}
-    except (OSError, EOFError, UnicodeDecodeError) as error:
-        raise BackupError(422, "The archive is truncated or compressed incorrectly; it cannot be used.") from error
-    if trailer is None:
-        raise BackupError(422, "The archive has no end marker, so it is incomplete. Take a fresh backup and use that file.")
-    mismatched = [name for name, value in trailer.items() if counts.get(name, 0) != value]
-    if mismatched:
-        raise BackupError(
-            422,
-            "The archive's own row counts do not match its contents ("
-            + ", ".join(sorted(mismatched)[:5])
-            + "). Treat this file as damaged.",
-        )
-    if expected_counts is not None:
-        for name, value in expected_counts.items():
-            if counts.get(name, 0) != value:
-                raise BackupError(422, f"The archive holds {counts.get(name, 0):,} rows for {name} but the backup register expects {value:,}.")
-    total = sum(counts.values())
-    return {
-        "manifest": manifest,
-        "counts": counts,
-        "total_rows": total,
-        "tables": tables_with_columns,
-    }
+        return _validate_manifest(next(records, {}))
+    finally:
+        records.close()
+
+
+def scan_archive(path: Path, expected_counts: dict[str, int] | None = None) -> dict:
+    """Validate the complete stream before any registration or restore writes."""
+    records = _archive_records(path)
+    try:
+        manifest = _validate_manifest(next(records, {}))
+        columns = {entry["name"]: entry["columns"] for entry in manifest["tables"]}
+        counts = {name: 0 for name in columns}
+        total = 0
+        trailer = None
+        for record in records:
+            if trailer is not None:
+                raise _invalid_archive()
+            if record.get("type") == "table":
+                name = record.get("table")
+                rows = record.get("rows")
+                if (not isinstance(name, str) or name not in columns or not isinstance(rows, list)
+                        or len(rows) > CHUNK_ROWS):
+                    raise _invalid_archive()
+                allowed = set(columns[name])
+                for row in rows:
+                    if not isinstance(row, dict) or not set(row).issubset(allowed):
+                        raise _invalid_archive()
+                    for value in row.values():
+                        if isinstance(value, dict):
+                            if set(value) != {"__bytes__"} or not isinstance(value["__bytes__"], str):
+                                raise _invalid_archive()
+                            try:
+                                base64.b64decode(value["__bytes__"], validate=True)
+                            except (ValueError, binascii.Error) as error:
+                                raise _invalid_archive() from error
+                        elif isinstance(value, list) or (isinstance(value, float) and not math.isfinite(value)):
+                            raise _invalid_archive()
+                counts[name] += len(rows)
+                total += len(rows)
+                if counts[name] > ARCHIVE_POLICY.rows_per_table or total > ARCHIVE_POLICY.total_rows:
+                    raise _invalid_archive()
+            elif record.get("type") == "trailer":
+                trailer = record.get("tables")
+                if (not isinstance(trailer, dict) or set(trailer) != set(counts)
+                        or any(type(v) is not int or v < 0 for v in trailer.values())
+                        or trailer != counts or type(record.get("rows")) is not int or record["rows"] != total):
+                    raise _invalid_archive()
+            else:
+                raise _invalid_archive()
+        if trailer is None or (expected_counts is not None and any(counts.get(k) != v for k, v in expected_counts.items())):
+            raise _invalid_archive()
+        return {"manifest": manifest, "counts": counts, "total_rows": total, "tables": columns}
+    finally:
+        records.close()
+
+
+def _validate_archive_plan(scanned: dict, plan: dict[str, PlanTable]) -> None:
+    for name, columns in scanned["tables"].items():
+        if name not in plan or not set(columns).issubset({c.name for c in plan[name].columns}):
+            raise BackupError(422, "The archive schema is not supported by this database.")
 
 
 # ---------------------------------------------------------------------------
@@ -610,6 +697,8 @@ def _replace_workspace_rows(
     scope: str,
 ) -> dict:
     """Delete the covered rows and re-insert them from the archive, in one transaction."""
+    scanned = scan_archive(path)
+    _validate_archive_plan(scanned, plan)
     order = table_order(plan)
     replaceable = {name: plan[name] for name in order if name not in PRESERVED_TABLES}
     _defer_foreign_keys(db)
@@ -623,8 +712,7 @@ def _replace_workspace_rows(
             statement = statement.where(plan_table.scope(organization_id))
         db.execute(statement)
 
-    # Parents first on the way in; the archive was written in the same order.
-    scanned = scan_archive(path)
+    # Parents first on the way in; validation completed before the first delete.
     manifest_names = [entry.get("name") for entry in scanned["manifest"].get("tables") or []]
     insertion_order = [name for name in order if name in manifest_names and name in replaceable]
     insertion_order += [name for name in manifest_names if name in replaceable and name not in insertion_order]
@@ -633,12 +721,9 @@ def _replace_workspace_rows(
     inserted_tables = 0
     pending_self_references: list[tuple] = []
     try:
-        with gzip.open(path, "rt", encoding="utf-8") as stream:
-            stream.readline()
-            for line in stream:
-                if not line.strip():
-                    continue
-                record = json.loads(line)
+        with contextlib.closing(_archive_records(path)) as stream:
+            next(stream)
+            for record in stream:
                 if record.get("type") != "table":
                     continue
                 name = record.get("table")
@@ -1369,6 +1454,7 @@ def import_archive(db: Session, *, organization_id: str, source: Path, file_name
         source.unlink(missing_ok=True)
         raise BackupError(409, "Full-database archives can only be imported into a single-workspace deployment.")
     scanned = scan_archive(source)
+    _validate_archive_plan(scanned, backup_plan(db, manifest["scope"], organization_id))
     settings = db.scalar(select(BackupSettings).where(BackupSettings.organization_id == organization_id))
     directory = archive_directory(settings, workspace_slug(db, organization_id))
     # The header describes every table in the archive, including the empty ones,
@@ -1389,8 +1475,13 @@ def import_archive(db: Session, *, organization_id: str, source: Path, file_name
     job.file_name = f"{job.backup_number}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.jsonl.gz"[:255]
     job.file_path = str(directory / job.file_name)
     db.commit()
+    created_destination = None
     try:
-        shutil.copyfile(source, job.file_path)
+        destination = ensure_within_root(Path(job.file_path))
+        with source.open("rb") as incoming, destination.open("xb") as outgoing:
+            created_destination = destination
+            os.chmod(destination, 0o600)
+            shutil.copyfileobj(incoming, outgoing)
         source.unlink(missing_ok=True)
         size = Path(job.file_path).stat().st_size
         job.status = "completed"
@@ -1416,7 +1507,8 @@ def import_archive(db: Session, *, organization_id: str, source: Path, file_name
         return job
     except Exception:
         db.rollback()
-        Path(job.file_path).unlink(missing_ok=True)
+        if created_destination is not None:
+            ensure_within_root(created_destination).unlink(missing_ok=True)
         job = db.get(BackupJob, job.id)
         if job is not None:
             job.status = "failed"

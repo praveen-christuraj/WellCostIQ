@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / ".agent/memory/architecture.dot"
 EXTENSIONS = {".py", ".ts", ".tsx"}
-EXCLUDE = {"node_modules", ".venv", "dist", "__pycache__", "tests", "alembic"}
+EXCLUDE = {".arena", ".security-tools", "node_modules", ".venv", "dist", "__pycache__", "tests", "alembic"}
 
 
 def path_label(path: Path) -> str:

@@ -14,6 +14,7 @@ from app.api import afe, assistant, auth, audit, backup, business_dashboard, cos
 from app.api.catalogue_items import ITEM_ROUTERS, catalogue_error_handler
 from app.api.catalogue_options import router as catalogue_options_router
 from app.bootstrap import bootstrap_admin
+from app.core.body_limits import BodySizeLimitMiddleware
 from app.core.config import canonical_origin, get_settings, origin_from_url
 from app.core.logging import configure_logging
 from app.services import backup as backup_service
@@ -125,23 +126,12 @@ async def origin_guard(request: Request, call_next):
     return await call_next(request)
 
 
-@app.middleware("http")
-async def body_size_guard(request: Request, call_next):
-    """Refuse oversized JSON bodies before a parser allocates them.
-
-    Multipart uploads have their own bounded readers (documents, backup archives)
-    because their size limit depends on the feature.
-    """
-    if request.method not in SAFE_METHODS:
-        content_type = request.headers.get("content-type", "").lower()
-        if not content_type.startswith("multipart/"):
-            try:
-                length = int(request.headers.get("content-length") or 0)
-            except ValueError:
-                length = 0
-            if length > MAX_JSON_BODY:
-                return JSONResponse(status_code=413, content={"detail": "The request body is too large."})
-    return await call_next(request)
+app.add_middleware(
+    BodySizeLimitMiddleware,
+    json_bytes=MAX_JSON_BODY,
+    multipart_bytes=settings.max_multipart_body_mb * 1024 * 1024,
+    backup_bytes=(settings.backup_max_upload_mb + 1) * 1024 * 1024,
+)
 
 
 @app.middleware("http")

@@ -14,7 +14,7 @@ import ipaddress
 from datetime import timedelta
 
 from fastapi import HTTPException, Request
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -74,30 +74,42 @@ def client_key(request: Request, action: str) -> str:
     ).hexdigest()
 
 
-def throttle(db: Session, request: Request, action: str, limit: int, *, window_minutes: int | None = None) -> None:
-    """Spend one unit from a database-backed budget shared by every API worker.
+def throttle(
+    db: Session, request: Request, action: str, limit: int, *,
+    window_minutes: int | None = None, subject: str | None = None,
+) -> None:
+    """Atomically spend a sliding-window budget in an independent transaction.
 
-    ``limit`` attempts are allowed per window; the next raises HTTP 429. The
-    ledger also stores the keyed digest only. This is not a substitute for an
-    atomic edge limiter under heavy concurrency, but it closes the practical
-    bypass where each request claimed a different address.
+    PostgreSQL serializes each keyed client/action with an advisory xact lock;
+    SQLite serializes writers with BEGIN IMMEDIATE. Business state in ``db`` is
+    never committed here. Edge throttling is still required for volumetric abuse.
     """
-    settings = get_settings()
-    window = window_minutes or settings.throttle_window_minutes
-    now = utcnow()
-    key = client_key(request, action)
-    count = db.scalar(
-        select(func.count(PasswordResetAttempt.id)).where(
-            PasswordResetAttempt.ip_hash == key,
-            PasswordResetAttempt.attempted_at >= now - timedelta(minutes=window),
-        )
-    ) or 0
-    if count >= limit:
-        raise HTTPException(
-            429,
-            f"Too many attempts. Wait {window} minutes and try again.",
-            headers={"Retry-After": str(window * 60)},
-        )
-    db.add(PasswordResetAttempt(ip_hash=key, attempted_at=now))
-    db.execute(delete(PasswordResetAttempt).where(PasswordResetAttempt.attempted_at < now - timedelta(days=1)))
-    db.commit()
+    window = window_minutes or get_settings().throttle_window_minutes
+    key = client_key(request, action) if subject is None else hmac.new(
+        get_settings().secret_key.encode(), f"account:{action}:{subject}".encode(), hashlib.sha256,
+    ).hexdigest()
+    with Session(bind=db.get_bind()) as ledger:
+        dialect = ledger.get_bind().dialect.name
+        if dialect == "postgresql":
+            lock_id = int.from_bytes(bytes.fromhex(key)[:8], "big", signed=True)
+            ledger.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_id})
+        elif dialect == "sqlite":
+            ledger.execute(text("BEGIN IMMEDIATE"))
+        else:
+            raise RuntimeError("Request budgets require PostgreSQL or SQLite")
+        now = utcnow()
+        count = ledger.scalar(
+            select(func.count(PasswordResetAttempt.id)).where(
+                PasswordResetAttempt.ip_hash == key,
+                PasswordResetAttempt.attempted_at >= now - timedelta(minutes=window),
+            )
+        ) or 0
+        if count >= limit:
+            raise HTTPException(
+                429, f"Too many attempts. Wait {window} minutes and try again.",
+                headers={"Retry-After": str(window * 60)},
+            )
+        ledger.add(PasswordResetAttempt(ip_hash=key, attempted_at=now))
+        retention = timedelta(days=max(1, (window + 1439) // 1440))
+        ledger.execute(delete(PasswordResetAttempt).where(PasswordResetAttempt.attempted_at < now - retention))
+        ledger.commit()
