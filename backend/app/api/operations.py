@@ -96,6 +96,7 @@ from app.schemas.operations import (
     OpsSettingsOut,
     OpsStudyOut,
     OpsSurveyPreviewOut,
+    OpsSubmitReadinessOut,
     OpsTimeDepthOut,
     OpsTimelineReviewIn,
     OpsTimelineReviewOut,
@@ -739,6 +740,22 @@ def save_report(report_id: str, data: OpsReportSaveIn, request: Request, db: Db,
         may_review=owner(user) or "ops-report:review" in granted(user),
     )
     return _to_report_out(r, db)
+
+
+@router.get(
+    "/reports/{report_id}/submit-readiness",
+    response_model=OpsSubmitReadinessOut,
+    dependencies=[Depends(require("ops-report:read"))],
+)
+def submit_readiness(report_id: str, db: Db, user: Current):
+    """What still stops this report being submitted, before anyone presses Submit.
+
+    The same checklist the submit route refuses with, so the editor can show the
+    exact reasons instead of a bare 422 after the fact. Read-only: it changes
+    nothing and needs no submit or update right.
+    """
+
+    return reports_svc.submit_readiness(db, user.organization_id, report_id)
 
 
 @router.post(

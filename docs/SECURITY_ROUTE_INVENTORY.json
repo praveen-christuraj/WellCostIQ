@@ -3576,7 +3576,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_active",
-      "source_line": 76,
+      "source_line": 77,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3593,7 +3593,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.create",
-      "source_line": 154,
+      "source_line": 155,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3610,7 +3610,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_delete",
-      "source_line": 172,
+      "source_line": 173,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3627,7 +3627,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_purge",
-      "source_line": 188,
+      "source_line": 189,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3644,7 +3644,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_restore",
-      "source_line": 180,
+      "source_line": 181,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3661,7 +3661,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_revise",
-      "source_line": 121,
+      "source_line": 122,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3678,7 +3678,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_deleted",
-      "source_line": 88,
+      "source_line": 89,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3695,7 +3695,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.import_items",
-      "source_line": 161,
+      "source_line": 162,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3712,7 +3712,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.overview",
-      "source_line": 80,
+      "source_line": 81,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3729,7 +3729,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.price_revision_template",
-      "source_line": 94,
+      "source_line": 95,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3746,7 +3746,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.all_revisions",
-      "source_line": 84,
+      "source_line": 85,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3763,7 +3763,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.soft_delete",
-      "source_line": 207,
+      "source_line": 208,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3780,7 +3780,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.get_item",
-      "source_line": 140,
+      "source_line": 141,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3797,7 +3797,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.update",
-      "source_line": 196,
+      "source_line": 197,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3814,7 +3814,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.purge",
-      "source_line": 223,
+      "source_line": 224,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3831,7 +3831,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.restore",
-      "source_line": 215,
+      "source_line": 216,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3848,7 +3848,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.revise",
-      "source_line": 232,
+      "source_line": 233,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3865,7 +3865,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.item_revisions",
-      "source_line": 145,
+      "source_line": 146,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3882,7 +3882,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_active",
-      "source_line": 76,
+      "source_line": 77,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3899,7 +3899,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.create",
-      "source_line": 154,
+      "source_line": 155,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3916,7 +3916,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_delete",
-      "source_line": 172,
+      "source_line": 173,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3933,7 +3933,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_purge",
-      "source_line": 188,
+      "source_line": 189,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3950,7 +3950,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_restore",
-      "source_line": 180,
+      "source_line": 181,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3967,7 +3967,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_revise",
-      "source_line": 121,
+      "source_line": 122,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -3984,7 +3984,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_deleted",
-      "source_line": 88,
+      "source_line": 89,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4001,7 +4001,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.import_items",
-      "source_line": 161,
+      "source_line": 162,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4018,7 +4018,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.overview",
-      "source_line": 80,
+      "source_line": 81,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4035,7 +4035,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.price_revision_template",
-      "source_line": 94,
+      "source_line": 95,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4052,7 +4052,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.all_revisions",
-      "source_line": 84,
+      "source_line": 85,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4069,7 +4069,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.soft_delete",
-      "source_line": 207,
+      "source_line": 208,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4086,7 +4086,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.get_item",
-      "source_line": 140,
+      "source_line": 141,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4103,7 +4103,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.update",
-      "source_line": 196,
+      "source_line": 197,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4120,7 +4120,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.purge",
-      "source_line": 223,
+      "source_line": 224,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4137,7 +4137,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.restore",
-      "source_line": 215,
+      "source_line": 216,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4154,7 +4154,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.revise",
-      "source_line": 232,
+      "source_line": 233,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4171,7 +4171,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.item_revisions",
-      "source_line": 145,
+      "source_line": 146,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4205,7 +4205,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_active",
-      "source_line": 76,
+      "source_line": 77,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4222,7 +4222,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.create",
-      "source_line": 154,
+      "source_line": 155,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4239,7 +4239,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_delete",
-      "source_line": 172,
+      "source_line": 173,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4256,7 +4256,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_purge",
-      "source_line": 188,
+      "source_line": 189,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4273,7 +4273,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_restore",
-      "source_line": 180,
+      "source_line": 181,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4290,7 +4290,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_revise",
-      "source_line": 121,
+      "source_line": 122,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4307,7 +4307,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_deleted",
-      "source_line": 88,
+      "source_line": 89,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4324,7 +4324,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.import_items",
-      "source_line": 161,
+      "source_line": 162,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4341,7 +4341,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.overview",
-      "source_line": 80,
+      "source_line": 81,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4358,7 +4358,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.price_revision_template",
-      "source_line": 94,
+      "source_line": 95,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4375,7 +4375,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.all_revisions",
-      "source_line": 84,
+      "source_line": 85,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4392,7 +4392,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.soft_delete",
-      "source_line": 207,
+      "source_line": 208,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4409,7 +4409,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.get_item",
-      "source_line": 140,
+      "source_line": 141,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4426,7 +4426,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.update",
-      "source_line": 196,
+      "source_line": 197,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4443,7 +4443,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.purge",
-      "source_line": 223,
+      "source_line": 224,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4460,7 +4460,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.restore",
-      "source_line": 215,
+      "source_line": 216,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4477,7 +4477,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.revise",
-      "source_line": 232,
+      "source_line": 233,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4494,7 +4494,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.item_revisions",
-      "source_line": 145,
+      "source_line": 146,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4511,7 +4511,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_active",
-      "source_line": 76,
+      "source_line": 77,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4528,7 +4528,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.create",
-      "source_line": 154,
+      "source_line": 155,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4545,7 +4545,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_delete",
-      "source_line": 172,
+      "source_line": 173,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4562,7 +4562,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_purge",
-      "source_line": 188,
+      "source_line": 189,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4579,7 +4579,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_restore",
-      "source_line": 180,
+      "source_line": 181,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4596,7 +4596,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_revise",
-      "source_line": 121,
+      "source_line": 122,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4613,7 +4613,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_deleted",
-      "source_line": 88,
+      "source_line": 89,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4630,7 +4630,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.import_items",
-      "source_line": 161,
+      "source_line": 162,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4647,7 +4647,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.overview",
-      "source_line": 80,
+      "source_line": 81,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4664,7 +4664,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.price_revision_template",
-      "source_line": 94,
+      "source_line": 95,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4681,7 +4681,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.all_revisions",
-      "source_line": 84,
+      "source_line": 85,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4698,7 +4698,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.soft_delete",
-      "source_line": 207,
+      "source_line": 208,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4715,7 +4715,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.get_item",
-      "source_line": 140,
+      "source_line": 141,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4732,7 +4732,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.update",
-      "source_line": 196,
+      "source_line": 197,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4749,7 +4749,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.purge",
-      "source_line": 223,
+      "source_line": 224,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4766,7 +4766,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.restore",
-      "source_line": 215,
+      "source_line": 216,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4783,7 +4783,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.revise",
-      "source_line": 232,
+      "source_line": 233,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -4800,7 +4800,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.item_revisions",
-      "source_line": 145,
+      "source_line": 146,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5429,7 +5429,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_active",
-      "source_line": 76,
+      "source_line": 77,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5446,7 +5446,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.create",
-      "source_line": 154,
+      "source_line": 155,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5463,7 +5463,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_delete",
-      "source_line": 172,
+      "source_line": 173,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5480,7 +5480,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_purge",
-      "source_line": 188,
+      "source_line": 189,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5497,7 +5497,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_restore",
-      "source_line": 180,
+      "source_line": 181,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5514,7 +5514,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.bulk_revise",
-      "source_line": 121,
+      "source_line": 122,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5531,7 +5531,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.list_deleted",
-      "source_line": 88,
+      "source_line": 89,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5548,7 +5548,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.import_items",
-      "source_line": 161,
+      "source_line": 162,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5565,7 +5565,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.overview",
-      "source_line": 80,
+      "source_line": 81,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5582,7 +5582,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.price_revision_template",
-      "source_line": 94,
+      "source_line": 95,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5599,7 +5599,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.all_revisions",
-      "source_line": 84,
+      "source_line": 85,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5616,7 +5616,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.soft_delete",
-      "source_line": 207,
+      "source_line": 208,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5633,7 +5633,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.get_item",
-      "source_line": 140,
+      "source_line": 141,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5650,7 +5650,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.update",
-      "source_line": 196,
+      "source_line": 197,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5667,7 +5667,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.purge",
-      "source_line": 223,
+      "source_line": 224,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5684,7 +5684,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.restore",
-      "source_line": 215,
+      "source_line": 216,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5701,7 +5701,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.revise",
-      "source_line": 232,
+      "source_line": 233,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -5718,7 +5718,7 @@
         }
       ],
       "handler": "app.api.catalogue_items.item_revisions",
-      "source_line": 145,
+      "source_line": 146,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6819,7 +6819,7 @@
         }
       ],
       "handler": "app.api.operations.operations_ai_review",
-      "source_line": 1537,
+      "source_line": 1554,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6839,7 +6839,7 @@
         }
       ],
       "handler": "app.api.operations.ai_status",
-      "source_line": 176,
+      "source_line": 177,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6856,7 +6856,7 @@
         }
       ],
       "handler": "app.api.operations.audit",
-      "source_line": 2052,
+      "source_line": 2069,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6873,7 +6873,7 @@
         }
       ],
       "handler": "app.api.operations.time_depth",
-      "source_line": 1582,
+      "source_line": 1599,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6890,7 +6890,7 @@
         }
       ],
       "handler": "app.api.operations.list_code_links",
-      "source_line": 1412,
+      "source_line": 1429,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6907,7 +6907,7 @@
         }
       ],
       "handler": "app.api.operations.create_code_link",
-      "source_line": 1426,
+      "source_line": 1443,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6924,7 +6924,7 @@
         }
       ],
       "handler": "app.api.operations.create_code_links_batch",
-      "source_line": 1435,
+      "source_line": 1452,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6941,7 +6941,7 @@
         }
       ],
       "handler": "app.api.operations.delete_code_links",
-      "source_line": 1453,
+      "source_line": 1470,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6958,7 +6958,7 @@
         }
       ],
       "handler": "app.api.operations.purge_code_links",
-      "source_line": 1471,
+      "source_line": 1488,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6975,7 +6975,7 @@
         }
       ],
       "handler": "app.api.operations.restore_code_links",
-      "source_line": 1462,
+      "source_line": 1479,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -6992,7 +6992,7 @@
         }
       ],
       "handler": "app.api.operations.update_code_link",
-      "source_line": 1444,
+      "source_line": 1461,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7009,7 +7009,7 @@
         }
       ],
       "handler": "app.api.operations.purge_single_code_link",
-      "source_line": 1480,
+      "source_line": 1497,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7026,7 +7026,7 @@
         }
       ],
       "handler": "app.api.operations.list_correlations",
-      "source_line": 1255,
+      "source_line": 1272,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7043,7 +7043,7 @@
         }
       ],
       "handler": "app.api.operations.create_correlation",
-      "source_line": 1347,
+      "source_line": 1364,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7060,7 +7060,7 @@
         }
       ],
       "handler": "app.api.operations.create_correlations_batch",
-      "source_line": 1352,
+      "source_line": 1369,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7077,7 +7077,7 @@
         }
       ],
       "handler": "app.api.operations.delete_correlations",
-      "source_line": 1370,
+      "source_line": 1387,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7094,7 +7094,7 @@
         }
       ],
       "handler": "app.api.operations.purge_correlations",
-      "source_line": 1388,
+      "source_line": 1405,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7111,7 +7111,7 @@
         }
       ],
       "handler": "app.api.operations.restore_correlations",
-      "source_line": 1379,
+      "source_line": 1396,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7128,7 +7128,7 @@
         }
       ],
       "handler": "app.api.operations.correlation_reference",
-      "source_line": 1270,
+      "source_line": 1287,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7145,7 +7145,7 @@
         }
       ],
       "handler": "app.api.operations.update_correlation",
-      "source_line": 1361,
+      "source_line": 1378,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7162,7 +7162,7 @@
         }
       ],
       "handler": "app.api.operations.purge_single_correlation",
-      "source_line": 1398,
+      "source_line": 1415,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7179,7 +7179,7 @@
         }
       ],
       "handler": "app.api.operations.dashboard",
-      "source_line": 1555,
+      "source_line": 1572,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7196,7 +7196,7 @@
         }
       ],
       "handler": "app.api.operations.default_codes",
-      "source_line": 1677,
+      "source_line": 1694,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7206,7 +7206,7 @@
       "authenticated_dependency": true,
       "capabilities": [],
       "handler": "app.api.operations.register_folders",
-      "source_line": 135,
+      "source_line": 136,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7216,7 +7216,7 @@
       "authenticated_dependency": true,
       "capabilities": [],
       "handler": "app.api.operations.register_records",
-      "source_line": 141,
+      "source_line": 142,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7233,7 +7233,7 @@
         }
       ],
       "handler": "app.api.operations.list_documents",
-      "source_line": 201,
+      "source_line": 202,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7250,7 +7250,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_delete_documents",
-      "source_line": 361,
+      "source_line": 362,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7267,7 +7267,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_purge_documents",
-      "source_line": 377,
+      "source_line": 378,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7284,7 +7284,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_restore_documents",
-      "source_line": 369,
+      "source_line": 370,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7301,7 +7301,7 @@
         }
       ],
       "handler": "app.api.operations.list_deleted_documents",
-      "source_line": 226,
+      "source_line": 227,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7318,7 +7318,7 @@
         }
       ],
       "handler": "app.api.operations.audit",
-      "source_line": 2052,
+      "source_line": 2069,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7335,7 +7335,7 @@
         }
       ],
       "handler": "app.api.operations.upload_document",
-      "source_line": 300,
+      "source_line": 301,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7352,7 +7352,7 @@
         }
       ],
       "handler": "app.api.operations.get_document",
-      "source_line": 243,
+      "source_line": 244,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7369,7 +7369,7 @@
         }
       ],
       "handler": "app.api.operations.edit_document",
-      "source_line": 250,
+      "source_line": 251,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7386,7 +7386,7 @@
         }
       ],
       "handler": "app.api.operations.download_document",
-      "source_line": 276,
+      "source_line": 277,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7403,7 +7403,7 @@
         }
       ],
       "handler": "app.api.operations.list_extractions",
-      "source_line": 340,
+      "source_line": 341,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7423,7 +7423,7 @@
         }
       ],
       "handler": "app.api.operations.guide",
-      "source_line": 157,
+      "source_line": 158,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7443,7 +7443,7 @@
         }
       ],
       "handler": "app.api.operations.guide_study",
-      "source_line": 162,
+      "source_line": 163,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7460,7 +7460,7 @@
         }
       ],
       "handler": "app.api.operations.audit",
-      "source_line": 2052,
+      "source_line": 2069,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7477,7 +7477,7 @@
         }
       ],
       "handler": "app.api.operations.list_masters",
-      "source_line": 1685,
+      "source_line": 1702,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7494,7 +7494,7 @@
         }
       ],
       "handler": "app.api.operations.create_master",
-      "source_line": 1695,
+      "source_line": 1712,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7511,7 +7511,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_delete_masters",
-      "source_line": 1799,
+      "source_line": 1816,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7528,7 +7528,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_purge_masters",
-      "source_line": 1819,
+      "source_line": 1836,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7545,7 +7545,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_restore_masters",
-      "source_line": 1809,
+      "source_line": 1826,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7562,7 +7562,7 @@
         }
       ],
       "handler": "app.api.operations.import_codes",
-      "source_line": 1719,
+      "source_line": 1736,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7579,7 +7579,7 @@
         }
       ],
       "handler": "app.api.operations.code_import_template",
-      "source_line": 1775,
+      "source_line": 1792,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7596,7 +7596,7 @@
         }
       ],
       "handler": "app.api.operations.update_master",
-      "source_line": 1707,
+      "source_line": 1724,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7613,7 +7613,7 @@
         }
       ],
       "handler": "app.api.operations.purge_single_master",
-      "source_line": 1830,
+      "source_line": 1847,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7630,7 +7630,7 @@
         }
       ],
       "handler": "app.api.operations.list_plans",
-      "source_line": 1843,
+      "source_line": 1860,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7647,7 +7647,7 @@
         }
       ],
       "handler": "app.api.operations.create_plan",
-      "source_line": 1925,
+      "source_line": 1942,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7664,7 +7664,7 @@
         }
       ],
       "handler": "app.api.operations.purge_plans",
-      "source_line": 2020,
+      "source_line": 2037,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7681,7 +7681,7 @@
         }
       ],
       "handler": "app.api.operations.audit",
-      "source_line": 2052,
+      "source_line": 2069,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7698,7 +7698,7 @@
         }
       ],
       "handler": "app.api.operations.delete_plan",
-      "source_line": 2008,
+      "source_line": 2025,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7715,7 +7715,7 @@
         }
       ],
       "handler": "app.api.operations.get_plan",
-      "source_line": 1887,
+      "source_line": 1904,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7732,7 +7732,7 @@
         }
       ],
       "handler": "app.api.operations.update_plan",
-      "source_line": 1930,
+      "source_line": 1947,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7749,7 +7749,7 @@
         }
       ],
       "handler": "app.api.operations.activate_plan",
-      "source_line": 1997,
+      "source_line": 2014,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7766,7 +7766,7 @@
         }
       ],
       "handler": "app.api.operations.preview_timeline",
-      "source_line": 1958,
+      "source_line": 1975,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7783,7 +7783,7 @@
         }
       ],
       "handler": "app.api.operations.add_plan_item",
-      "source_line": 1991,
+      "source_line": 2008,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7800,7 +7800,7 @@
         }
       ],
       "handler": "app.api.operations.save_timeline",
-      "source_line": 1979,
+      "source_line": 1996,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7817,7 +7817,7 @@
         }
       ],
       "handler": "app.api.operations.plan_item_close",
-      "source_line": 916,
+      "source_line": 933,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7834,7 +7834,7 @@
         }
       ],
       "handler": "app.api.operations.plan_item_reopen",
-      "source_line": 933,
+      "source_line": 950,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7851,7 +7851,7 @@
         }
       ],
       "handler": "app.api.operations.plan_item_state",
-      "source_line": 906,
+      "source_line": 923,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7868,7 +7868,7 @@
         }
       ],
       "handler": "app.api.operations.reopen_plan",
-      "source_line": 1936,
+      "source_line": 1953,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7885,7 +7885,7 @@
         }
       ],
       "handler": "app.api.operations.restore_plan",
-      "source_line": 2013,
+      "source_line": 2030,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7902,7 +7902,7 @@
         }
       ],
       "handler": "app.api.operations.plan_sequence_export",
-      "source_line": 955,
+      "source_line": 972,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7919,7 +7919,7 @@
         }
       ],
       "handler": "app.api.operations.study_plan",
-      "source_line": 1946,
+      "source_line": 1963,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7936,7 +7936,7 @@
         }
       ],
       "handler": "app.api.operations.get_planned_survey",
-      "source_line": 1892,
+      "source_line": 1909,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7953,7 +7953,7 @@
         }
       ],
       "handler": "app.api.operations.save_planned_survey",
-      "source_line": 1909,
+      "source_line": 1926,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7976,7 +7976,7 @@
         }
       ],
       "handler": "app.api.operations.preview_planned_survey",
-      "source_line": 1898,
+      "source_line": 1915,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -7993,7 +7993,7 @@
         }
       ],
       "handler": "app.api.operations.plan_timeline_rollup",
-      "source_line": 945,
+      "source_line": 962,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8010,7 +8010,7 @@
         }
       ],
       "handler": "app.api.operations.planned_survey_trajectory",
-      "source_line": 1914,
+      "source_line": 1931,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8027,7 +8027,7 @@
         }
       ],
       "handler": "app.api.operations.reference",
-      "source_line": 1188,
+      "source_line": 1205,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8044,7 +8044,7 @@
         }
       ],
       "handler": "app.api.operations.list_reports",
-      "source_line": 601,
+      "source_line": 602,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8061,7 +8061,7 @@
         }
       ],
       "handler": "app.api.operations.create_report",
-      "source_line": 720,
+      "source_line": 721,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8078,7 +8078,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_assign",
-      "source_line": 1030,
+      "source_line": 1047,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8095,7 +8095,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_assign_preview",
-      "source_line": 1020,
+      "source_line": 1037,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8112,7 +8112,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_delete",
-      "source_line": 1076,
+      "source_line": 1093,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8129,7 +8129,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_edit",
-      "source_line": 677,
+      "source_line": 678,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8146,7 +8146,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_purge",
-      "source_line": 1090,
+      "source_line": 1107,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8163,7 +8163,7 @@
         }
       ],
       "handler": "app.api.operations.bulk_restore",
-      "source_line": 1083,
+      "source_line": 1100,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8180,7 +8180,7 @@
         }
       ],
       "handler": "app.api.operations.list_deleted_reports",
-      "source_line": 627,
+      "source_line": 628,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8197,7 +8197,7 @@
         }
       ],
       "handler": "app.api.operations.audit",
-      "source_line": 2052,
+      "source_line": 2069,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8232,7 +8232,7 @@
         }
       ],
       "handler": "app.api.operations.report_from_document",
-      "source_line": 636,
+      "source_line": 637,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8249,7 +8249,7 @@
         }
       ],
       "handler": "app.api.operations.import_reports",
-      "source_line": 1099,
+      "source_line": 1116,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8266,7 +8266,7 @@
         }
       ],
       "handler": "app.api.operations.timeline_codes_apply",
-      "source_line": 876,
+      "source_line": 893,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8283,7 +8283,7 @@
         }
       ],
       "handler": "app.api.operations.timeline_codes_clear",
-      "source_line": 896,
+      "source_line": 913,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8300,7 +8300,7 @@
         }
       ],
       "handler": "app.api.operations.timeline_codes_preview",
-      "source_line": 866,
+      "source_line": 883,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8317,7 +8317,7 @@
         }
       ],
       "handler": "app.api.operations.timeline_codes_split",
-      "source_line": 886,
+      "source_line": 903,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8334,7 +8334,7 @@
         }
       ],
       "handler": "app.api.operations.get_report",
-      "source_line": 714,
+      "source_line": 715,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8351,7 +8351,7 @@
         }
       ],
       "handler": "app.api.operations.save_report",
-      "source_line": 728,
+      "source_line": 729,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8374,7 +8374,7 @@
         }
       ],
       "handler": "app.api.operations.ai_prefill_report",
-      "source_line": 812,
+      "source_line": 829,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8391,7 +8391,7 @@
         }
       ],
       "handler": "app.api.operations.approve_report",
-      "source_line": 753,
+      "source_line": 770,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8408,7 +8408,7 @@
         }
       ],
       "handler": "app.api.operations.get_brief",
-      "source_line": 831,
+      "source_line": 848,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8425,7 +8425,7 @@
         }
       ],
       "handler": "app.api.operations.review_brief",
-      "source_line": 836,
+      "source_line": 853,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8460,7 +8460,7 @@
         }
       ],
       "handler": "app.api.operations.add_report_source",
-      "source_line": 653,
+      "source_line": 654,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8477,7 +8477,7 @@
         }
       ],
       "handler": "app.api.operations.generate_narratives",
-      "source_line": 795,
+      "source_line": 812,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8500,7 +8500,7 @@
         }
       ],
       "handler": "app.api.operations.print_report",
-      "source_line": 2030,
+      "source_line": 2047,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8517,7 +8517,7 @@
         }
       ],
       "handler": "app.api.operations.reject_report",
-      "source_line": 764,
+      "source_line": 781,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8534,7 +8534,7 @@
         }
       ],
       "handler": "app.api.operations.reopen_report",
-      "source_line": 775,
+      "source_line": 792,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8551,7 +8551,24 @@
         }
       ],
       "handler": "app.api.operations.submit_report",
-      "source_line": 744,
+      "source_line": 761,
+      "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/operations/reports/{report_id}/submit-readiness",
+      "public_allowlisted": false,
+      "authenticated_dependency": true,
+      "capabilities": [
+        {
+          "mode": "all",
+          "keys": [
+            "ops-report:read"
+          ]
+        }
+      ],
+      "handler": "app.api.operations.submit_readiness",
+      "source_line": 745,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8568,7 +8585,7 @@
         }
       ],
       "handler": "app.api.operations.preview_surveys",
-      "source_line": 1039,
+      "source_line": 1056,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8585,7 +8602,7 @@
         }
       ],
       "handler": "app.api.operations.report_timeline_codes",
-      "source_line": 856,
+      "source_line": 873,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8602,7 +8619,7 @@
         }
       ],
       "handler": "app.api.operations.review_timeline",
-      "source_line": 844,
+      "source_line": 861,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8623,7 +8640,7 @@
         }
       ],
       "handler": "app.api.operations.scope_reference",
-      "source_line": 1174,
+      "source_line": 1191,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8640,7 +8657,7 @@
         }
       ],
       "handler": "app.api.operations.get_settings",
-      "source_line": 188,
+      "source_line": 189,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8657,7 +8674,7 @@
         }
       ],
       "handler": "app.api.operations.update_settings",
-      "source_line": 193,
+      "source_line": 194,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8674,7 +8691,7 @@
         }
       ],
       "handler": "app.api.operations.well_summary",
-      "source_line": 1492,
+      "source_line": 1509,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8692,7 +8709,7 @@
         }
       ],
       "handler": "app.api.operations.summary_export_audit",
-      "source_line": 1517,
+      "source_line": 1534,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8711,7 +8728,7 @@
         }
       ],
       "handler": "app.api.operations.well_diagram",
-      "source_line": 1623,
+      "source_line": 1640,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8730,7 +8747,7 @@
         }
       ],
       "handler": "app.api.operations.well_path",
-      "source_line": 1599,
+      "source_line": 1616,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8834,7 +8851,7 @@
         }
       ],
       "handler": "app.api.record_templates.list_templates",
-      "source_line": 30,
+      "source_line": 31,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8851,7 +8868,7 @@
         }
       ],
       "handler": "app.api.record_templates.create_template",
-      "source_line": 80,
+      "source_line": 81,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8868,7 +8885,7 @@
         }
       ],
       "handler": "app.api.record_templates.export_templates",
-      "source_line": 41,
+      "source_line": 42,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8885,7 +8902,7 @@
         }
       ],
       "handler": "app.api.record_templates.export_audit",
-      "source_line": 63,
+      "source_line": 64,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8902,7 +8919,7 @@
         }
       ],
       "handler": "app.api.record_templates.delete_template",
-      "source_line": 96,
+      "source_line": 97,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8919,7 +8936,7 @@
         }
       ],
       "handler": "app.api.record_templates.get_template",
-      "source_line": 75,
+      "source_line": 76,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8936,7 +8953,7 @@
         }
       ],
       "handler": "app.api.record_templates.update_template",
-      "source_line": 85,
+      "source_line": 86,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8953,7 +8970,7 @@
         }
       ],
       "handler": "app.api.record_templates.record_apply",
-      "source_line": 119,
+      "source_line": 120,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8970,7 +8987,7 @@
         }
       ],
       "handler": "app.api.record_templates.duplicate_template",
-      "source_line": 90,
+      "source_line": 91,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -8987,7 +9004,7 @@
         }
       ],
       "handler": "app.api.record_templates.purge_template",
-      "source_line": 107,
+      "source_line": 108,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -9004,7 +9021,7 @@
         }
       ],
       "handler": "app.api.record_templates.preview_template",
-      "source_line": 113,
+      "source_line": 114,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {
@@ -9021,7 +9038,7 @@
         }
       ],
       "handler": "app.api.record_templates.restore_template",
-      "source_line": 102,
+      "source_line": 103,
       "tenant_owner_audit_review": "manual review required; dependencies alone are not proof"
     },
     {

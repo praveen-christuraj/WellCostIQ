@@ -1609,6 +1609,80 @@ def _budget_by_key(baseline: DailyCostBaseline) -> dict[str, list[DailyCostBasel
     return result
 
 
+def _service_budgets_for(
+    budgets: dict[str, list[DailyCostBaselineBudgetLine]], source_line_id: str,
+) -> list[DailyCostBaselineBudgetLine]:
+    """Every locked allowance of one AFE service line, one per priced scope.
+
+    A scope-aware line keys its allowances ``service:<line id>~<scope>``; a
+    single-scope line keeps the plain ``service:<line id>`` key, so both forms
+    are returned together.
+    """
+
+    exact = budgets.get(f"service:{source_line_id}")
+    if exact is not None:
+        return exact
+    prefix = f"service:{source_line_id}~"
+    return [row for key, rows in budgets.items() if key.startswith(prefix) for row in rows]
+
+
+def _budget_for_scope(
+    matching: Sequence[DailyCostBaselineBudgetLine], section_id: str | None, phase_id: str | None,
+) -> DailyCostBaselineBudgetLine | None:
+    """The allowance of exactly this scope, when the scope identifies only one.
+
+    A rate entered for a whole section prices every phase under it, so an exact
+    (section, phase) allowance is preferred and a section-only allowance is the
+    fallback; anything still ambiguous stays unmatched rather than mis-clubbed.
+    """
+
+    exact = [row for row in matching if row.section_id == section_id and row.phase_id == phase_id]
+    if len(exact) == 1:
+        return exact[0]
+    section_only = [row for row in matching if row.section_id == section_id]
+    if len(section_only) == 1:
+        return section_only[0]
+    return None
+
+
+def _match_service_budget(
+    candidates: dict[str, DailyCostBaselineBudgetLine],
+    line: DailyCostServiceLineIn,
+    fallback_key: str,
+) -> tuple[list[DailyCostBaselineBudgetLine], str]:
+    """Match a service actual to the allowance of the line's own scope.
+
+    A service priced on several scopes has one allowance per scope, so the
+    scoped match wins; whole-well allowances remain the fallback.
+    """
+
+    scoped = [
+        row for row in candidates.values()
+        if row.section_id == line.hole_section_id and row.phase_id == line.phase_id
+    ]
+    if len(scoped) == 1:
+        return scoped, f"service:{scoped[0].item_key}"
+    resolved = scoped if scoped else list(candidates.values())
+    if len(resolved) == 1:
+        return resolved, f"service:{resolved[0].item_key}"
+    return [], fallback_key
+
+
+def _weighted_rate(lines: Sequence[DailyCostBaselineBudgetLine]) -> Decimal:
+    """The single unit rate a clubbed allowance charges, weighted by quantity.
+
+    A drill-bit or tangible allowance can be saved as several rows for the same
+    item (a revision, a second purchase). Pricing the actual off the first row
+    would quietly pick one of them, so the rate is the quantity-weighted average
+    and falls back to the only unit rate when no quantity was recorded.
+    """
+
+    quantity = sum((Decimal(row.quantity) for row in lines), Decimal("0"))
+    if quantity > 0:
+        return _rate(sum((Decimal(row.quantity) * Decimal(row.unit_rate) for row in lines), Decimal("0")) / quantity)
+    return _rate(lines[0].unit_rate) if lines else Decimal("0")
+
+
 def _service_rate_or_422(
     entry: DailyCostEntry,
     line: DailyCostServiceLineIn,

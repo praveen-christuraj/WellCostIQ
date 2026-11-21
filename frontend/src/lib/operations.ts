@@ -1606,6 +1606,22 @@ export function submitReport(id: string) {
   return api<OpsReport>(`/operations/reports/${id}/submit`, { method: 'POST', action: 'Submit report' })
 }
 
+/** What still stops this report being submitted; the same list the refusal carries. */
+export type OpsSubmitReadiness = {
+  ready: boolean
+  blockers: string[]
+  blocker_count: number
+}
+
+export function submitReadiness(id: string) {
+  return api<OpsSubmitReadiness>(`/operations/reports/${id}/submit-readiness`, {
+    // A background check must never raise the global pop-up: the editor shows the
+    // checklist itself, and a failed lookup simply hides it.
+    silent: true,
+    action: 'Check submit readiness',
+  })
+}
+
 export function approveReport(id: string) {
   return api<OpsReport>(`/operations/reports/${id}/approve`, { method: 'POST', action: 'Approve report' })
 }

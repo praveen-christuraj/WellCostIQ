@@ -458,6 +458,7 @@ digraph WellSenseIQ {
   "backend/app/api/business_dashboard.py" -> "backend/app/schemas/business_dashboard.py";
   "backend/app/api/business_dashboard.py" -> "backend/app/services/__init__.py";
   "backend/app/api/catalogue_items.py" -> "backend/app/api/deps.py";
+  "backend/app/api/catalogue_items.py" -> "backend/app/core/spreadsheets.py";
   "backend/app/api/catalogue_items.py" -> "backend/app/schemas/catalogue.py";
   "backend/app/api/catalogue_items.py" -> "backend/app/schemas/master_data.py";
   "backend/app/api/catalogue_items.py" -> "backend/app/services/__init__.py";
@@ -537,6 +538,7 @@ digraph WellSenseIQ {
   "backend/app/api/rbac.py" -> "backend/app/schemas/rbac.py";
   "backend/app/api/rbac.py" -> "backend/app/services/__init__.py";
   "backend/app/api/record_templates.py" -> "backend/app/api/deps.py";
+  "backend/app/api/record_templates.py" -> "backend/app/core/spreadsheets.py";
   "backend/app/api/record_templates.py" -> "backend/app/schemas/record_template.py";
   "backend/app/api/record_templates.py" -> "backend/app/services/__init__.py";
   "backend/app/api/report_builder.py" -> "backend/app/api/deps.py";
