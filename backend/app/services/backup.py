@@ -1391,6 +1391,15 @@ def run_due_backups(now: datetime | None = None) -> int:
     moment = as_utc(now) or datetime.now(timezone.utc)
     started = 0
     with SessionLocal() as db:
+        dialect = db.get_bind().dialect.name
+        if dialect == "postgresql":
+            # Cross-process singleton lock: only one worker sweeps due schedules at a time.
+            acquired = db.scalar(text("SELECT pg_try_advisory_xact_lock(hashtext('wellcostiq:backup_scheduler'))"))
+            if not acquired:
+                return 0
+        elif dialect == "sqlite":
+            db.execute(text("BEGIN IMMEDIATE"))
+
         due = list(db.scalars(
             select(BackupSettings).where(
                 BackupSettings.enabled.is_(True),
@@ -1408,6 +1417,8 @@ def run_due_backups(now: datetime | None = None) -> int:
                 settings.next_run_at = calculate_next_run(settings, moment + timedelta(minutes=5))
                 db.commit()
                 continue
+            # Claim this scheduled slot atomically before releasing the transaction.
+            settings.next_run_at = calculate_next_run(settings, moment + timedelta(minutes=1))
             job = create_job(
                 db, organization_id=organization_id, scope=settings.scope, trigger_source="scheduled",
                 description="Scheduled backup", user=None,
