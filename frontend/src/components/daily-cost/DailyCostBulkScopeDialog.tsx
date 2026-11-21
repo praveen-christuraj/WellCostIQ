@@ -124,15 +124,33 @@ export function DailyCostBulkScopeDialog({
     if (!useCurrentRates) return line
     const section = allocations[0]?.hole_section_id || (scopeMode === 'assign' ? sectionId : line.hole_section_id)
     const phase = allocations[0]?.phase_id || (scopeMode === 'assign' ? phaseId : line.phase_id)
-    const rates = baseline.service_rates.filter(rate => rate.is_current !== false && rate.service_id === line.service_id)
-      .filter(rate => !rate.hole_section_id || rate.hole_section_id === section)
-      .filter(rate => !rate.phase_id || rate.phase_id === phase)
-    const rate = rates.find(rate => rate.charge_category === line.charge_category)
-    if (!rate) throw new Error('No compatible current AFE rate exists for a selected service. Edit that service individually.')
-    return { ...line, baseline_service_rate_id: rate.id, charging_basis: rate.charging_basis,
-      charge_category: rate.charge_category as DailyCostServiceInput['charge_category'], currency: rate.currency,
-      exchange_rate: rate.currency === line.currency ? line.exchange_rate : null,
-      override_rate: null, override_reason: '', quantity_unit: rateQuantityUnit(rate.charging_basis, rate.charge_category) }
+    const sourceItems = line.rate_items?.length
+      ? line.rate_items
+      : [{ baseline_service_rate_id: line.baseline_service_rate_id, currency: line.currency,
+          exchange_rate: line.exchange_rate, quantity: line.quantity, quantity_unit: line.quantity_unit,
+          override_rate: line.override_rate, override_reason: line.override_reason }]
+    const rateItems = sourceItems.map(component => {
+      const previous = baseline.service_rates.find(rate => rate.id === component.baseline_service_rate_id)
+      const rate = baseline.service_rates.find(candidate => candidate.is_current !== false
+        && candidate.service_id === line.service_id
+        && candidate.charge_category === (previous?.charge_category ?? line.charge_category)
+        && candidate.charging_basis === (previous?.charging_basis ?? line.charging_basis)
+        && (!candidate.hole_section_id || candidate.hole_section_id === section)
+        && (!candidate.phase_id || candidate.phase_id === phase))
+      return rate ? { ...component, baseline_service_rate_id: rate.id, currency: rate.currency,
+        quantity_unit: rateQuantityUnit(rate.charging_basis, rate.charge_category),
+        override_rate: null, override_reason: '' } : null
+    })
+    if (rateItems.some(item => item === null)) throw new Error('No compatible current AFE rate exists for every cost item on a selected service. Edit that service individually.')
+    const resolved = rateItems as NonNullable<(typeof rateItems)[number]>[]
+    const primary = baseline.service_rates.find(rate => rate.id === resolved[0]?.baseline_service_rate_id)
+    if (!primary) throw new Error('No compatible current AFE rate exists for a selected service.')
+    if (new Set(resolved.map(item => item.currency?.toUpperCase())).size > 1) throw new Error('The current AFE cost items use different currencies; edit this service individually.')
+    return { ...line, baseline_service_rate_id: primary.id, charging_basis: primary.charging_basis,
+      charge_category: primary.charge_category as DailyCostServiceInput['charge_category'],
+      currency: primary.currency, exchange_rate: primary.currency === line.currency ? line.exchange_rate : null,
+      rate_items: resolved, override_rate: null, override_reason: '',
+      quantity_unit: rateQuantityUnit(primary.charging_basis, primary.charge_category) }
   }
   const timeBased = selections.some(({ line }) => useCurrentRates ? baseline.service_rates.some(rate => rate.is_current !== false && rate.service_id === line.service_id && rate.charging_basis === 'Day Rate' && !DAILY_ONE_TIME_CATEGORIES.includes(rate.charge_category as DailyCostServiceInput['charge_category'])) : line.charging_basis === 'Day Rate' && !DAILY_ONE_TIME_CATEGORIES.includes(line.charge_category))
 
@@ -220,6 +238,8 @@ export function DailyCostBulkScopeDialog({
           return
         }
         targetLine.baseline_service_rate_id = selectedRate.id
+        targetLine.rate_items = [{ baseline_service_rate_id: selectedRate.id, currency: selectedRate.currency,
+          quantity: targetLine.quantity, quantity_unit: rateQuantityUnit(selectedRate.charging_basis, selectedRate.charge_category) }]
         targetLine.charging_basis = selectedRate.charging_basis
         targetLine.charge_category = (selectedRate.charge_category || 'Operation') as DailyCostServiceInput['charge_category']
         targetLine.quantity_unit = rateQuantityUnit(selectedRate.charging_basis, targetLine.charge_category)
@@ -229,6 +249,9 @@ export function DailyCostBulkScopeDialog({
       if (quantityMode === 'assign') {
         targetLine.quantity = quantity
         targetLine.quantity_unit = quantityUnit
+        targetLine.rate_items = targetLine.rate_items?.map(item => ({
+          ...item, quantity, quantity_unit: quantityUnit,
+        }))
       }
 
       if (selectedRate && selectedRate.service_id !== line.service_id) {

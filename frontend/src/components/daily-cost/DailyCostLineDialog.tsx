@@ -95,11 +95,9 @@ const isOther = (line: EditableDailyCostLine): line is DailyCostOtherExpenseInpu
  * A service configured in the AFE is one *cost item*, but it can carry several
  * priced charge categories (Operation, Standby, Mobilization, …) that are all
  * part of the same AFE line. ``item_rate_ids`` is the set of those locked AFE
- * rates this row bills for; the row is saved as one ordinary ledger line per
- * selected cost item, because that is how the AFE compares, clubs and prices
- * them. ``baseline_service_rate_id`` stays the row's primary rate (the first
- * selected cost item) for the shared fields: currency, basis, override, scope
- * and quantity.
+ * rates this row bills for; they are persisted as priced child components of
+ * one visible service line. ``baseline_service_rate_id`` remains the primary
+ * rate for legacy shared fields and the optional rate override.
  */
 type ServiceEntryRow = {
   /** Locked AFE rates (cost items) of this service the row bills for. */
@@ -280,7 +278,9 @@ export function DailyCostLineDialog({
             cost_items: initialLine.cost_items ?? [],
             id: initialLine.id || 'service-0',
             service_id: initialLine.service_id,
-            item_rate_ids: initialLine.baseline_service_rate_id ? [initialLine.baseline_service_rate_id] : [],
+            item_rate_ids: initialLine.rate_items?.length
+              ? initialLine.rate_items.map(item => item.baseline_service_rate_id).filter((id): id is string => Boolean(id))
+              : initialLine.baseline_service_rate_id ? [initialLine.baseline_service_rate_id] : [],
             baseline_service_rate_id: initialLine.baseline_service_rate_id,
             charging_basis: initialLine.charging_basis,
             charge_category: initialLine.charge_category,
@@ -712,40 +712,54 @@ export function DailyCostLineDialog({
         problems.push('Common quantity must be greater than zero.')
       }
 
-      const duplicateCheck = new Set<string>()
+      const duplicateRates = new Set<string>()
+      const duplicateRows = new Set<string>()
       serviceRows.forEach((row, idx) => {
         const rowLabel = `Service #${idx + 1}`
-        if ((row.cost_items ?? []).some(item => !item.description.trim() || item.amount === '' || !Number.isFinite(Number(item.amount)) || Number(item.amount) < 0)) problems.push(`${rowLabel}: Each cost item needs a description and a non-negative amount.`)
+        if ((row.cost_items ?? []).some(item => !item.description.trim() || item.amount === '' || !Number.isFinite(Number(item.amount)) || Number(item.amount) < 0)) problems.push(`${rowLabel}: Each manual cost item needs a description and a non-negative amount.`)
         if (!row.service_id) {
           problems.push(`${rowLabel}: Select a service from Master Data.`)
           return
         }
 
         const subId = commonSubActivityId || ''
-        // Duplicates are judged per *cost item* (locked AFE rate), not per
-        // service: a service whose AFE line carries Operation, Standby and
-        // Mobilization is entered once and bills all three, and only a second
-        // charge for the very same cost item under the same sub activity is a
-        // duplicate. This is the guard the backend applies to saved rows.
-        const rowItems = rowRates(row)
-        const rowKeys = rowItems.length
-          ? rowItems.map(rate => `${row.service_id}:${subId}:${rate.charge_category}:${row.customScope ? row.custom_hole_section_id : commonHoleSectionId}:${row.customScope ? row.custom_phase_id : commonPhaseId}`)
-          : [`${row.service_id}:${subId}:${row.charge_category}:${row.customScope ? row.custom_hole_section_id : commonHoleSectionId}:${row.customScope ? row.custom_phase_id : commonPhaseId}`]
-        const sName = reference.services.find(s => s.id === row.service_id)?.service_code || row.service_id
-        for (const [keyIndex, dupKey] of rowKeys.entries()) {
-          if (duplicateCheck.has(dupKey)) {
-            const category = rowItems[keyIndex]?.charge_category || row.charge_category || 'this charge'
-            problems.push(`${rowLabel} (${sName}): ${category} is already entered twice under the same sub activity. Untick the repeated cost item or use a different sub activity.`)
-          }
-          duplicateCheck.add(dupKey)
+        const sectionId = row.customScope ? row.custom_hole_section_id : commonHoleSectionId
+        const phaseId = row.customScope ? row.custom_phase_id : commonPhaseId
+        const identity = [row.service_id, commonActivityId, subId, sectionId ?? '', phaseId ?? ''].join(':')
+        const selectedRates = rowRates(row)
+        if (selectedRates.length > 1 && (row.cost_items ?? []).length) {
+          problems.push(`${rowLabel}: Manual actual-cost breakdowns replace rate pricing and can only be used with one selected AFE cost item.`)
         }
-
-        const existingKeys = new Set(serviceLines.flatMap((sLine, sIdx) => sIdx === lineIndex || sLine.service_id !== row.service_id || (sLine.sub_activity_id || '') !== subId
-          ? []
-          : [`${sLine.service_id}:${subId}:${sLine.charge_category}:${sLine.hole_section_id}:${sLine.phase_id}`]))
-        const clashes = rowItems.filter(rate => existingKeys.has(`${row.service_id}:${subId}:${rate.charge_category}:${row.customScope ? row.custom_hole_section_id : commonHoleSectionId}:${row.customScope ? row.custom_phase_id : commonPhaseId}`))
-        if (!allocations.length && clashes.length) {
-          problems.push(`${rowLabel} (${sName}): ${clashes.map(rate => rate.charge_category).join(', ')} ${clashes.length === 1 ? 'is' : 'are'} already entered for this sub activity on this sheet. Untick ${clashes.length === 1 ? 'that cost item' : 'those cost items'}, or add the service again under a different sub activity.`)
+        const sName = reference.services.find(s => s.id === row.service_id)?.service_code || row.service_id
+        if (duplicateRows.has(identity)) {
+          problems.push(`${rowLabel} (${sName}): This service is already in the same activity, sub activity and scope. Add its other cost items to that service row.`)
+        }
+        duplicateRows.add(identity)
+        for (const rate of selectedRates) {
+          if (duplicateRates.has(rate.id)) {
+            problems.push(`${rowLabel} (${sName}): ${rate.charge_category} cost item is selected more than once. Keep it in one service row.`)
+          }
+          duplicateRates.add(rate.id)
+        }
+        if (selectedRates.length > 1) {
+          const currencies = new Set(selectedRates.map(rate => rate.currency.toUpperCase()))
+          if (currencies.size > 1) problems.push(`${rowLabel} (${sName}): Selected AFE cost items use different currencies. Add them as separate allocations so their totals remain correctly denominated.`)
+          if (selectedRates.some(rate => (rate.currency || '').toUpperCase() !== row.currency.toUpperCase())) {
+            problems.push(`${rowLabel} (${sName}): Selected cost items must use the service row currency.`)
+          }
+        }
+        const existingSameService = serviceLines.filter((saved, savedIndex) =>
+          savedIndex !== lineIndex && saved.service_id === row.service_id
+          && saved.activity_id === commonActivityId && (saved.sub_activity_id || '') === subId
+          && saved.hole_section_id === sectionId && saved.phase_id === phaseId)
+        if (!allocations.length && existingSameService.length) {
+          const savedRateIds = new Set(existingSameService.flatMap(saved =>
+            saved.rate_items?.length ? saved.rate_items.map(item => item.baseline_service_rate_id).filter(Boolean) : [saved.baseline_service_rate_id].filter(Boolean)))
+          const newIds = selectedRates.map(rate => rate.id)
+          const overlaps = newIds.some(id => savedRateIds.has(id))
+          if (overlaps || !newIds.length) {
+            problems.push(`${rowLabel} (${sName}): This service is already entered for the same activity, sub activity and scope. Edit the existing service row and include the other cost items there.`)
+          }
         }
 
         const plannedRow = allocations.length
@@ -887,13 +901,9 @@ export function DailyCostLineDialog({
     setSaving(true)
     try {
       if (kind === 'service') {
-        // Every selected cost item becomes its own ordinary ledger line. That is
-        // how the AFE priced the service (one allowance per charge category), so
-        // the report clubs them back into the one service row and each category
-        // reconciles against its own budget line. A row with no selectable item
-        // (an unplanned UPA/NPT service) is saved exactly as before.
-        const lines: DailyCostServiceInput[] = []
-        let editedIdentityUsed = false
+        // Expand components only for scope allocation, then regroup them into
+        // one service line per service/activity/sub-activity/section/phase.
+        const byIdentity = new Map<string, DailyCostServiceInput>()
         for (const row of serviceRows) {
           const secId = row.customScope ? row.custom_hole_section_id : commonHoleSectionId
           const phId = row.customScope ? row.custom_phase_id : commonPhaseId
@@ -914,51 +924,73 @@ export function DailyCostLineDialog({
             service_id: row.service_id,
             remarks: row.remarks.trim(),
           }
-          const charges: DailyCostServiceInput[] = costs.length
-            ? costs.map((rate, rateIndex) => {
-              // The daily override applies to the item it was typed beside (the
-              // row's primary item). Any other cost item keeps its locked AFE
-              // rate, so one entry can never quietly reprice the whole service.
-              const carriesOverride = row.override_rate !== null && rate.id === row.baseline_service_rate_id
-              const cur = (carriesOverride || rateIndex === 0 ? row.currency : rate.currency || row.currency || baseline.standard_currency || 'USD').toUpperCase()
-              return {
-                ...shared,
-                cost_items: rateIndex === 0 ? row.cost_items ?? [] : [],
-                baseline_service_rate_id: rate.id,
-                charging_basis: rate.charging_basis,
-                charge_category: (rate.charge_category || 'Operation') as ChargeCategory,
-                currency: cur,
-                exchange_rate: cur !== 'USD' && row.exchange_rate ? row.exchange_rate : null,
-                override_rate: carriesOverride ? row.override_rate : null,
-                override_reason: carriesOverride && row.override_rate ? row.override_reason.trim() : '',
-              }
-            })
-            : [{
+          const chosen = costs.length ? costs : [null]
+          for (const [rateIndex, rate] of chosen.entries()) {
+            const basis = rate?.charging_basis ?? row.charging_basis
+            const category = (rate?.charge_category || row.charge_category || 'Operation') as ChargeCategory
+            const quantityUnit: DailyQuantityUnit = basis === 'Per Service Rate'
+              ? 'service'
+              : basis === 'Per Section Rate'
+                ? 'section'
+                : rate && rateIsOneTime(rate) ? 'unit' : unit
+            const carriesOverride = Boolean(rate && row.override_rate !== null && rate.id === row.baseline_service_rate_id)
+            const currency = (rate?.currency || row.currency || baseline.standard_currency || 'USD').toUpperCase()
+            const component: DailyCostServiceInput = {
               ...shared,
-              cost_items: row.cost_items ?? [],
-              baseline_service_rate_id: null,
-              charging_basis: row.charging_basis,
-              charge_category: (row.charge_category || 'Operation') as ChargeCategory,
-              currency: (row.currency || baseline.standard_currency || 'USD').toUpperCase(),
-              exchange_rate: row.exchange_rate,
-              override_rate: row.override_rate || null,
-              override_reason: row.override_rate ? row.override_reason.trim() : '',
-            }]
-          for (const charge of charges) {
-            // Only an edit that still produces exactly one line keeps the saved
-            // line's identity; splitting it would otherwise overwrite one row
-            // and append the rest.
-            const keepsIdentity = Boolean(initialLine) && serviceRows.length === 1 && charges.length === 1 && !editedIdentityUsed
-            if (keepsIdentity) editedIdentityUsed = true
-            // `allocateService` also normalises a line with no allocation:
-            // a one-time charge becomes one unit, and per-service / per-section
-            // charges keep their own quantity unit.
-            lines.push(...allocateService(
-              { ...charge, id: keepsIdentity ? initialLine!.id : null },
-              allocations, baseline, reference,
-            ))
+              quantity: rate && rateIsOneTime(rate) ? '1' : qty,
+              quantity_unit: quantityUnit,
+              cost_items: rateIndex === 0 ? row.cost_items ?? [] : [],
+              baseline_service_rate_id: rate?.id ?? null,
+              charging_basis: basis,
+              charge_category: category,
+              currency,
+              exchange_rate: currency !== 'USD'
+                ? (currency === row.currency ? row.exchange_rate : defaultUsdRateForCurrency(currency, baseline))
+                : null,
+              override_rate: carriesOverride ? row.override_rate : null,
+              override_reason: carriesOverride && row.override_rate ? row.override_reason.trim() : '',
+            }
+            const allocationsForComponent = allocateService(component, allocations, baseline, reference)
+            for (const allocated of allocationsForComponent) {
+              const key = [allocated.service_id, allocated.activity_id, allocated.sub_activity_id ?? '',
+                allocated.hole_section_id ?? '', allocated.phase_id ?? '', allocated.currency.toUpperCase()].join(':')
+              const existing = byIdentity.get(key)
+              if (!rate) {
+                if (existing) throw new Error('A service without an AFE cost item can only be entered once per activity and scope.')
+                byIdentity.set(key, allocated)
+                continue
+              }
+              const rateItem = {
+                baseline_service_rate_id: allocated.baseline_service_rate_id,
+                currency: allocated.currency,
+                exchange_rate: allocated.exchange_rate ?? null,
+                quantity: allocated.quantity,
+                quantity_unit: allocated.quantity_unit,
+                override_rate: allocated.override_rate,
+                override_reason: allocated.override_reason,
+              }
+              if (!existing) {
+                byIdentity.set(key, { ...allocated, rate_items: [rateItem] })
+              } else {
+                const seen = (existing.rate_items ?? []).some(item => item.baseline_service_rate_id === rateItem.baseline_service_rate_id)
+                if (seen) throw new Error('The same AFE cost item was selected more than once.')
+                byIdentity.set(key, {
+                  ...existing,
+                  rate_items: [...(existing.rate_items ?? []), rateItem],
+                  cost_items: [...(existing.cost_items ?? []), ...(allocated.cost_items ?? [])],
+                })
+              }
+            }
           }
         }
+        const lines = [...byIdentity.values()].map((line, index) => ({
+          ...line,
+          // Only a one-to-one edit can preserve the old row identity. A legacy
+          // multi-row service is consolidated by the backend on the next save.
+          id: initialLine && serviceRows.length === 1 && byIdentity.size === 1
+            ? initialLine.id
+            : (index === 0 ? line.id ?? null : null),
+        }))
         onSave(lines)
       } else if (nonServiceForm) {
         const cur = (nonServiceForm.currency || baseline.standard_currency || 'USD').toUpperCase()
@@ -1240,7 +1272,7 @@ export function DailyCostLineDialog({
               {serviceRows.map((row, index) => {
                 const sObj = reference.services.find(s => s.id === row.service_id)
                 const rate = baseline.service_rates.find(r => r.id === row.baseline_service_rate_id)
-                const rateMatches = baseline.service_rates.filter(r => r.service_id === row.service_id && (r.is_current !== false || r.id === row.baseline_service_rate_id))
+                const rateMatches = baseline.service_rates.filter(r => r.service_id === row.service_id && (r.is_current !== false || rowItemRateIds(row).includes(r.id)))
                 const selectedRates = rowRates(row)
                 const rowCurrency = (row.currency || 'USD').toUpperCase()
                 const canChangeCurrency = row.override_rate !== null || !rate
@@ -1287,11 +1319,8 @@ export function DailyCostLineDialog({
 
                       {row.service_id && (
                         <Box sx={{ gridColumn: '1 / -1' }} display="grid" gap={1}>
-                          {/* One service, one entry, every cost item it carries.
-                              Each ticked item is saved as its own ledger line, so
-                              the AFE compares and clubs the service exactly as it
-                              was estimated, and the user never has to add the same
-                              service twice to reach a second cost item. */}
+                          {/* One visible service row; selected locked AFE rates are
+                              retained as priced detail beneath that row. */}
                           <Box display="flex" alignItems="baseline" justifyContent="space-between" gap={1} flexWrap="wrap">
                             <Typography fontSize={11} fontWeight={800} color="text.secondary" textTransform="uppercase" letterSpacing={.6}>
                               AFE cost items · {selectedRates.length} of {rateMatches.length} selected
@@ -1358,8 +1387,8 @@ export function DailyCostLineDialog({
                               })}
                               {selectedRates.length > 1 && (
                                 <Typography fontSize={11} color="text.secondary">
-                                  {selectedRates.length} cost items will be saved as {selectedRates.length} lines of this one service,
-                                  {allocations.length ? ` under ${allocations.length} activity allocation${allocations.length === 1 ? '' : 's'}` : ' under the same activity, sub activity and scope'}.
+                                  {selectedRates.length} cost items will be grouped into one service line,
+                                  {allocations.length ? ` under each applicable activity allocation (${allocations.length} allocation${allocations.length === 1 ? '' : 's'}).` : ' under the same activity, sub activity and scope.'}
                                 </Typography>
                               )}
                             </Box>
@@ -1369,7 +1398,9 @@ export function DailyCostLineDialog({
 
                       <Box sx={{ gridColumn: '1 / -1' }} display="grid" gap={1}>
                         <Typography fontWeight={700}>Actual cost breakdown (optional)</Typography>
-                        <Typography color="text.secondary" fontSize={12}>Amounts are in {row.currency}. Their total replaces the rate-based charge; descriptions are retained for reference.</Typography>
+                        <Typography color="text.secondary" fontSize={12}>{selectedRates.length > 1
+                          ? 'Manual actual-cost breakdowns replace rate pricing, so remove this breakdown before combining multiple AFE cost items.'
+                          : `Amounts are in ${row.currency}. Their total replaces the rate-based charge; descriptions are retained for reference.`}</Typography>
                         {(row.cost_items ?? []).map((item, itemIndex) => <Box key={itemIndex} display="flex" gap={1}>
                           <TextField size="small" label="Description" value={item.description} onChange={e => updateServiceRow(row.id, { cost_items: row.cost_items!.map((v, i) => i === itemIndex ? { ...v, description: e.target.value } : v) })} fullWidth />
                           <TextField size="small" label="Amount" type="number" value={item.amount} onChange={e => updateServiceRow(row.id, { cost_items: row.cost_items!.map((v, i) => i === itemIndex ? { ...v, amount: e.target.value } : v) })} />

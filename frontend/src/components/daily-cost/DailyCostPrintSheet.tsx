@@ -801,6 +801,34 @@ function LihSchedule({ report }: { report: CostPrintReport }) {
   </>
 }
 
+function DailyServiceCostItemDetails({ report }: { report: CostPrintReport }) {
+  const rows = report.days.flatMap(day => (day.services ?? []).flatMap(line =>
+    (line.rate_items ?? []).map((component, index) => ({
+      key: `${day.entry.id}:${line.id}:${component.baseline_service_rate_id ?? index}`,
+      day: displayDate(day.entry.cost_date), service: `${line.service_code} · ${line.service_name}`,
+      activity: `${line.activity_code} · ${line.activity_name}`,
+      subActivity: line.sub_activity_code ? `${line.sub_activity_code} · ${line.sub_activity_name}` : line.sub_activity_name || '—',
+      scope: [line.section_code, line.phase_code].filter(Boolean).join(' · ') || 'Whole well',
+      costItem: `${component.charge_category}${component.baseline_service_rate_id ? ` · AFE rate ${component.baseline_service_rate_id.slice(0, 8)}` : ''}`,
+      rateId: component.baseline_service_rate_id ?? '',
+      quantity: `${component.quantity} ${component.quantity_unit}`,
+      rate: `${printMoney(component.override_rate ?? component.captured_rate, component.currency)} / ${component.charging_basis}`,
+      amount: printMoney(component.amount, component.currency),
+      standardAmount: printMoney(component.standard_amount, day.entry.standard_currency),
+    })),
+  ))
+  if (!rows.length) return null
+  return <section className="dcr-cumulative-section dcr-service-item-details">
+    <h2>Daily service cost-item detail</h2>
+    <table><thead><tr><th>Date</th><th>Service</th><th>Activity / sub activity</th><th>Section / phase</th><th>Cost item</th><th>Quantity</th><th>Rate</th><th>Native amount</th><th>AFE amount</th></tr></thead>
+      <tbody>{rows.map(row => <tr key={row.key}>
+        <td>{row.day}</td><td>{row.service}</td><td>{row.activity}<br/>{row.subActivity}</td><td>{row.scope}</td><td title={row.rateId || undefined}>{row.costItem}</td>
+        <td>{row.quantity}</td><td className="num">{row.rate}</td><td className="num">{row.amount}</td><td className="num">{row.standardAmount}</td>
+      </tr>)}</tbody>
+    </table>
+  </section>
+}
+
 function CumulativeReportDetails({ report }: { report: CostPrintReport }) {
   const groups = new Map<string, DailyCostDay[]>()
   for (const day of report.overviewDays?.length ? report.overviewDays : report.days) {
@@ -818,7 +846,7 @@ function CumulativeReportDetails({ report }: { report: CostPrintReport }) {
       <div className="ps-eyebrow">{APP_NAME} · cumulative saved costs</div>
       <h1>{reportTitle(report)}</h1>
       <p>{report.period} · Printed {watNowFormatted()}</p>
-      <p>These schedules consolidate saved daily sheets. Daily line-by-line breakdowns are intentionally omitted; currencies and incompatible AFEs remain separate.</p>
+      <p>These schedules consolidate saved daily sheets. Service cost-item detail follows the summaries; currencies and incompatible AFEs remain separate.</p>
     </header>
     {scopes.map(scope => {
       const rows = reportCostRows(scope.rows, report.services)
@@ -829,6 +857,7 @@ function CumulativeReportDetails({ report }: { report: CostPrintReport }) {
         <CumulativeSchedule title="Tangibles cumulative cost · item-wise" rows={rows.tangibles.filter(row => asNumber(row.actual_to_date) !== 0)} currency={scope.currency}/>
       </section>
     })}
+    <DailyServiceCostItemDetails report={report}/>
     <LihSchedule report={report}/>
   </div>
 }
