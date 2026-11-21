@@ -46,12 +46,39 @@ export type OpsSurvey = {
 export type OpsPlanSurveyStation = OpsSurvey & { source_file: string; source_sheet: string }
 export type OpsPlanSurvey = { stations: OpsPlanSurveyStation[]; updated_at: string; shared_reference: boolean }
 
+/** The states a sequence code can be in. Only `complete` carries a verdict. */
+export type OpsSequenceState = 'not_started' | 'in_progress' | 'overrun_open' | 'complete' | 'skipped'
+
+/**
+ * The state a programme row is stored in. `planned` is an open row; the ledger
+ * derives the richer set above from it, its hours and any close.
+ */
+export type OpsPlanItemState = Exclude<OpsSequenceState, 'not_started' | 'in_progress' | 'overrun_open'> | 'planned'
+
 export type OpsTimelineCode = {
   sequence_no: number
   description: string
   planned_hours: string | null
   target_depth_m: string | null
   cum_planned_days: string | null
+  /** The identity of the programme row. Prefer it over the printed code. */
+  item_id: string
+  state: OpsSequenceState
+  remaining_hours: string | null
+  actual_hours: string | null
+  is_skipped: boolean
+  closed: boolean
+  /** Cumulative days on the curve with skipped activities removed. */
+  effective_cum_days: string | null
+}
+
+/** What this workspace decided a lead, a lag and an unplanned hour mean. */
+export type OpsSequencePolicy = {
+  uncoded: 'lag' | 'exclude'
+  npt: 'include' | 'exclude'
+  skipped_credit: 'separate' | 'net'
+  auto_close_tolerance_pct: string
+  auto_close: boolean
 }
 
 export type OpsReportTimelineCodes = {
@@ -60,6 +87,7 @@ export type OpsReportTimelineCodes = {
   plan_status: string
   basis: string
   codes: OpsTimelineCode[]
+  policy: OpsSequencePolicy | null
 }
 
 export type OpsSeqCodePreview = {
@@ -77,12 +105,43 @@ export type OpsSeqCodePreview = {
   }[]
   skipped: { block_id: string; sequence_no: number | null; reason: string }[]
   summary: string
+  /** What this code's arithmetic will say once the lines carry it. */
+  code_state: OpsSequenceState | ''
+  actual_hours: string | null
+  remaining_hours: string | null
+  variance_hours: string | null
+  variance_days: string | null
+  /** Read before applying: an in-progress code is not an 88-hour lead. */
+  warnings: string[]
 }
 
 export type OpsSeqCodeApplyOut = {
   applied_count: number
   sequence_no: number
+  item_id: string | null
   skipped: { block_id: string; sequence_no: number | null; reason: string }[]
+  summary: string
+  code_state: OpsSequenceState | ''
+  variance_hours: string | null
+  variance_days: string | null
+}
+
+/** One line's hours, shared between programme codes. */
+export type OpsSeqCodeSplit = {
+  block_id: string
+  allocations: { item_id?: string | null; sequence_no?: number | null; hours: string }[]
+  /** Allow the unallocated rest of the line to stay Unplanned Activity. */
+  remainder_to_unplanned?: boolean
+  note?: string
+}
+
+export type OpsSeqCodeSplitOut = {
+  block_id: string
+  item_id: string | null
+  allocated_hours: string
+  line_hours: string
+  remainder_hours: string
+  allocations: { item_id: string; sequence_no: number; hours: string }[]
   summary: string
 }
 
@@ -92,11 +151,75 @@ export type OpsTimelineRollupCode = {
   planned_hours: string | null
   target_depth_m: string | null
   actual_hours: string | null
+  /** Null unless `state === 'complete'`: an open activity has no verdict. */
   variance_hours: string | null
   variance_days: string | null
   comparison: 'ahead' | 'behind' | 'on'
   line_count: number
   report_count: number
+  item_id: string
+  state: OpsSequenceState
+  progress_pct: string | null
+  remaining_hours: string | null
+  close_suggested: boolean
+  closed_at: string | null
+  close_source: string
+  close_note: string
+  saved_planned_hours: string | null
+  skip_reason: string
+  skipped_by: string
+  skipped_at: string | null
+  effective_cum_days: string | null
+  cum_shift_days: string | null
+  saved_cum_days: string | null
+  provisional_actual_hours: string | null
+}
+
+/** Hours against no sequence code. They raise actual and can only read as lag. */
+export type OpsTimelineUnplanned = {
+  code: string
+  actual_hours: string | null
+  upa_hours: string | null
+  npt_hours: string | null
+  other_hours: string | null
+  variance_hours: string | null
+  variance_days: string | null
+  comparison: 'ahead' | 'behind' | 'on'
+  line_count: number
+  provisional_hours: string | null
+  unmatched_hours: string | null
+}
+
+export type OpsTimelineTotals = {
+  planned_in_scope: string | null
+  planned_in_scope_days: string | null
+  planned_saved: string | null
+  actual_coded: string | null
+  actual_unplanned: string | null
+  actual_total: string | null
+  /** The printed lead/lag: finished variances less unplanned hours. */
+  realised_variance: string | null
+  realised_variance_days: string | null
+  comparison: 'ahead' | 'behind' | 'on'
+  closed_coverage_pct: string | null
+  /** Burn, not a verdict: how much of the plan the hours have spent. */
+  plan_coverage_pct: string | null
+  plan_coverage_days: string | null
+  provisional_actual_hours: string | null
+  closed_code_count: number
+  open_code_count: number
+  not_started_count: number
+  skipped_count: number
+  missing_planned_hours: number
+  unattributed_hours: string | null
+}
+
+export type OpsTimelineFinding = {
+  kind: string
+  message: string
+  item_id: string | null
+  block_id: string | null
+  severity: string
 }
 
 export type OpsTimelineRollup = {
@@ -108,6 +231,15 @@ export type OpsTimelineRollup = {
   comparison: 'ahead' | 'behind' | 'on'
   codes: OpsTimelineRollupCode[]
   uncoded_lines: number
+  unplanned: OpsTimelineUnplanned
+  totals: OpsTimelineTotals
+  findings: OpsTimelineFinding[]
+  policy: OpsSequencePolicy
+  confirmed_report_count: number
+  provisional_report_count: number
+  /** Where the well is against the programme today — a different question. */
+  schedule_position_days: string | null
+  schedule_position_basis: string
 }
 
 export type OpsSurveyPreview = {
@@ -304,6 +436,13 @@ export type OpsBlock = {
   timeline_edited_at?: string | null
   /** Sequence code of the programme activity this line logs. */
   timeline_code?: string | null
+  /**
+   * The state of the code this line logs. An open code has no lead and no lag —
+   * only progress and the hours it still owes.
+   */
+  timeline_sequence_state?: OpsSequenceState | ''
+  /** `split` when this line's hours are shared between several codes. */
+  timeline_split_state?: string
   is_deleted: boolean
   created_at: string
   updated_at: string
@@ -887,6 +1026,20 @@ export type OpsSettings = {
   default_depth_unit: string
   default_rop_basis: string
   document_max_mb: number
+  /** What unplanned (uncoded) hours do to the printed lead/lag. */
+  sequence_uncoded_policy: 'lag' | 'exclude'
+  /** Whether NPT hours count against the sequence variance. */
+  sequence_npt_policy: 'include' | 'exclude'
+  /** Whether a skipped activity's saved hours are netted into the verdict. */
+  sequence_skipped_credit: 'separate' | 'net'
+  /** Over-plan percentage at which closing an activity is *suggested*. */
+  sequence_auto_close_tolerance_pct: string
+  /** Apply that suggestion without a reviewer. Off by default, deliberately. */
+  sequence_auto_close: boolean
+  /** Refuse to submit a report whose lines carry no code and no UPA reason. */
+  sequence_require_code_on_submit: boolean
+  /** Only the current revision of a report votes on the confirmed figure. */
+  sequence_current_run_only: boolean
   created_at: string
   updated_at: string
 }
@@ -912,14 +1065,31 @@ export type OpsPlan = {
   updated_at: string
   well_code: string
   well_name: string
-  items: {
-    id: string
-    sequence_no: number
-    description: string
-    target_depth_m: string | null
-    planned_hours: string
-    cum_planned_days: string | null
-  }[]
+  items: OpsPlanItem[]
+}
+
+/**
+ * One programme row. `id` is its identity: a stored sequence code points at it, so
+ * an edit that moves the activity up or down the programme follows it rather than
+ * sliding every code one row sideways.
+ */
+export type OpsPlanItem = {
+  id: string
+  sequence_no: number
+  description: string
+  target_depth_m: string | null
+  planned_hours: string
+  cum_planned_days: string | null
+  /** `planned`, `skipped` or `complete`. Only a close carries a lead or a lag. */
+  state?: OpsPlanItemState
+  skip_reason?: string
+  skipped_by?: string
+  skipped_at?: string | null
+  closed_at?: string | null
+  closed_by?: string
+  close_source?: string
+  close_note?: string
+  closed_actual_hours?: string | null
 }
 
 export const opsScopeReference = () => api<OpsScopeReference>('/operations/scope-reference')
@@ -1529,17 +1699,33 @@ export type TimelineRow = {
   target_depth_m: string | null
   planned_hours: string | null
   source_row?: number
+  /** The stored row this line came from; an imported row has none, and is new. */
+  id?: string
 }
 export type TimelinePreview = { sheet: string; sheets: string[]; warnings: string[]; items: TimelineRow[] }
 export const previewTimeline = (id: string, file: File, sheet = '') =>
   uploadFiles<TimelinePreview>(`/operations/plans/${id}/import-preview`, [file], { sheet }, 'file')
+/**
+ * The programme as the server saves it.
+ *
+ * `item_id` carries each row's **identity**. Without it the server has to delete
+ * and re-create the programme, which gives every activity a fresh key and slides
+ * every stored sequence code one row sideways — a confident, wrong lead on a
+ * month that was already signed. A row with no `item_id` is genuinely new work.
+ */
 function timelinePayload(rows: TimelineRow[]) {
   return rows.map((row, i) => {
     // Keep existing metadata when editing just the description, depth or hours.
-    const { id: _id, source_row: _source, cum_planned_days: _computed, ...item } = row as TimelineRow & {
-      id?: string; cum_planned_days?: string
+    const { id, source_row: _source, cum_planned_days: _computed, ...item } = row as TimelineRow & {
+      cum_planned_days?: string
     }
-    return { ...item, sequence_no: i + 1, description: row.description.trim(), target_depth_m: row.target_depth_m ?? null }
+    return {
+      ...item,
+      item_id: id ?? null,
+      sequence_no: i + 1,
+      description: row.description.trim(),
+      target_depth_m: row.target_depth_m ?? null,
+    }
   })
 }
 
@@ -1562,17 +1748,103 @@ export const defaultOpsCodes = () => api<OpsDefaultCode[]>('/operations/default-
 /** The baseline programme a report is compared against, and its linkable sequence codes. */
 export const reportTimelineCodes = (reportId: string) =>
   api<OpsReportTimelineCodes>(`/operations/reports/${reportId}/timeline-codes`, { action: 'Load sequence codes' })
-export const previewTimelineCodes = (data: { block_ids: string[]; sequence_no: number }) =>
+/** The code is named by `item_id` (its identity); `sequence_no` is for a typed code. */
+export type OpsSeqCodeSelection = { block_ids: string[]; sequence_no?: number; item_id?: string }
+
+export const previewTimelineCodes = (data: OpsSeqCodeSelection) =>
   api<OpsSeqCodePreview>('/operations/reports/timeline-codes/preview', {
     method: 'POST',
     body: body(data),
     action: 'Preview sequence code assignment',
   })
-export const applyTimelineCodes = (data: { block_ids: string[]; sequence_no: number }) =>
+export const applyTimelineCodes = (data: OpsSeqCodeSelection) =>
   api<OpsSeqCodeApplyOut>('/operations/reports/timeline-codes/apply', {
     method: 'POST',
     body: body(data),
     action: 'Apply sequence codes',
+  })
+/** Share one line's hours between codes; any remainder stays named, never lost. */
+export const splitTimelineCodes = (data: OpsSeqCodeSplit) =>
+  api<OpsSeqCodeSplitOut>('/operations/reports/timeline-codes/split', {
+    method: 'POST',
+    body: body(data),
+    action: 'Split the line between sequence codes',
+  })
+/** Remove the code, deliberately making the hours Unplanned Activity (a lag). */
+export const clearTimelineCodes = (data: { block_ids: string[]; acknowledge_unplanned: boolean }) =>
+  api<{ cleared_count: number; summary: string }>('/operations/reports/timeline-codes/clear', {
+    method: 'POST',
+    body: body(data),
+    action: 'Clear sequence codes',
+  })
+
+export type OpsSequenceStateOut = {
+  item_id: string
+  sequence_no: number
+  state: OpsSequenceState
+  saved_planned_hours: string | null
+  planned_in_scope: string | null
+  planned_saved: string | null
+  summary: string
+}
+
+/** Skip a planned activity (its hours are released) or bring it back. */
+export const setSequenceState = (
+  planId: string,
+  itemId: string,
+  data: { state: 'planned' | 'skipped'; reason?: string; expected_updated_at?: string | null },
+) =>
+  api<OpsSequenceStateOut>(`/operations/plans/${planId}/items/${itemId}/state`, {
+    method: 'POST',
+    body: body(data),
+    action: data.state === 'skipped' ? 'Skip the activity' : 'Restore the activity',
+  })
+
+export type OpsSequenceCloseOut = {
+  item_id: string
+  sequence_no: number
+  state: OpsSequenceState
+  planned_hours: string | null
+  actual_hours: string | null
+  variance_hours: string | null
+  variance_days: string | null
+  comparison: 'ahead' | 'behind' | 'on'
+  summary: string
+}
+
+/** Finish a planned activity. The only route to a lead or a lag. */
+export const closeSequence = (
+  planId: string,
+  itemId: string,
+  data: { actual_hours?: string | null; note?: string; expected_updated_at?: string | null },
+) =>
+  api<OpsSequenceCloseOut>(`/operations/plans/${planId}/items/${itemId}/close`, {
+    method: 'POST',
+    body: body(data),
+    action: 'Close the activity',
+  })
+
+/** Withdraw a close, with a reason. The hours stay; the verdict is withdrawn. */
+export const reopenSequence = (planId: string, itemId: string, note: string) =>
+  api<{ item_id: string; sequence_no: number; state: OpsSequenceState; summary: string }>(
+    `/operations/plans/${planId}/items/${itemId}/reopen`,
+    { method: 'POST', body: body({ note }), action: 'Reopen the activity' },
+  )
+
+/** The per-code register as a self-describing download. */
+export type OpsSequenceExport = {
+  plan_version_id: string
+  plan_label: string
+  columns: string[]
+  rows: Record<string, string | number | null>[]
+  totals: OpsTimelineTotals
+  policy: OpsSequencePolicy
+  findings: OpsTimelineFinding[]
+  notes: string[]
+}
+export const sequenceExport = (planId: string) =>
+  api<OpsSequenceExport>(`/operations/plans/${planId}/sequence-export`, {
+    action: 'Load the sequence register',
   })
 /** Per-code planned vs actual hours across the baseline programme's whole scope. */
 export const timelineRollup = (planId: string) =>

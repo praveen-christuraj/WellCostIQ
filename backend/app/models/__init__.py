@@ -131,6 +131,7 @@ from app.models.assistant import AssistantConversation, AssistantMemory
 from app.models.entry_check import DailyCostCheckReview, DailyCostItemProfile
 from app.models.operations import (  # noqa: F401
     OpsActivityBlock,
+    OpsActivityBlockCode,
     OpsDailyReport,
     OpsDocument,
     OpsExtractionJob,

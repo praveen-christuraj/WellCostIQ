@@ -151,6 +151,10 @@ type Block = Pick<
   | 'timeline_system_actual_hours'
   | 'timeline_variance_hours'
   | 'timeline_actual_edited'
+  // The state of the code this line logs. An open code has no verdict — only
+  // progress and the hours it still owes.
+  | 'timeline_sequence_state'
+  | 'timeline_split_state'
 > & { id: string }
 
 const surveyFields = {
@@ -940,11 +944,19 @@ export default function OperationsReportDetail({
                 {
                   field: 'timeline_comparison',
                   headerName: 'Lead (+/−)',
-                  minWidth: 150,
+                  minWidth: 165,
                   valueGetter: ({ data }) => {
                     const variance = data?.timeline_variance_hours
                     const mark = data?.timeline_comparison
-                    if (!mark) return ''
+                    const state = data?.timeline_sequence_state
+                    // An open code has no lead and no lag. Saying "On plan" here
+                    // would be a verdict on a job that has not finished, and saying
+                    // nothing would hide where the hours went.
+                    if (state === 'in_progress') return 'In progress · no verdict'
+                    if (state === 'overrun_open') return 'Over plan · still open'
+                    if (state === 'skipped') return 'Activity skipped · hours released'
+                    if (state === 'not_started') return 'Not started'
+                    if (!mark) return 'Unplanned activity'
                     const label = mark === 'ahead' ? 'Lead' : mark === 'behind' ? 'Lag' : 'On plan'
                     const hours =
                       variance === null || variance === undefined ? '' : ` ${Math.abs(Number(variance)).toFixed(2)} h`
@@ -1425,8 +1437,8 @@ export default function OperationsReportDetail({
           reportId={report?.id ?? ''}
           blocks={(selected.length ? selected : blocks) as unknown as OpsBlock[]}
           onClose={() => setSeqOpen(false)}
-          onApplied={() => {
-            setNotice('Sequence codes applied and plan-vs-timeline recomputed. Save the report if you have other unsaved edits.')
+          onApplied={(message) => {
+            setNotice(`${message}. Plan-vs-timeline recomputed; save the report if you have other unsaved edits.`)
             void load()
             void onChanged()
           }}

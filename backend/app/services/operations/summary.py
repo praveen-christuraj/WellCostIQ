@@ -669,8 +669,15 @@ def well_operation_summary(
         "total_rotating_hours": _num(total_rot_hours) if total_rot_hours > 0 else 0.0,
         "avg_rop_m_per_hr": _num(overall_rop),
         "planned_days": planned_days_total,
+        # This is the **schedule position**: planned cumulative days at the confirmed
+        # checkpoint minus elapsed days. It answers "where is the well against the
+        # programme today", which is a different question from the sequence variance
+        # (planned hours − actual hours for finished activities, ÷ 24). Both are
+        # named for what they measure so they are never read as the same figure.
         "lag_days": latest_lag,
+        "schedule_position_days": latest_lag,
         "schedule_variance_days": latest_lag,
+        "lag_basis": "schedule position · planned cumulative days at the confirmed checkpoint − elapsed days",
         "survey_count": len(survey_rows),
         "max_inc_deg": _num(max(incs)) if incs else None,
         "max_dls_deg_per_30m": _num(max(dlss)) if dlss else None,

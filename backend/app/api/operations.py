@@ -72,8 +72,14 @@ from app.schemas.operations import (
     OpsTrajectoryComparison,
     OpsPlanStudyRequest,
     OpsSeqCodeApplyOut,
+    OpsSeqCodeClearIn,
     OpsSeqCodeIn,
     OpsSeqCodePreviewOut,
+    OpsSeqCodeSplitIn,
+    OpsSeqCodeSplitOut,
+    OpsSequenceCloseIn,
+    OpsSequenceCloseOut,
+    OpsSequenceStateIn,
     OpsReportTimelineCodesOut,
     OpsTimelineRollupOut,
     OpsPlanUpdateIn,
@@ -465,6 +471,10 @@ def _block_out(b, db=None, organization_id: str | None = None) -> dict:
         "timeline_planned_days": getattr(b, "timeline_planned_days", None),
         "timeline_actual_days": getattr(b, "timeline_actual_days", None),
         "timeline_basis": getattr(b, "timeline_basis", "") or "",
+        # The code's state as the last recompute read it: the register says
+        # "in progress" instead of leaving a blank where a lead would be.
+        "timeline_sequence_state": getattr(b, "timeline_sequence_state", "") or "",
+        "timeline_split_state": getattr(b, "timeline_split_state", "") or "",
         "timeline_reviewed_by": getattr(b, "timeline_reviewed_by", "") or "",
         "timeline_reviewed_at": getattr(b, "timeline_reviewed_at", None),
         # Plan-vs-actual hours: the figures the engineer compares and edits.
@@ -873,6 +883,65 @@ def timeline_codes_apply(data: OpsSeqCodeIn, request: Request, db: Db, user: Cur
     return seq_codes_svc.apply(db, user.organization_id, data, user, request)
 
 
+@router.post(
+    "/reports/timeline-codes/split",
+    response_model=OpsSeqCodeSplitOut,
+    dependencies=[Depends(require("ops-report:update"))],
+)
+def timeline_codes_split(data: OpsSeqCodeSplitIn, request: Request, db: Db, user: Current):
+    """Share one line's hours between several programme codes, naming any remainder."""
+    return seq_codes_svc.apply_split(db, user.organization_id, data, user, request)
+
+
+@router.post(
+    "/reports/timeline-codes/clear",
+    response_model=dict,
+    dependencies=[Depends(require("ops-report:update"))],
+)
+def timeline_codes_clear(data: OpsSeqCodeClearIn, request: Request, db: Db, user: Current):
+    """Remove the code from these lines, deliberately making the hours unplanned."""
+    return seq_codes_svc.clear_codes(db, user.organization_id, data, user, request)
+
+
+@router.post(
+    "/plans/{plan_id}/items/{item_id}/state",
+    response_model=dict,
+    dependencies=[Depends(require("ops-plan:update"))],
+)
+def plan_item_state(plan_id: str, item_id: str, data: OpsSequenceStateIn, request: Request, db: Db, user: Current):
+    """Skip a planned activity — its hours are released and reported as saved — or restore it."""
+    return seq_codes_svc.set_item_state(db, user.organization_id, plan_id, item_id, data, user, request)
+
+
+@router.post(
+    "/plans/{plan_id}/items/{item_id}/close",
+    response_model=OpsSequenceCloseOut,
+    dependencies=[Depends(require("ops-plan:update"))],
+)
+def plan_item_close(plan_id: str, item_id: str, data: OpsSequenceCloseIn, request: Request, db: Db, user: Current):
+    """State that a planned activity is finished. The only route to a lead or a lag."""
+    # Closing compares report facts (the hours that were logged), so it needs the
+    # same capability as confirming that comparison — not merely the right to edit
+    # a programme. One holder of each cannot quietly declare a job finished.
+    if not (owner(user) or "ops-report:review" in granted(user)):
+        raise HTTPException(
+            403, "Permission denied. Closing an activity compares report facts; it needs ops-report:review."
+        )
+    return seq_codes_svc.close_item(db, user.organization_id, plan_id, item_id, data, user, request)
+
+
+@router.post(
+    "/plans/{plan_id}/items/{item_id}/reopen",
+    response_model=dict,
+    dependencies=[Depends(require("ops-plan:update"))],
+)
+def plan_item_reopen(plan_id: str, item_id: str, data: OpsSequenceCloseIn, request: Request, db: Db, user: Current):
+    """Withdraw a close, with a reason. The hours stay; the verdict is withdrawn."""
+    if not (owner(user) or "ops-report:review" in granted(user)):
+        raise HTTPException(403, "Permission denied. Withdrawing a close needs ops-report:review.")
+    return seq_codes_svc.reopen_item(db, user.organization_id, plan_id, item_id, data.note, user, request)
+
+
 @router.get(
     "/plans/{plan_id}/timeline-rollup",
     response_model=OpsTimelineRollupOut,
@@ -881,6 +950,71 @@ def timeline_codes_apply(data: OpsSeqCodeIn, request: Request, db: Db, user: Cur
 def plan_timeline_rollup(plan_id: str, db: Db, user: Current):
     """Planned vs actual hours per sequence code, across the baseline's logs."""
     return seq_codes_svc.timeline_rollup(db, user.organization_id, plan_id, user)
+
+
+@router.get(
+    "/plans/{plan_id}/sequence-export",
+    response_model=dict,
+    dependencies=[Depends(require("ops-plan:read"))],
+)
+def plan_sequence_export(plan_id: str, db: Db, user: Current):
+    """The per-code register as a download: one row per code plus the buckets.
+
+    Spreadsheet-shaped and self-describing — every column is a number or a word the
+    ledger itself produces, so a printed register and the screen cannot disagree.
+    """
+    rollup = seq_codes_svc.timeline_rollup(db, user.organization_id, plan_id, user)
+    columns = [
+        "sequence_no",
+        "description",
+        "state",
+        "planned_hours",
+        "actual_hours",
+        "remaining_hours",
+        "progress_pct",
+        "variance_hours",
+        "variance_days",
+        "comparison",
+        "line_count",
+        "effective_cum_days",
+        "cum_shift_days",
+        "close_source",
+        "close_note",
+        "skip_reason",
+    ]
+    rows = []
+    for code in rollup["codes"]:
+        rows.append({column: code.get(column) for column in columns})
+    unplanned = rollup["unplanned"]
+    rows.append(
+        {
+            **{column: None for column in columns},
+            "sequence_no": unplanned["code"],
+            "description": "Unplanned Activity (no sequence code)",
+            "state": "unplanned",
+            "planned_hours": 0,
+            "actual_hours": unplanned["actual_hours"],
+            "variance_hours": unplanned["variance_hours"],
+            "variance_days": unplanned["variance_days"],
+            "comparison": unplanned["comparison"],
+            "line_count": unplanned["line_count"],
+        }
+    )
+    return {
+        "plan_version_id": rollup["plan_version_id"],
+        "plan_label": rollup["plan_label"],
+        "columns": columns,
+        "rows": rows,
+        "totals": rollup["totals"],
+        "policy": rollup["policy"],
+        "findings": rollup["findings"],
+        "notes": [
+            "Lead is positive and lag is negative: variance = planned − actual hours, ÷ 24 for days.",
+            "Only a closed activity carries a variance. An open one carries progress and remaining hours.",
+            "Skipped activities are reported as saved planned hours and removed from the effective curve.",
+            "Unplanned Activity has no planned hours, so it can only ever read as lag.",
+        ],
+    }
 
 
 @router.post(
@@ -1714,6 +1848,31 @@ def list_plans(db: Db, user: Current, well_id: str = "", scope: str = "", delete
     return [_plan_out(row) for row in rows]
 
 
+def _plan_item_out(i):
+    """One programme row: the editable fields plus the state the ledger derives.
+
+    ``state``/``closed_*``/``skip_*`` are business facts and are editable through
+    their own endpoints, never through the timeline save. ``effective_cum_days``
+    is the saved curve with skipped activities removed, so a page can show both.
+    """
+    row = {"id": i.id, **{k: getattr(i, k, None) for k in OpsPlanItemIn.model_fields if k != "item_id"}}
+    row.update(
+        {
+            "item_id": i.id,
+            "state": getattr(i, "state", "planned") or "planned",
+            "skip_reason": getattr(i, "skip_reason", "") or "",
+            "skipped_by": getattr(i, "skipped_by", "") or "",
+            "skipped_at": getattr(i, "skipped_at", None),
+            "closed_at": getattr(i, "closed_at", None),
+            "closed_by": getattr(i, "closed_by", "") or "",
+            "close_source": getattr(i, "close_source", "") or "",
+            "close_note": getattr(i, "close_note", "") or "",
+            "closed_actual_hours": getattr(i, "closed_actual_hours", None),
+        }
+    )
+    return row
+
+
 def _plan_out(r):
     return {
         **{
@@ -1721,7 +1880,7 @@ def _plan_out(r):
         },
         "well_code": r._well_code,
         "well_name": r._well_name,
-        "items": [{"id": i.id, **{k: getattr(i, k) for k in OpsPlanItemIn.model_fields}} for i in r._items],
+        "items": [_plan_item_out(i) for i in r._items],
     }
 
 

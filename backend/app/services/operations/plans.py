@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from app.core.precision import rounded
 from app.domain.operations.durations import utc
 from app.models import User
-from app.models.operations import OpsDailyReport, OpsPlanItem, OpsPlanSurveyStation, OpsPlanVersion
+from app.models.operations import (
+    OpsActivityBlock,
+    OpsDailyReport,
+    OpsPlanItem,
+    OpsPlanSurveyStation,
+    OpsPlanVersion,
+)
 from app.models.rig_well import Well
 from app.services.audit import record as audit_record
 from app.services.operations.scope import resolve
@@ -129,15 +135,139 @@ def add_plan_item(db: Session, organization_id: str, plan_id: str, data, user: U
 
 
 def replace_items(db, org, plan_id, items, user, request):
+    """Save the reviewed programme without re-pointing every historical link.
+
+    The old implementation deleted every item and re-created it with a fresh primary
+    key, and every block's ``timeline_plan_item_id`` was nulled by the FK. Inserting
+    one activity at the top therefore slid every stored code one row sideways — a
+    confident, wrong lead/lag on a submitted month.
+
+    This is a positional upsert instead:
+
+    * a row that carries ``item_id`` updates that item in place (description, depth,
+      hours, criteria) and keeps its identity and its state;
+    * a row without one is inserted, because it is new work;
+    * an existing item that is missing from the payload is **refused** while any
+      daily-report line is coded to it, and the refusal names the reports. Removing
+      planned work that has hours against it is a decision about the record, not an
+      edit to a draft — the activity is skipped instead, which keeps its history.
+    """
     plan = get_plan(db, org, plan_id, lock=True)
     if plan.status != "draft":
         raise HTTPException(409, "Only a draft timeline can be edited.")
-    db.execute(
-        delete(OpsPlanItem).where(OpsPlanItem.organization_id == org, OpsPlanItem.plan_version_id == plan.id)
+    existing = {item.id: item for item in plan._items}
+    # A row whose position changed, with hours already coded to it, is refused: the
+    # code points at the activity, so it is the *number* that would start lying.
+    # Keeping the number honest is cheap here and impossible to unpick later.
+    referenced = {
+        item_id
+        for item_id in db.scalars(
+            select(OpsActivityBlock.timeline_plan_item_id)
+            .where(
+                OpsActivityBlock.organization_id == org,
+                OpsActivityBlock.timeline_plan_item_id.in_(set(existing)),
+                OpsActivityBlock.is_deleted.is_(False),
+            )
+            .distinct()
+        ).all()
+        if item_id
+    }
+    if referenced:
+        by_identity = {getattr(row, "item_id", None): row for row in items}
+        moved = sorted(
+            existing[item_id].sequence_no
+            for item_id in referenced
+            if item_id in by_identity
+            and by_identity[item_id].sequence_no != existing[item_id].sequence_no
+        )
+        if moved:
+            raise HTTPException(
+                409,
+                "Daily-report hours are coded to sequence "
+                + ", ".join(str(n) for n in moved[:6])
+                + (f" (+{len(moved) - 6} more)" if len(moved) > 6 else "")
+                + ". Their position cannot change while the code points at them: a printed code would no longer "
+                "match the row it names. Add new work below them, or clear the codes first.",
+            )
+    incoming_ids = {getattr(item, "item_id", None) for item in items} - {None}
+    unknown = incoming_ids - set(existing)
+    if unknown:
+        raise HTTPException(
+            422,
+            "A programme row names an activity that is not in this draft. Reload the timeline before saving.",
+        )
+    duplicated = [
+        ident for ident in incoming_ids if sum(1 for item in items if getattr(item, "item_id", None) == ident) > 1
+    ]
+    if duplicated:
+        raise HTTPException(422, "A programme activity appears twice in the payload. Reload the timeline.")
+    removed = set(existing) - incoming_ids
+    if removed:
+        coded = db.execute(
+            select(OpsActivityBlock.timeline_plan_item_id, OpsDailyReport.well_code_snapshot, OpsDailyReport.report_date)
+            .join(OpsDailyReport, OpsDailyReport.id == OpsActivityBlock.report_id)
+            .where(
+                OpsActivityBlock.organization_id == org,
+                OpsActivityBlock.timeline_plan_item_id.in_(removed),
+                OpsActivityBlock.is_deleted.is_(False),
+            )
+        ).all()
+        if coded:
+            names = sorted({f"{well} {date}" for _item, well, date in coded})
+            raise HTTPException(
+                409,
+                "These activities have daily-report hours coded to them and cannot be removed: "
+                + ", ".join(names[:6])
+                + (f" (+{len(names) - 6} more)" if len(names) > 6 else "")
+                + ". Skip the activity instead — its planned hours are then released and its history kept.",
+            )
+    # Nothing references the removed rows — the guard above proved it — so they are
+    # genuinely deleted rather than left to reappear in the next read.
+    for ident in removed:
+        db.delete(existing.pop(ident))
+    # The saved order is the payload's order: ``sequence_no`` is positional, so the
+    # rows are collected in that order rather than re-read from the database. A new
+    # row has no id until it is flushed, so it cannot be keyed by one either.
+    rows: list[OpsPlanItem] = []
+    for position, data in enumerate(items, 1):
+        ident = getattr(data, "item_id", None)
+        if ident and ident in existing:
+            item = existing[ident]
+            for field, value in data.model_dump(exclude={"item_id"}).items():
+                if field in ("sequence_no", "cum_planned_days"):
+                    continue  # positional and derived, written below
+                setattr(item, field, value)
+        else:
+            item = OpsPlanItem(
+                organization_id=org,
+                plan_version_id=plan.id,
+                **data.model_dump(exclude={"item_id"}),
+            )
+            db.add(item)
+        item.sequence_no = position
+        rows.append(item)
+    hours = Decimal(0)
+    for item in rows:
+        # The cumulative curve is rebuilt from the order the engineer saved, so a
+        # row moved up the programme moves up its curve too — and a renumbering
+        # never silently keeps a stale cumulative day count.
+        hours += item.planned_hours
+        item.cum_planned_days = rounded(hours / 24)
+    plan.planned_days = rounded(hours / 24)
+    plan.updated_at = datetime.now(UTC)
+    plan.updated_by = user.email
+    audit_record(
+        db,
+        organization_id=org,
+        actor=user,
+        action="update",
+        entity_type="ops_plan",
+        entity_id=plan.id,
+        entity_label=plan.label,
+        summary=f"Saved {len(rows)} timeline items ({hours} planned hours)",
+        request=request,
     )
-    for i, item in enumerate(items, 1):
-        item.sequence_no = i
-    _write_items(db, org, plan, items, [], user, request)
+    db.commit()
 
 
 def _write_items(db, org, plan, items, existing, user, request):
@@ -173,7 +303,7 @@ def _write_items(db, org, plan, items, existing, user, request):
         entity_type="ops_plan",
         entity_id=plan.id,
         entity_label=plan.label,
-        summary=f"Saved {len(existing)} timeline items ({hours} planned hours)",
+        summary=f"Saved {len(rows)} timeline items ({hours} planned hours)",
         request=request,
     )
     db.commit()

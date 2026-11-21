@@ -19,15 +19,22 @@ import { api } from '../../lib/api'
 import {
   activatePlan,
   auditExport,
+  closeSequence,
   createPlan,
   getOpsPlan,
   reopenPlan,
+  reopenSequence,
+  sequenceExport,
+  setSequenceState,
   studyTimeline,
   timelineRollup,
   updatePlan,
   type OpsPlan,
+  type OpsPlanItem,
   type OpsTimelineRollup,
+  type OpsTimelineRollupCode,
 } from '../../lib/operations'
+import { exportCsv } from '../../lib/export'
 import {
   formatWatDateTime,
   formatWatShort,
@@ -473,6 +480,22 @@ export default function OperationsPlans() {
   )
 }
 
+/** What a programme row's own state is called on screen. */
+function stateLabel(state: unknown): string {
+  switch (state) {
+    case 'skipped':
+      return 'Skipped'
+    case 'complete':
+      return 'Finished'
+    case 'not_started':
+    case 'planned':
+    case undefined:
+      return 'Planned'
+    default:
+      return 'Planned'
+  }
+}
+
 function PlanView({
   plan,
   onClose,
@@ -488,9 +511,20 @@ function PlanView({
   const [tab, setTab] = useState(initialSurvey ? 'survey' : 'timeline')
   const [rollup, setRollup] = useState<OpsTimelineRollup | null>(null)
   const [rollupError, setRollupError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+  /** Skip / close is a decision with a reason, so it opens a form instead of firing. */
+  const [action, setAction] = useState<{
+    kind: 'skip' | 'unskip' | 'close' | 'reopen'
+    code: OpsTimelineRollupCode
+  } | null>(null)
+  const [reason, setReason] = useState('')
+  const [hours, setHours] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [reload, setReload] = useState(0)
+
   useEffect(() => {
     let current = true
-    setRollup(null)
     setRollupError('')
     timelineRollup(plan.id)
       .then((r) => {
@@ -502,21 +536,96 @@ function PlanView({
     return () => {
       current = false
     }
-  }, [plan.id])
+  }, [plan.id, reload])
+
+  const openAction = (kind: 'skip' | 'unskip' | 'close' | 'reopen', code: OpsTimelineRollupCode) => {
+    setAction({ kind, code })
+    setReason('')
+    // Pre-fill the hours a close will be judged on: the logged total, which is the
+    // evidence the engineer is confirming.
+    setHours(code.actual_hours ?? '')
+    setActionError('')
+  }
+
+  const runAction = async () => {
+    if (!action) return
+    setBusy(true)
+    setActionError('')
+    try {
+      const { kind, code } = action
+      if (kind === 'skip' || kind === 'unskip') {
+        const result = await setSequenceState(plan.id, code.item_id, {
+          state: kind === 'skip' ? 'skipped' : 'planned',
+          reason: kind === 'skip' ? reason : '',
+        })
+        setNotice(result.summary)
+      } else if (kind === 'close') {
+        const result = await closeSequence(plan.id, code.item_id, {
+          actual_hours: hours.trim() || null,
+          note: reason,
+        })
+        setNotice(result.summary)
+      } else {
+        const result = await reopenSequence(plan.id, code.item_id, reason)
+        setNotice(result.summary)
+      }
+      setAction(null)
+      setReason('')
+      setHours('')
+      setReload((n) => n + 1)
+    } catch (e) {
+      setActionError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const exportRegister = async () => {
+    setBusy(true)
+    setRollupError('')
+    try {
+      const data = await sequenceExport(plan.id)
+      exportCsv(
+        `${plan.well_code}-${plan.scope}-sequence-register-v${plan.version_no}.csv`,
+        data.rows,
+        data.columns.map((column) => ({
+          header: column.replace(/_/g, ' '),
+          value: (row: Record<string, unknown>) => {
+            const value = row[column]
+            return value === null || value === undefined ? '' : String(value)
+          },
+        })),
+      )
+      setNotice(`Sequence register exported · ${data.notes[0]}`)
+    } catch (e) {
+      setRollupError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
   /** The programme rows, enriched with what the logs actually recorded per code. */
-  const rows = useMemo<Array<(typeof plan.items)[number] & Partial<import('../../lib/operations').OpsTimelineRollupCode>>>(() => {
+  /** The programme rows, enriched with what the logs actually recorded per code. */
+  const rows = useMemo<Array<OpsPlanItem & Partial<Omit<OpsTimelineRollupCode, 'state'>>>>(() => {
     if (!rollup) return plan.items.map((item) => ({ ...item }))
-    const byCode = new Map(rollup.codes.map((c) => [c.sequence_no, c]))
+    // Joined on identity, never on the printed number: a saved order change must not
+    // move one activity's actual hours onto its neighbour.
+    const byItem = new Map(rollup.codes.map((c) => [c.item_id, c]))
     return plan.items.map((item) => {
-      const code = byCode.get(item.sequence_no)
+      const code = byItem.get(item.id)
       return {
         ...item,
         actual_hours: code?.actual_hours ?? null,
+        remaining_hours: code?.remaining_hours ?? null,
+        progress_pct: code?.progress_pct ?? null,
         variance_hours: code?.variance_hours ?? null,
         variance_days: code?.variance_days ?? null,
         comparison: code?.comparison,
         line_count: code?.line_count,
         report_count: code?.report_count,
+        effective_cum_days: code?.effective_cum_days ?? null,
+        cum_shift_days: code?.cum_shift_days ?? null,
+        close_suggested: code?.close_suggested ?? false,
+        close_source: code?.close_source ?? '',
       }
     })
   }, [plan.items, rollup])
@@ -563,22 +672,87 @@ function PlanView({
           Planned-vs-actual per code could not be loaded: {rollupError}
         </Alert>
       )}
+      {notice && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNotice('')}>
+          {notice}
+        </Alert>
+      )}
       {rollup && (
-        <Box display="flex" gap={1} flexWrap="wrap" alignItems="center" mb={1.5}>
-          <Chip size="small" variant="outlined" label={`Planned ${fmt(rollup.planned_hours)} h`} />
-          <Chip size="small" variant="outlined" label={`Actual ${fmt(rollup.actual_hours)} h`} />
-          <Chip
-            size="small"
-            color={rollup.comparison === 'ahead' ? 'success' : rollup.comparison === 'behind' ? 'warning' : 'default'}
-            label={`Variance ${Number(rollup.variance_hours ?? 0) >= 0 ? '+' : ''}${fmt(rollup.variance_hours)} h · ${rollup.comparison === 'ahead' ? 'lead' : rollup.comparison === 'behind' ? 'lag' : 'on plan'}`}
-          />
-          {rollup.uncoded_lines > 0 && (
-            <Chip size="small" color="warning" variant="outlined" label={`${rollup.uncoded_lines} logged line(s) without a code — excluded`} />
-          )}
-          <Typography variant="caption" color="text.secondary" sx={{ width: '100%' }}>
-            Hours are summed per sequence code across every report logged against this baseline. Variance is planned − actual; positive is a lead.
+        <Stack spacing={1.5} mb={1.5}>
+          <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
+            <Chip size="small" variant="outlined" label={`Planned in scope ${fmt(rollup.totals.planned_in_scope)} h`} />
+            <Chip size="small" variant="outlined" label={`Hours spent ${fmt(rollup.totals.actual_total)} h`} />
+            <Chip
+              size="small"
+              color={
+                rollup.totals.realised_variance === null
+                  ? 'default'
+                  : rollup.totals.comparison === 'ahead'
+                    ? 'success'
+                    : rollup.totals.comparison === 'behind'
+                      ? 'warning'
+                      : 'default'
+              }
+              label={
+                // Only finished activities vote. An open plan has spent hours, not
+                // a lead — the chip says so instead of printing the burn as one.
+                rollup.totals.closed_code_count === 0
+                  ? 'No activity finished yet — no lead or lag'
+                  : `Lead / lag ${
+                      Number(rollup.totals.realised_variance ?? 0) >= 0 ? '+' : ''
+                    }${fmt(rollup.totals.realised_variance)} h · ${fmt(rollup.totals.realised_variance_days)} d`
+              }
+            />
+            {Number(rollup.totals.planned_saved ?? 0) > 0 && (
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`${fmt(rollup.totals.planned_saved)} h released by skipped activities`}
+              />
+            )}
+            {Number(rollup.totals.actual_unplanned ?? 0) > 0 && (
+              <Chip
+                size="small"
+                color="warning"
+                variant="outlined"
+                label={`${fmt(rollup.totals.actual_unplanned)} h unplanned (${rollup.unplanned.line_count} line(s)) — reads as lag`}
+              />
+            )}
+            {Number(rollup.totals.actual_unplanned ?? 0) === 0 && rollup.uncoded_lines > 0 && (
+              <Chip
+                size="small"
+                color="warning"
+                variant="outlined"
+                label={`${rollup.uncoded_lines} uncoded line(s) in drafts — not yet counted`}
+              />
+            )}
+            {rollup.provisional_report_count > 0 && (
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`${rollup.provisional_report_count} draft report(s) excluded from these figures`}
+              />
+            )}
+            <Button size="small" onClick={() => void exportRegister()} disabled={busy}>
+              Export the register
+            </Button>
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            Hours are summed per sequence code across every confirmed report logged against this baseline. Variance is
+            planned − actual, ÷ 24 for days; positive is a lead, negative a lag. It is printed only once the activity is
+            <strong> finished</strong> — until then the difference is work still owed, shown as remaining hours. Skipped
+            activities release their hours instead of reading as a lag.
           </Typography>
-        </Box>
+          {rollup.findings.length > 0 && (
+            <Alert severity={rollup.findings.some((f) => f.severity === 'warning') ? 'warning' : 'info'}>
+              {rollup.findings.slice(0, 4).map((finding) => (
+                <Typography key={`${finding.kind}-${finding.item_id ?? finding.block_id ?? ''}`} variant="caption" component="p">
+                  {finding.message}
+                </Typography>
+              ))}
+            </Alert>
+          )}
+        </Stack>
       )}
       <DataTable
         rows={rows}
@@ -586,19 +760,125 @@ function PlanView({
         canExport={can('ops-plan:export')}
         onExport={auditExport('plans')}
         columns={[
-          { field: 'sequence_no', headerName: 'Sequence' },
+          { field: 'sequence_no', headerName: 'Sequence', width: 100 },
           { field: 'description', headerName: 'Activity', minWidth: 250, flex: 3, tooltipField: 'description' },
           { field: 'target_depth_m', headerName: 'Target MD (m)' },
           { field: 'planned_hours', headerName: 'Planned hours', valueFormatter: (p) => fmt(p.value) },
-          { field: 'actual_hours', headerName: 'Actual (h)', valueGetter: ({ data }) => (data?.actual_hours === null || data?.actual_hours === undefined ? '—' : Number(data.actual_hours).toFixed(2)) },
-          { field: 'variance_hours', headerName: 'Variance (h)', minWidth: 110, valueGetter: ({ data }) => (data?.variance_hours === null || data?.variance_hours === undefined ? '—' : `${Number(data.variance_hours) >= 0 ? '+' : ''}${Number(data.variance_hours).toFixed(2)}`) },
-          { field: 'comparison', headerName: 'Lead / Lag', width: 110, valueGetter: ({ data }) => {
-              if (data?.comparison === undefined) return '—'
+          {
+            field: 'state',
+            headerName: 'State',
+            width: 130,
+            valueGetter: ({ data }) => stateLabel(data?.state),
+            // The state is the reason a row has no verdict, so it is the one cell
+            // that must never be silent.
+            cellStyle: ({ data }): Record<string, string> => {
+              if (data?.state === 'skipped') return { color: 'var(--mui-palette-text-secondary)' }
+              if (data?.state === 'complete') {
+                return { color: 'var(--mui-palette-success-main)', fontWeight: '600' }
+              }
+              return {}
+            },
+          },
+          {
+            field: 'actual_hours',
+            headerName: 'Logged (h)',
+            valueGetter: ({ data }) =>
+              data?.actual_hours === null || data?.actual_hours === undefined
+                ? '—'
+                : Number(data.actual_hours).toFixed(2),
+          },
+          {
+            field: 'progress_pct',
+            headerName: 'Progress',
+            width: 105,
+            valueGetter: ({ data }) =>
+              data?.progress_pct === null || data?.progress_pct === undefined
+                ? '—'
+                : `${Number(data.progress_pct).toFixed(0)} %`,
+          },
+          {
+            // Remaining work, printed where the old screen printed a lead. An open
+            // activity owes hours; it is not early.
+            field: 'remaining_hours',
+            headerName: 'Remaining (h)',
+            width: 120,
+            valueGetter: ({ data }) =>
+              data?.remaining_hours === null || data?.remaining_hours === undefined
+                ? '—'
+                : Number(data.remaining_hours).toFixed(2),
+          },
+          {
+            field: 'variance_hours',
+            headerName: 'Variance (h)',
+            minWidth: 110,
+            valueGetter: ({ data }) =>
+              data?.variance_hours === null || data?.variance_hours === undefined
+                ? '—'
+                : `${Number(data.variance_hours) >= 0 ? '+' : ''}${Number(data.variance_hours).toFixed(2)}`,
+          },
+          {
+            field: 'comparison',
+            headerName: 'Lead / Lag',
+            width: 130,
+            valueGetter: ({ data }) => {
+              if (!data || data.variance_hours === null || data.variance_hours === undefined) {
+                // Say what the row is instead of "On plan", which would be a claim.
+                return data?.state === 'skipped'
+                  ? 'Released'
+                  : data?.state === 'complete'
+                    ? 'On plan'
+                    : data?.state === undefined || data?.state === 'planned'
+                      ? 'Not started'
+                      : 'No verdict yet'
+              }
               return data.comparison === 'ahead' ? 'Lead' : data.comparison === 'behind' ? 'Lag' : 'On plan'
-            } },
-          { field: 'line_count', headerName: 'Lines', width: 80, valueGetter: ({ data }) => (data?.line_count === undefined ? '—' : String(data.line_count)) },
-          { field: 'report_count', headerName: 'Logs', width: 80, valueGetter: ({ data }) => (data?.report_count === undefined ? '—' : String(data.report_count)) },
-          { field: 'cum_planned_days', headerName: 'Cumulative days' },
+            },
+          },
+          {
+            field: 'line_count',
+            headerName: 'Lines',
+            width: 80,
+            valueGetter: ({ data }) => (data?.line_count === undefined ? '—' : String(data.line_count)),
+          },
+          {
+            field: 'report_count',
+            headerName: 'Logs',
+            width: 80,
+            valueGetter: ({ data }) => (data?.report_count === undefined ? '—' : String(data.report_count)),
+          },
+          {
+            field: 'cum_planned_days',
+            headerName: 'Cumulative days',
+            valueGetter: ({ data }) =>
+              data?.cum_shift_days && Number(data.cum_shift_days) > 0
+                ? `${fmt(data.cum_planned_days)} (${fmt(data.effective_cum_days)} effective)`
+                : fmt(data?.cum_planned_days),
+          },
+          {
+            headerName: 'ACTIONS',
+            width: 190,
+            sortable: false,
+            filter: false,
+            valueGetter: ({ data }) =>
+              data?.state === 'skipped'
+                ? 'Restore'
+                : data?.state === 'complete'
+                  ? 'Reopen'
+                  : data?.state === undefined || data?.state === 'planned'
+                    ? 'Skip · Close'
+                    : 'Close',
+            onCellClicked: ({ data }) => {
+              if (!data || !rollup) return
+              const code = rollup.codes.find((c) => c.item_id === data.id)
+              if (!code) return
+              // A skipped row is restored, a finished one reopened, an open one
+              // either skipped or closed — each with its own form.
+              if (code.state === 'skipped') openAction('unskip', code)
+              else if (code.state === 'complete') openAction('reopen', code)
+              else openAction('close', code)
+            },
+            cellStyle: { cursor: 'pointer', color: 'var(--mui-palette-primary-main)' } as Record<string, string>,
+          },
         ]}
       />
       <Box mt={2}>
@@ -606,6 +886,101 @@ function PlanView({
         <StudyPanel runLabel="Study saved timeline" run={(useAi) => studyTimeline(plan.id, useAi)} />
       </Box>
         </Box>}
+
+      {action && (
+        <FormDialog
+          open
+          title={
+            action.kind === 'skip'
+              ? `Skip sequence ${action.code.sequence_no}`
+              : action.kind === 'unskip'
+                ? `Restore sequence ${action.code.sequence_no}`
+                : action.kind === 'close'
+                  ? `Finish sequence ${action.code.sequence_no}`
+                  : `Reopen sequence ${action.code.sequence_no}`
+          }
+          subtitle={action.code.description}
+          onClose={() => setAction(null)}
+          onSubmit={() => void runAction()}
+          submitLabel={
+            action.kind === 'skip'
+              ? 'Skip the activity'
+              : action.kind === 'unskip'
+                ? 'Put it back in the plan'
+                : action.kind === 'close'
+                  ? 'Finish the activity'
+                  : 'Reopen it'
+          }
+          busy={busy}
+          submitDisabled={action.kind === 'skip' || action.kind === 'reopen' ? reason.trim().length < 3 : false}
+        >
+          <Stack spacing={2} pt={0.5}>
+            {actionError && <Alert severity="error">{actionError}</Alert>}
+            {action.kind === 'skip' && (
+              <Alert severity="warning">
+                A skipped activity will never be done. Its {fmt(action.code.planned_hours)} planned hours leave the
+                plan&rsquo;s scope and are reported once as <strong>saved</strong>; every later activity&rsquo;s
+                effective position moves earlier by that time. It is not counted as a lag. Hours already logged
+                against it must be moved first.
+              </Alert>
+            )}
+            {action.kind === 'unskip' && (
+              <Alert severity="info">
+                Restoring puts its {fmt(action.code.planned_hours)} planned hours back in scope and moves every later
+                activity&rsquo;s effective position back out. The saved-hours line disappears.
+              </Alert>
+            )}
+            {action.kind === 'close' && (
+              <>
+                <Alert severity="info">
+                  Finishing is what turns hours into a lead or a lag: {fmt(action.code.planned_hours)} h planned −{' '}
+                  {fmt(action.code.actual_hours)} h logged. It is never inferred from the hours alone, because a job
+                  finished in 90 hours and a job abandoned at 100 are not the same event.
+                </Alert>
+                <TextField
+                  label="Actual hours to close on"
+                  value={hours}
+                  onChange={(e) => {
+                    const typed = e.target.value
+                    if (!/^\d*\.?\d*$/.test(typed)) return
+                    setHours(typed)
+                  }}
+                  helperText="Defaults to the hours logged against it. Change it only with a note saying where the real figure is."
+                  fullWidth
+                />
+              </>
+            )}
+            {action.kind === 'reopen' && (
+              <Alert severity="warning">
+                Reopening withdraws the verdict. The hours stay on the record; the activity goes back to showing
+                progress until it is finished again.
+              </Alert>
+            )}
+            <TextField
+              label={
+                action.kind === 'skip'
+                  ? 'Why is the activity skipped?'
+                  : action.kind === 'close'
+                    ? 'Note (required if the hours differ from the log)'
+                    : action.kind === 'reopen'
+                      ? 'Why is the close withdrawn?'
+                      : 'Note'
+              }
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              multiline
+              minRows={2}
+              fullWidth
+              required={action.kind === 'skip' || action.kind === 'reopen'}
+              helperText={
+                action.kind === 'skip' || action.kind === 'reopen'
+                  ? 'At least a few words. It is kept with the activity and written to the Audit Log.'
+                  : 'Kept with the close, so a reader sees on what evidence it was made.'
+              }
+            />
+          </Stack>
+        </FormDialog>
+      )}
     </PanelDialog>
   )
 }
