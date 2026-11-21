@@ -29,6 +29,7 @@ from app.models.daily_cost import (
     DailyCostEntry,
     DailyCostOtherExpenseLine,
     DailyCostServiceLine,
+    DailyCostServiceRateItem,
     DailyCostTangibleLine,
     DailyCostWellRateBaseline,
 )

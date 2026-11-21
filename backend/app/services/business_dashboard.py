@@ -36,7 +36,7 @@ from fastapi import HTTPException, Request
 
 from app.core.precision import DECIMAL_QUANT
 from app.core.units import depth_to_meters
-from sqlalchemy import case, func, literal, select, union_all
+from sqlalchemy import case, exists, func, literal, select, union_all
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import (
@@ -44,6 +44,7 @@ from app.models import (
     Currency,
     DailyCostEntry,
     DailyCostServiceLine,
+    DailyCostServiceRateItem,
     Rig,
     User,
     Well,
@@ -339,26 +340,31 @@ def _allocated_classification_days(
     if currency and currency.upper() != "USD":
         conditions.append(DailyCostEntry.standard_currency == currency)
 
-    rows = db.execute(
-        select(
-            DailyCostEntry.well_id,
-            DailyCostEntry.afe_id,
-            DailyCostEntry.cost_date,
-            DailyCostEntry.id,
-            DailyCostServiceLine.classification,
-            DailyCostServiceLine.activity_id,
-            DailyCostServiceLine.sub_activity_id,
-            DailyCostServiceLine.hole_section_id,
-            DailyCostServiceLine.phase_id,
-            DailyCostServiceLine.charging_basis,
-            DailyCostServiceLine.charge_category,
-            DailyCostServiceLine.quantity_unit,
-            DailyCostServiceLine.quantity,
-        )
-        .select_from(DailyCostServiceLine)
-        .join(DailyCostEntry, DailyCostServiceLine.entry_id == DailyCostEntry.id)
-        .where(*conditions)
-    ).all()
+    common_columns = (
+        DailyCostEntry.well_id, DailyCostEntry.afe_id, DailyCostEntry.cost_date, DailyCostEntry.id,
+        DailyCostServiceLine.classification, DailyCostServiceLine.activity_id,
+        DailyCostServiceLine.sub_activity_id, DailyCostServiceLine.hole_section_id,
+        DailyCostServiceLine.phase_id,
+    )
+    component_rows = select(
+        *common_columns, DailyCostServiceRateItem.charging_basis,
+        DailyCostServiceRateItem.charge_category, DailyCostServiceRateItem.quantity_unit,
+        DailyCostServiceRateItem.quantity,
+    ).select_from(DailyCostServiceLine).join(
+        DailyCostEntry, DailyCostServiceLine.entry_id == DailyCostEntry.id
+    ).join(
+        DailyCostServiceRateItem, DailyCostServiceRateItem.service_line_id == DailyCostServiceLine.id
+    ).where(*conditions)
+    legacy_rows = select(
+        *common_columns, DailyCostServiceLine.charging_basis,
+        DailyCostServiceLine.charge_category, DailyCostServiceLine.quantity_unit,
+        DailyCostServiceLine.quantity,
+    ).select_from(DailyCostServiceLine).join(
+        DailyCostEntry, DailyCostServiceLine.entry_id == DailyCostEntry.id
+    ).where(*conditions, ~exists(select(1).where(
+        DailyCostServiceRateItem.service_line_id == DailyCostServiceLine.id
+    )))
+    rows = db.execute(union_all(component_rows, legacy_rows)).all()
 
     allocations: dict[AllocationKey, Decimal] = {}
     allocation_afes: dict[AllocationKey, str] = {}

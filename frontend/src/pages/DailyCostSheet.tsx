@@ -61,7 +61,7 @@ const KIND_OF_GROUP: Record<EntryCheckGroup, DailyCostLineKind> = {
 }
 
 type GridLine = {
-  id: string; lineIndex: number; item: string; activity: string; section: string; actualDepth: string; subActivity: string
+  id: string; lineIndex: number; item: string; costItems: string; activity: string; section: string; actualDepth: string; subActivity: string
   vendor: string; quantity: string; quantityUnit: string; rate: string; currency: string
   amount: string; standardAmount: string; usdAmount: string; source: string; budget: string; overrideReason: string; remarks: string
 }
@@ -968,6 +968,7 @@ export default function DailyCostSheet() {
     return inputs.map((line, index) => {
       const priced = outputs[index]
       let item = '—'
+      let costItems = '—'
       let sourceRate = ''
       let sourceCurrency = line.currency
       let sourceLabel = ''
@@ -976,6 +977,15 @@ export default function DailyCostSheet() {
         const rate = baseline.service_rates.find(option => option.id === line.baseline_service_rate_id)
         const savedLine = day.services.find(option => option.id === line.id && option.service_id === line.service_id)
         item = rate?.display_name || (savedLine ? `${savedLine.service_code} · ${savedLine.service_name}` : service?.display_name) || 'Service unavailable'
+        const componentIds = line.rate_items?.length
+          ? line.rate_items.map(component => component.baseline_service_rate_id).filter((id): id is string => Boolean(id))
+          : line.baseline_service_rate_id ? [line.baseline_service_rate_id] : []
+        costItems = componentIds.map(id => {
+          const componentRate = baseline.service_rates.find(option => option.id === id)
+          return componentRate
+            ? `${componentRate.charge_category || componentRate.display_name} · ${id.slice(0, 8)}`
+            : id
+        }).join(' · ') || 'Manual rate'
         sourceRate = line.override_rate ?? rate?.unit_rate ?? '0'
         sourceCurrency = line.currency || rate?.currency || standard
         sourceLabel = line.override_rate !== null ? 'Daily override' : rate ? 'Locked AFE' : 'Manual UPA/NPT'
@@ -1028,7 +1038,7 @@ export default function DailyCostSheet() {
         ? formatDepthMeters(priced.actual_depth, 'm')
         : formatDepthMeters(line.actual_depth, line.actual_depth_unit ?? 'm')
       return {
-        id: line.id || `${kind}-${index}`, lineIndex: index, item, activity,
+        id: line.id || `${kind}-${index}`, lineIndex: index, item, costItems, activity,
         section: scopeName(line.hole_section_id, line.phase_id),
         actualDepth: resolvedDepth,
         subActivity: sub,
@@ -1049,6 +1059,7 @@ export default function DailyCostSheet() {
   const makeColumns = (kind: DailyCostLineKind): ColDef<GridLine>[] => {
     const columns: ColDef<GridLine>[] = [
       { headerName: 'ITEM', field: 'item', minWidth: 190, flex: 1.2 },
+      ...(kind === 'service' ? [{ headerName: 'COST ITEMS', field: 'costItems' as const, minWidth: 190, flex: 1 }] : []),
       { headerName: 'ACTIVITY', field: 'activity', minWidth: 140 },
       { headerName: 'SUB ACTIVITY', field: 'subActivity', minWidth: 140 },
       { headerName: 'SECTION / PHASE', field: 'section', minWidth: 140 },
@@ -1788,7 +1799,7 @@ export default function DailyCostSheet() {
 
     <FormDialog open={importOpen} title="Import daily actuals" subtitle="Upload one CSV or Excel file. Rows are validated as a batch; invalid files make no changes and existing lines are retained." onClose={() => { if (!importBusy) setImportOpen(false) }} onSubmit={() => void importDailyCosts()} busy={importBusy} submitLabel={`Validate and import${importRows.length ? ` (${importRows.length})` : ''}`} submitDisabled={!importRows.length || !editable} maxWidth="md">
       <Box display="grid" gap={1.4}>
-        <Alert severity="info">Use the template for line_type (Service, Consumable, Tangible or Other), activity_code, sub_activity_code and the item/service code. The Activity classifies the line (Planned / UPA / NPT); planned services must include their baseline_service_rate_id, while UPA/NPT manual rates require an override reason. An Other row also needs expense_type, unit_rate and a remark, and is deducted from the AFE total. The same service can appear again only under a different sub_activity_code.</Alert>
+        <Alert severity="info">Use the template for line_type (Service, Consumable, Tangible or Other), activity_code, sub_activity_code and the item/service code. The Activity classifies the line (Planned / UPA / NPT); planned services must include their baseline_service_rate_id, while UPA/NPT manual rates require an override reason. An Other row also needs expense_type, unit_rate and a remark, and is deducted from the AFE total. Distinct AFE cost-item rows for the same service and scope are grouped into one service line when imported.</Alert>
         <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
           <Button variant="outlined" startIcon={<CloudUploadOutlined/>} onClick={() => fileInput.current?.click()}>Choose CSV / XLSX</Button>
           <Button variant="text" startIcon={<DownloadOutlined/>} onClick={exportTemplate}>Download CSV template</Button>

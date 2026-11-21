@@ -170,8 +170,44 @@ class ServiceCostItemIn(BaseModel):
         return value.strip()
 
 
+class DailyCostServiceRateItemIn(_Strict):
+    """One AFE-priced component of a single visible daily service line."""
+
+    baseline_service_rate_id: str | None = Field(default=None, max_length=36)
+    currency: str = Field(default="", max_length=10)
+    exchange_rate: Decimal3 | None = Field(default=None, gt=0, le=Decimal("999999"))
+    quantity: Decimal3 | None = Field(default=None, gt=0, le=Decimal("1000000"))
+    quantity_unit: QuantityUnit | None = None
+    override_rate: Decimal3 | None = Field(default=None, ge=0, le=MAX_RATE)
+    override_reason: str = Field(default="", max_length=500)
+
+    @field_validator("baseline_service_rate_id", "exchange_rate", "quantity", mode="before")
+    @classmethod
+    def blank_rate_component_values(cls, value: Any) -> Any:
+        return _blank_to_none(value)
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def normalize_component_currency(cls, value: Any) -> Any:
+        return _upper(value)
+
+    @field_validator("override_reason", mode="before")
+    @classmethod
+    def trim_component_reason(cls, value: Any) -> Any:
+        return _trim(value)
+
+    @model_validator(mode="after")
+    def require_component_override_reason(self):
+        if self.override_rate is not None and len(self.override_reason.strip()) < 3:
+            raise ValueError("Give a reason of at least 3 characters for a daily rate override.")
+        if self.override_rate is None and self.override_reason:
+            raise ValueError("An override reason is only valid when an override rate is entered.")
+        return self
+
+
 class DailyCostServiceLineIn(DailyCostLineInput):
     cost_items: list[ServiceCostItemIn] = Field(default_factory=list, max_length=100)
+    rate_items: list[DailyCostServiceRateItemIn] = Field(default_factory=list, max_length=100)
     service_id: str = Field(min_length=1, max_length=36)
     baseline_service_rate_id: str | None = Field(default=None, max_length=36)
     charging_basis: ChargingBasis | None = None
@@ -182,6 +218,13 @@ class DailyCostServiceLineIn(DailyCostLineInput):
     @classmethod
     def blank_rate_to_none(cls, value: Any) -> Any:
         return _blank_to_none(value)
+
+    @model_validator(mode="after")
+    def unique_selected_rate_items(self):
+        ids = [item.baseline_service_rate_id for item in self.rate_items if item.baseline_service_rate_id]
+        if len(ids) != len(set(ids)):
+            raise ValueError("The same AFE cost item cannot be selected twice for one service.")
+        return self
 
 
 class DailyCostConsumableLineIn(DailyCostLineInput):
@@ -585,8 +628,29 @@ class DailyCostLineOut(BaseModel):
     remarks: str
 
 
+class DailyCostServiceRateItemOut(BaseModel):
+    baseline_service_rate_id: str | None
+    charge_category: ChargeCategory
+    charging_basis: ChargingBasis
+    quantity: Decimal
+    quantity_unit: QuantityUnit
+    captured_rate: Decimal
+    override_rate: Decimal | None
+    currency: str
+    exchange_rate: Decimal
+    amount: Decimal
+    standard_amount: Decimal
+    usd_exchange_rate: Decimal = Decimal("1")
+    usd_amount: Decimal = Decimal("0")
+    rate_source: str
+    budget_key: str
+    budget_name: str
+    override_reason: str = ""
+
+
 class DailyCostServiceLineOut(DailyCostLineOut):
     cost_items: list[ServiceCostItemIn] = Field(default_factory=list)
+    rate_items: list[DailyCostServiceRateItemOut] = Field(default_factory=list)
     service_id: str
     service_code: str
     service_name: str

@@ -545,6 +545,9 @@ class DailyCostServiceLine(DailyCostLine):
     cost_items: Mapped[list["DailyCostServiceCostItem"]] = relationship(
         cascade="all, delete-orphan", order_by="DailyCostServiceCostItem.sort_order", lazy="selectin"
     )
+    rate_items: Mapped[list["DailyCostServiceRateItem"]] = relationship(
+        cascade="all, delete-orphan", order_by="DailyCostServiceRateItem.sort_order", lazy="selectin"
+    )
 
     entry: Mapped[DailyCostEntry] = relationship(back_populates="service_lines", lazy="select")
     service: Mapped["Service"] = relationship("Service", lazy="joined")
@@ -643,6 +646,43 @@ class DailyCostOtherExpenseLine(DailyCostLine):
     phase: Mapped["Phase | None"] = relationship("Phase", lazy="joined")
     sub_activity: Mapped["WellSubActivity | None"] = relationship("WellSubActivity", lazy="joined")
     vendor: Mapped["Vendor | None"] = relationship("Vendor", lazy="joined")
+
+
+class DailyCostServiceRateItem(Base):
+    """One priced AFE cost item carried by a single visible service line.
+
+    The parent remains the register row; these immutable-at-save components keep
+    each selected rate and its budget attribution available to reconciliation.
+    """
+
+    __tablename__ = "daily_cost_service_rate_items"
+    __table_args__ = (
+        CheckConstraint(_in("charge_category", DAILY_CHARGE_CATEGORIES), name="ck_daily_cost_service_rate_item_category"),
+        CheckConstraint(_in("charging_basis", DAILY_CHARGING_BASES), name="ck_daily_cost_service_rate_item_basis"),
+        CheckConstraint("quantity >= 0 AND captured_rate >= 0 AND amount >= 0 AND standard_amount >= 0 AND usd_amount >= 0", name="ck_daily_cost_service_rate_item_amounts"),
+        Index("ix_daily_cost_service_rate_item_line_order", "service_line_id", "sort_order"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    service_line_id: Mapped[str] = mapped_column(ForeignKey("daily_cost_service_lines.id", ondelete="CASCADE"), nullable=False, index=True)
+    baseline_service_rate_id: Mapped[str | None] = mapped_column(ForeignKey("daily_cost_baseline_service_rates.id", ondelete="RESTRICT"), nullable=True, index=True)
+    charge_category: Mapped[str] = mapped_column(String(40), nullable=False)
+    charging_basis: Mapped[str] = mapped_column(String(30), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    quantity_unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    captured_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    override_rate: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False)
+    exchange_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    standard_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    usd_exchange_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    usd_amount: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    rate_source: Mapped[str] = mapped_column(String(30), nullable=False)
+    baseline_budget_line_id: Mapped[str | None] = mapped_column(ForeignKey("daily_cost_baseline_budget_lines.id", ondelete="RESTRICT"), nullable=True, index=True)
+    budget_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    override_reason: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class DailyCostServiceCostItem(Base):

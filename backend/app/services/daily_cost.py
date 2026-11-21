@@ -29,7 +29,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
-from sqlalchemy import Select, case, func, literal, or_, select, union_all
+from sqlalchemy import Select, case, exists, func, literal, or_, select, union_all
 from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -39,7 +39,7 @@ from app.models import (
     DailyCostBaselineBudgetLine, DailyCostBaselineExchangeRate, DailyCostBaselinePhase,
     DailyCostBaselineSection, DailyCostBaselineServiceRate, DailyCostCatalogueRateSnapshot,
     DailyCostConsumableLine, DailyCostEntry, DailyCostOtherExpenseLine, DailyCostServiceLine,
-    DailyCostTangibleLine,
+    DailyCostServiceRateItem, DailyCostTangibleLine,
     DailyCostWellRateBaseline, DrillBit, FuelType, HoleSection, LihCostEntry, MudChemical, Phase, Rig,
     Service, Tangible, Vendor, Well, WellPhase, WellSection, WellSubActivity,
 )
@@ -58,6 +58,7 @@ from app.schemas.daily_cost import (
     DailyCostImportRequest, DailyCostImportResponse, DailyCostOtherExpenseLineIn,
     DailyCostOtherExpenseLineOut, DailyCostOtherExpenseTypeOption, DailyCostOverview, DailyCostPreviewOut,
     DailyCostRateOut, DailyCostReference, DailyCostReopenIn, DailyCostRigOption, DailyCostSaveIn,
+    DailyCostServiceRateItemOut,
     DailyCostSectionDepthOut, DailyCostSectionOption, DailyCostServiceLineIn, DailyCostServiceLineOut, DailyCostStatusIn,
     DailyCostSubActivityOption, DailyCostTangibleLineIn, DailyCostTangibleLineOut,
     DailyCostTrendPoint, DailyCostVendorOption, DailyCostWarnings, DailyCostWellHeader,
@@ -1685,6 +1686,7 @@ def _normalise_service(
     entry_usd_fx: Decimal = Decimal("1"),
     extra_rates: dict[str, Decimal] | None = None,
 ) -> tuple[dict[str, Any], Any | None, str]:
+    """Price one visible service row and retain every priced AFE component."""
     old = _check_line_id(line.id, existing_rows, "Service")
     service = _active_master(
         db, Service, line.service_id, entry.organization_id, "service", allow_deleted=old is not None
@@ -1702,13 +1704,6 @@ def _normalise_service(
         entry_usd_fx=entry_usd_fx,
         extra_rates=extra_rates,
     )
-    rate = _service_rate_or_422(entry, line, service, base["classification"])
-    basis = rate.charging_basis if rate else line.charging_basis
-    if not basis:
-        raise HTTPException(status_code=422, detail=f"Service {service.service_code}: select a charging basis for this line")
-    _validate_service_unit(line, basis, f"Service {service.service_code}")
-    if basis in ("Per Service Rate", "Per Section Rate") and not line.hole_section_id:
-        raise HTTPException(status_code=422, detail=f"Service {service.service_code}: select a hole section for this charging basis")
     default_vendor = None
     if line.vendor_id is None and service.vendor_id:
         default_vendor = _get_vendor(db, entry.organization_id, service.vendor_id, existing=old is not None, label=f"Service {service.service_code}")
@@ -1718,86 +1713,117 @@ def _normalise_service(
     base["vendor_name_snapshot"] = vendor.vendor_name if vendor else ""
     if not base["party_name"] and vendor:
         base["party_name"] = vendor.vendor_name
-    if rate:
-        base_rate = Decimal(rate.unit_rate)
-        base_currency = rate.currency.upper()
-        source = "afe_baseline"
-        rate_id = rate.id
-        budget_key = f"service:{rate.source_afe_line_id}"
-        matching = _service_budgets_for(budgets, rate.source_afe_line_id)
-        # AFE saves replace their source rows. Reconnect a revised service to
-        # its original locked allowance only when the mapping is unambiguous.
-        # Do not inflate or rewrite the locked budget when a basis changes.
-        if not matching:
-            candidates = {row.id: row for previous in entry.baseline.service_rates
-                          if previous.service_id == service.id
-                          for row in _service_budgets_for(budgets, previous.source_afe_line_id)}
-            matching, budget_key = _match_service_budget(candidates, line, budget_key)
-        budget = matching[0] if matching else None
-        # One AFE service can be priced on several scopes; match the allowance
-        # of the scope the activity was recorded in, then club that scope.
-        if rate.source_afe_line_id and len(matching) > 1:
-            scoped_budget = _budget_for_scope(matching, line.hole_section_id, line.phase_id)
-            if scoped_budget is not None:
-                budget = scoped_budget
-                budget_key = f"service:{budget.item_key}"
-        if line.hole_section_id:
-            _validate_scope(entry.baseline, hole_section_id=line.hole_section_id, phase_id=line.phase_id, require_section=True)
-    else:
-        base_rate = Decimal("0")
-        base_currency = (line.currency or "").upper()
-        source = "manual_unplanned"
-        rate_id = None
-        budget_key = f"unplanned:service:{service.id}"
-        budget = None
-    currency = (line.currency or base_currency).upper()
-    if not currency:
-        raise HTTPException(status_code=422, detail=f"Service {service.service_code}: a currency is required")
-    if line.override_rate is None and base_currency and currency != base_currency:
-        raise HTTPException(status_code=422, detail=f"Service {service.service_code}: daily rate currency must match the locked AFE rate ({base_currency})")
-    factor, usd_fx = _resolve_fx(
-        entry.baseline,
-        currency,
-        f"Service {service.service_code}",
-        line_exchange_rate=line.exchange_rate,
-        entry_usd_fx=entry_usd_fx,
-        extra_rates=extra_rates,
-    )
-    if line.exchange_rate is not None and extra_rates is not None:
-        extra_rates[currency] = factor
-    selected_rate = _rate(line.override_rate if line.override_rate is not None else base_rate)
-    if line.override_rate is not None:
-        source = "daily_override" if rate else "manual_unplanned"
-    quantity = Decimal(line.quantity)
-    if basis == "Day Rate" and line.charge_category in SERVICE_ONE_TIME:
-        # Mobilization, demobilization and fixed charges are unit-priced events,
-        # not quantities of days.  The UI still accepts a positive quantity so
-        # the line schema remains consistent, but the ledger must charge the
-        # selected rate exactly once.
-        billable_quantity = Decimal("1")
-    else:
-        billable_quantity = quantity / Decimal("24") if basis == "Day Rate" and line.quantity_unit == "hours" else quantity
-    amount = _money(sum((item.amount for item in line.cost_items), Decimal("0"))) if line.cost_items else _money(billable_quantity * selected_rate)
-    old_override = Decimal(old.override_rate) if old and old.override_rate is not None else None
-    old_reason = old.override_reason if old else ""
-    label = _label(service.service_code, service.service_name)
-    audit_change = None
-    if line.override_rate is not None and (old_override != Decimal(line.override_rate) or old_reason != line.override_reason):
-        audit_change = (old_override, Decimal(line.override_rate), line.override_reason, currency, label)
-    elif old_override is not None and line.override_rate is None:
-        audit_change = (old_override, None, old_reason, currency, label)
-    base.update(
-        {
-            "cost_items": [DailyCostServiceCostItem(description=item.description, amount=item.amount, sort_order=index) for index, item in enumerate(line.cost_items)],
-            "service_id": service.id,
-            "service_code_snapshot": service.service_code,
-            "service_name_snapshot": service.service_name,
-            "service_group_snapshot": service.service_group,
-            "charging_basis": basis,
-            "charge_category": line.charge_category,
+
+    # New clients send an explicit component list. Legacy API/import rows still
+    # arrive through the scalar rate fields and are treated as one component.
+    specs = list(line.rate_items) if line.rate_items else [None]
+    if len(specs) > 1 and line.cost_items:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Service {service.service_code}: manual actual-cost breakdowns can only be used with one AFE cost item; keep them separate from multi-item rate detail.",
+        )
+    if any(spec is not None and not spec.baseline_service_rate_id for spec in specs):
+        raise HTTPException(status_code=422, detail=f"Service {service.service_code}: each selected AFE cost item must identify its locked rate")
+    component_fields: list[dict[str, Any]] = []
+    audit_changes: list[tuple[Any, ...]] = []
+    for index, spec in enumerate(specs):
+        rate_id = spec.baseline_service_rate_id if spec is not None else line.baseline_service_rate_id
+        selected_rate = next((row for row in entry.baseline.service_rates if row.id == rate_id), None) if rate_id else None
+        category = selected_rate.charge_category if selected_rate and selected_rate.rate_kind == "day_rate" else line.charge_category
+        basis_hint = selected_rate.charging_basis if selected_rate else line.charging_basis
+        qty_unit = spec.quantity_unit if spec and spec.quantity_unit else None
+        if qty_unit is None:
+            if basis_hint == "Per Service Rate":
+                qty_unit = "service"
+            elif basis_hint == "Per Section Rate":
+                qty_unit = "section"
+            elif category in SERVICE_ONE_TIME:
+                qty_unit = "unit"
+            else:
+                qty_unit = line.quantity_unit
+        quantity = Decimal(spec.quantity if spec and spec.quantity is not None else line.quantity)
+        if category in SERVICE_ONE_TIME and basis_hint == "Day Rate":
+            quantity = Decimal("1")
+        component_line = line.model_copy(update={
             "baseline_service_rate_id": rate_id,
+            "charge_category": category,
+            "charging_basis": basis_hint,
+            "quantity": quantity,
+            "quantity_unit": qty_unit,
+            "currency": (spec.currency if spec and spec.currency else line.currency),
+            "exchange_rate": (spec.exchange_rate if spec and spec.exchange_rate is not None else line.exchange_rate),
+            "override_rate": (spec.override_rate if spec and spec.override_rate is not None else (line.override_rate if index == 0 else None)),
+            "override_reason": (spec.override_reason if spec and spec.override_rate is not None else (line.override_reason if index == 0 and line.override_rate is not None else "")),
+        })
+        rate = _service_rate_or_422(entry, component_line, service, base["classification"])
+        basis = rate.charging_basis if rate else component_line.charging_basis
+        if not basis:
+            raise HTTPException(status_code=422, detail=f"Service {service.service_code}: select a charging basis for this line")
+        _validate_service_unit(component_line, basis, f"Service {service.service_code}")
+        if basis in ("Per Service Rate", "Per Section Rate") and not component_line.hole_section_id:
+            raise HTTPException(status_code=422, detail=f"Service {service.service_code}: select a hole section for this charging basis")
+        if rate:
+            base_rate = Decimal(rate.unit_rate)
+            base_currency = rate.currency.upper()
+            source = "afe_baseline"
+            component_rate_id = rate.id
+            budget_key = f"service:{rate.source_afe_line_id}"
+            matching = _service_budgets_for(budgets, rate.source_afe_line_id)
+            if not matching:
+                candidates = {row.id: row for previous in entry.baseline.service_rates
+                              if previous.service_id == service.id
+                              for row in _service_budgets_for(budgets, previous.source_afe_line_id)}
+                matching, budget_key = _match_service_budget(candidates, component_line, budget_key)
+            budget = matching[0] if matching else None
+            if rate.source_afe_line_id and len(matching) > 1:
+                scoped_budget = _budget_for_scope(matching, component_line.hole_section_id, component_line.phase_id)
+                if scoped_budget is not None:
+                    budget = scoped_budget
+                    budget_key = f"service:{budget.item_key}"
+            if component_line.hole_section_id:
+                _validate_scope(entry.baseline, hole_section_id=component_line.hole_section_id, phase_id=component_line.phase_id, require_section=True)
+        else:
+            base_rate = Decimal("0")
+            base_currency = (component_line.currency or "").upper()
+            source = "manual_unplanned"
+            component_rate_id = None
+            budget_key = f"unplanned:service:{service.id}"
+            budget = None
+        currency = (component_line.currency or base_currency).upper()
+        if not currency:
+            raise HTTPException(status_code=422, detail=f"Service {service.service_code}: a currency is required")
+        if component_line.override_rate is None and base_currency and currency != base_currency:
+            raise HTTPException(status_code=422, detail=f"Service {service.service_code}: daily rate currency must match the locked AFE rate ({base_currency})")
+        factor, usd_fx = _resolve_fx(
+            entry.baseline, currency, f"Service {service.service_code}",
+            line_exchange_rate=component_line.exchange_rate,
+            entry_usd_fx=entry_usd_fx, extra_rates=extra_rates,
+        )
+        if component_line.exchange_rate is not None and extra_rates is not None:
+            extra_rates[currency] = factor
+        effective_rate = _rate(component_line.override_rate if component_line.override_rate is not None else base_rate)
+        if component_line.override_rate is not None:
+            source = "daily_override" if rate else "manual_unplanned"
+        billable_quantity = Decimal("1") if basis == "Day Rate" and component_line.charge_category in SERVICE_ONE_TIME else quantity
+        if basis == "Day Rate" and component_line.quantity_unit == "hours" and component_line.charge_category not in SERVICE_ONE_TIME:
+            billable_quantity = quantity / Decimal("24")
+        amount = _money(sum((item.amount for item in line.cost_items), Decimal("0"))) if index == 0 and line.cost_items else _money(billable_quantity * effective_rate)
+        reason = component_line.override_reason
+        if component_line.override_rate is not None:
+            old_override = Decimal(old.override_rate) if old and index == 0 and old.override_rate is not None else None
+            old_reason = old.override_reason if old and index == 0 else ""
+            if old_override != Decimal(component_line.override_rate) or old_reason != reason:
+                audit_changes.append((old_override, Decimal(component_line.override_rate), reason, currency, _label(service.service_code, service.service_name)))
+        elif old and index == 0 and old.override_rate is not None:
+            audit_changes.append((Decimal(old.override_rate), None, old.override_reason, currency, _label(service.service_code, service.service_name)))
+        component_fields.append({
+            "baseline_service_rate_id": component_rate_id,
+            "charge_category": component_line.charge_category,
+            "charging_basis": basis,
+            "quantity": quantity,
+            "quantity_unit": component_line.quantity_unit,
             "captured_rate": _rate(base_rate),
-            "override_rate": _rate(line.override_rate) if line.override_rate is not None else None,
+            "override_rate": _rate(component_line.override_rate) if component_line.override_rate is not None else None,
             "currency": currency,
             "exchange_rate": factor,
             "amount": amount,
@@ -1807,82 +1833,48 @@ def _normalise_service(
             "rate_source": source,
             "baseline_budget_line_id": budget.id if budget else None,
             "budget_key": budget_key,
-            "sort_order": 0,
-            "override_reason": line.override_reason,
-            "remarks": line.remarks,
-            "quantity": quantity,
-            "quantity_unit": line.quantity_unit,
-        }
-    )
-    if audit_change:
-        base["_override_audit"] = audit_change
-    return base, old, label
+            "override_reason": reason,
+            "sort_order": index,
+        })
 
-
-def _service_budgets_for(
-    budgets: dict[str, list[DailyCostBaselineBudgetLine]], source_line_id: str,
-) -> list[DailyCostBaselineBudgetLine]:
-    """Every locked allowance of one AFE service line, one per priced scope.
-
-    A scope-aware line keys its allowances ``service:<line id>~<scope>``; a
-    single-scope line keeps the plain ``service:<line id>`` key, so both forms
-    are returned together.
-    """
-
-    exact = budgets.get(f"service:{source_line_id}")
-    if exact is not None:
-        return exact
-    prefix = f"service:{source_line_id}~"
-    return [row for key, rows in budgets.items() if key.startswith(prefix) for row in rows]
-
-
-def _budget_for_scope(
-    matching: Sequence[DailyCostBaselineBudgetLine], section_id: str | None, phase_id: str | None,
-) -> DailyCostBaselineBudgetLine | None:
-    """The allowance of exactly this scope, when the scope identifies only one.
-
-    A rate entered for a whole section prices every phase under it, so an exact
-    (section, phase) allowance is preferred and a section-only allowance is the
-    fallback; anything still ambiguous stays unmatched rather than mis-clubbed.
-    """
-
-    exact = [row for row in matching if row.section_id == section_id and row.phase_id == phase_id]
-    if len(exact) == 1:
-        return exact[0]
-    section_only = [row for row in matching if row.section_id == section_id]
-    if len(section_only) == 1:
-        return section_only[0]
-    return None
-
-
-def _match_service_budget(
-    candidates: dict[str, DailyCostBaselineBudgetLine],
-    line: DailyCostServiceLineIn,
-    fallback_key: str,
-) -> tuple[list[DailyCostBaselineBudgetLine], str]:
-    """Match a service actual to the allowance of the line's own scope.
-
-    A service priced on several scopes has one allowance per scope, so the
-    scoped match wins; whole-well allowances remain the fallback.
-    """
-
-    scoped = [
-        row for row in candidates.values()
-        if row.section_id == line.hole_section_id and row.phase_id == line.phase_id
-    ]
-    if len(scoped) == 1:
-        return scoped, f"service:{scoped[0].item_key}"
-    resolved = scoped if scoped else list(candidates.values())
-    if len(resolved) == 1:
-        return resolved, f"service:{resolved[0].item_key}"
-    return [], fallback_key
-
-
-def _weighted_rate(lines: Sequence[DailyCostBaselineBudgetLine]) -> Decimal:
-    quantity = sum((Decimal(row.quantity) for row in lines), Decimal("0"))
-    if quantity > 0:
-        return _rate(sum((Decimal(row.quantity) * Decimal(row.unit_rate) for row in lines), Decimal("0")) / quantity)
-    return _rate(lines[0].unit_rate) if lines else Decimal("0")
+    currencies = {item["currency"] for item in component_fields}
+    factors = {item["exchange_rate"] for item in component_fields}
+    if len(currencies) > 1 or len(factors) > 1:
+        raise HTTPException(status_code=422, detail=f"Service {service.service_code}: cost items combined on one line must use the same currency and exchange rate")
+    primary = component_fields[0]
+    amount = _money(sum((item["amount"] for item in component_fields), Decimal("0")))
+    standard_amount = _money(sum((item["standard_amount"] for item in component_fields), Decimal("0")))
+    usd_amount = _money(sum((item["usd_amount"] for item in component_fields), Decimal("0")))
+    base.update({
+        "cost_items": [DailyCostServiceCostItem(description=item.description, amount=item.amount, sort_order=index) for index, item in enumerate(line.cost_items)],
+        "rate_items": [DailyCostServiceRateItem(**item) for item in component_fields],
+        "service_id": service.id,
+        "service_code_snapshot": service.service_code,
+        "service_name_snapshot": service.service_name,
+        "service_group_snapshot": service.service_group,
+        "charging_basis": primary["charging_basis"],
+        "charge_category": primary["charge_category"],
+        "baseline_service_rate_id": primary["baseline_service_rate_id"],
+        "captured_rate": primary["captured_rate"],
+        "override_rate": primary["override_rate"],
+        "currency": primary["currency"],
+        "exchange_rate": primary["exchange_rate"],
+        "amount": amount,
+        "standard_amount": standard_amount,
+        "usd_exchange_rate": primary["usd_exchange_rate"],
+        "usd_amount": usd_amount,
+        "rate_source": primary["rate_source"],
+        "baseline_budget_line_id": primary["baseline_budget_line_id"],
+        "budget_key": primary["budget_key"],
+        "sort_order": 0,
+        "override_reason": primary["override_reason"],
+        "remarks": line.remarks,
+        "quantity": Decimal(line.quantity),
+        "quantity_unit": line.quantity_unit,
+    })
+    if audit_changes:
+        base["_override_audits"] = audit_changes
+    return base, old, _label(service.service_code, service.service_name)
 
 
 def _normalise_catalogue_line(
@@ -2120,77 +2112,140 @@ def _normalise_other_expense(
     return base, old, _label(line.expense_type, type_label)
 
 
-def _reject_duplicate_service_sub_activity(services: list[dict[str, Any]]) -> None:
-    """One *cost item* of a service may repeat only under a different sub activity.
+def _club_duplicate_service_fields(services: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse repeated payload rows for the same service allocation.
 
-    A service configured in the AFE is one service with one or more cost items
-    (its priced charge categories). The daily entry window bills any number of
-    those cost items in a single entry and saves one ordinary ledger line per
-    item, so the ledger legitimately holds several rows for one service on one
-    date. The ledger key is therefore the cost item — service, charge category
-    and scope — not the service alone:
-
-    * Operation + Standby + Mobilization of one service, recorded together under
-      one sub activity, is three cost lines of one service. That is entry, not
-      duplication.
-    * The same cost item (say Operation) twice under the same sub activity,
-      section and phase is a duplicate: one charge would be counted twice.
-    * A service operated 18h under sub activity 1, 3h under sub activity 2 and
-      3h under sub activity 3 is three separate allocations and stays valid.
-
-    Time-based hourly allocations are limited to 24 hours per service/category.
-    The deduplicated whole-well operational allocation is also limited to 24
-    hours, so repeated simultaneous service charges cannot inflate MIS duration.
+    This also upgrades sheets that historically had one payload row per cost
+    category. Distinct locked rate ids are combined; repeated ids remain an
+    error rather than silently double billing.
     """
-    hours: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal("0"))
+    result: list[dict[str, Any]] = []
+    positions: dict[tuple[str, str, str, str, str], int] = {}
     for fields in services:
-        if fields["charging_basis"] == "Day Rate" and fields["quantity_unit"] == "hours" and fields["charge_category"] not in SERVICE_ONE_TIME:
-            key = (fields["service_id"], fields["charge_category"])
-            hours[key] += Decimal(fields["quantity"])
-            if hours[key] > 24:
-                raise HTTPException(status_code=422, detail=f"Service {fields['service_code_snapshot']}: total allocated {fields['charge_category']} hours cannot exceed 24 on one daily sheet")
-    seen: dict[tuple, str] = {}
-    for fields in services:
-        key = (fields["service_id"], fields.get("sub_activity_id") or "", fields.get("charge_category"), fields.get("hole_section_id"), fields.get("phase_id"))
-        code = fields.get("service_code_snapshot") or fields["service_id"]
-        sub_label = fields.get("sub_activity_code_snapshot") or "the same sub activity"
-        if key in seen:
-            category = fields.get("charge_category") or "charge"
+        key = (
+            fields["service_id"], fields.get("activity_id") or "",
+            fields.get("sub_activity_id") or "", fields.get("hole_section_id") or "",
+            fields.get("phase_id") or "",
+        )
+        index = positions.get(key)
+        if index is None:
+            positions[key] = len(result)
+            result.append(fields)
+            continue
+        current = result[index]
+        current_items = list(current.get("rate_items") or [])
+        next_items = list(fields.get("rate_items") or [])
+        current_ids = {item.baseline_service_rate_id for item in current_items if item.baseline_service_rate_id}
+        next_ids = {item.baseline_service_rate_id for item in next_items if item.baseline_service_rate_id}
+        if not next_items or not current_items or current_ids.intersection(next_ids):
+            code = fields.get("service_code_snapshot") or fields["service_id"]
+            raise HTTPException(status_code=422, detail=f"Service {code}: the same AFE cost item is already entered under this activity, sub activity and scope.")
+        if current.get("currency") != fields.get("currency") or current.get("exchange_rate") != fields.get("exchange_rate"):
+            code = fields.get("service_code_snapshot") or fields["service_id"]
+            raise HTTPException(status_code=422, detail=f"Service {code}: cost items combined on one line must use the same currency and exchange rate.")
+        if (current.get("cost_items") or fields.get("cost_items")) and len(current_items + next_items) > 1:
+            code = fields.get("service_code_snapshot") or fields["service_id"]
             raise HTTPException(
                 status_code=422,
-                detail=(
-                    f"Service {code}: the {category} cost item is already entered for sub activity {sub_label} on this date. "
-                    "Enter a service's cost items once, in the same entry, or use a different sub activity, "
-                    "cost item or section/phase for a distinct allocation."
-                ),
+                detail=f"Service {code}: manual actual-cost breakdowns can only be used with one AFE cost item; keep them separate from multi-item rate detail.",
             )
-        seen[key] = code
+        current["rate_items"] = current_items + next_items
+        current["cost_items"] = list(current.get("cost_items") or []) + list(fields.get("cost_items") or [])
+        for name in ("amount", "standard_amount", "usd_amount"):
+            current[name] = _money(Decimal(current[name]) + Decimal(fields[name]))
+        current["_override_audits"] = list(current.get("_override_audits") or []) + list(fields.get("_override_audits") or [])
+        # Retain a primary-row override audit emitted in the legacy path.
+        if fields.get("_override_audit"):
+            current.setdefault("_override_audits", []).append(fields["_override_audit"])
+    return result
+
+
+def _reject_duplicate_service_sub_activity(services: list[dict[str, Any]]) -> None:
+    """One parent service row per activity/sub-activity/operational scope.
+
+    Different locked AFE rates are retained as children of that row. The exact
+    rate id, rather than its display category, identifies a duplicate component.
+    """
+    parent_keys: set[tuple[str, str, str, str, str]] = set()
+    allocation_hours: dict[tuple[str, str, str, str, str, str], Decimal] = {}
+    for fields in services:
+        identity = (
+            fields["service_id"], fields.get("activity_id") or "",
+            fields.get("sub_activity_id") or "", fields.get("hole_section_id") or "",
+            fields.get("phase_id") or "",
+        )
+        if identity in parent_keys:
+            code = fields.get("service_code_snapshot") or fields["service_id"]
+            sub = fields.get("sub_activity_code_snapshot") or "the same sub activity"
+            raise HTTPException(
+                status_code=422,
+                detail=f"Service {code} is already entered under sub activity {sub} for this activity and scope. Add its other cost items to the existing service line.",
+            )
+        parent_keys.add(identity)
+        components = fields.get("rate_items") or []
+        seen_rate_ids: set[str] = set()
+        if not components:
+            components = [{
+                "baseline_service_rate_id": fields.get("baseline_service_rate_id"),
+                "charge_category": fields.get("charge_category"),
+                "charging_basis": fields.get("charging_basis"),
+                "quantity_unit": fields.get("quantity_unit"),
+                "quantity": fields.get("quantity"),
+            }]
+        def item_value(item: Any, name: str, default: Any = None) -> Any:
+            return item.get(name, default) if isinstance(item, dict) else getattr(item, name, default)
+
+        for item in components:
+            rate_id = item_value(item, "baseline_service_rate_id")
+            if rate_id and rate_id in seen_rate_ids:
+                raise HTTPException(status_code=422, detail="The same AFE cost item cannot be selected twice for one service.")
+            if rate_id:
+                seen_rate_ids.add(rate_id)
+            category = item_value(item, "charge_category", fields.get("charge_category")) or "Operation"
+            basis = item_value(item, "charging_basis", fields.get("charging_basis"))
+            unit = item_value(item, "quantity_unit", fields.get("quantity_unit"))
+            quantity = Decimal(item_value(item, "quantity", fields.get("quantity", 0)))
+            if basis == "Day Rate" and unit == "hours" and category not in SERVICE_ONE_TIME:
+                alloc_key = (*identity, category)
+                allocation_hours[alloc_key] = max(allocation_hours.get(alloc_key, Decimal("0")), quantity)
+
+    totals: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal("0"))
+    for key, hours in allocation_hours.items():
+        service_id, _activity, _sub, _section, _phase, category = key
+        totals[(service_id, category)] += hours
+        if totals[(service_id, category)] > 24:
+            service = next((row for row in services if row["service_id"] == service_id), {})
+            code = service.get("service_code_snapshot") or service_id
+            raise HTTPException(status_code=422, detail=f"Service {code}: total allocated {category} hours cannot exceed 24 on one daily sheet")
 
     operational_hours: dict[tuple[str, str, str, str, str], Decimal] = {}
     for fields in services:
-        if (
-            fields["charging_basis"] != "Day Rate"
-            or fields["charge_category"] in SERVICE_ONE_TIME
-            or fields["quantity_unit"] != "hours"
-        ):
-            continue
-        duration = Decimal(fields["quantity"])
-        key = (
-            fields.get("classification") or "Planned",
-            fields.get("activity_id") or "",
-            fields.get("sub_activity_id") or "",
-            fields.get("hole_section_id") or "",
-            fields.get("phase_id") or "",
-        )
-        operational_hours[key] = max(operational_hours.get(key, Decimal("0")), duration)
+        components = fields.get("rate_items") or [{
+            "charge_category": fields.get("charge_category"),
+            "charging_basis": fields.get("charging_basis"),
+            "quantity_unit": fields.get("quantity_unit"),
+            "quantity": fields.get("quantity"),
+        }]
+        durations = [
+            Decimal(item_value(item, "quantity", fields.get("quantity", 0)))
+            for item in components
+            if item_value(item, "charging_basis", fields.get("charging_basis")) == "Day Rate"
+            and item_value(item, "charge_category", fields.get("charge_category")) not in SERVICE_ONE_TIME
+            and item_value(item, "quantity_unit", fields.get("quantity_unit")) == "hours"
+        ]
+        if durations:
+            key = (
+                fields.get("classification") or "Planned", fields.get("activity_id") or "",
+                fields.get("sub_activity_id") or "", fields.get("hole_section_id") or "",
+                fields.get("phase_id") or "",
+            )
+            operational_hours[key] = max(operational_hours.get(key, Decimal("0")), max(durations))
     total_operational_hours = sum(operational_hours.values(), Decimal("0"))
     if total_operational_hours > Decimal("24"):
         raise HTTPException(
             status_code=422,
-            detail=(
-                f"Whole-well operational allocations total {total_operational_hours:g} hours on this daily sheet. "
-                "After repeated service charges are deduplicated, Planned, NPT and UPA time together cannot exceed 24 hours."
-            ),
+            detail=(f"Whole-well operational allocations total {total_operational_hours:g} hours on this daily sheet. "
+                    "After repeated service charges are deduplicated, Planned, NPT and UPA time together cannot exceed 24 hours."),
         )
 
 
@@ -2259,6 +2314,7 @@ def _normalize_payload(
         services.append(fields)
         staged.append((payload_pos, line, old, fields))
         payload_pos += 1
+    services = _club_duplicate_service_fields(services)
     _reject_duplicate_service_sub_activity(services)
     for order, line in enumerate(payload.consumables):
         fields, old, label = _normalise_catalogue_line(
@@ -2354,6 +2410,7 @@ def _persist_group(entry: DailyCostEntry, model: type[Any], fields_group: list[d
         row_id = clean["id"]
         row = existing.get(row_id)
         audit_change = fields.get("_override_audit")
+        audit_changes = fields.get("_override_audits", [])
         if row is None:
             row = model(**clean)
         else:
@@ -2363,6 +2420,7 @@ def _persist_group(entry: DailyCostEntry, model: type[Any], fields_group: list[d
         persisted.append(row)
         if audit_change:
             overrides.append((row, audit_change))
+        overrides.extend((row, change) for change in audit_changes)
     setattr(entry, LINE_RELATIONSHIP[model], persisted)
     return persisted, overrides
 
@@ -2520,10 +2578,42 @@ def _line_out(line: Any, labels: dict[str, DailyCostBaselineBudgetLine]) -> Any:
     """
     common = _daily_line_common(line, labels)
     if isinstance(line, DailyCostServiceLine):
+        component_rows = list(line.rate_items or [])
+        if not component_rows:
+            # Older rows predate component persistence; expose their scalar rate
+            # as one component without rewriting the historical ledger row.
+            component_rows = [None]
+        rate_items = []
+        for item in component_rows:
+            if item is None:
+                rate_items.append(DailyCostServiceRateItemOut(
+                    baseline_service_rate_id=line.baseline_service_rate_id,
+                    charge_category=line.charge_category, charging_basis=line.charging_basis,
+                    quantity=line.quantity, quantity_unit=line.quantity_unit,
+                    captured_rate=line.captured_rate, override_rate=line.override_rate,
+                    currency=line.currency, exchange_rate=line.exchange_rate, amount=line.amount,
+                    standard_amount=line.standard_amount, usd_exchange_rate=line.usd_exchange_rate,
+                    usd_amount=line.usd_amount, rate_source=line.rate_source, budget_key=line.budget_key,
+                    budget_name=_line_budget_name(line, labels), override_reason=line.override_reason,
+                ))
+            else:
+                rate_items.append(DailyCostServiceRateItemOut(
+                    baseline_service_rate_id=item.baseline_service_rate_id,
+                    charge_category=item.charge_category, charging_basis=item.charging_basis,
+                    quantity=item.quantity, quantity_unit=item.quantity_unit,
+                    captured_rate=item.captured_rate, override_rate=item.override_rate,
+                    currency=item.currency, exchange_rate=item.exchange_rate, amount=item.amount,
+                    standard_amount=item.standard_amount, usd_exchange_rate=item.usd_exchange_rate,
+                    usd_amount=item.usd_amount, rate_source=item.rate_source, budget_key=item.budget_key,
+                    budget_name=labels.get(item.budget_key).item_name_snapshot if labels.get(item.budget_key) else _label(line.service_code_snapshot, line.service_name_snapshot),
+                    override_reason=item.override_reason,
+                ))
         return DailyCostServiceLineOut(
-            **common, cost_items=[{"description": item.description, "amount": item.amount} for item in line.cost_items], service_id=line.service_id, service_code=line.service_code_snapshot,
-            service_name=line.service_name_snapshot, service_group=line.service_group_snapshot, charging_basis=line.charging_basis,
-            charge_category=line.charge_category, baseline_service_rate_id=line.baseline_service_rate_id,
+            **common, cost_items=[{"description": item.description, "amount": item.amount} for item in line.cost_items],
+            rate_items=rate_items, service_id=line.service_id, service_code=line.service_code_snapshot,
+            service_name=line.service_name_snapshot, service_group=line.service_group_snapshot,
+            charging_basis=line.charging_basis, charge_category=line.charge_category,
+            baseline_service_rate_id=line.baseline_service_rate_id,
         )
     if isinstance(line, DailyCostConsumableLine):
         return DailyCostConsumableLineOut(
@@ -3017,29 +3107,46 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
                 amount = Decimal(row.standard_amount)
                 on_report_date = entry_dates.get(row.entry_id) == as_of
                 actual_by_group[group] += amount
-                actual_by_key[(group, row.budget_key)] += amount
-                if on_report_date:
-                    actual_by_group_today[group] += amount
-                    actual_by_key_today[(group, row.budget_key)] += amount
-                actual_by_class[(group, row.budget_key, row.classification)] += amount
                 actual_by_group_class[(group, row.classification)] += amount
                 actual_all.append((group, row))
-                if (group, row.budget_key) not in planned_keys:
-                    line_group = ""
-                    if isinstance(row, DailyCostServiceLine):
-                        code, name = row.service_code_snapshot, row.service_name_snapshot
-                        kind, line_group = "service", row.service_group_snapshot
-                    elif isinstance(row, DailyCostConsumableLine):
-                        code, name = row.item_code_snapshot, row.item_name_snapshot
-                        kind = "consumable"
-                    elif isinstance(row, DailyCostOtherExpenseLine):
-                        # Grouped per expense type, so the deduction names the event.
-                        code, name = row.expense_type, row.expense_type_label
-                        kind = "other_expense"
-                    else:
-                        code, name = row.tangible_code_snapshot, row.tangible_name_snapshot
-                        kind = "tangible"
-                    unplanned_meta[(group, row.budget_key)] = (code, name or kind, line_group)
+                if on_report_date:
+                    actual_by_group_today[group] += amount
+                components = list(row.rate_items or []) if isinstance(row, DailyCostServiceLine) else []
+                if components:
+                    for component in components:
+                        component_amount = Decimal(component.standard_amount)
+                        key = component.budget_key
+                        actual_by_key[(group, key)] += component_amount
+                        actual_by_class[(group, key, row.classification)] += component_amount
+                        if on_report_date:
+                            actual_by_key_today[(group, key)] += component_amount
+                        if (group, key) not in planned_keys:
+                            unplanned_meta[(group, key)] = (
+                                row.service_code_snapshot,
+                                _label(row.service_code_snapshot, row.service_name_snapshot),
+                                row.service_group_snapshot,
+                            )
+                else:
+                    key = row.budget_key
+                    actual_by_key[(group, key)] += amount
+                    actual_by_class[(group, key, row.classification)] += amount
+                    if on_report_date:
+                        actual_by_key_today[(group, key)] += amount
+                    if (group, key) not in planned_keys:
+                        line_group = ""
+                        if isinstance(row, DailyCostServiceLine):
+                            code, name = row.service_code_snapshot, row.service_name_snapshot
+                            kind, line_group = "service", row.service_group_snapshot
+                        elif isinstance(row, DailyCostConsumableLine):
+                            code, name = row.item_code_snapshot, row.item_name_snapshot
+                            kind = "consumable"
+                        elif isinstance(row, DailyCostOtherExpenseLine):
+                            code, name = row.expense_type, row.expense_type_label
+                            kind = "other_expense"
+                        else:
+                            code, name = row.tangible_code_snapshot, row.tangible_name_snapshot
+                            kind = "tangible"
+                        unplanned_meta[(group, key)] = (code, name or kind, line_group)
 
     comparison_lines: list[DailyCostBudgetComparison] = []
     section_labels, phase_labels = _scope_labels(entry.baseline)
@@ -4098,13 +4205,7 @@ def _line_union(
     include_draft: bool,
     scope: str | None = None,
 ) -> Any:
-    """One row per daily cost line, whatever its group, with every captured factor.
-
-    All four line tables share the same factor columns, so a UNION ALL keeps one
-    column-wise shape for every cut of the ledger (day, section, activity, party).
-    Other-expense lines appear under the "Other Expenses" group, which has no AFE
-    allowance, so their planned amount stays empty in every reconciliation cut.
-    """
+    """A reporting row per priced component, with legacy-line fallback."""
     parts = []
     for model, group in LINE_MODELS:
         statement = select(
@@ -4139,17 +4240,63 @@ def _line_union(
             DailyCostEntry.well_id == well_id,
             DailyCostEntry.is_deleted.is_(False),
         )
-        if scope in ("drilling", "completion"):
-            statement = statement.join(Afe, DailyCostEntry.afe_id == Afe.id).where(
-                Afe.configuration_scope == scope
+        component_statement = None
+        if model is DailyCostServiceLine:
+            has_components = exists(select(1).where(DailyCostServiceRateItem.service_line_id == model.id))
+            statement = statement.where(~has_components)
+            component_statement = select(
+                literal(group).label("cost_group"),
+                model.service_code_snapshot.label("item_code"),
+                (model.service_name_snapshot + literal(" · ") + DailyCostServiceRateItem.charge_category).label("item_name"),
+                DailyCostEntry.cost_date.label("cost_date"),
+                DailyCostEntry.status.label("entry_status"),
+                model.section_code_snapshot.label("section_code"),
+                model.section_name_snapshot.label("section_name"),
+                model.phase_code_snapshot.label("phase_code"),
+                model.phase_name_snapshot.label("phase_name"),
+                model.activity_code_snapshot.label("activity_code"),
+                model.activity_name_snapshot.label("activity_name"),
+                model.sub_activity_code_snapshot.label("sub_activity_code"),
+                model.sub_activity_name_snapshot.label("sub_activity_name"),
+                model.sub_activity_party_snapshot.label("sub_activity_party"),
+                model.vendor_code_snapshot.label("vendor_code"),
+                model.vendor_name_snapshot.label("vendor_name"),
+                model.party_name.label("party_name"),
+                model.classification.label("classification"),
+                model.service_group_snapshot.label("service_group"),
+                DailyCostServiceRateItem.rate_source.label("rate_source"),
+                DailyCostServiceRateItem.currency.label("currency"),
+                DailyCostServiceRateItem.exchange_rate.label("exchange_rate"),
+                DailyCostServiceRateItem.budget_key.label("budget_key"),
+                DailyCostServiceRateItem.quantity.label("quantity"),
+                DailyCostServiceRateItem.amount.label("amount"),
+                DailyCostServiceRateItem.standard_amount.label("standard_amount"),
+            ).select_from(model).join(DailyCostEntry, model.entry_id == DailyCostEntry.id).join(
+                DailyCostServiceRateItem, DailyCostServiceRateItem.service_line_id == model.id
+            ).where(
+                model.organization_id == organization_id,
+                DailyCostEntry.well_id == well_id,
+                DailyCostEntry.is_deleted.is_(False),
             )
+        if scope in ("drilling", "completion"):
+            statement = statement.join(Afe, DailyCostEntry.afe_id == Afe.id).where(Afe.configuration_scope == scope)
+            if component_statement is not None:
+                component_statement = component_statement.join(Afe, DailyCostEntry.afe_id == Afe.id).where(Afe.configuration_scope == scope)
         if not include_draft:
             statement = statement.where(DailyCostEntry.status == "submitted")
+            if component_statement is not None:
+                component_statement = component_statement.where(DailyCostEntry.status == "submitted")
         if date_from is not None:
             statement = statement.where(DailyCostEntry.cost_date >= date_from)
+            if component_statement is not None:
+                component_statement = component_statement.where(DailyCostEntry.cost_date >= date_from)
         if date_to is not None:
             statement = statement.where(DailyCostEntry.cost_date <= date_to)
+            if component_statement is not None:
+                component_statement = component_statement.where(DailyCostEntry.cost_date <= date_to)
         parts.append(statement)
+        if component_statement is not None:
+            parts.append(component_statement)
     return union_all(*parts).subquery("daily_cost_lines")
 
 
@@ -4298,22 +4445,36 @@ def _party_factor_rows(
     # responsible party, so simultaneous services never double the duration.
     from app.services.operational_time import ONE_TIME_SERVICE_CATEGORIES, hours_to_days
 
-    day_query = (
+    component_query = (
         select(
-            DailyCostEntry.cost_date,
-            DailyCostEntry.id,
-            DailyCostServiceLine.classification,
-            DailyCostServiceLine.activity_id,
-            DailyCostServiceLine.sub_activity_id,
-            DailyCostServiceLine.hole_section_id,
-            DailyCostServiceLine.phase_id,
-            DailyCostServiceLine.charging_basis,
-            DailyCostServiceLine.charge_category,
-            DailyCostServiceLine.quantity_unit,
-            DailyCostServiceLine.quantity,
-            DailyCostServiceLine.sub_activity_party_snapshot,
-            DailyCostServiceLine.party_name,
-            DailyCostServiceLine.vendor_name_snapshot,
+            DailyCostEntry.cost_date, DailyCostEntry.id,
+            DailyCostServiceLine.classification, DailyCostServiceLine.activity_id,
+            DailyCostServiceLine.sub_activity_id, DailyCostServiceLine.hole_section_id,
+            DailyCostServiceLine.phase_id, DailyCostServiceRateItem.charging_basis,
+            DailyCostServiceRateItem.charge_category, DailyCostServiceRateItem.quantity_unit,
+            DailyCostServiceRateItem.quantity, DailyCostServiceLine.sub_activity_party_snapshot,
+            DailyCostServiceLine.party_name, DailyCostServiceLine.vendor_name_snapshot,
+        )
+        .select_from(DailyCostServiceLine)
+        .join(DailyCostEntry, DailyCostServiceLine.entry_id == DailyCostEntry.id)
+        .join(DailyCostServiceRateItem, DailyCostServiceRateItem.service_line_id == DailyCostServiceLine.id)
+        .where(
+            DailyCostServiceLine.organization_id == organization_id,
+            DailyCostEntry.organization_id == organization_id,
+            DailyCostEntry.well_id == well_id,
+            DailyCostEntry.is_deleted.is_(False),
+            DailyCostServiceLine.classification.in_(("NPT", "UPA")),
+        )
+    )
+    legacy_query = (
+        select(
+            DailyCostEntry.cost_date, DailyCostEntry.id,
+            DailyCostServiceLine.classification, DailyCostServiceLine.activity_id,
+            DailyCostServiceLine.sub_activity_id, DailyCostServiceLine.hole_section_id,
+            DailyCostServiceLine.phase_id, DailyCostServiceLine.charging_basis,
+            DailyCostServiceLine.charge_category, DailyCostServiceLine.quantity_unit,
+            DailyCostServiceLine.quantity, DailyCostServiceLine.sub_activity_party_snapshot,
+            DailyCostServiceLine.party_name, DailyCostServiceLine.vendor_name_snapshot,
         )
         .select_from(DailyCostServiceLine)
         .join(DailyCostEntry, DailyCostServiceLine.entry_id == DailyCostEntry.id)
@@ -4323,19 +4484,24 @@ def _party_factor_rows(
             DailyCostEntry.well_id == well_id,
             DailyCostEntry.is_deleted.is_(False),
             DailyCostServiceLine.classification.in_(("NPT", "UPA")),
+            ~exists(select(1).where(DailyCostServiceRateItem.service_line_id == DailyCostServiceLine.id)),
         )
     )
     if not include_draft:
-        day_query = day_query.where(DailyCostEntry.status == "submitted")
+        component_query = component_query.where(DailyCostEntry.status == "submitted")
+        legacy_query = legacy_query.where(DailyCostEntry.status == "submitted")
     if date_from is not None:
-        day_query = day_query.where(DailyCostEntry.cost_date >= date_from)
+        component_query = component_query.where(DailyCostEntry.cost_date >= date_from)
+        legacy_query = legacy_query.where(DailyCostEntry.cost_date >= date_from)
     if date_to is not None:
-        day_query = day_query.where(DailyCostEntry.cost_date <= date_to)
+        component_query = component_query.where(DailyCostEntry.cost_date <= date_to)
+        legacy_query = legacy_query.where(DailyCostEntry.cost_date <= date_to)
+    day_rows = db.execute(union_all(component_query, legacy_query)).all()
     allocation_hours: dict[tuple[Any, ...], Decimal] = {}
     for (
         cost_date, entry_key, classification, activity, sub_activity, section, phase,
         charging_basis, charge_category, quantity_unit, quantity, sub_party, party, vendor,
-    ) in db.execute(day_query).all():
+    ) in day_rows:
         if (
             charging_basis != "Day Rate"
             or charge_category in ONE_TIME_SERVICE_CATEGORIES
@@ -6063,7 +6229,15 @@ def _saved_inputs(
             "override_reason": row.override_reason, "remarks": row.remarks,
         }
     services = [DailyCostServiceLineIn(
-        **common(row), cost_items=[{"description": item.description, "amount": item.amount} for item in row.cost_items], service_id=row.service_id, baseline_service_rate_id=row.baseline_service_rate_id,
+        **common(row),
+        cost_items=[{"description": item.description, "amount": item.amount} for item in row.cost_items],
+        rate_items=[{
+            "baseline_service_rate_id": item.baseline_service_rate_id,
+            "currency": item.currency, "exchange_rate": item.exchange_rate,
+            "quantity": item.quantity, "quantity_unit": item.quantity_unit,
+            "override_rate": item.override_rate, "override_reason": item.override_reason,
+        } for item in row.rate_items],
+        service_id=row.service_id, baseline_service_rate_id=row.baseline_service_rate_id,
         charging_basis=row.charging_basis, charge_category=row.charge_category,
         quantity_unit=row.quantity_unit,
     ) for row in entry.service_lines]
