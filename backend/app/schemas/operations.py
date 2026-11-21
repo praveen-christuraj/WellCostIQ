@@ -611,6 +611,18 @@ class OpsReportOut(_Strict):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
+class OpsSubmitReadinessOut(_Strict):
+    """The checklist the Submit action would be refused with.
+
+    ``blockers`` carries the same sentences the submit route returns, in the same
+    order, so the editor can show them before the request is made.
+    """
+
+    ready: bool
+    blockers: list[str] = []
+    blocker_count: int = 0
+
+
 class OpsSurveyIn(_Strict):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
     md_m: Decimal3 | None = None

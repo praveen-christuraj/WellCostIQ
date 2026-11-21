@@ -1,6 +1,7 @@
 """Reports service — CRUD, workflow, metrics."""
 
 import re
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -1486,59 +1487,102 @@ def _metric_state(db, report):
         metric.review_state = report.status
 
 
-def submit_report(db: Session, organization_id: str, report_id: str, user: User, request=None):
-    report = get_report(db, organization_id, report_id, lock=True)
-    if report.status not in ("draft", "in_review", "rejected"):
-        raise HTTPException(409, "Only draft or in-review reports can be submitted")
-    blocks = db.scalars(
-        select(OpsActivityBlock).where(
-            OpsActivityBlock.report_id == report.id, OpsActivityBlock.is_deleted.is_(False)
-        )
-    ).all()
-    scope.resolve(db, organization_id, report.well_id, report.scope)
-    measurement_only = report.report_type == "DMR" and not blocks and bool(report.operation_summary.strip())
+@dataclass(frozen=True)
+class SubmitRefusal:
+    """One reason a report cannot be submitted, with the answer it would produce.
+
+    The checklist and the refusal are one piece of arithmetic: ``submit_refusals``
+    collects everything that still stops a submission and ``submit_report`` turns
+    the first one into the HTTP response. Returning a value instead of raising an
+    ``HTTPException`` lets the read-only readiness check run exactly the same code
+    without pretending it is the write.
+    """
+
+    message: str
+    status_code: int = 422
+
+
+def _is_measurement_only(report: OpsDailyReport, blocks: list[OpsActivityBlock]) -> bool:
+    """A mud report with no shift blocks is a measurement, not a missing 24 hours."""
+
+    return report.report_type == "DMR" and not blocks and bool((report.operation_summary or "").strip())
+
+
+def submit_refusals(db: Session, report: OpsDailyReport, blocks: list[OpsActivityBlock]) -> list[SubmitRefusal]:
+    """Everything that still stops this report being submitted, in reading order.
+
+    Both the readiness panel and the submit route read this list, so the reason a
+    user sees before pressing Submit is the reason the server gives after, and the
+    two cannot drift apart. The order is the order the engineer would fix things:
+    the review state first, then the time arithmetic, then the codes on each line.
+    """
+
+    refusals: list[SubmitRefusal] = []
+    settings = db.scalar(select(OpsSettings).where(OpsSettings.organization_id == report.organization_id))
+    measurement_only = _is_measurement_only(report, blocks)
     if not blocks and not measurement_only:
-        raise HTTPException(422, "Cannot submit a report with no time blocks")
+        refusals.append(
+            SubmitRefusal("This report has no time blocks. Log the day's activities before submitting.")
+        )
     if report.extraction_status == "needs_review" or any(
         b.review_state not in ("accepted", "edited") for b in blocks
     ):
-        raise HTTPException(422, "Review the suggested blocks and save the draft before submitting.")
-    settings = db.scalar(select(OpsSettings).where(OpsSettings.organization_id == organization_id))
+        suggested = sum(1 for b in blocks if b.review_state not in ("accepted", "edited"))
+        detail = (
+            f" {suggested} suggested block(s) still need accepting or editing."
+            if suggested
+            else ""
+        )
+        refusals.append(
+            SubmitRefusal("Review the suggested blocks and save the draft before submitting." + detail)
+        )
     total = sum(b.duration_minutes for b in blocks)
     if not measurement_only and total > (settings.max_daily_hours if settings else 24) * 60:
-        raise HTTPException(422, "Logged hours exceed the workspace maximum daily hours.")
-    if not measurement_only and abs(total - report.period_minutes) > (
-        settings.completeness_tolerance_minutes if settings else 2
-    ):
-        raise HTTPException(
-            422, f"Logged {total} minutes; expected {report.period_minutes}. Correct the log or the report period."
+        refusals.append(SubmitRefusal("Logged hours exceed the workspace maximum daily hours."))
+    tolerance = settings.completeness_tolerance_minutes if settings else 2
+    # With no log at all the missing blocks are the answer; a period-balance
+    # figure on top of that only repeats it in different words.
+    if blocks and not measurement_only and abs(total - report.period_minutes) > tolerance:
+        # Saying which way the gap runs is the difference between "your log is
+        # wrong" and "you have three hours left to account for".
+        direction = "under" if total < report.period_minutes else "over"
+        refusals.append(
+            SubmitRefusal(
+                f"Logged {total} minutes; expected {report.period_minutes} "
+                f"({direction} by {abs(total - report.period_minutes)} minutes). "
+                "Correct the log or the report period."
+            )
         )
-    _validate_blocks(
-        [{"sequence_no": b.sequence_no, "started_at": b.started_at, "ended_at": b.ended_at} for b in blocks],
-        report.period_start_at,
-        report.period_end_at,
-    )
+    if blocks:
+        try:
+            _validate_blocks(
+                [{"sequence_no": b.sequence_no, "started_at": b.started_at, "ended_at": b.ended_at} for b in blocks],
+                report.period_start_at,
+                report.period_end_at,
+            )
+        except HTTPException as exc:
+            refusals.append(SubmitRefusal(str(exc.detail), exc.status_code))
     for b in blocks:
         if message := describe_missing(b):
-            raise HTTPException(422, message)
+            refusals.append(SubmitRefusal(message))
         if (
             b.classification in ("NPT", "UPA")
             and not b.operation_id
             and (settings.require_operations if settings else True)
         ):
-            raise HTTPException(422, f"Block {b.sequence_no}: select the Operations code.")
+            refusals.append(SubmitRefusal(f"Block {b.sequence_no}: select the Operations code."))
         if b.classification in ("NPT", "UPA") or b.allocation in ("NPT", "UPA"):
             if settings and settings.require_npt_agency and not b.responsible_agency_id and not (
                 b.vendor_id or b.responsible_party or ""
             ).strip():
-                raise HTTPException(422, f"Block {b.sequence_no}: select the responsible agency.")
-            if (not settings or settings.require_npt_reason) and not b.reason.strip():
-                raise HTTPException(422, f"Block {b.sequence_no}: enter the reason.")
+                refusals.append(SubmitRefusal(f"Block {b.sequence_no}: select the responsible agency."))
+            if (not settings or settings.require_npt_reason) and not (b.reason or "").strip():
+                refusals.append(SubmitRefusal(f"Block {b.sequence_no}: enter the reason."))
     # A line with no sequence code is Unplanned Activity — real work, but work the
     # programme cannot account for. Submitting it is allowed by default (the
     # arithmetic already shows it as lag); a workspace that wants the code chosen
     # before submission switches this on, and the refusal names the line.
-    if not measurement_only and sequence_policy.require_code_on_submit(db, organization_id):
+    if blocks and not measurement_only and sequence_policy.require_code_on_submit(db, report.organization_id):
         split_blocks = {
             row.block_id
             for row in db.scalars(
@@ -1558,13 +1602,74 @@ def submit_report(db: Session, organization_id: str, report_id: str, user: User,
             and not (b.classification == "UPA" and (b.reason or "").strip())
         ]
         if uncoded:
-            raise HTTPException(
-                422,
-                "These lines carry no sequence code: "
-                + ", ".join(str(n) for n in uncoded[:10])
-                + (f" (+{len(uncoded) - 10} more)" if len(uncoded) > 10 else "")
-                + ". Code them, or classify the work as Unplanned Activity with a reason, before submitting.",
+            refusals.append(
+                SubmitRefusal(
+                    "These lines carry no sequence code: "
+                    + ", ".join(str(n) for n in uncoded[:10])
+                    + (f" (+{len(uncoded) - 10} more)" if len(uncoded) > 10 else "")
+                    + ". Code them, or classify the work as Unplanned Activity with a reason, before submitting."
+                )
             )
+    return refusals
+
+
+def submit_readiness(db: Session, organization_id: str, report_id: str) -> dict[str, Any]:
+    """Everything still outstanding before this report can be submitted.
+
+    Read-only and side-effect free: the editor calls it after every save so the
+    engineer sees the same checklist the submit route would refuse with, instead
+    of discovering it from a bare 422.
+    """
+
+    report = get_report(db, organization_id, report_id)
+    if report.status not in ("draft", "in_review", "rejected"):
+        return {
+            "ready": False,
+            "blockers": [f"This report is {report.status}; only a draft, in-review or rejected report can be submitted."],
+            "blocker_count": 1,
+        }
+    try:
+        # The submit route refuses an unconfigured well scope before it reads a
+        # single gate. A checklist that raised instead of reporting would hide
+        # exactly the one thing standing in the way, so it becomes a blocker.
+        scope.resolve(db, organization_id, report.well_id, report.scope, report.rig_id)
+    except HTTPException as exc:
+        return {"ready": False, "blockers": [str(exc.detail)], "blocker_count": 1}
+    blocks = db.scalars(
+        select(OpsActivityBlock).where(
+            OpsActivityBlock.report_id == report.id, OpsActivityBlock.is_deleted.is_(False)
+        )
+    ).all()
+    refusals = submit_refusals(db, report, list(blocks))
+    return {
+        "ready": not refusals,
+        "blockers": [refusal.message for refusal in refusals],
+        "blocker_count": len(refusals),
+    }
+
+
+def submit_report(db: Session, organization_id: str, report_id: str, user: User, request=None):
+    report = get_report(db, organization_id, report_id, lock=True)
+    if report.status not in ("draft", "in_review", "rejected"):
+        raise HTTPException(409, "Only draft or in-review reports can be submitted")
+    blocks = db.scalars(
+        select(OpsActivityBlock).where(
+            OpsActivityBlock.report_id == report.id, OpsActivityBlock.is_deleted.is_(False)
+        )
+    ).all()
+    scope.resolve(db, organization_id, report.well_id, report.scope)
+    # The gates live in one place: the readiness panel shows this same list, so a
+    # refusal here is never the first time the engineer hears about it.
+    refusals = submit_refusals(db, report, list(blocks))
+    if refusals:
+        # An out-of-period or overlapping log is still a 409; every other gate is
+        # a 422. The first refusal is what the response carries, and the rest are
+        # listed in the message so a caller that only reads `detail` sees them.
+        first = refusals[0]
+        detail = first.message
+        if len(refusals) > 1:
+            detail = "\n".join(refusal.message for refusal in refusals)
+        raise HTTPException(first.status_code, detail)
     report.status = "submitted"
     _metric_state(db, report)
     report.submitted_at = datetime.now(UTC)

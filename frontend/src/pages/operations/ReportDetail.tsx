@@ -48,12 +48,14 @@ import {
   reopenReport,
   reviewBrief,
   saveReport,
+  submitReadiness,
   submitReport,
   type OpsAiPrefill,
   type OpsBlock,
   type OpsNarratives,
   type OpsReference,
   type OpsReport,
+  type OpsSubmitReadiness,
   type OpsReportTimelineCodes,
   type OpsSurvey,
 } from '../../lib/operations'
@@ -240,6 +242,10 @@ export default function OperationsReportDetail({
   const [narratives, setNarratives] = useState<OpsNarratives | null>(null)
   const [prefillBusy, setPrefillBusy] = useState(false)
   const [prefillResult, setPrefillResult] = useState<OpsAiPrefill | null>(null)
+  // The server's own submit checklist, read after every save so the engineer sees
+  // what is still outstanding instead of discovering it from a bare 422.
+  const [readiness, setReadiness] = useState<OpsSubmitReadiness | null>(null)
+  const [readinessBusy, setReadinessBusy] = useState(false)
 
   const editorDirty = useFormDirty(editor, Boolean(editor))
 
@@ -252,6 +258,20 @@ export default function OperationsReportDetail({
     setSelected([])
     setSelectionKey((n) => n + 1)
     setDirty(false)
+  }
+
+  /**
+   * Read the submit checklist for the saved report. Deliberately silent on
+   * failure: a checklist that cannot be loaded must never stop the editor working,
+   * and Submit still answers with the same sentences if pressed.
+   */
+  const refreshReadiness = (reportId = id) => {
+    if (!reportId) return Promise.resolve()
+    setReadinessBusy(true)
+    return submitReadiness(reportId)
+      .then((next) => setReadiness(next))
+      .catch(() => setReadiness(null))
+      .finally(() => setReadinessBusy(false))
   }
 
   useEffect(() => {
@@ -269,6 +289,7 @@ export default function OperationsReportDetail({
             reset(r)
             setRef(refs)
             setTimelineCodes(codes)
+            void refreshReadiness(id)
           }
         })
         .catch((e) => {
@@ -287,13 +308,15 @@ export default function OperationsReportDetail({
   }, [id, includeDeleted])
 
   /** Re-read the report after a bulk or review action, keeping the current tab. */
-  const load = () =>
-    Promise.all([getReport(id, includeDeleted), reportTimelineCodes(id).catch(() => null)])
+  const load = () => {
+    void refreshReadiness()
+    return Promise.all([getReport(id, includeDeleted), reportTimelineCodes(id).catch(() => null)])
       .then(([r, codes]) => {
         reset(r)
         setTimelineCodes(codes)
       })
       .catch((e) => setError((e as Error).message))
+  }
 
   const refreshBrief = () => {
     setBriefError('')
@@ -307,6 +330,17 @@ export default function OperationsReportDetail({
     !report.is_deleted &&
     ['draft', 'in_review', 'rejected'].includes(report.status) &&
     can('ops-report:update')
+
+  // The checklist applies only while the report can still be submitted. A dirty
+  // draft's stored figures are stale, so the panel says so instead of listing
+  // reasons that the unsaved edits may already have fixed.
+  const canSubmitNow =
+    !!report &&
+    !report.is_deleted &&
+    ['draft', 'in_review', 'rejected'].includes(report.status)
+  const submitBlockers =
+    canSubmitNow && !dirty && can('ops-report:submit') && readiness ? readiness.blockers : []
+  const submitBlocked = submitBlockers.length > 0
 
   const mayReopen =
     !!report &&
@@ -340,6 +374,7 @@ export default function OperationsReportDetail({
       })
       reset(r)
       void refreshBrief()
+      void refreshReadiness(r.id)
       void onChanged()
       setNotice(
         r.extraction_status === 'needs_review'
@@ -370,6 +405,7 @@ export default function OperationsReportDetail({
               ? await rejectReport(report.id, reason)
               : await reopenReport(report.id, reopenRemarks.trim())
       reset(r)
+      void refreshReadiness()
       void onChanged()
       void refreshBrief()
       setReject(false)
@@ -381,6 +417,9 @@ export default function OperationsReportDetail({
       )
     } catch (e) {
       setError((e as Error).message)
+      // The refusal and this checklist are the same arithmetic: re-read it so the
+      // reason stays on screen with every other outstanding item.
+      if (action === 'submit') void refreshReadiness()
     } finally {
       setBusy(false)
     }
@@ -629,10 +668,13 @@ export default function OperationsReportDetail({
               ['draft', 'in_review', 'rejected'].includes(report.status) && (
                 <Button
                   variant="outlined"
-                  disabled={busy || dirty || report.extraction_status === 'needs_review'}
+                  // Never silently disabled: a disabled button with no reason is what
+                  // turns a correct refusal into a mystery. Dirty work still blocks the
+                  // request itself, and the checklist below explains everything else.
+                  disabled={busy || dirty}
                   onClick={() => void transition('submit')}
                 >
-                  Submit
+                  {readinessBusy ? 'Checking…' : submitBlocked ? `Submit (${readiness?.blocker_count} to fix)` : 'Submit'}
                 </Button>
               )}
             {!report.is_deleted && report.status === 'submitted' && can('ops-report:approve') && (
@@ -708,6 +750,23 @@ export default function OperationsReportDetail({
               Depths (TVD), bit depth, casing, mud, BHA, surveys, narratives and WAT activity blocks. Verify, adjust any
               value, and save the reviewed draft.
             </Caution>
+          )}
+          {submitBlockers.length > 0 && (
+            <Alert severity="warning" data-testid="submit-blockers">
+              <Typography fontWeight={700} fontSize={13} mb={0.5}>
+                {submitBlockers.length === 1
+                  ? 'One item still stops this report being submitted:'
+                  : `${submitBlockers.length} items still stop this report being submitted:`}
+              </Typography>
+              <Box component="ol" sx={{ m: 0, pl: 2.25, fontSize: 12.5, lineHeight: 1.55 }}>
+                {submitBlockers.map((blocker, index) => (
+                  <li key={index}>{blocker}</li>
+                ))}
+              </Box>
+              <Typography variant="caption" color="text.secondary" display="block" mt={0.75}>
+                These are the server's own checks, so what you see here is exactly what Submit would refuse with.
+              </Typography>
+            </Alert>
           )}
           {editable &&
             (report.current_extraction_id || blocks.some((b) => b.review_state === 'suggested')) &&

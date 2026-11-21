@@ -109,7 +109,7 @@ permissions. `require` and `require_any` expose metadata without changing their
 permission semantics. New anonymous API paths fail the explicit method/path
 allowlist; framework docs are separately classified and remain configuration-gated.
 
-Generated `SECURITY_ROUTE_INVENTORY.json`: **648 method/path entries**, seven
+Generated `SECURITY_ROUTE_INVENTORY.json`: **649 method/path entries**, seven
 public entries (five auth/recovery plus root/health), **zero missing-auth policy
 violations**. The inventory records dependency capabilities and handler source
 locations, and deliberately marks object ownership, tenant predicates and audit
