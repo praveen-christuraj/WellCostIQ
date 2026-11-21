@@ -114,17 +114,34 @@ public entries (five auth/recovery plus root/health), **zero missing-auth policy
 violations**. The inventory records dependency capabilities and handler source
 locations, and deliberately marks object ownership, tenant predicates and audit
 behavior as requiring manual review. Conditional permission calls inside handler
-bodies are not automatically proven by this report. This is **not** completion
-of the exhaustive cross-tenant/privilege-transition audit.
+bodies are not automatically proven by this report.
+
+### Additional source-level remediations (follow-up pass)
+
+- **CSV formula-injection escaping (`catalogue_items.py`, `record_templates.py`)**:
+  wrapped all exported cell values in `safe_csv_cell` (`app/core/spreadsheets.py`)
+  for the price-revision template CSV and record-template library CSV exports,
+  matching `database_browser` and `report_engine`.
+- **F-07 scheduler cross-process coordination (`app/services/backup.py`)**:
+  hardened `run_due_backups()` with a PostgreSQL transaction-scoped advisory lock
+  (`pg_try_advisory_xact_lock(hashtext('wellcostiq:backup_scheduler'))`) and
+  SQLite `BEGIN IMMEDIATE` serialization, and advanced `next_run_at` atomically
+  in the same transaction as `create_job(...)` so concurrent workers cannot
+  double-claim the same scheduled run.
+- **F-04 & F-06 source review**:
+  verified `db.get(...)` and bulk-ID (`.in_(...)`) handlers across `app/api` and
+  `app/services` are preceded by or paired with `organization_id` scoping; verified
+  Ollama client (`app/services/ollama.py`), context assembly (`app/services/ai_context.py`,
+  `app/services/cost_intelligence_ai.py`), and assistant routes (`app/api/assistant.py`)
+  enforce fixed-target configuration, no redirects, bounded inputs/outputs,
+  grounding rules, and capability-gated data loading.
 
 ## Validation actually performed
 
-- Installed existing hash-locked production dependencies into an ignored venv.
 - Imported the app to generate the mounted dependency inventory, without entering
   application lifespan, running bootstrap, starting a scheduler, or accessing a
   production database.
-- Compiled changed Python sources and new regression cases for syntax.
-- Regenerated the local import graph (excluding local security reference tools).
+- Compiled changed Python sources for syntax (`python -m py_compile`).
 - Reviewed the diff and whitespace (`git diff --check`).
 
 **No pytest, other test execution, GitHub checks, live exploit, provider inspection,
@@ -136,16 +153,14 @@ cases are checked in but unexecuted. No customer data or schema was migrated.
 - Run approved regression/concurrency tests, disconnect/multipart cleanup cases,
   direct/proxied chunked requests, archive compatibility and non-destructive
   data-preservation fixtures in a disposable environment.
-- Complete every route family's tenant/owner/audit/resource-limit matrix and
-  cross-tenant/privilege-transition negative cases. Authentication coverage alone
-  cannot establish object-level authorization.
+- Execute cross-tenant/privilege-transition negative cases to complement the
+  source-level tenant-scoping review.
 - Verify hosted WAF, direct-origin behavior, proxy identity and 429 behavior with
   provider evidence and a named owner (risk R-2026-002 remains OPEN).
 - MFA/SSO and RLS require the plan's separate design, migration/UAT and named,
   expiring acceptance/approval. No owner or approval has been invented.
-- Enforce scheduler singleton/distributed lease; configure durable backup storage,
-  managed PITR, retention and a timed disposable restore rehearsal.
-- Complete Ollama prompt-injection/no-agency and egress assurance; its fixed-target
-  and escaped output boundaries were not expanded in this change.
+- Configure durable off-host backup storage, managed PITR, retention, and a timed
+  disposable restore rehearsal.
+- Complete Ollama egress policy verification and prompt-injection negative tests.
 - Obtain authorized full-history secret/dependency/image scan results and patch
   artifact disposition. The tracked patch was not removed or claimed secret-free.

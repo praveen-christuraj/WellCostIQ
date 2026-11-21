@@ -13,6 +13,7 @@ import io
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.deps import Current, Db, require
+from app.core.spreadsheets import safe_csv_cell
 from app.schemas.record_template import (
     TemplateApplyIn,
     TemplateApplyPreviewOut,
@@ -51,7 +52,7 @@ def export_templates(db: Db, user: Current, kind: str = Query(default="", max_le
     buffer.write("\ufeff")
     writer = csv.DictWriter(buffer, fieldnames=headers, lineterminator="\r\n")
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows({k: safe_csv_cell(v) for k, v in row.items()} for row in rows)
     filename = f"record-templates{'-' + kind if kind else ''}-{svc._now().date().isoformat()}.csv"
     return Response(
         content=buffer.getvalue().encode("utf-8"),

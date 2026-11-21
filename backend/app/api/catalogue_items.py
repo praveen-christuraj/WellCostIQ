@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import Current, Db, require
+from app.core.spreadsheets import safe_csv_cell
 from app.schemas.catalogue import (
     BulkPriceRevisionRequest,
     BulkPriceRevisionResult,
@@ -110,7 +111,7 @@ def build_item_router(spec: PricedSpec) -> APIRouter:
         buffer.write("\ufeff")
         writer = csv.DictWriter(buffer, fieldnames=headers, lineterminator="\r\n")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({k: safe_csv_cell(v) for k, v in row.items()} for row in rows)
         filename = f"{spec.key}-price-revision-{svc.today().isoformat()}.csv"
         return Response(
             content=buffer.getvalue().encode("utf-8"),
