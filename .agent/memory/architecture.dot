@@ -52,6 +52,7 @@ digraph WellSenseIQ {
   "backend/app/core/time.py";
   "backend/app/core/units.py";
   "backend/app/domain/__init__.py";
+  "backend/app/domain/activity_classification.py";
   "backend/app/domain/afe_costing.py";
   "backend/app/domain/cost_intelligence.py";
   "backend/app/domain/entry_rules.py";
@@ -550,12 +551,12 @@ digraph WellSenseIQ {
   "backend/app/api/report_builder.py" -> "backend/app/services/report_formula.py";
   "backend/app/api/rig_well.py" -> "backend/app/api/deps.py";
   "backend/app/api/rig_well.py" -> "backend/app/core/units.py";
+  "backend/app/api/rig_well.py" -> "backend/app/domain/activity_classification.py";
   "backend/app/api/rig_well.py" -> "backend/app/models/__init__.py";
   "backend/app/api/rig_well.py" -> "backend/app/models/rig_well.py";
   "backend/app/api/rig_well.py" -> "backend/app/models/sow_adjustment.py";
   "backend/app/api/rig_well.py" -> "backend/app/schemas/rig_well.py";
   "backend/app/api/rig_well.py" -> "backend/app/services/__init__.py";
-  "backend/app/api/rig_well.py" -> "backend/app/services/daily_cost.py";
   "backend/app/api/rig_well.py" -> "backend/app/services/retention.py";
   "backend/app/api/security.py" -> "backend/app/api/deps.py";
   "backend/app/api/security.py" -> "backend/app/core/config.py";
