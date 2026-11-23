@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.deps import Current, Db, granted, owner, require
 from app.core.units import depth_to_meters
+from app.domain.activity_classification import activity_classification
 from app.models import (
     Activity,
     Afe,
@@ -51,7 +52,6 @@ from app.models import (
 )
 from app.models.rig_well import WELL_CLOSED_STATUSES, rolled_up_plan, rolled_up_status
 from app.services import well_lifecycle
-from app.services.daily_cost import classify_activity
 from app.services.retention import (
     AFE_LABEL,
     DAILY_SHEET_LABEL,
@@ -3105,7 +3105,7 @@ def create_sub_activity(
 ) -> WellSubActivityOut:
     well = _well_for_sub_activity(db, data.well_id, user.organization_id, scope=data.scope)
     activity = _master_record_or_422(db, Activity, data.activity_id, user.organization_id, "Activity")
-    classification = classify_activity(activity)
+    classification = activity_classification(activity)
     vendor, responsible_party, party_source = _resolve_responsible_party(
         db,
         user.organization_id,
@@ -3195,8 +3195,10 @@ def update_sub_activity(
     payload = data.model_dump(exclude_unset=True)
     changed: list[str] = []
     # The party and its vendor are one decision, resolved together against the
-    # activity being saved (an activity change can make the party mandatory).
-    if "vendor_id" in payload or "responsible_party" in payload:
+    # activity being saved: an activity change can make the party mandatory, so
+    # it is re-checked even when the request only moves the record to another
+    # Activity.
+    if any(key in payload for key in ("vendor_id", "responsible_party", "activity_id")):
         target_act_id = payload.get("activity_id") or record.activity_id
         target_act = _master_record_or_422(db, Activity, target_act_id, user.organization_id, "Activity")
         vendor, party_text, party_source = _resolve_responsible_party(
@@ -3204,7 +3206,7 @@ def update_sub_activity(
             user.organization_id,
             vendor_id=payload.get("vendor_id", record.vendor_id or ""),
             responsible_party=payload.get("responsible_party", record.responsible_party),
-            classification=classify_activity(target_act),
+            classification=activity_classification(target_act),
             existing_vendor_id=record.vendor_id,
         )
         if (
@@ -3478,7 +3480,7 @@ def import_sub_activities(
         if activity is None:
             errors.append(f"Row {row_number} ({payload.sub_activity_code}): Activity '{_string(activity_ref) or '—'}' is missing, ambiguous, or inactive in Master Data")
             continue
-        classification = classify_activity(activity)
+        classification = activity_classification(activity)
         matched_vendor = _vendor_from_import(db, vendor_reference, user.organization_id) if _string(vendor_reference) else None
         if _string(vendor_reference) and matched_vendor is None:
             errors.append(

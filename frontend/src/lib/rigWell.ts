@@ -268,6 +268,35 @@ export type MasterActivity = {
   /** Planned / UPA / NPT — the type the Activity stands for. */
   activity_type?: string
 }
+export type ActivityClassification = 'Planned' | 'NPT' | 'UPA'
+
+/**
+ * The effective classification of a Master Data Activity.
+ *
+ * The Activity carries the type the workspace chose for it. Activities created
+ * before that field existed were backfilled to Planned rather than guessed from
+ * their name, so the printed code and name stay a second signal: an Activity is
+ * NPT or UPA when **either** its stored type **or** its code/name says so, and
+ * Planned only when both agree. This mirrors the server rule in
+ * `app.domain.activity_classification`, so a sub activity form can never disable
+ * a responsible party the API would demand, and it restores what legacy NPT/UPA
+ * Activities did before the typed field arrived.
+ */
+export function classifyActivity(activity?: MasterActivity | null): ActivityClassification {
+  if (!activity) return 'Planned'
+  const declared = (activity.activity_type ?? '').trim().toUpperCase()
+  if (declared === 'NPT' || declared === 'UPA') return declared
+  const text = `${activity.code ?? ''} ${activity.name ?? ''}`.toLowerCase()
+  if (/\bnpt\b/.test(text) || /non[ -]?productive/.test(text)) return 'NPT'
+  if (/\bupa\b/.test(text) || text.includes('unplanned')) return 'UPA'
+  return 'Planned'
+}
+
+/** Planned work needs no responsible party; NPT and UPA work do. */
+export function isPlannedActivity(activity?: MasterActivity | null): boolean {
+  return classifyActivity(activity) === 'Planned'
+}
+
 /** A vendor the responsible-party picker may offer for a sub activity. */
 export type SubActivityVendorOption = {
   id: string

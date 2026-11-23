@@ -13,7 +13,9 @@ import { api, body } from '../lib/api'
 import type { ImportRow } from '../lib/export'
 import {
   activeWellScopes,
+  classifyActivity,
   emptySubActivityForm,
+  isPlannedActivity,
   scopeLabel,
   SUB_ACTIVITY_IMPORT_HEADERS as SUB_ACTIVITY_HEADERS,
   SUB_ACTIVITY_IMPORT_OPTIONAL_HEADERS,
@@ -27,18 +29,6 @@ import {
   type WellConfigurationScope,
 } from '../lib/rigWell'
 import { formatWatDate } from '../lib/time'
-
-function isPlannedActivity(activity?: MasterActivity | null): boolean {
-  if (!activity) return true
-  // The Master Data Activity carries its own type; the printed code and name are
-  // only read as a fallback for records created before the type existed.
-  const declared = (activity.activity_type ?? '').trim()
-  if (declared) return declared === 'Planned'
-  const text = `${activity.code} ${activity.name}`.toLowerCase()
-  if (/\bnpt\b/.test(text) || /non[ -]?productive/.test(text)) return false
-  if (/\bupa\b/.test(text) || text.includes('unplanned')) return false
-  return true
-}
 
 const CAUTION_PAGE = 'well-sub-activities'
 
@@ -198,7 +188,8 @@ export default function WellSubActivities() {
   }
 
   const selectedActivity = activities.find(a => a.id === form.activity_id) ?? null
-  const isPlanned = selectedActivity ? isPlannedActivity(selectedActivity) : true
+  const selectedClassification = classifyActivity(selectedActivity)
+  const isPlanned = selectedClassification === 'Planned'
 
   const openCreate = () => {
     if (!selectedScope) return
@@ -228,7 +219,10 @@ export default function WellSubActivities() {
       vendor_id: planned ? '' : record.vendor_id,
       description: record.description,
     })
-    setPartyMode(!planned && record.vendor_id ? 'vendor' : 'typed')
+    // Keep a typed legacy party editable as text, but offer the vendor picker
+    // whenever the record is linked or the workspace has a vendor to link.
+    const hasTypedParty = Boolean(record.responsible_party.trim()) && record.responsible_party.trim() !== 'Not Applicable'
+    setPartyMode(!planned && (!hasTypedParty || Boolean(record.vendor_id)) && vendors.length ? 'vendor' : 'typed')
     setFormError('')
     setFormOpen(true)
   }
@@ -473,23 +467,45 @@ export default function WellSubActivities() {
           <TextField label="Sub activity code" required fullWidth value={form.sub_activity_code} onChange={event => setForm({ ...form, sub_activity_code: event.target.value })} inputProps={{ maxLength: 50 }} helperText="Unique within this well scope; normalized to uppercase."/>
           <TextField label="Sub activity name" required fullWidth value={form.sub_activity_name} onChange={event => setForm({ ...form, sub_activity_name: event.target.value })} inputProps={{ maxLength: 150 }}/>
         </Box>
-        <TextField select label="Activity" required fullWidth value={form.activity_id} onChange={event => onActivityChange(event.target.value)}>
-          {activities.map(activity => <MenuItem key={activity.id} value={activity.id}>{activity.code} — {activity.name}</MenuItem>)}
+        <TextField
+          select
+          label="Activity"
+          required
+          fullWidth
+          value={form.activity_id}
+          onChange={event => onActivityChange(event.target.value)}
+          helperText="The Activity's type (Planned / NPT / UPA) decides whether a responsible party is needed. Correct the type in Master Data → Activities."
+        >
+          {activities.map(activity => {
+            const type = classifyActivity(activity)
+            return <MenuItem key={activity.id} value={activity.id}>{activity.code} — {activity.name} · {type}</MenuItem>
+          })}
         </TextField>
         {isPlanned ? (
-          <TextField
-            label="Responsible party / company"
-            disabled
-            fullWidth
-            value="Not Applicable"
-            helperText="Not applicable for planned activities."
-          />
-        ) : (
-          <Box display="grid" gap={1}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
+          <Box display="grid" gap={.75}>
+            <Box display="flex" alignItems="center" gap={1}>
               <Typography fontSize={10} fontWeight={800} color="text.secondary" textTransform="uppercase">
                 Responsible party / company
               </Typography>
+              <Tag tone="success">{selectedClassification}</Tag>
+            </Box>
+            <TextField
+              label="Responsible party / company"
+              disabled
+              fullWidth
+              value="Not Applicable"
+              helperText={`This Activity is classified ${selectedClassification}, so no responsible party is needed. If the work is unplanned, set the Activity to NPT or UPA in Master Data → Activities.`}
+            />
+          </Box>
+        ) : (
+          <Box display="grid" gap={1}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Typography fontSize={10} fontWeight={800} color="text.secondary" textTransform="uppercase">
+                  Responsible party / company
+                </Typography>
+                <Tag tone={selectedClassification === 'NPT' ? 'error' : 'warning'}>{selectedClassification}</Tag>
+              </Box>
               {!!vendors.length && (
                 <Button size="small" color="inherit" onClick={() => setPartyMode(mode => mode === 'vendor' ? 'typed' : 'vendor')}>
                   {partyMode === 'vendor' ? 'Type a company name' : 'Pick from vendors'}
@@ -508,7 +524,7 @@ export default function WellSubActivities() {
                   setForm({ ...form, vendor_id: vendor?.id ?? '', responsible_party: vendor?.name ?? '' })
                 }}
                 helperText={vendors.length
-                  ? 'Linked to the vendor register, so this work step is traceable to the company, its vendor code and its orders.'
+                  ? `Required for ${selectedClassification} work. Linked to the vendor register, so this work step is traceable to the company, its vendor code and its orders.`
                   : 'No active vendor yet — add one in Master Data → Vendors, or type a company name.'}
               >
                 {!vendors.length && <MenuItem value="">No active vendors in this workspace</MenuItem>}
@@ -522,7 +538,7 @@ export default function WellSubActivities() {
                 value={form.responsible_party}
                 onChange={event => setForm({ ...form, responsible_party: event.target.value, vendor_id: '' })}
                 inputProps={{ maxLength: 200 }}
-                helperText="For a company that is not in the vendor register. A linked vendor is tracked; this text is kept as typed."
+                helperText={`Required for ${selectedClassification} work when the company is not in the vendor register. Use “Pick from vendors” to link one; a linked vendor is tracked.`}
               />
             )}
             {!!form.vendor_id && (
@@ -556,7 +572,7 @@ export default function WellSubActivities() {
       open={importOpen}
       onClose={() => setImportOpen(false)}
       title={`Import sub activities${activeWell && selectedScope ? ` · ${activeWell.well_code} (${scopeLabel(selectedScope)})` : ''}`}
-      subtitle="Rows are imported into the selected well scope (unless an optional scope column overrides a row to drilling or completion). The Activity column accepts an exact Master Data Activity code or name; the optional vendor_code column links the responsible party to a vendor. The sub activity code is unique within each well scope."
+      subtitle="Rows are imported into the selected well scope (unless an optional scope column overrides a row to drilling or completion). The Activity column accepts an exact Master Data Activity code or name. A responsible_party (or the optional vendor_code) is required for NPT and UPA Activities; the vendor_code column links that party to a vendor. The sub activity code is unique within each well scope."
       headers={SUB_ACTIVITY_HEADERS}
       optionalHeaders={SUB_ACTIVITY_IMPORT_OPTIONAL_HEADERS}
       sample={{ sub_activity_code: 'RIH-01', sub_activity_name: 'Run in hole with tubing', activity: 'DRILL', responsible_party: 'Operations team', vendor_code: '', description: 'Run completion tubing to planned depth.' }}

@@ -895,3 +895,111 @@ def test_sub_activity_responsible_party_is_tracked_through_the_vendor_register()
         assert by_code["SA-TYPED"]["vendor_id"] == ""
         assert by_code["SA-TYPED"]["responsible_party"] == "Rig crew"
         assert by_code["SA-TYPED"]["responsible_party_source"] == "import"
+
+
+def test_sub_activity_party_follows_the_effective_activity_classification():
+    """A typed NPT/UPA Activity and a legacy NPT-named one both need a party.
+
+    Activities created before ``activity_type`` existed were backfilled to
+    Planned rather than guessed from their name, so the sub activity form and
+    this API treat the stored type *and* the printed code/name as signals. That
+    keeps the screen from disabling a field the API demands, and keeps the API
+    from silently accepting "Not Applicable" for unplanned work.
+    """
+    with TestClient(app) as client:
+        headers = login(client)
+        rig = create_rig(client, headers)
+        well = create_well(client, headers, rig["id"], "WELL-CLASS")
+
+        created_vendor = client.post(
+            "/api/v1/master-data/vendors", headers=headers,
+            json={
+                "vendor_code": "VND-CLASS", "vendor_name": "Class Oilfield Services",
+                "category": "Drilling", "status": "active", "description": "",
+            },
+        )
+        assert created_vendor.status_code == 201, created_vendor.text
+        vendor = created_vendor.json()
+
+        def add_activity(code: str, name: str, activity_type: str | None = None) -> dict:
+            payload: dict[str, object] = {"code": code, "name": name}
+            if activity_type is not None:
+                payload["activity_type"] = activity_type
+            created = client.post("/api/v1/master-data/activities", headers=headers, json=payload)
+            assert created.status_code == 201, created.text
+            # A record without a type keeps the migration's Planned default.
+            assert created.json()["activity_type"] == (activity_type or "Planned")
+            return created.json()
+
+        typed_npt = add_activity("ACT-WAIT", "Waiting on weather", "NPT")
+        # The name never says NPT: the legacy row's backfilled type is Planned
+        # and only its code carries the meaning.
+        legacy_npt = add_activity("NPT-LEGACY", "Rig repair")
+        planned = add_activity("DRILL", "Drilling operations")
+
+        def add_sub(code: str, activity_id: str, party: str, **overrides):
+            payload = {
+                "well_id": well["id"], "sub_activity_code": code,
+                "sub_activity_name": f"Step {code}", "activity_id": activity_id,
+                "responsible_party": party, "description": "Work step.",
+            }
+            payload.update(overrides)
+            return client.post("/api/v1/rig-well/sub-activities", headers=headers, json=payload)
+
+        # An explicitly typed NPT Activity requires the party and may link a vendor.
+        missing = add_sub("SA-NPT-TYPED", typed_npt["id"], "Not Applicable")
+        assert missing.status_code == 422, missing.text
+        assert "NPT" in missing.json()["detail"]
+        linked = add_sub("SA-NPT-TYPED", typed_npt["id"], "", vendor_id=vendor["id"])
+        assert linked.status_code == 201, linked.text
+        assert linked.json()["vendor_code"] == "VND-CLASS"
+        assert linked.json()["responsible_party"] == "Class Oilfield Services"
+
+        # The regression: a legacy Activity whose stored type is Planned but whose
+        # code says NPT must keep demanding a party, exactly as it did before the
+        # typed Activity arrived.
+        legacy_missing = add_sub("SA-NPT-LEGACY", legacy_npt["id"], "Not Applicable")
+        assert legacy_missing.status_code == 422, legacy_missing.text
+        assert "NPT" in legacy_missing.json()["detail"]
+        legacy_typed = add_sub("SA-NPT-LEGACY", legacy_npt["id"], "Weather downtime crew")
+        assert legacy_typed.status_code == 201, legacy_typed.text
+        assert legacy_typed.json()["responsible_party"] == "Weather downtime crew"
+
+        # Planned work still needs no party.
+        planned_sub = add_sub("SA-PLANNED", planned["id"], "Not Applicable")
+        assert planned_sub.status_code == 201, planned_sub.text
+        assert planned_sub.json()["responsible_party"] == "Not Applicable"
+
+        # Moving a row onto an NPT Activity re-checks the party (the form always
+        # sends the party fields, so this is the same request the screen makes).
+        moved = client.patch(
+            f"/api/v1/rig-well/sub-activities/{planned_sub.json()['id']}?well_id={well['id']}",
+            headers=headers,
+            json={
+                "activity_id": typed_npt["id"], "vendor_id": "",
+                "responsible_party": "Not Applicable",
+            },
+        )
+        assert moved.status_code == 422, moved.text
+
+        # The import path shares the rule and reports the row rather than saving it.
+        imported = client.post(
+            f"/api/v1/rig-well/sub-activities/import?well_id={well['id']}&scope=drilling",
+            headers=headers,
+            json={"rows": [
+                {
+                    "sub_activity_code": "SA-IMP-NPT", "sub_activity_name": "Waiting on weather",
+                    "activity": "NPT-LEGACY", "responsible_party": "Not Applicable",
+                    "description": "Imported step.",
+                },
+                {
+                    "sub_activity_code": "SA-IMP-OK", "sub_activity_name": "Waiting on weather",
+                    "activity": "NPT-LEGACY", "responsible_party": "",
+                    "vendor_code": "VND-CLASS", "description": "Imported step.",
+                },
+            ]},
+        )
+        assert imported.status_code == 200, imported.text
+        assert imported.json()["imported_count"] == 1, imported.json()
+        assert imported.json()["error_count"] == 1, imported.json()
+        assert "responsible party" in imported.json()["errors"][0].lower()
