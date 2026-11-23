@@ -24,6 +24,7 @@ from app.schemas.daily_cost import (
     DailyCostSaveIn,
     DailyCostStatusIn,
     DailyCostWellOption,
+    DailyCostWellMudOverviewItem,
     DailyCostWellProgressReport,
     DailyCostWellProgressUpdate,
     DailyCostWellSummary,
@@ -112,6 +113,23 @@ def progress_overview(
 ) -> list[DailyCostWellProgressReport]:
     """Exact spud-based actual days for every well with daily cost, in one call."""
     return service.progress_overview(
+        db, user.organization_id, date_from=date_from, date_to=date_to, include_draft=include_draft,
+    )
+
+
+@router.get(
+    "/mud-reconciliation-overview", response_model=list[DailyCostWellMudOverviewItem],
+    dependencies=[Depends(require("daily-cost:read"))],
+)
+def mud_reconciliation_overview(
+    db: Db,
+    user: Current,
+    date_from: date | None = Query(default=None, alias="from"),
+    date_to: date | None = Query(default=None, alias="to"),
+    include_draft: bool = Query(default=True),
+) -> list[DailyCostWellMudOverviewItem]:
+    """Section-scoped mud reconciliation adjustments for tracked wells, in one call."""
+    return service.mud_reconciliation_overview(
         db, user.organization_id, date_from=date_from, date_to=date_to, include_draft=include_draft,
     )
 

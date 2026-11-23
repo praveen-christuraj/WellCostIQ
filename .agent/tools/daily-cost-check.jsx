@@ -144,10 +144,14 @@ const mudLoggingSplit = serviceBodyRows.find(row => row.cells[0].textContent ===
 assert.deepEqual([...mudLoggingSplit.cells].map(cell => cell.textContent),
   ['Mud logging', '€1,000', '€250', '€50', '€250', '-', '€50', '€300', '€700', '30%'],
   'a service row prints planned, NPT and UPA activity costs beside its cumulative total, showing "-" when nil')
+const mudChemicalsRow = combinedRows.find(row => row.cells[0].textContent === 'Mud Chemicals')
+assert.deepEqual([...mudChemicalsRow.cells].map(cell => cell.textContent),
+  ['Mud Chemicals', '€2,000', '€238', '-', '€238', '-', '-', '€238', '€1,763', '12%'],
+  'Mud Chemicals row substitutes reconciled section mud cost (250 + 187.5 - 200 = 237.5 -> €238) and updates balance and % used')
 const serviceFooter = [...servicePanel.querySelectorAll('tfoot tr:last-child th')].map(cell => cell.textContent)
 assert.deepEqual(serviceFooter,
-  ['Services + consumables total', '€19,000', '€2,375', '€300', '€2,625', '-', '€50', '€2,675', '€16,325', '14%'],
-  'the merged footer totals every service and consumable value, showing "-" when nil')
+  ['Services + consumables total', '€19,000', '€2,363', '€300', '€2,613', '-', '€50', '€2,663', '€16,338', '14%'],
+  'the merged footer totals every service and reconciled consumable value, showing "-" when nil')
 const fuelRow = combinedRows.find(row => row.cells[0].textContent === 'Fuel')
 assert.deepEqual([...fuelRow.cells].map(cell => cell.textContent).slice(2, 8), ['-', '€100', '€100', '-', '-', '€100'],
   'a consumable prints its day cost and planned/NPT/UPA/total cumulative values, showing "-" when nil')
@@ -260,12 +264,23 @@ const mudCostTotal = mudCostPanel.querySelector('tfoot tr')
 assert.deepEqual([...mudCostTotal.cells].map(cell => cell.textContent), ['Total', '€3,500', '€200', '€188'], 'mud chemical totals print planned, actual and reconciled for every section')
 assert.equal(mudCostPanel.querySelector('.dcr-mud-note'), null, 'the mud chemical panel no longer prints the AFE allowance note')
 const afeSummaryRows = [...sheet.querySelectorAll('.dcr-overall tbody tr')].map(row => [...row.cells].map(cell => cell.textContent))
-assert.deepEqual(afeSummaryRows[1], ['Consumables', '€16,000', '€100'],
-  'without a well summary the bulk print keeps its own AFE-scoped consumables actual')
+assert.deepEqual(afeSummaryRows[1], ['Consumables', '€16,000', '€88'],
+  'even without a well summary, single-day/bulk print reconciles consumables with mud reconciliation (100 + 187.5 - 200 = 87.5 -> €88)')
 assert.deepEqual(afeSummaryRows[2], ['Tangibles', '€4,000', '-'],
   'AFE vs actual summary retains the locked tangible AFE amount')
 const afeSummaryNote = sheet.querySelector('.dcr-overall p').textContent
-assert.equal(afeSummaryNote, 'AFE available = €6,900 · 1% used', 'AFE summary labels the final balance as the available amount')
+assert.equal(afeSummaryNote, 'AFE available = €6,913 · 1% used', 'AFE summary labels the final reconciled balance as the available amount')
+const cumulativeScopes = [...sheet.querySelectorAll('.daily-report-details .dcr-cumulative-scope')]
+const eurScope = cumulativeScopes.find(node => node.querySelector('h1')?.textContent.includes('(EUR)'))
+const eurConsumableSchedule = [...eurScope.querySelectorAll('.dcr-cumulative-section')].find(
+  node => node.querySelector('h2')?.textContent === 'Consumables cumulative cost · four categories',
+)
+const eurMudCumRow = [...eurConsumableSchedule.querySelectorAll('tbody tr')].find(
+  row => row.cells[0]?.textContent === 'Mud Chemicals',
+)
+assert.deepEqual([...eurMudCumRow.cells].map(cell => cell.textContent),
+  ['Mud Chemicals', '€2,000', '€238', '€1,763', '12%'],
+  'page-2 Consumables cumulative cost schedule also prints reconciled Mud Chemicals actual, balance and used %')
 assert.ok(!afeSummaryNote.includes('after LIH') && !afeSummaryNote.includes('Balance'), 'AFE summary removes the old after-LIH and duplicate balance wording')
 for (const code of ['DC-1', 'DC-2', 'AFE-1', 'AFE-2', 'WELL-1', 'RIG-1', 'SVC', 'SURFACE', 'DRL', 'DRILL', 'SA1', 'V1', 'T1', 'BAR']) {
   assert.ok(!sheet.textContent.includes(code), `${code} is omitted in favour of its name`)
@@ -317,6 +332,40 @@ assert.deepEqual(summaryAfeRows[2], ['Tangibles', '€4,000', '-'],
   'well-summary printing falls back to the locked tangible AFE budget when its actual factor is absent')
 assert.deepEqual(summaryAfeRows.at(-1), ['Total', '€23,000', '€800'],
   'the summary total keeps the API comparison actual that already includes the reconciled mud chemicals')
+
+// When the API has already reconciled budget_lines (`is_mud_reconciled: true`)
+// and comparison (`has_mud_reconciliation: true`), passing mudReconciliation
+// alongside it must never apply the mud delta a second time.
+const backendReconciledDay = {
+  ...second,
+  comparison: {
+    ...second.comparison,
+    has_mud_reconciliation: true,
+    actual_to_date: '87.5',
+    balance: '6912.5',
+    groups: [
+      second.comparison.groups[0],
+      { ...second.comparison.groups[1], actual_to_date: '87.5', balance: '4912.5', actual_planned: '87.5' },
+    ],
+    budget_lines: second.comparison.budget_lines.map(row =>
+      row.budget_key === 'consumable:Mud Chemicals'
+        ? { ...row, actual_to_date: '237.5', actual_prior: '187.5', actual_today: '50', actual_planned: '237.5', balance: '1762.5', is_mud_reconciled: true }
+        : row,
+    ),
+  },
+}
+await act(async () => root.render(<DailyCostPrintSheet coversOnly report={{
+  title: 'Backend reconciled sheet', period: '10 Oct 2026', reportKind: 'daily',
+  days: [backendReconciledDay], overviewDays: [backendReconciledDay], mudReconciliation,
+}}/>))
+const backendSheet = document.querySelector('.afe-print-sheet')
+const backendMudRow = [...backendSheet.querySelectorAll('.dcr-cost-item-row')].find(row => row.cells[0].textContent === 'Mud Chemicals')
+assert.deepEqual([...backendMudRow.cells].map(cell => cell.textContent),
+  ['Mud Chemicals', '€2,000', '€188', '€50', '€238', '-', '-', '€238', '€1,763', '12%'],
+  'backend-reconciled Mud Chemicals prints exact prior/today/cumulative without double-subtracting the mud adjustment')
+const backendAfeRows = [...backendSheet.querySelectorAll('.dcr-overall tbody tr')].map(row => [...row.cells].map(cell => cell.textContent))
+assert.deepEqual(backendAfeRows[1], ['Consumables', '€16,000', '€88'],
+  'backend-reconciled comparison keeps €88 consumables without double-counting')
 let trigger
 function PrintHarness() { const hook = useCostPrint(); trigger = hook.print; return hook.printSheet }
 await act(async () => root.render(<PrintHarness/>))

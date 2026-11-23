@@ -42,9 +42,11 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.models import (
     Afe,
     Currency,
+    DailyCostConsumableLine,
     DailyCostEntry,
     DailyCostServiceLine,
     DailyCostServiceRateItem,
+    MudCostEntry,
     Rig,
     User,
     Well,
@@ -687,6 +689,8 @@ def dashboard(
     per_well: dict[str, dict[str, Any]] = {}
     per_afe: dict[str, dict[str, Any]] = {}
     afe_usd_rate_hint: dict[str, Decimal] = {}
+    well_std_currency: dict[str, str] = {}
+    well_fx_to_selected: dict[str, Decimal] = {}
     excluded_entry_count = 0
     sheets_by_day: dict[date, int] = {}
     if caps.actuals and well_ids:
@@ -700,8 +704,12 @@ def dashboard(
             if code != selected and not use_usd_cols:
                 excluded_entry_count += int(row[6] or 0)
                 continue
+            well_std_currency.setdefault(str(row[0]), code)
             if row[22] is not None and Decimal(row[22]) > 0:
                 afe_usd_rate_hint[row[1]] = Decimal(row[22])
+                well_fx_to_selected[str(row[0])] = Decimal(row[22]) if (use_usd_cols and code != "USD") else Decimal("1")
+            else:
+                well_fx_to_selected.setdefault(str(row[0]), Decimal("1"))
             s_amt = Decimal(row[15] or 0) if use_usd_cols else Decimal(row[8] or 0)
             c_amt = Decimal(row[16] or 0) if use_usd_cols else Decimal(row[9] or 0)
             t_amt = Decimal(row[17] or 0) if use_usd_cols else Decimal(row[10] or 0)
@@ -835,6 +843,112 @@ def dashboard(
             .group_by(lines.c.cost_group)
         ).all():
             group_actual[str(group)] += Decimal(amount or 0)
+
+        # Apply section-scoped mud reconciliation across per-well, per-AFE,
+        # cost-group, section and daily dashboard aggregates.
+        if per_well:
+            from app.services.daily_cost import _resolve_well_mud_reconciliation
+
+            mud_well_ids = set(
+                str(wid)
+                for wid in db.scalars(
+                    select(MudCostEntry.well_id)
+                    .where(
+                        MudCostEntry.organization_id == organization_id,
+                        MudCostEntry.well_id.in_(list(per_well.keys())),
+                        MudCostEntry.is_deleted.is_(False),
+                    )
+                    .distinct()
+                ).all()
+            )
+            wells_map = {w.id: w for w in wells}
+            eff_mud_scope = (
+                str(requested_afe.configuration_scope).lower()
+                if requested_afe is not None and requested_afe.configuration_scope
+                else (normalized_scope or None)
+            )
+            for wid in sorted(mud_well_ids):
+                w_obj = wells_map.get(wid)
+                w_bucket = per_well.get(wid)
+                w_cur = well_std_currency.get(wid)
+                if w_obj is None or w_bucket is None or not w_cur:
+                    continue
+                eff_to = date_to or w_bucket["last"]
+                resolved = _resolve_well_mud_reconciliation(
+                    db,
+                    organization_id,
+                    w_obj,
+                    currency=w_cur,
+                    date_from=date_from,
+                    date_to=eff_to,
+                    include_draft=include_draft,
+                    scope=eff_mud_scope,
+                    skip_if_no_mud_entries=True,
+                )
+                if not resolved.available:
+                    continue
+                use_usd = selected == "USD" and w_cur != "USD"
+                fx_hint = well_fx_to_selected.get(wid, Decimal("1"))
+                if afe_id:
+                    if afe_id in resolved.afe_adjustment or len(resolved.afe_adjustment) > 1:
+                        base_adj = resolved.afe_adjustment.get(afe_id, Decimal("0"))
+                    else:
+                        base_adj = resolved.adjustment
+                    sel_adj = _money(base_adj * fx_hint) if use_usd else base_adj
+                    if afe_id in per_afe:
+                        per_afe[afe_id]["total"] += sel_adj
+                else:
+                    sel_adj = resolved.adjustment_usd if use_usd else resolved.adjustment
+                    if len(resolved.afe_adjustment) <= 1 and sum(1 for a in afes if a.well_id == wid) == 1:
+                        only_afe_id = next((a.id for a in afes if a.well_id == wid), "")
+                        if only_afe_id and only_afe_id in per_afe:
+                            per_afe[only_afe_id]["total"] += sel_adj
+                    else:
+                        for aid, a_adj in resolved.afe_adjustment.items():
+                            if aid in per_afe:
+                                per_afe[aid]["total"] += _money(a_adj * fx_hint) if use_usd else a_adj
+                w_bucket["consumables"] += sel_adj
+                w_bucket["total"] += sel_adj
+                group_actual["Consumables"] += sel_adj
+                classification_amounts["Planned"] += sel_adj
+                if not afe_id and resolved.reconciliation is not None:
+                    for sec in resolved.reconciliation.sections:
+                        if sec.reconciled_cost is None or not sec.hole_section_id:
+                            continue
+                        sec_delta = Decimal(sec.reconciled_cost) - Decimal(sec.actual_cost)
+                        if use_usd:
+                            sec_delta = _money(sec_delta * fx_hint)
+                        sf = section_facts.setdefault(
+                            (wid, sec.hole_section_id),
+                            {
+                                "code": str(sec.section_code or ""),
+                                "name": str(sec.section_name or ""),
+                                "active_days": int(sec.entry_count or 0),
+                                "amount": Decimal("0"),
+                            },
+                        )
+                        sf["amount"] = Decimal(sf["amount"]) + sec_delta
+                day_map = resolved.day_adjustment_usd if use_usd else resolved.day_adjustment
+                if not afe_id:
+                    for d_key, d_delta in day_map.items():
+                        if d_delta == 0 and d_key not in daily_facts:
+                            continue
+                        df = daily_facts.setdefault(
+                            d_key,
+                            {
+                                "actual": Decimal("0"),
+                                "npt": Decimal("0"),
+                                "upa": Decimal("0"),
+                                "tangibles": Decimal("0"),
+                                "operational": Decimal("0"),
+                                "services": Decimal("0"),
+                                "consumables": Decimal("0"),
+                                "other_expenses": Decimal("0"),
+                            },
+                        )
+                        df["actual"] += d_delta
+                        df["consumables"] += d_delta
+                        df["operational"] = max(Decimal("0"), df["actual"] - df["tangibles"])
 
     # ---- AFE totals by well and currency --------------------------------------
     afe_totals: dict[str, dict[str, Any]] = defaultdict(_empty_afe_bucket)
@@ -1459,8 +1573,118 @@ def well_detail(
             .select_from(lines)
             .group_by(lines.c.hole_section_id)
         ).all()
-        total_section = sum((Decimal(values[4] or 0) for values in section_totals), Decimal("0"))
-        used = {values[0]: values for values in section_totals}
+        used = {values[0]: list(values) for values in section_totals}
+
+        # Apply section-scoped mud reconciliation to well_detail sections & activities.
+        from app.services.daily_cost import _resolve_well_mud_reconciliation
+
+        w_std_cur = db.scalar(
+            select(DailyCostEntry.standard_currency)
+            .where(
+                DailyCostEntry.organization_id == organization_id,
+                DailyCostEntry.well_id == well_id,
+                DailyCostEntry.is_deleted.is_(False),
+            )
+            .limit(1)
+        )
+        if w_std_cur:
+            detail_mud = _resolve_well_mud_reconciliation(
+                db,
+                organization_id,
+                well,
+                currency=str(w_std_cur),
+                date_from=date_from,
+                date_to=date_to or row.last_cost_date,
+                include_draft=include_draft,
+                scope=normalized_scope or None,
+                skip_if_no_mud_entries=True,
+            )
+            if detail_mud.available and detail_mud.reconciliation is not None:
+                use_usd_detail = payload.currency == "USD" and str(w_std_cur) != "USD"
+                fx_detail = Decimal("1")
+                if use_usd_detail:
+                    fx_val = db.scalar(
+                        select(func.max(DailyCostEntry.usd_exchange_rate)).where(
+                            DailyCostEntry.organization_id == organization_id,
+                            DailyCostEntry.well_id == well_id,
+                            DailyCostEntry.is_deleted.is_(False),
+                        )
+                    )
+                    if fx_val and Decimal(fx_val) > 0:
+                        fx_detail = Decimal(fx_val)
+                for sec in detail_mud.reconciliation.sections:
+                    if sec.reconciled_cost is None or not sec.hole_section_id:
+                        continue
+                    sec_delta = Decimal(sec.reconciled_cost) - Decimal(sec.actual_cost)
+                    if use_usd_detail:
+                        sec_delta = _money(sec_delta * fx_detail)
+                    if sec.hole_section_id in used:
+                        used[sec.hole_section_id][4] = Decimal(used[sec.hole_section_id][4] or 0) + sec_delta
+                    elif sec_delta != 0:
+                        used[sec.hole_section_id] = [
+                            sec.hole_section_id,
+                            str(sec.section_code or ""),
+                            str(sec.section_name or ""),
+                            int(sec.entry_count or 0),
+                            sec_delta,
+                        ]
+                act_mud_delta = detail_mud.adjustment_usd if use_usd_detail else detail_mud.adjustment
+                if act_mud_delta != 0 and activities:
+                    raw_mud_act_stmt = (
+                        select(
+                            DailyCostConsumableLine.activity_id,
+                            func.sum(
+                                DailyCostConsumableLine.usd_amount
+                                if use_usd_detail
+                                else DailyCostConsumableLine.standard_amount
+                            ),
+                        )
+                        .join(DailyCostEntry, DailyCostEntry.id == DailyCostConsumableLine.entry_id)
+                        .outerjoin(Afe, Afe.id == DailyCostEntry.afe_id)
+                        .where(
+                            DailyCostConsumableLine.organization_id == organization_id,
+                            DailyCostEntry.organization_id == organization_id,
+                            DailyCostEntry.well_id == well_id,
+                            DailyCostEntry.is_deleted.is_(False),
+                            DailyCostConsumableLine.category == "Mud Chemicals",
+                            DailyCostConsumableLine.hole_section_id.in_(
+                                [hid for (_sc, hid) in detail_mud.reconciled_section_keys]
+                            ),
+                        )
+                    )
+                    if date_from is not None:
+                        raw_mud_act_stmt = raw_mud_act_stmt.where(DailyCostEntry.cost_date >= date_from)
+                    if date_to is not None:
+                        raw_mud_act_stmt = raw_mud_act_stmt.where(DailyCostEntry.cost_date <= date_to)
+                    if normalized_scope in ("drilling", "completion"):
+                        raw_mud_act_stmt = raw_mud_act_stmt.where(Afe.configuration_scope == normalized_scope)
+                    if not include_draft:
+                        raw_mud_act_stmt = raw_mud_act_stmt.where(DailyCostEntry.status == "submitted")
+                    raw_mud_by_act = {
+                        r_act: Decimal(r_val or 0)
+                        for r_act, r_val in db.execute(
+                            raw_mud_act_stmt.group_by(DailyCostConsumableLine.activity_id)
+                        ).all()
+                    }
+                    tot_raw_mud_act = sum(raw_mud_by_act.values(), Decimal("0"))
+                    new_total_activity = max(total_activity + act_mud_delta, Decimal("0"))
+                    updated_acts: list[DashboardActivityRow] = []
+                    for act_row in activities:
+                        cur_amt = Decimal(act_row.amount or 0)
+                        if tot_raw_mud_act > 0 and act_row.activity_id in raw_mud_by_act:
+                            cur_amt += _money(act_mud_delta * raw_mud_by_act[act_row.activity_id] / tot_raw_mud_act)
+                        updated_acts.append(
+                            act_row.model_copy(
+                                update={
+                                    "amount": _money(cur_amt),
+                                    "share": _percent(cur_amt, new_total_activity) if new_total_activity else None,
+                                }
+                            )
+                        )
+                    updated_acts.sort(key=lambda item: item.amount or Decimal("0"), reverse=True)
+                    activities = updated_acts
+
+        total_section = sum((Decimal(values[4] or 0) for values in used.values()), Decimal("0"))
         from app.services.daily_cost import resolve_actual_depths
         _, detail_day_depths, detail_latest_sections = resolve_actual_depths(
             db,

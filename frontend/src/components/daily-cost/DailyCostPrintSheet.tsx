@@ -278,9 +278,72 @@ function resolveServiceLineGroup(
   return canonicalServiceGroup(fromCatalog || line.service_group)
 }
 
+type MudFallback = {
+  delta: number
+  todayDelta?: number
+}
+
+function resolveMudFallback(
+  report: CostPrintReport,
+  budgetLines: DailyCostComparisonLine[],
+  targetCurrency: string,
+  reportDate?: string,
+): MudFallback | null {
+  if (budgetLines.some(line => line.is_mud_reconciled)) return null
+  const summary = report.summary
+  if (
+    summary
+    && (!summary.totals.currency || !targetCurrency || summary.totals.currency.toUpperCase() === targetCurrency.toUpperCase())
+    && summary.totals.comparison_consumables != null
+    && asNumber(summary.totals.comparison_consumables) !== asNumber(summary.totals.consumables)
+  ) {
+    return {
+      delta: asNumber(summary.totals.comparison_consumables) - asNumber(summary.totals.consumables),
+    }
+  }
+  const mudCurrency = report.mudReconciliation?.currency ?? summary?.mud_cost?.currency ?? ''
+  if (mudCurrency && targetCurrency && mudCurrency.toUpperCase() !== targetCurrency.toUpperCase()) {
+    return null
+  }
+  const mudSections = report.mudReconciliation?.sections ?? summary?.mud_cost?.sections ?? []
+  const reconciledSections = mudSections.filter(row => row.reconciled_cost != null)
+  if (!reconciledSections.length) return null
+  const delta = reconciledSections.reduce(
+    (sum, row) => sum + asNumber(row.reconciled_cost) - asNumber(row.actual_cost),
+    0,
+  )
+  let todayDelta: number | undefined
+  const mudRows = report.mudReconciliation?.rows
+  if (reportDate && mudRows && mudRows.length > 0) {
+    const reconciledIds = new Set(
+      reconciledSections.map(row => optionalText(row, 'hole_section_id') ?? row.section_id),
+    )
+    const todayMudRows = mudRows.filter(
+      row => row.cost_date === reportDate && reconciledIds.has(row.section_id),
+    )
+    if (todayMudRows.length > 0) {
+      todayDelta = todayMudRows.reduce(
+        (sum, row) => sum + asNumber(row.window_reconciled_cost ?? row.reconciled_cost ?? row.actual_cost) - asNumber(row.actual_cost),
+        0,
+      )
+    } else {
+      const rawTodayMud = report.days
+        .filter(day => day.entry.cost_date === reportDate)
+        .flatMap(day => day.consumables ?? [])
+        .filter(line => line.category === 'Mud Chemicals' && line.hole_section_id && reconciledIds.has(line.hole_section_id))
+        .reduce((sum, line) => sum + asNumber(line.standard_amount), 0)
+      todayDelta = -rawTodayMud
+    }
+  }
+  return Math.abs(delta) > 1e-9 || (todayDelta !== undefined && Math.abs(todayDelta) > 1e-9)
+    ? { delta, todayDelta }
+    : null
+}
+
 function reportCostRows(
   budgetLines: DailyCostComparisonLine[],
   serviceCatalog?: DailyCostServiceOption[],
+  mudFallback?: MudFallback | null,
 ) {
   const catalogById = new Map<string, string>()
   const catalogByCode = new Map<string, string>()
@@ -321,6 +384,8 @@ function reportCostRows(
     const current = consumableGroups.get(category)
     const planned = asNumber(current?.planned) + asNumber(line.planned)
     const actual = asNumber(current?.actual_to_date) + asNumber(line.actual_to_date)
+    const currentDay = current ? daySplit(current) : { prior: 0, today: 0, total: 0 }
+    const lineDay = daySplit(line)
     const currentSplit = current ? classificationSplit(current) : { planned: '0', upa: '0', npt: '0' }
     const lineSplit = classificationSplit(line)
     consumableGroups.set(category, {
@@ -331,21 +396,57 @@ function reportCostRows(
       item_name: category,
       planned: String(planned),
       actual_to_date: String(actual),
+      actual_prior: String(currentDay.prior + lineDay.prior),
+      actual_today: String(currentDay.today + lineDay.today),
       actual_planned: String(asNumber(currentSplit.planned) + asNumber(lineSplit.planned)),
       actual_upa: String(asNumber(currentSplit.upa) + asNumber(lineSplit.upa)),
       actual_npt: String(asNumber(currentSplit.npt) + asNumber(lineSplit.npt)),
       balance: String(planned - actual),
       is_planned: Boolean(current?.is_planned || line.is_planned),
+      is_mud_reconciled: Boolean(current?.is_mud_reconciled || line.is_mud_reconciled),
     })
   }
   const example = budgetLines.find(line => line.cost_group === 'Consumables')
+  if (mudFallback) {
+    const mudRow = consumableGroups.get('Mud Chemicals') ?? {
+      budget_key: 'consumable-summary:Mud Chemicals',
+      budget_kind: 'consumable_summary',
+      item_code: 'Mud Chemicals',
+      item_name: 'Mud Chemicals',
+      cost_group: 'Consumables' as const,
+      planned: '0', actual_to_date: '0', actual_prior: '0', actual_today: '0',
+      balance: '0', is_planned: Boolean(example?.is_planned),
+      actual_planned: '0', actual_upa: '0', actual_npt: '0',
+      is_mud_reconciled: false,
+    }
+    if (!mudRow.is_mud_reconciled) {
+      const plannedAllowance = asNumber(mudRow.planned)
+      const oldDay = daySplit(mudRow)
+      const newTotal = asNumber(mudRow.actual_to_date) + mudFallback.delta
+      const newToday = mudFallback.todayDelta !== undefined
+        ? oldDay.today + mudFallback.todayDelta
+        : (oldDay.prior === 0 && oldDay.today > 0 ? newTotal : oldDay.today)
+      const newPrior = newTotal - newToday
+      const split = classificationSplit(mudRow)
+      consumableGroups.set('Mud Chemicals', {
+        ...mudRow,
+        actual_to_date: String(newTotal),
+        actual_prior: String(newPrior),
+        actual_today: String(newToday),
+        actual_planned: String(asNumber(split.planned) + mudFallback.delta),
+        balance: String(plannedAllowance - newTotal),
+        is_mud_reconciled: true,
+      })
+    }
+  }
   const consumables = CONSUMABLE_ORDER.map(category => consumableGroups.get(category) ?? {
     budget_key: `consumable-summary:${category}`,
     budget_kind: 'consumable_summary',
     item_code: category,
     item_name: category,
     cost_group: 'Consumables' as const,
-    planned: '0', actual_to_date: '0', balance: '0', is_planned: Boolean(example?.is_planned),
+    planned: '0', actual_to_date: '0', actual_prior: '0', actual_today: '0',
+    balance: '0', is_planned: Boolean(example?.is_planned),
     actual_planned: '0', actual_upa: '0', actual_npt: '0',
   })
   const tangibles = [...budgetLines]
@@ -459,10 +560,12 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const coverDays = summary ? overviewDays : overviewDays.filter(day =>
     day.entry.afe_id === latest.entry.afe_id && day.entry.standard_currency === latest.entry.standard_currency)
   const currency = summary?.totals.currency || latest.entry.standard_currency
+  const reportDate = summary?.as_of ?? latest.entry.cost_date
   const latestComparison = latest.comparison
   const budgetLines = summary?.budget_lines ?? latestComparison.budget_lines
+  const mudFallback = resolveMudFallback(report, budgetLines, currency, String(reportDate))
   // Codes define business order but remain hidden; consumables are four category totals.
-  const costRows = reportCostRows(budgetLines, report.services)
+  const costRows = reportCostRows(budgetLines, report.services, mudFallback)
   // Every AFE allowance prints, in its reporting group, including lines with no
   // cost yet (they show 0). The density step (below) keeps a long schedule on page one.
   const services = costRows.services
@@ -486,23 +589,30 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const coverCostGroups = dailyCoverCostGroups(services, consumables)
   const coverCostRows = coverCostGroups.flatMap(group => group.rows)
   const tangiblePosition = groupPosition('Tangibles')
+  const comparisonAlreadyReconciled = Boolean(
+    latestComparison.has_mud_reconciliation || budgetLines.some(line => line.is_mud_reconciled),
+  )
+  const unappliedMudDelta = !summary && !comparisonAlreadyReconciled ? (mudFallback?.delta ?? 0) : 0
   const totalPlanned = asNumber(summary?.totals.planned ?? latestComparison.planned_total)
-  const totalActual = asNumber(summary?.totals.comparison_actual ?? latestComparison.actual_to_date)
+  const totalActual = summary
+    ? asNumber(summary.totals.comparison_actual ?? summary.totals.actual)
+    : asNumber(latestComparison.actual_to_date) + unappliedMudDelta
   const otherExpenses = asNumber(summary?.totals.other_expenses ?? latestComparison.other_expenses_to_date)
   // LIH Cost Register: separate from every budgeted group, added to the actual
   // cost and deducted explicitly from the AFE amount in AFE vs actual summary.
   const lihBucket = (report.lihReport?.totals ?? []).find(row => row.currency === currency)
-  const lihTotal = asNumber(summary?.totals.lih_cost ?? lihBucket?.total ?? 0)
+  const lihTotal = asNumber(summary?.totals.lih_cost ?? latestComparison.lih_cost_to_date ?? lihBucket?.total ?? 0)
   const ndtInspections = report.ndtInspections ?? []
   // Cover-level density only reacts to an unusually long NDT register in the
   // bottom-right stack, so Services + Consumables row count never alters the
   // heights or font sizes of AFE vs actual, NDT, UPA, NPT, mud or losses.
   const densityStep = ndtInspections.length > 8 ? 4 : ndtInspections.length > 6 ? 3 : ndtInspections.length > 4 ? 2 : 1
   const actualIncludingLih = totalActual + lihTotal
-  const balance = asNumber(
-    summary?.totals.comparison_balance_including_lih
-      ?? (summary ? totalPlanned - lihTotal - totalActual : latestComparison.balance),
-  )
+  const balance = summary?.totals.comparison_balance_including_lih != null
+    ? asNumber(summary.totals.comparison_balance_including_lih)
+    : summary
+      ? totalPlanned - lihTotal - totalActual
+      : asNumber(latestComparison.balance) - unappliedMudDelta
   const progressRows = report.reportKind === 'daily' && latest.progress ? [latest.progress] : (summary?.progress ?? (latest.progress ? [latest.progress] : []))
   const spud = progressRows.find(row => row.spud_at)?.spud_at
   const actualDays = progressRows.reduce((total, row) => total + asNumber(row.actual_days), 0)
@@ -543,17 +653,13 @@ function ReportCover({ report }: { report: CostPrintReport }) {
     ? mudReconciledRows.reduce((total, row) => total + asNumber(row.reconciled_cost), 0)
     : null
   /*
-   * The AFE vs actual summary compares consumables at the reconciled mud
-   * chemicals cost rather than the recorded actual, so its rows add up to the
-   * summary total and the AFE-available figure, which the well summary already
-   * reports with the reconciled mud chemicals in place. The Consumables cost
-   * panel keeps the recorded actual cost of every line, and a bulk print of a
-   * single saved day keeps its own AFE-scoped comparison untouched because no
-   * well summary is available to reconcile it against.
+   * Every consumables cost panel and the AFE vs actual summary use the
+   * reconciled mud chemicals cost whenever a hole section has a reconciled mud
+   * cost, falling back to recorded actual cost only for unreconciled sections.
    */
   const consumableComparisonActual = summary?.totals.comparison_consumables != null
     ? asNumber(summary.totals.comparison_consumables)
-    : consumablePosition.actual
+    : consumablePosition.actual + unappliedMudDelta
   const mudPlanned = (row: (typeof mudSections)[number]) =>
     row.planned_cost == null ? '—' : printMoney(row.planned_cost, currency)
   const mudBalances = new Map((report.mudBalance?.rows ?? []).map(row => [row.section_id, row]))
@@ -563,7 +669,6 @@ function ReportCover({ report }: { report: CostPrintReport }) {
   const upaDays = upa.reduce((sum, row) => sum + row.days, 0)
   const plannedActivityDays = Math.max(0, actualDays - nptDays - upaDays)
   const printed = watNowFormatted()
-  const reportDate = summary?.as_of ?? latest.entry.cost_date
   type MudSection = typeof mudSections[number]
   const mudMatrixRows: { label: string; value: (row: MudSection) => string }[] = [
     { label: 'Opening Stock', value: row => quantityText(mudBalances.get(row.section_id)?.opening_stock) },
@@ -849,7 +954,8 @@ function CumulativeReportDetails({ report }: { report: CostPrintReport }) {
       <p>These schedules consolidate saved daily sheets. Service cost-item detail follows the summaries; currencies and incompatible AFEs remain separate.</p>
     </header>
     {scopes.map(scope => {
-      const rows = reportCostRows(scope.rows, report.services)
+      const scopeFallback = resolveMudFallback(report, scope.rows, scope.currency)
+      const rows = reportCostRows(scope.rows, report.services, scopeFallback)
       return <section className="dcr-cumulative-scope" key={scope.key}>
         <h1>{scope.label} ({scope.currency})</h1>
         <CumulativeSchedule title="Service-wise cumulative cost" rows={rows.services.filter(row => asNumber(row.actual_to_date) !== 0)} currency={scope.currency}/>

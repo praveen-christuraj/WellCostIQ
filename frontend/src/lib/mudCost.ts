@@ -230,7 +230,7 @@ export type MudCostReconciliationRow = {
   additions: string; extra_obm_received: string; actual_cost: string
   total_mud: string; alpha: string | null; beta: string | null
   cost_per_bbl: string | null
-  consumption_losses: string; reconciled_cost: string | null
+  consumption_losses: string; reconciled_cost: string | null; window_reconciled_cost?: string | null
   cumulative_additions: string; cumulative_extra_obm_received: string
   cumulative_actual_cost: string; cumulative_total_mud: string
   cumulative_alpha: string | null; cumulative_beta: string | null

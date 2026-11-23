@@ -372,6 +372,7 @@ class MudCostReconciliationRowOut(BaseModel):
     cost_per_bbl: Decimal | None
     consumption_losses: Decimal
     reconciled_cost: Decimal | None
+    window_reconciled_cost: Decimal | None = None
     cumulative_additions: Decimal
     cumulative_extra_obm_received: Decimal
     cumulative_actual_cost: Decimal

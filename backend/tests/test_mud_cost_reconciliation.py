@@ -377,20 +377,38 @@ def test_reconciliation_uses_actual_daily_cost_and_latest_cost_per_bbl():
         assert filtered["selected_section_count"] == 1
         assert all(row["mud_type"] == "OBM" for row in filtered["rows"])
 
-        # The well cost analysis carries both numbers and compares with the
-        # reconciled mud cost only.
+        # The well cost analysis always uses the reconciled mud cost as the
+        # primary Consumables and Total Actual figure, while retaining raw
+        # daily-sheet mud chemicals for audit/reference.
         summary = _json(client, "get", f"/api/v1/daily-cost/wells/{scope['well']['id']}/cost-summary", headers)
         assert summary["mud_cost"]["available"] is True
         assert Decimal(summary["mud_cost"]["actual_cost"]) == Decimal("1700")
         assert Decimal(summary["mud_cost"]["reconciled_cost"]) == Decimal("440")
         assert Decimal(summary["mud_cost"]["comparison_cost"]) == Decimal("440")
-        assert Decimal(summary["totals"]["actual"]) == Decimal("1700")
+        assert Decimal(summary["totals"]["actual"]) == Decimal("440")
+        assert Decimal(summary["totals"]["consumables"]) == Decimal("440")
+        assert Decimal(summary["totals"]["raw_actual"]) == Decimal("1700")
+        assert Decimal(summary["totals"]["raw_consumables"]) == Decimal("1700")
         assert Decimal(summary["totals"]["actual_mud_chemicals"]) == Decimal("1700")
         assert Decimal(summary["totals"]["comparison_actual"]) == Decimal("440")
         assert Decimal(summary["totals"]["comparison_consumables"]) == Decimal("440")
+        assert Decimal(summary["totals"]["balance"]) == Decimal("4560")
         assert Decimal(summary["totals"]["comparison_balance"]) == Decimal("4560")
         assert summary["totals"]["has_mud_reconciliation"] is True
         assert Decimal(summary["mud_cost"]["latest_cost_per_bbl"]) == Decimal("20")
+        mud_budget_line = next(
+            row for row in summary["budget_lines"]
+            if row["cost_group"] == "Consumables" and "Mud Chemicals" in row["item_name"]
+        )
+        assert Decimal(mud_budget_line["actual_to_date"]) == Decimal("440")
+        assert mud_budget_line["is_mud_reconciled"] is True
+        assert sum(Decimal(row["total"]) for row in summary["daily"]) == Decimal("440")
+        assert Decimal(summary["daily"][-1]["cumulative"]) == Decimal("440")
+
+        mud_overview = _json(client, "get", "/api/v1/daily-cost/mud-reconciliation-overview", headers)
+        well_mud = next(row for row in mud_overview if row["well_id"] == scope["well"]["id"])
+        assert well_mud["has_mud_reconciliation"] is True
+        assert Decimal(well_mud["mud_cost_adjustment"]) == Decimal("-1260")
 
         export = client.post("/api/v1/mud-cost/export-audit", headers=headers, json={
             "module": "reconciliation", "format": "csv", "record_count": len(result["rows"]),

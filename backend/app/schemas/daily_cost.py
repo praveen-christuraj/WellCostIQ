@@ -742,6 +742,10 @@ class DailyCostBudgetComparison(BaseModel):
     # Set when a row sums several allowances of the same service and scope, so
     # the report prints the service once for that section and phase.
     club_count: int = 0
+    # True when this Mud Chemicals line already substitutes the section-scoped
+    # reconciled mud cost in ``actual_to_date``, ``actual_prior`` and ``actual_today``.
+    is_mud_reconciled: bool = False
+    raw_actual_to_date: Decimal | None = None
 
 
 class DailyCostComparison(BaseModel):
@@ -784,6 +788,12 @@ class DailyCostComparison(BaseModel):
     adjusted_planned_total: Decimal | None = None
     adjusted_balance: Decimal | None = None
     has_adjustment: bool = False
+    has_mud_reconciliation: bool = False
+    raw_actual_to_date: Decimal | None = None
+    actual_mud_chemicals: Decimal = Decimal("0")
+    reconciled_mud_cost: Decimal = Decimal("0")
+    comparison_mud_cost: Decimal = Decimal("0")
+    mud_cost_adjustment: Decimal = Decimal("0")
 
 
 class DailyCostSectionDepthOut(BaseModel):
@@ -1247,8 +1257,13 @@ class DailyCostWellTotals(BaseModel):
     spud_days_variance: Decimal | None = None
     # Mud chemicals comparison. ``actual_mud_chemicals`` is the recorded Daily
     # Cost figure; ``comparison_mud_cost`` replaces it with the reconciled amount
-    # where a section supports reconciliation. The comparison_* figures are what
-    # the final AFE comparison uses, while ``actual`` above remains as recorded.
+    # where a section supports reconciliation. ``actual``, ``consumables`` and
+    # ``balance`` carry the effective reconciled figures whenever mud
+    # reconciliation is available, while ``raw_actual`` and ``raw_consumables``
+    # retain the unadjusted daily-register sums for audit visibility.
+    raw_actual: Decimal = Decimal("0")
+    raw_consumables: Decimal = Decimal("0")
+    raw_actual_including_lih: Decimal = Decimal("0")
     actual_mud_chemicals: Decimal = Decimal("0")
     reconciled_mud_cost: Decimal = Decimal("0")
     comparison_mud_cost: Decimal = Decimal("0")
@@ -1416,6 +1431,19 @@ class DailyCostWellSummary(BaseModel):
     out_of_scope: DailyCostOutOfScope | None = None
     # Fine-grained section/phase/activity/classification cells for the criteria pivot.
     criteria: list[DailyCostCriteriaRow] = Field(default_factory=list)
+
+
+class DailyCostWellMudOverviewItem(BaseModel):
+    """Per-well mud reconciliation & LIH summary for multi-well comparison reports."""
+
+    well_id: str
+    currency: str
+    has_mud_reconciliation: bool = False
+    actual_mud_chemicals: Decimal = Decimal("0")
+    reconciled_mud_cost: Decimal = Decimal("0")
+    comparison_mud_cost: Decimal = Decimal("0")
+    mud_cost_adjustment: Decimal = Decimal("0")
+    mud_cost_adjustment_usd: Decimal = Decimal("0")
 
 
 DailyCostDayOut.model_rebuild()

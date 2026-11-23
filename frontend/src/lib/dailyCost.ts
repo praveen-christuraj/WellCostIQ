@@ -260,6 +260,9 @@ export type DailyCostComparisonLine = {
   phase_id?: string | null; phase_label?: string
   /** How many same-scope allowances this row clubs into one printed line. */
   club_count?: number
+  /** True when `actual_to_date` already substitutes reconciled mud cost for reconciled sections. */
+  is_mud_reconciled?: boolean
+  raw_actual_to_date?: string | null
 }
 /**
  * `actual_to_date` covers all four groups, so `balance` is the AFE total less the
@@ -276,6 +279,9 @@ export type DailyCostComparison = {
   // Revised AFE amount when an approved SOW adjustment exists. planned_total
   // always stays the locked (original) AFE total.
   adjusted_planned_total: string | null; adjusted_balance: string | null; has_adjustment: boolean
+  has_mud_reconciliation?: boolean
+  actual_mud_chemicals?: string; reconciled_mud_cost?: string; mud_cost_adjustment?: string
+  raw_actual_to_date?: string
 }
 export type DailyCostWarning = { code: string; severity: 'info' | 'warning' | 'error'; message: string }
 /**
@@ -296,6 +302,12 @@ export type WellProgressScope = {
 }
 export type WellProgressReport = {
   well_id: string; well_code: string; well_name: string; scopes: WellProgressScope[]
+}
+export type DailyCostWellMudOverviewItem = {
+  well_id: string; currency: string
+  has_mud_reconciliation: boolean
+  actual_mud_chemicals: string; comparison_mud_cost: string
+  mud_cost_adjustment: string; mud_cost_adjustment_usd: string
 }
 export type DailyCostDay = {
   entry: DailyCostEntry; services: DailyCostServiceLine[]; consumables: DailyCostConsumableLine[]
@@ -535,6 +547,7 @@ export type DailyCostWellTotals = {
   comparison_actual: string | null; comparison_consumables: string | null
   comparison_balance: string | null; comparison_used_percent: string | null
   comparison_adjusted_balance: string | null; has_mud_reconciliation: boolean
+  raw_actual?: string; raw_consumables?: string; raw_actual_including_lih?: string
   // LIH Cost Register: recorded separately, added to the actual cost and
   // deducted from the AFE amount in every comparison.
   lih_cost?: string; lih_line_count?: number; lih_entries?: number
