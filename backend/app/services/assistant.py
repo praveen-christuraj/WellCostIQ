@@ -1246,7 +1246,10 @@ def _answer_cost_position(
         grp = line.cost_group or "Other"
         bucket = group_totals.setdefault(grp, [Decimal("0"), Decimal("0")])
         bucket[0] += Decimal(str(line.planned or 0))
-        bucket[1] += Decimal(str(line.actual or 0))
+        line_actual_val = getattr(line, "actual_to_date", None)
+        if line_actual_val is None:
+            line_actual_val = getattr(line, "actual", 0)
+        bucket[1] += Decimal(str(line_actual_val or 0))
     if group_totals:
         group_rows: list[list[str]] = []
         for grp, (planned_val, actual_val) in sorted(group_totals.items(), key=lambda kv: -kv[1][1]):
@@ -1278,19 +1281,25 @@ def _answer_cost_position(
         if needle in q_low:
             requested_group = grp_name
             break
+    def _line_actual(item: Any) -> Decimal:
+        val = getattr(item, "actual_to_date", None)
+        if val is None:
+            val = getattr(item, "actual", 0)
+        return Decimal(str(val or 0))
+
     candidate_lines = [
         line for line in (getattr(summary, "budget_lines", []) or [])
-        if Decimal(str(line.actual or 0)) > 0
+        if _line_actual(line) > 0
         and (requested_group is None or (line.cost_group or "").lower() == requested_group.lower())
     ]
-    candidate_lines.sort(key=lambda item: -Decimal(str(item.actual or 0)))
+    candidate_lines.sort(key=lambda item: -_line_actual(item))
     if candidate_lines:
         item_rows = [
             [
                 line.cost_group or "—",
                 line.item_name or line.item_code or "—",
                 f"{currency} {_money(line.planned)}" if (_can(permissions, "afe:read") and line.is_planned) else "Unbudgeted",
-                f"{currency} {_money(line.actual)}",
+                f"{currency} {_money(_line_actual(line))}",
             ]
             for line in candidate_lines[:10]
         ]

@@ -145,6 +145,7 @@ def reconciliation(
     rig_id: str = Query(min_length=1, max_length=36),
     well_id: str = Query(min_length=1, max_length=36),
     section_id: str = Query(default="", max_length=36),
+    scope: str = Query(default="", max_length=20),
     date_from: date | None = Query(default=None, alias="from"),
     date_to: date | None = Query(default=None, alias="to"),
     include_draft: bool = Query(default=True),
@@ -152,6 +153,7 @@ def reconciliation(
     return service.mud_cost_reconciliation(
         db, user.organization_id, rig_id=rig_id, well_id=well_id, section_id=section_id,
         date_from=date_from, date_to=date_to, include_draft=include_draft,
+        scope=scope or None,
     )
 
 

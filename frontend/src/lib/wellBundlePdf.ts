@@ -156,7 +156,11 @@ export async function fetchWellBundleData(request: WellBundleRequest): Promise<W
   const mudBase = well.rig_id ? { rig_id: well.rig_id, well_id: well.id } : null
   const mudBalanceParams = mudBase ? new URLSearchParams({ ...mudBase, view: 'inception' }) : null
   const mudReconParams = mudBase
-    ? new URLSearchParams({ ...mudBase, to: dateTo, include_draft: String(includeDraft), ...(dateFrom ? { from: dateFrom } : {}) })
+    ? new URLSearchParams({
+      ...mudBase, to: dateTo, include_draft: String(includeDraft),
+      ...(dateFrom ? { from: dateFrom } : {}),
+      ...(scope !== 'both' ? { scope } : {}),
+    })
     : null
   const mudLossParams = mudBase
     ? new URLSearchParams({ ...mudBase, view: 'section', to: dateTo, ...(dateFrom ? { from: dateFrom } : {}) })
@@ -714,6 +718,7 @@ export async function buildWellBundleDocument(
       }
     }
     if (data.days.length) {
+      const summaryDayByDate = new Map((data.summary?.daily ?? []).map(row => [row.cost_date, row]))
       dcTables.push({
         title: `Daily Cost Sheet Log (${data.days.length} day${data.days.length === 1 ? '' : 's'})`,
         head: ['Date', 'AFE', 'Status', 'Services', 'Consumables', 'Tangibles', 'Other', 'Daily Total', 'Cumulative'],
@@ -721,14 +726,18 @@ export async function buildWellBundleDocument(
         body: (() => {
           let running = 0
           return data.days.map(day => {
-            const total = num(day.entry.total_cost)
-            running += total
+            const summaryDay = data.days.filter(d => d.entry.cost_date === day.entry.cost_date).length === 1
+              ? summaryDayByDate.get(day.entry.cost_date)
+              : undefined
+            const consumablesVal = summaryDay ? num(summaryDay.consumables) : num(day.entry.consumables_total)
+            const total = summaryDay ? num(summaryDay.total) : num(day.entry.total_cost)
+            running = summaryDay ? num(summaryDay.cumulative) : running + total
             return [
               displayDate(day.entry.cost_date),
               day.entry.afe_code,
               day.entry.status.toUpperCase(),
               dailyMoney(day.entry.services_total),
-              dailyMoney(day.entry.consumables_total),
+              dailyMoney(consumablesVal),
               dailyMoney(day.entry.tangibles_total),
               dailyMoney(day.entry.other_expenses_total),
               dailyMoney(total),
@@ -958,7 +967,7 @@ export async function buildWellBundleDocument(
       mudKpis.push(
         { label: 'Total Mud Actual Cost', value: dailyMoney(recon.total_actual_cost, mudCurr), hint: `${reconSections.length} section(s)` },
         { label: 'Total Reconciled Cost', value: dailyMoney(recon.total_reconciled_cost, mudCurr), hint: `Adjustment: ${dailyMoney(recon.total_adjustment, mudCurr)}` },
-        { label: 'Mud AFE Planned', value: recon.total_planned_cost != null ? dailyMoney(recon.total_planned_cost, mudCurr) : '—', hint: recon.total_planned_cost != null ? `Actual / AFE: ${pctText(num(recon.total_actual_cost), num(recon.total_planned_cost))}` : 'No mud AFE allowance' },
+        { label: 'Mud AFE Planned', value: recon.total_planned_cost != null ? dailyMoney(recon.total_planned_cost, mudCurr) : '—', hint: recon.total_planned_cost != null ? `Reconciled / AFE: ${pctText(num(recon.total_reconciled_cost || recon.total_actual_cost), num(recon.total_planned_cost))}` : 'No mud AFE allowance' },
         { label: 'Latest Cost / BBL', value: recon.latest_cost_per_bbl != null ? dailyMoney(recon.latest_cost_per_bbl, mudCurr) : '—', hint: recon.latest_cost_per_bbl_section || 'Across configured sections' },
       )
       for (const sec of reconSections) {
@@ -1033,7 +1042,7 @@ export async function buildWellBundleDocument(
           dailyMoney(recon?.total_actual_cost ?? 0),
           dailyMoney(recon?.total_reconciled_cost ?? 0),
           dailyMoney(recon?.total_adjustment ?? 0),
-          recon?.total_planned_cost != null ? pctText(num(recon.total_actual_cost), num(recon.total_planned_cost)) : '—',
+          recon?.total_planned_cost != null ? pctText(num(recon.total_reconciled_cost || recon.total_actual_cost), num(recon.total_planned_cost)) : '—',
         ],
       })
     }

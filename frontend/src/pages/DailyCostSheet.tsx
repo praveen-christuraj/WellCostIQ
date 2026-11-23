@@ -1231,16 +1231,18 @@ export default function DailyCostSheet() {
     try {
       // Re-fetch the saved record, never print an unsaved preview.
       const saved = await api<DailyCostDay>(`/daily-cost/entries/${entry.id}`)
+      const reportScope = saved.progress?.scope ?? progress?.scope
       const params = new URLSearchParams({ to: entry.cost_date, include_draft: 'true' })
+      if (reportScope) params.set('scope', reportScope)
       const mudParams = new URLSearchParams({
         rig_id: entry.rig_id, well_id: entry.well_id, to: entry.cost_date, include_draft: 'true',
       })
+      if (reportScope) mudParams.set('scope', reportScope)
       const mudBalanceParams = new URLSearchParams({
         rig_id: entry.rig_id, well_id: entry.well_id, view: 'section', to: entry.cost_date,
       })
       const lihParams = new URLSearchParams({ well_id: entry.well_id, to: entry.cost_date, from: entry.cost_date })
       const ndtParams = new URLSearchParams({ well_id: entry.well_id })
-      const reportScope = saved.progress?.scope ?? progress?.scope
       if (reportScope) ndtParams.set('scope', reportScope)
       const [overviewDays, summary, mudReconciliation, mudBalance, lihReport, ndtInspections] = await Promise.all([
         api<DailyCostDay[]>(`/daily-cost/wells/${entry.well_id}/cost-report?${params}`, { silent: true }).catch(() => [saved]),
@@ -1608,7 +1610,13 @@ export default function DailyCostSheet() {
 
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mt: 1.8 }}>
       <Box display="flex" justifyContent="space-between" alignItems="start" gap={2} flexWrap="wrap" mb={1.3}>
-        <Box><Typography fontWeight={800} fontSize={15}>AFE budget reconciliation</Typography><Typography color="text.secondary" fontSize={11.5} mt={.3}>Category-level bulk allowances are intentionally matched against itemized actuals; balances update as the cost date advances.</Typography></Box>
+        <Box>
+          <Typography fontWeight={800} fontSize={15}>AFE budget reconciliation</Typography>
+          <Typography color="text.secondary" fontSize={11.5} mt={.3}>
+            Category-level bulk allowances are intentionally matched against itemized actuals; balances update as the cost date advances.
+            {day.comparison.has_mud_reconciliation && ` Mud Chemicals cumulative cost uses reconciled section mud cost (${dailyMoney(day.comparison.reconciled_mud_cost, standard)} vs recorded chemicals ${dailyMoney(day.comparison.actual_mud_chemicals, standard)}).`}
+          </Typography>
+        </Box>
         {editable && <Button size="small" startIcon={<DownloadOutlined/>} onClick={exportTemplate}>Import template</Button>}
       </Box>
       <Box display="grid" gap={1} mb={1.5} sx={{ gridTemplateColumns: { xs: '1fr', sm: 'repeat(5, auto)' }, justifyContent: { sm: 'flex-end' }, alignItems: 'center' }}>

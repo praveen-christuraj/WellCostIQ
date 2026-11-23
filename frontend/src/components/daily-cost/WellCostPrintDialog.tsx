@@ -47,6 +47,7 @@ export function WellCostPrintDialog({ open, onClose, wells, initialWellId = '' }
         rig_id: well?.rig_id ?? '', well_id: wellId, to, include_draft: String(includeDraft),
       })
       if (mode === 'range') mudParams.set('from', dateFrom)
+      if (scopeFilter) mudParams.set('scope', scopeFilter)
       const mudBalanceParams = new URLSearchParams({ rig_id: well?.rig_id ?? '', well_id: wellId, view: 'section', to })
       if (mode === 'range') mudBalanceParams.set('from', dateFrom)
       const lihParams = new URLSearchParams({ well_id: wellId, to })

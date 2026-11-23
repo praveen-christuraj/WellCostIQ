@@ -9,7 +9,7 @@ import { Caution, RestoreCautions } from '../components/ui/Caution'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
 import type { Afe } from '../lib/afe'
-import type { DailyCostEntry, WellProgressReport } from '../lib/dailyCost'
+import type { DailyCostEntry, DailyCostWellMudOverviewItem, WellProgressReport } from '../lib/dailyCost'
 import type { LihCostEntry } from '../lib/lihCost'
 import { formatDepth, type Well } from '../lib/rigWell'
 import { formatDepthMeters } from '../lib/units'
@@ -42,7 +42,10 @@ type CostRow = {
 }
 
 type CurrencyAmounts = Map<string, number>
-type Sources = { wells: Well[]; afes: Afe[]; entries: DailyCostEntry[]; lih: LihCostEntry[]; progress: WellProgressReport[] }
+type Sources = {
+  wells: Well[]; afes: Afe[]; entries: DailyCostEntry[]; lih: LihCostEntry[]
+  progress: WellProgressReport[]; mudOverview: DailyCostWellMudOverviewItem[]
+}
 
 function addAmount(amounts: CurrencyAmounts, currency: string, value: string | number | null | undefined) {
   if (value == null || value === '') return
@@ -86,7 +89,7 @@ function StatCard({ label, value, note, icon }: { label: string; value: string; 
 
 export default function WellCostComparisonReport() {
   const { can } = useAuth()
-  const [sources, setSources] = useState<Sources>({ wells: [], afes: [], entries: [], lih: [], progress: [] })
+  const [sources, setSources] = useState<Sources>({ wells: [], afes: [], entries: [], lih: [], progress: [], mudOverview: [] })
   const [loading, setLoading] = useState(true)
   const [loadErrors, setLoadErrors] = useState<string[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
@@ -100,7 +103,7 @@ export default function WellCostComparisonReport() {
   const load = useCallback(async () => {
     setLoading(true)
     setLoadErrors([])
-    const [wellsResult, afesResult, entriesResult, lihResult, progressResult] = await Promise.allSettled([
+    const [wellsResult, afesResult, entriesResult, lihResult, progressResult, mudResult] = await Promise.allSettled([
       api<Well[]>('/rig-well/wells'),
       canReadAfe ? api<Afe[]>('/afe/afes') : Promise.resolve([] as Afe[]),
       canReadDaily ? api<DailyCostEntry[]>('/daily-cost/entries') : Promise.resolve([] as DailyCostEntry[]),
@@ -109,6 +112,8 @@ export default function WellCostComparisonReport() {
       canReadDaily ? api<LihCostEntry[]>('/lih-cost/entries') : Promise.resolve([] as LihCostEntry[]),
       // Exact elapsed days per scope: a sheet count is never a duration.
       canReadDaily ? api<WellProgressReport[]>('/daily-cost/progress-overview') : Promise.resolve([] as WellProgressReport[]),
+      // Section-scoped mud reconciliation adjustments per well.
+      canReadDaily ? api<DailyCostWellMudOverviewItem[]>('/daily-cost/mud-reconciliation-overview', { silent: true }) : Promise.resolve([] as DailyCostWellMudOverviewItem[]),
     ])
     const errors: string[] = []
     const wells = wellsResult.status === 'fulfilled' ? wellsResult.value : []
@@ -121,7 +126,8 @@ export default function WellCostComparisonReport() {
     if (lihResult.status === 'rejected') errors.push(`LIH cost register: ${lihResult.reason instanceof Error ? lihResult.reason.message : 'could not be loaded'}`)
     const progress = progressResult.status === 'fulfilled' ? progressResult.value : []
     if (progressResult.status === 'rejected') errors.push(`Well progress days: ${progressResult.reason instanceof Error ? progressResult.reason.message : 'could not be loaded'}`)
-    setSources({ wells, afes, entries, lih, progress })
+    const mudOverview = mudResult.status === 'fulfilled' ? mudResult.value : []
+    setSources({ wells, afes, entries, lih, progress, mudOverview })
     setLoadErrors(errors)
     setLoading(false)
   }, [canReadAfe, canReadDaily, refreshKey])
@@ -152,9 +158,11 @@ export default function WellCostComparisonReport() {
     }
 
     const progressByWell = new Map(sources.progress.map(row => [row.well_id, row]))
+    const mudByWell = new Map(sources.mudOverview.map(row => [row.well_id, row]))
     return sources.wells.map(well => {
       const afes = afesByWell.get(well.id) ?? []
       const entries = actualByWell.get(well.id) ?? []
+      const mudInfo = mudByWell.get(well.id)
       const afeAmounts: CurrencyAmounts = new Map()
       const effectiveAmounts: CurrencyAmounts = new Map()
       const adjustmentAmounts: CurrencyAmounts = new Map()
@@ -175,6 +183,9 @@ export default function WellCostComparisonReport() {
         }
       }
       for (const entry of entries) addAmount(actualAmounts, entry.standard_currency, entry.total_cost)
+      if (mudInfo?.has_mud_reconciliation && mudInfo.currency) {
+        addAmount(actualAmounts, mudInfo.currency, mudInfo.mud_cost_adjustment)
+      }
       const lihAmounts: CurrencyAmounts = new Map()
       for (const entry of lihByWell.get(well.id) ?? []) addAmount(lihAmounts, entry.currency, entry.total_cost)
 
@@ -212,6 +223,7 @@ export default function WellCostComparisonReport() {
       const dates = entries.map(entry => String(entry.cost_date)).sort()
       const firstDate = dates[0] ?? ''
       const totalUsd = entries.reduce((sum, entry) => sum + Number(entry.total_cost_usd ?? entry.total_cost ?? 0), 0)
+        + (mudInfo?.has_mud_reconciliation ? Number(mudInfo.mud_cost_adjustment_usd ?? 0) : 0)
       const latestDepthEntry = [...entries]
         .filter(entry => entry.actual_depth != null && entry.actual_depth !== '')
         .sort((a, b) => String(a.cost_date).localeCompare(String(b.cost_date)))

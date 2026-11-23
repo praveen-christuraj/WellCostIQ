@@ -1534,14 +1534,18 @@ def _mud_actual_cost_map(
     *,
     date_to: date,
     include_draft: bool,
-) -> dict[tuple[str, date], Decimal]:
-    """Mud Chemicals cost from the Daily Cost register, by hole section and date."""
+    scope: str | None = None,
+) -> dict[tuple[tuple[str, str], date], Decimal]:
+    """Mud Chemicals cost from the Daily Cost register, by (scope, hole section) and date."""
     statement = select(
+        Afe.configuration_scope,
         DailyCostEntry.cost_date,
         DailyCostConsumableLine.hole_section_id,
         func.sum(DailyCostConsumableLine.standard_amount),
     ).join(
         DailyCostEntry, DailyCostEntry.id == DailyCostConsumableLine.entry_id,
+    ).outerjoin(
+        Afe, Afe.id == DailyCostEntry.afe_id,
     ).where(
         DailyCostConsumableLine.organization_id == organization_id,
         DailyCostEntry.organization_id == organization_id,
@@ -1550,14 +1554,23 @@ def _mud_actual_cost_map(
         DailyCostConsumableLine.category == MUD_CHEMICAL_CATEGORY,
         DailyCostEntry.cost_date <= date_to,
     )
+    if scope in ("drilling", "completion"):
+        statement = statement.where(Afe.configuration_scope == scope)
     if not include_draft:
         statement = statement.where(DailyCostEntry.status == "submitted")
-    statement = statement.group_by(DailyCostEntry.cost_date, DailyCostConsumableLine.hole_section_id)
-    result: dict[tuple[str, date], Decimal] = {}
-    for cost_date, hole_section_id, amount in db.execute(statement).all():
+    statement = statement.group_by(
+        Afe.configuration_scope,
+        DailyCostEntry.cost_date,
+        DailyCostConsumableLine.hole_section_id,
+    )
+    result: dict[tuple[tuple[str, str], date], Decimal] = {}
+    for afe_scope, cost_date, hole_section_id, amount in db.execute(statement).all():
         if not hole_section_id:
             continue
-        result[(str(hole_section_id), cost_date)] = _recon_amount(amount)
+        sec_key = _setting_key(str(afe_scope or "drilling"), str(hole_section_id))
+        result[(sec_key, cost_date)] = _recon_amount(
+            result.get((sec_key, cost_date), ZERO) + _recon_amount(amount)
+        )
     return result
 
 
@@ -1565,6 +1578,8 @@ def _planned_mud_cost_map(
     db: Session,
     organization_id: str,
     well_id: str,
+    *,
+    scope: str | None = None,
 ) -> tuple[dict[tuple[str, str], Decimal], bool]:
     """The AFE mud chemicals allowance of each section, keyed by scope and section.
 
@@ -1577,19 +1592,22 @@ def _planned_mud_cost_map(
     The second value reports whether the well has any locked AFE plan at all. When
     it does not, a planned amount is unknown and must not be printed as zero.
     """
-    locked_plan = db.scalar(
-        select(DailyCostBaseline.id).where(
-            DailyCostBaseline.organization_id == organization_id,
-            DailyCostBaseline.well_id == well_id,
-            select(DailyCostEntry.id).where(
-                DailyCostEntry.baseline_id == DailyCostBaseline.id,
-                DailyCostEntry.is_deleted.is_(False),
-            ).exists(),
-        ).limit(1)
+    locked_stmt = select(DailyCostBaseline.id).join(
+        Afe, Afe.id == DailyCostBaseline.afe_id,
+    ).where(
+        DailyCostBaseline.organization_id == organization_id,
+        DailyCostBaseline.well_id == well_id,
+        select(DailyCostEntry.id).where(
+            DailyCostEntry.baseline_id == DailyCostBaseline.id,
+            DailyCostEntry.is_deleted.is_(False),
+        ).exists(),
     )
+    if scope in ("drilling", "completion"):
+        locked_stmt = locked_stmt.where(Afe.configuration_scope == scope)
+    locked_plan = db.scalar(locked_stmt.limit(1))
     if locked_plan is None:
         return {}, False
-    rows = db.execute(
+    rows_stmt = (
         select(
             Afe.configuration_scope,
             DailyCostBaselineBudgetLine.section_id,
@@ -1608,13 +1626,17 @@ def _planned_mud_cost_map(
                 DailyCostEntry.is_deleted.is_(False),
             ).exists(),
         )
-        .group_by(Afe.configuration_scope, DailyCostBaselineBudgetLine.section_id)
+    )
+    if scope in ("drilling", "completion"):
+        rows_stmt = rows_stmt.where(Afe.configuration_scope == scope)
+    rows = db.execute(
+        rows_stmt.group_by(Afe.configuration_scope, DailyCostBaselineBudgetLine.section_id)
     ).all()
     planned: dict[tuple[str, str], Decimal] = {}
-    for scope, hole_section_id, amount in rows:
-        if not scope or not hole_section_id:
+    for row_scope, hole_section_id, amount in rows:
+        if not row_scope or not hole_section_id:
             continue
-        key = _setting_key(str(scope), str(hole_section_id))
+        key = _setting_key(str(row_scope), str(hole_section_id))
         planned[key] = planned.get(key, ZERO) + _recon_amount(amount)
     return planned, True
 
@@ -1628,6 +1650,7 @@ def reconcile_well(
     date_to: date | None = None,
     include_draft: bool = True,
     section_id: str = "",
+    scope: str | None = None,
 ) -> MudCostReconciliationOut:
     """Reconcile mud cost section by section, day by day, to ``date_to``.
 
@@ -1636,18 +1659,23 @@ def reconcile_well(
     Cost/BBL to the mud consumed to date, exactly as the well cost comparison
     consumes it. Sections are never combined in a row.
     """
+    normalized_scope = scope.lower() if scope and scope.lower() in ("drilling", "completion") else None
     effective_to = date_to or date.today()
     if date_from and date_from > effective_to:
         raise HTTPException(status_code=422, detail="The start date must not be after the end date")
     currency = well_standard_currency(db, organization_id, well.id)
     actuals = _mud_actual_cost_map(
-        db, organization_id, well.id, date_to=effective_to, include_draft=include_draft,
+        db, organization_id, well.id, date_to=effective_to, include_draft=include_draft, scope=normalized_scope,
     )
     settings = _setting_map(db, organization_id, well.id)
-    planned_mud, has_locked_plan = _planned_mud_cost_map(db, organization_id, well.id)
+    planned_mud, has_locked_plan = _planned_mud_cost_map(
+        db, organization_id, well.id, scope=normalized_scope,
+    )
     for key, setting in settings.items():
+        if normalized_scope and key[0] != normalized_scope:
+            continue
         if setting.currency and setting.currency != currency and any(
-            hole == key[1] for (hole, _date) in actuals
+            sec_key == key for (sec_key, _date) in actuals
         ):
             raise HTTPException(status_code=409, detail=(
                 f"The Cost/BBL base rate for {setting.section_code_snapshot} {setting.section_name_snapshot} "
@@ -1658,6 +1686,7 @@ def reconcile_well(
     entries = [
         entry for entry in _entries_for_well(db, organization_id, well.id, deleted=False)
         if entry.entry_date <= effective_to
+        and (normalized_scope is None or entry.section_scope == normalized_scope)
     ]
     current_sections = db.scalars(
         select(WellSection).where(
@@ -1704,7 +1733,7 @@ def reconcile_well(
             Decimal(latest_entry.section_to_depth),
         )
         entries_by_date = {row.entry_date: row for row in section_entries}
-        dates = sorted(set(entries_by_date) | {day for (hole, day) in actuals if hole == hole_section_id})
+        dates = sorted(set(entries_by_date) | {day for (sec_key, day) in actuals if sec_key == key})
         cumulative_additions = ZERO
         cumulative_extra = ZERO
         cumulative_actual = ZERO
@@ -1717,7 +1746,7 @@ def reconcile_well(
             additions = group_total(raw, "additions")
             extra_obm = raw["extra_obm_received"]
             consumption = group_total(raw, "consumption_losses")
-            actual = actuals.get((hole_section_id, cost_date), ZERO)
+            actual = actuals.get((key, cost_date), ZERO)
             cumulative_additions += additions
             cumulative_extra += extra_obm
             cumulative_actual += actual
@@ -1804,6 +1833,24 @@ def reconcile_well(
             reconciled = _recon_amount(consumption * latest_rate)
         else:
             reconciled = None
+        if reconciled is not None and window:
+            if is_wbm:
+                for row in window:
+                    row.window_reconciled_cost = _recon_amount(row.actual_cost)
+            elif latest_rate is not None:
+                for row in window:
+                    row.window_reconciled_cost = _recon_amount(row.consumption_losses * latest_rate)
+                residual = _recon_amount(
+                    reconciled - sum((row.window_reconciled_cost or ZERO for row in window), ZERO)
+                )
+                if residual != ZERO:
+                    anchor = next(
+                        (row for row in reversed(window) if row.consumption_losses > ZERO),
+                        window[-1],
+                    )
+                    anchor.window_reconciled_cost = _recon_amount(
+                        (anchor.window_reconciled_cost or ZERO) + residual
+                    )
         loss_values = _loss_values_for_entries(
             entry for entry in section_entries
             if date_from is None or entry.entry_date >= date_from
@@ -1902,6 +1949,7 @@ def mud_cost_reconciliation(
     date_from: date | None = None,
     date_to: date | None = None,
     include_draft: bool = True,
+    scope: str | None = None,
 ) -> MudCostReconciliationOut:
     _rig, well, _ = _scope_or_404(db, organization_id, rig_id, well_id)
     if section_id:
@@ -1924,5 +1972,5 @@ def mud_cost_reconciliation(
             raise HTTPException(status_code=404, detail="Section not found for this well")
     return reconcile_well(
         db, organization_id, well,
-        date_from=date_from, date_to=date_to, include_draft=include_draft, section_id=section_id,
+        date_from=date_from, date_to=date_to, include_draft=include_draft, section_id=section_id, scope=scope,
     )

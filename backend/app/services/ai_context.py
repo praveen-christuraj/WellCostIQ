@@ -328,13 +328,13 @@ def _single_well_block(summary: DailyCostWellSummary) -> str:
         f"Well {well.well_code} ({well.well_name}) | Rig: {well.rig_code} ({well.rig_name}) | Status: {well.status} | Plan: {well.config_status} | Currency: {cur or 'unset'}",
         f"  Effective AFE budget: {p}{_money(eff_afe)}"
         + (f" (SOW adjusted from original {p}{_money(t.planned)})" if t.has_adjustment and t.adjusted_planned is not None else ""),
-        f"  Recorded actual cost (Daily Cost sheets): {p}{_money(t.actual)}",
+        f"  Actual cost{(' (mud-reconciled)' if t.has_mud_reconciliation else '')}: {p}{_money(t.actual)}",
         f"  LIH register cost: {p}{_money(t.lih_cost)} ({t.lih_entries} entries, {t.lih_line_count} lines) | Total cost incl. LIH: {p}{_money(t.actual_including_lih)}",
     ]
-    if t.has_mud_reconciliation and t.comparison_actual is not None:
+    if t.has_mud_reconciliation:
         lines.append(
-            f"  Mud-reconciled comparison cost: {p}{_money(t.comparison_actual)} "
-            f"(incl. LIH: {p}{_money(t.comparison_actual_including_lih)}; mud adjustment: {_signed_money(cur, t.mud_cost_adjustment)})"
+            f"  Mud reconciliation detail: reconciled mud {p}{_money(t.comparison_mud_cost)} vs recorded mud chemicals {p}{_money(t.actual_mud_chemicals)} "
+            f"(adjustment: {_signed_money(cur, t.mud_cost_adjustment)}; unadjusted daily-sheet total: {p}{_money(t.raw_actual)})"
         )
     lines.extend(
         [
@@ -408,7 +408,7 @@ def build_well_comparison(
                 ["Consumables", f"{p}{_money(t.consumables)}"],
                 ["Tangibles", f"{p}{_money(t.tangibles)}"],
                 ["Other expenses", f"{p}{_money(t.other_expenses)}"],
-                ["Recorded actual total", f"{p}{_money(t.actual)}"],
+                ["Actual total (reconciled)" if t.has_mud_reconciliation else "Actual total", f"{p}{_money(t.actual)}"],
                 *(
                     [["LIH cost", f"{p}{_money(t.lih_cost)}"], ["Total cost (incl. LIH)", f"{p}{_money(total_with_lih)}"]]
                     if t.lih_cost > 0

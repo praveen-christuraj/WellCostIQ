@@ -280,7 +280,6 @@ export default function DailyCostAnalysis() {
   const hasAdjustment = summary?.totals.has_adjustment ?? false
   const mud = summary?.mud_cost ?? null
   const hasMudReconciliation = Boolean(mud?.available)
-  const comparisonActual = summary?.totals.comparison_actual ?? summary?.totals.actual ?? '0'
   const comparisonBalance = summary?.totals.comparison_balance ?? summary?.totals.balance ?? '0'
   const comparisonUsedPercent = summary?.totals.comparison_used_percent ?? summary?.totals.used_percent ?? '0'
   const comparisonAdjustedBalance = summary?.totals.comparison_adjusted_balance ?? null
@@ -565,9 +564,9 @@ export default function DailyCostAnalysis() {
       <Box display="grid" gap={1.3} mb={1.8} sx={{ gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)', lg: `repeat(${comparisonCardCount}, 1fr)` } }}>
         <StatCard label="AFE planned" value={dailyMoney(summary.totals.planned, currency)} hint={`${summary.afes.length} AFE locked on this well`} icon={<AccountBalanceWalletOutlined fontSize="small"/>}/>
         {hasAdjustment && summary.totals.adjusted_planned != null && <StatCard label="Adjusted AFE" value={dailyMoney(summary.totals.adjusted_planned, currency)} hint={`${summary.totals.adjusted_used_percent ?? '—'}% of the adjusted AFE spent`} icon={<AccountBalanceWalletOutlined fontSize="small"/>}/>}
-        <StatCard label="Actual to date" value={dailyMoney(summary.totals.actual, currency)} hint={`${summary.totals.used_percent}% of the locked AFE`} icon={<TrendingUpRounded fontSize="small"/>}/>
+        <StatCard label="Actual to date" value={dailyMoney(summary.totals.actual, currency)} hint={hasMudReconciliation ? `${summary.totals.used_percent}% of locked AFE · includes reconciled mud` : `${summary.totals.used_percent}% of the locked AFE`} icon={<TrendingUpRounded fontSize="small"/>}/>
         <StatCard label="Actual / AFE %" value={`${Number(comparisonUsedPercent).toFixed(1)}%`} hint="(Actual cost ÷ AFE) × 100" tone={Number(comparisonUsedPercent) > 100 ? 'warning' : 'good'} icon={<CalculateOutlined fontSize="small"/>}/>
-        {hasMudReconciliation && <StatCard label="Comparison total" value={dailyMoney(comparisonActual, currency)} hint={`${comparisonUsedPercent}% of the locked AFE after mud reconciliation`} icon={<CalculateOutlined fontSize="small"/>}/>}
+        {hasMudReconciliation && <StatCard label="Mud reconciled" value={dailyMoney(summary.totals.comparison_mud_cost, currency)} hint={`Recorded mud ${dailyMoney(summary.totals.actual_mud_chemicals, currency)} · unadjusted total ${dailyMoney(summary.totals.raw_actual ?? summary.totals.actual, currency)}`} icon={<CalculateOutlined fontSize="small"/>}/>}
         {lih && hasLih && <StatCard label="LIH cost (register)" value={dailyMoney(lih.total, lih.currency)} hint={`${lih.entry_count} register day${lih.entry_count === 1 ? '' : 's'} · deducted from the AFE, added to actual`} tone="warning" icon={<ReportProblemOutlined fontSize="small"/>}/>}
         <StatCard label="Other expenses" value={dailyMoney(summary.totals.other_expenses, currency)} hint="LIH and similar charges deducted from the AFE" tone={Number(summary.totals.other_expenses) > 0 ? 'warning' : 'default'} icon={<ReportProblemOutlined fontSize="small"/>}/>
         <StatCard label="Remaining balance" value={dailyMoney(comparisonBalance, currency)} hint={hasMudReconciliation ? 'Planned less the reconciled comparison total' : Number(comparisonBalance) < 0 ? 'Over the AFE budget' : 'Planned less actual to date'} tone={Number(comparisonBalance) < 0 ? 'warning' : 'good'} icon={<SavingsOutlined fontSize="small"/>}/>

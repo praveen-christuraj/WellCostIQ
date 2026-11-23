@@ -22,6 +22,7 @@ import logging
 import re
 import threading
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
 from typing import Any, Iterable, Sequence
@@ -29,7 +30,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
-from sqlalchemy import Select, case, exists, func, literal, or_, select, union_all
+from sqlalchemy import Date, Numeric, Select, String, and_, case, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -40,7 +41,7 @@ from app.models import (
     DailyCostBaselineSection, DailyCostBaselineServiceRate, DailyCostCatalogueRateSnapshot,
     DailyCostConsumableLine, DailyCostEntry, DailyCostOtherExpenseLine, DailyCostServiceLine,
     DailyCostServiceRateItem, DailyCostTangibleLine,
-    DailyCostWellRateBaseline, DrillBit, FuelType, HoleSection, LihCostEntry, MudChemical, Phase, Rig,
+    DailyCostWellRateBaseline, DrillBit, FuelType, HoleSection, LihCostEntry, MudChemical, MudCostEntry, Phase, Rig,
     Service, Tangible, Vendor, Well, WellPhase, WellSection, WellSubActivity,
 )
 from app.models.daily_cost import OTHER_EXPENSE_TYPE_LABELS
@@ -65,6 +66,7 @@ from app.schemas.daily_cost import (
     DailyCostRigLatest, DailyCostRigLatestOut,
     DailyCostWellOption, DailyCostWellProgress, DailyCostWellProgressReport,
     DailyCostMudReconciliation, DailyCostMudSectionReconciliation,
+    DailyCostWellMudOverviewItem,
     DailyCostWellProgressUpdate, DailyCostWellSummary, DailyCostWellTotals,
     DailyCostForecast, DailyCostOutOfScope, DailyCostOutOfScopeLine, DailyCostCriteriaRow,
 )
@@ -3110,6 +3112,383 @@ def _live_unplanned_service_groups(
     }
 
 
+@dataclass
+class _ResolvedMudReconciliation:
+    available: bool
+    currency: str
+    reconciliation: Any
+    actual_mud_chemicals: Decimal
+    reconciled_mud_cost: Decimal
+    unreconciled_actual_cost: Decimal
+    comparison_mud_cost: Decimal
+    adjustment: Decimal
+    adjustment_usd: Decimal
+    reconciled_section_keys: set[tuple[str, str]]
+    day_reconciled_cost: dict[date, Decimal]
+    day_covered_raw_cost: dict[date, Decimal]
+    day_adjustment: dict[date, Decimal]
+    day_adjustment_usd: dict[date, Decimal]
+    afe_reconciled_mud: dict[str, Decimal]
+    afe_day_reconciled_mud: dict[tuple[str, date], Decimal]
+    afe_covered_raw_mud: dict[str, Decimal]
+    afe_adjustment: dict[str, Decimal]
+    factor_mud_rows: list[dict[str, Any]]
+    warnings: list[DailyCostWarnings]
+
+
+def _resolve_well_mud_reconciliation(
+    db: Session,
+    organization_id: str,
+    well: Well,
+    *,
+    currency: str,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    include_draft: bool = True,
+    scope: str | None = None,
+    skip_if_no_mud_entries: bool = False,
+) -> _ResolvedMudReconciliation:
+    """Resolve section-scoped mud reconciliation and allocate across days & AFEs."""
+    effective_to = date_to or date.today()
+    normalized_scope = scope.lower() if scope and scope.lower() in ("drilling", "completion") else None
+    empty = _ResolvedMudReconciliation(
+        available=False,
+        currency=currency,
+        reconciliation=None,
+        actual_mud_chemicals=Decimal("0.00"),
+        reconciled_mud_cost=Decimal("0.00"),
+        unreconciled_actual_cost=Decimal("0.00"),
+        comparison_mud_cost=Decimal("0.00"),
+        adjustment=Decimal("0.00"),
+        adjustment_usd=Decimal("0.00"),
+        reconciled_section_keys=set(),
+        day_reconciled_cost={},
+        day_covered_raw_cost={},
+        day_adjustment={},
+        day_adjustment_usd={},
+        afe_reconciled_mud={},
+        afe_day_reconciled_mud={},
+        afe_covered_raw_mud={},
+        afe_adjustment={},
+        factor_mud_rows=[],
+        warnings=[],
+    )
+    if skip_if_no_mud_entries:
+        mud_exists_stmt = select(MudCostEntry.id).where(
+            MudCostEntry.organization_id == organization_id,
+            MudCostEntry.well_id == well.id,
+            MudCostEntry.is_deleted.is_(False),
+            MudCostEntry.entry_date <= effective_to,
+        )
+        if normalized_scope is not None:
+            mud_exists_stmt = mud_exists_stmt.where(MudCostEntry.section_scope == normalized_scope)
+        if db.scalar(mud_exists_stmt.limit(1)) is None:
+            return empty
+
+    raw_stmt = (
+        select(
+            DailyCostEntry.afe_id,
+            Afe.configuration_scope,
+            DailyCostEntry.cost_date,
+            DailyCostEntry.usd_exchange_rate,
+            DailyCostConsumableLine.hole_section_id,
+            DailyCostConsumableLine.standard_amount,
+            DailyCostConsumableLine.usd_amount,
+            DailyCostConsumableLine.phase_code_snapshot,
+            DailyCostConsumableLine.phase_name_snapshot,
+            DailyCostConsumableLine.activity_code_snapshot,
+            DailyCostConsumableLine.activity_name_snapshot,
+            DailyCostConsumableLine.sub_activity_code_snapshot,
+            DailyCostConsumableLine.sub_activity_name_snapshot,
+            DailyCostConsumableLine.sub_activity_party_snapshot,
+            DailyCostConsumableLine.vendor_code_snapshot,
+            DailyCostConsumableLine.vendor_name_snapshot,
+            DailyCostConsumableLine.party_name,
+        )
+        .join(DailyCostEntry, DailyCostEntry.id == DailyCostConsumableLine.entry_id)
+        .outerjoin(Afe, Afe.id == DailyCostEntry.afe_id)
+        .where(
+            DailyCostConsumableLine.organization_id == organization_id,
+            DailyCostEntry.organization_id == organization_id,
+            DailyCostEntry.well_id == well.id,
+            DailyCostEntry.is_deleted.is_(False),
+            DailyCostConsumableLine.category == "Mud Chemicals",
+            DailyCostEntry.cost_date <= effective_to,
+        )
+    )
+    if date_from is not None:
+        raw_stmt = raw_stmt.where(DailyCostEntry.cost_date >= date_from)
+    if normalized_scope is not None:
+        raw_stmt = raw_stmt.where(Afe.configuration_scope == normalized_scope)
+    if not include_draft:
+        raw_stmt = raw_stmt.where(DailyCostEntry.status == "submitted")
+
+    raw_rows = db.execute(raw_stmt).all()
+    actual_mud_chemicals = _money(sum((Decimal(r[5] or 0) for r in raw_rows), Decimal("0")))
+    empty.actual_mud_chemicals = actual_mud_chemicals
+    empty.comparison_mud_cost = actual_mud_chemicals
+
+    warnings: list[DailyCostWarnings] = []
+    try:
+        reconciliation = mud_cost_service.reconcile_well(
+            db,
+            organization_id,
+            well,
+            date_from=date_from,
+            date_to=effective_to,
+            include_draft=include_draft,
+            scope=normalized_scope,
+        )
+    except HTTPException as error:
+        warnings.append(DailyCostWarnings(
+            code="mud-reconciliation-unavailable",
+            severity="warning",
+            message=f"Mud cost reconciliation is unavailable: {error.detail}",
+        ))
+        empty.warnings = warnings
+        return empty
+
+    empty.reconciliation = reconciliation
+    if reconciliation is None or reconciliation.currency != currency:
+        empty.warnings = warnings
+        return empty
+
+    reconciled_sections = [row for row in reconciliation.sections if row.reconciled_cost is not None]
+    if not reconciled_sections:
+        empty.unreconciled_actual_cost = actual_mud_chemicals
+        empty.warnings = warnings
+        return empty
+
+    reconciled_section_keys: set[tuple[str, str]] = {
+        (str(row.section_scope), str(row.hole_section_id))
+        for row in reconciled_sections
+        if row.hole_section_id
+    }
+    section_id_to_key: dict[tuple[str, str], tuple[str, str]] = {
+        (str(row.section_scope), str(row.section_id)): (str(row.section_scope), str(row.hole_section_id))
+        for row in reconciled_sections
+        if row.hole_section_id
+    }
+
+    covered_actual = sum((Decimal(row.actual_cost) for row in reconciled_sections), Decimal("0"))
+    reconciled_mud_cost = _money(
+        sum((Decimal(row.reconciled_cost) for row in reconciled_sections if row.reconciled_cost is not None), Decimal("0"))
+    )
+    unreconciled_actual = _money(max(actual_mud_chemicals - covered_actual, Decimal("0")))
+    comparison_mud_cost = _money(reconciled_mud_cost + unreconciled_actual)
+    adjustment = _money(comparison_mud_cost - actual_mud_chemicals)
+
+    # FX lookup per date and fallback for the well so non-USD standard currencies
+    # convert mud reconciliation adjustments into USD consistently.
+    entry_fx_stmt = (
+        select(
+            DailyCostEntry.afe_id,
+            Afe.configuration_scope,
+            DailyCostEntry.cost_date,
+            DailyCostEntry.usd_exchange_rate,
+        )
+        .outerjoin(Afe, Afe.id == DailyCostEntry.afe_id)
+        .where(
+            DailyCostEntry.organization_id == organization_id,
+            DailyCostEntry.well_id == well.id,
+            DailyCostEntry.is_deleted.is_(False),
+            DailyCostEntry.cost_date <= effective_to,
+        )
+    )
+    if normalized_scope is not None:
+        entry_fx_stmt = entry_fx_stmt.where(Afe.configuration_scope == normalized_scope)
+    if not include_draft:
+        entry_fx_stmt = entry_fx_stmt.where(DailyCostEntry.status == "submitted")
+    entry_fx_rows = db.execute(entry_fx_stmt.order_by(DailyCostEntry.cost_date, DailyCostEntry.id)).all()
+
+    fx_by_day: dict[date, Decimal] = {}
+    afes_by_scope: dict[str, list[str]] = defaultdict(list)
+    afe_by_scope_day: dict[tuple[str, date], str] = {}
+    default_fx = Decimal("1") if currency.upper() == "USD" else Decimal("1")
+    for afe_id, afe_scope, cost_date, usd_fx in entry_fx_rows:
+        sc = str(afe_scope or "drilling").lower()
+        aid = str(afe_id)
+        if aid not in afes_by_scope[sc]:
+            afes_by_scope[sc].append(aid)
+        afe_by_scope_day[(sc, cost_date)] = aid
+        rate_val = Decimal("1") if currency.upper() == "USD" else Decimal(usd_fx or 1)
+        fx_by_day[cost_date] = rate_val
+        default_fx = rate_val
+
+    day_covered_raw_cost: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
+    day_covered_raw_usd: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
+    afe_covered_raw_mud: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    sec_afe_raw: dict[tuple[str, str], dict[str, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+    sec_attr_weights: dict[tuple[str, str], dict[tuple[str, ...], Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: Decimal("0"))
+    )
+
+    for (
+        afe_id, afe_scope, cost_date, _usd_fx, hole_sec_id, std_amt, usd_amt,
+        ph_code, ph_name, act_code, act_name, sub_code, sub_name, sub_party, v_code, v_name, p_name,
+    ) in raw_rows:
+        if not hole_sec_id:
+            continue
+        sec_key = (str(afe_scope or "drilling").lower(), str(hole_sec_id))
+        if sec_key not in reconciled_section_keys:
+            continue
+        amt = Decimal(std_amt or 0)
+        u_amt = Decimal(usd_amt or 0)
+        day_covered_raw_cost[cost_date] += amt
+        day_covered_raw_usd[cost_date] += u_amt
+        afe_covered_raw_mud[str(afe_id)] += amt
+        sec_afe_raw[sec_key][str(afe_id)] += amt
+        attr_tuple = (
+            str(ph_code or ""), str(ph_name or ""),
+            str(act_code or ""), str(act_name or ""),
+            str(sub_code or ""), str(sub_name or ""), str(sub_party or ""),
+            str(v_code or ""), str(v_name or ""), str(p_name or ""),
+        )
+        sec_attr_weights[sec_key][attr_tuple] += max(amt, Decimal("0.001"))
+
+    day_reconciled_cost: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
+    sec_day_reconciled: dict[tuple[str, str], dict[date, Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: Decimal("0"))
+    )
+    for row in reconciliation.rows:
+        sec_key = section_id_to_key.get((str(row.section_scope), str(row.section_id)))
+        if sec_key is None or sec_key not in reconciled_section_keys:
+            continue
+        val = row.window_reconciled_cost if row.window_reconciled_cost is not None else row.reconciled_cost
+        if val is None:
+            continue
+        dec_val = _money(Decimal(val))
+        day_reconciled_cost[row.cost_date] = _money(day_reconciled_cost[row.cost_date] + dec_val)
+        sec_day_reconciled[sec_key][row.cost_date] = _money(sec_day_reconciled[sec_key][row.cost_date] + dec_val)
+
+    all_mud_days = sorted(set(day_reconciled_cost) | set(day_covered_raw_cost))
+    day_adjustment: dict[date, Decimal] = {}
+    day_adjustment_usd: dict[date, Decimal] = {}
+    for d in all_mud_days:
+        rec_d = _money(day_reconciled_cost.get(d, Decimal("0")))
+        raw_d = _money(day_covered_raw_cost.get(d, Decimal("0")))
+        delta_d = _money(rec_d - raw_d)
+        day_adjustment[d] = delta_d
+        fx_d = fx_by_day.get(d, default_fx)
+        rec_usd_d = _money(rec_d * fx_d)
+        raw_usd_d = _money(day_covered_raw_usd.get(d, Decimal("0")))
+        day_adjustment_usd[d] = _money(rec_usd_d - raw_usd_d)
+
+    adjustment_usd = _money(sum(day_adjustment_usd.values(), Decimal("0")))
+
+    # Allocate reconciled mud across AFEs within the same scope.
+    afe_reconciled_mud: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    afe_day_reconciled_mud: dict[tuple[str, date], Decimal] = defaultdict(lambda: Decimal("0"))
+    for sec in reconciled_sections:
+        if not sec.hole_section_id or sec.reconciled_cost is None:
+            continue
+        sec_key = (str(sec.section_scope), str(sec.hole_section_id))
+        sec_total = _money(Decimal(sec.reconciled_cost))
+        scope_afes = afes_by_scope.get(str(sec.section_scope), [])
+        raw_for_sec = sec_afe_raw.get(sec_key, {})
+        total_raw_sec = sum(raw_for_sec.values(), Decimal("0"))
+        if len(scope_afes) <= 1:
+            target_afe = scope_afes[0] if scope_afes else next(iter(raw_for_sec), "")
+            if target_afe:
+                afe_reconciled_mud[target_afe] = _money(afe_reconciled_mud[target_afe] + sec_total)
+                for d, d_val in sec_day_reconciled.get(sec_key, {}).items():
+                    afe_day_reconciled_mud[(target_afe, d)] = _money(
+                        afe_day_reconciled_mud[(target_afe, d)] + d_val
+                    )
+        elif total_raw_sec > 0:
+            ordered_afes = [a for a in scope_afes if raw_for_sec.get(a, Decimal("0")) > 0] or scope_afes
+            allocated_sec = Decimal("0")
+            for idx, aid in enumerate(ordered_afes):
+                if idx == len(ordered_afes) - 1:
+                    share_amt = _money(sec_total - allocated_sec)
+                else:
+                    share_amt = _money(sec_total * raw_for_sec[aid] / total_raw_sec)
+                    allocated_sec += share_amt
+                afe_reconciled_mud[aid] = _money(afe_reconciled_mud[aid] + share_amt)
+            for d, d_val in sec_day_reconciled.get(sec_key, {}).items():
+                alloc_d = Decimal("0")
+                for idx, aid in enumerate(ordered_afes):
+                    if idx == len(ordered_afes) - 1:
+                        s_d = _money(d_val - alloc_d)
+                    else:
+                        s_d = _money(d_val * raw_for_sec[aid] / total_raw_sec)
+                        alloc_d += s_d
+                    afe_day_reconciled_mud[(aid, d)] = _money(afe_day_reconciled_mud[(aid, d)] + s_d)
+        else:
+            for d, d_val in sec_day_reconciled.get(sec_key, {}).items():
+                aid = afe_by_scope_day.get((str(sec.section_scope), d), scope_afes[-1])
+                afe_day_reconciled_mud[(aid, d)] = _money(afe_day_reconciled_mud[(aid, d)] + d_val)
+                afe_reconciled_mud[aid] = _money(afe_reconciled_mud[aid] + d_val)
+
+    all_afes = set(afe_reconciled_mud) | set(afe_covered_raw_mud)
+    afe_adjustment = {
+        aid: _money(afe_reconciled_mud.get(aid, Decimal("0")) - afe_covered_raw_mud.get(aid, Decimal("0")))
+        for aid in all_afes
+    }
+
+    factor_mud_rows: list[dict[str, Any]] = []
+    for sec in reconciled_sections:
+        if sec.reconciled_cost is None or Decimal(sec.reconciled_cost) <= 0:
+            continue
+        sec_key = (str(sec.section_scope), str(sec.hole_section_id))
+        attr_candidates = sec_attr_weights.get(sec_key, {})
+        if attr_candidates:
+            best_attr = max(attr_candidates.items(), key=lambda kv: kv[1])[0]
+        else:
+            best_attr = ("",) * 10
+        factor_mud_rows.append({
+            "cost_group": "Consumables",
+            "item_code": "MUD-RECON",
+            "item_name": "Mud Chemicals (Reconciled)",
+            "cost_date": sec.last_date or effective_to,
+            "entry_status": "submitted",
+            "section_code": str(sec.section_code or ""),
+            "section_name": str(sec.section_name or ""),
+            "phase_code": best_attr[0],
+            "phase_name": best_attr[1],
+            "activity_code": best_attr[2],
+            "activity_name": best_attr[3],
+            "sub_activity_code": best_attr[4],
+            "sub_activity_name": best_attr[5],
+            "sub_activity_party": best_attr[6],
+            "vendor_code": best_attr[7],
+            "vendor_name": best_attr[8],
+            "party_name": best_attr[9],
+            "classification": "Planned",
+            "service_group": "",
+            "rate_source": "mud_reconciled",
+            "currency": currency,
+            "exchange_rate": Decimal("1"),
+            "budget_key": "consumable_category:Mud Chemicals",
+            "quantity": Decimal(sec.consumption_losses or 0),
+            "amount": _money(Decimal(sec.reconciled_cost)),
+            "standard_amount": _money(Decimal(sec.reconciled_cost)),
+        })
+
+    return _ResolvedMudReconciliation(
+        available=True,
+        currency=currency,
+        reconciliation=reconciliation,
+        actual_mud_chemicals=actual_mud_chemicals,
+        reconciled_mud_cost=reconciled_mud_cost,
+        unreconciled_actual_cost=unreconciled_actual,
+        comparison_mud_cost=comparison_mud_cost,
+        adjustment=adjustment,
+        adjustment_usd=adjustment_usd,
+        reconciled_section_keys=reconciled_section_keys,
+        day_reconciled_cost=dict(day_reconciled_cost),
+        day_covered_raw_cost={k: _money(v) for k, v in day_covered_raw_cost.items()},
+        day_adjustment=day_adjustment,
+        day_adjustment_usd=day_adjustment_usd,
+        afe_reconciled_mud=dict(afe_reconciled_mud),
+        afe_day_reconciled_mud=dict(afe_day_reconciled_mud),
+        afe_covered_raw_mud={k: _money(v) for k, v in afe_covered_raw_mud.items()},
+        afe_adjustment=afe_adjustment,
+        factor_mud_rows=factor_mud_rows,
+        warnings=warnings,
+    )
+
+
 def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = None) -> DailyCostComparison:
     """The locked AFE plan against every actual recorded through the sheet date.
 
@@ -3152,6 +3531,29 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
             select(DailyCostEntry.id, DailyCostEntry.cost_date).where(DailyCostEntry.id.in_(entries))
         ).all()
     }
+    afe_obj = entry.afe or db.get(Afe, entry.afe_id)
+    entry_scope = str(getattr(afe_obj, "configuration_scope", None) or "drilling").lower()
+    well_obj = entry.well or db.get(Well, entry.well_id)
+    mud_resolved = (
+        _resolve_well_mud_reconciliation(
+            db,
+            entry.organization_id,
+            well_obj,
+            currency=entry.standard_currency,
+            date_to=as_of,
+            include_draft=True,
+            scope=entry_scope,
+            skip_if_no_mud_entries=True,
+        )
+        if well_obj is not None
+        else None
+    )
+    reconciled_hole_ids = {
+        hole_id
+        for (sc, hole_id) in (mud_resolved.reconciled_section_keys if mud_resolved and mud_resolved.available else set())
+        if sc == entry_scope
+    }
+
     actual_by_group: dict[str, Decimal] = {key: Decimal("0") for key in group_names}
     # The same actuals cut by whether they were recorded on the report date or
     # before it, so a cost report can print "up to last day", "cost on this
@@ -3165,6 +3567,8 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
     actual_by_group_class: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal("0"))
     unplanned_meta: dict[tuple[str, str], tuple[str, str, str]] = {}
     actual_all: list[tuple[str, Any]] = []
+    raw_mud_for_afe = Decimal("0")
+    covered_raw_mud_for_afe = Decimal("0")
     if entries:
         for model, group in LINE_MODELS:
             rows = db.scalars(
@@ -3180,6 +3584,11 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
             for row in rows:
                 amount = Decimal(row.standard_amount)
                 on_report_date = entry_dates.get(row.entry_id) == as_of
+                if isinstance(row, DailyCostConsumableLine) and row.category == "Mud Chemicals":
+                    raw_mud_for_afe += amount
+                    if row.hole_section_id and str(row.hole_section_id) in reconciled_hole_ids:
+                        covered_raw_mud_for_afe += amount
+                        continue
                 actual_by_group[group] += amount
                 actual_by_group_class[(group, row.classification)] += amount
                 actual_all.append((group, row))
@@ -3222,9 +3631,49 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
                             kind = "tangible"
                         unplanned_meta[(group, key)] = (code, name or kind, line_group)
 
+    mud_reconciled_key: tuple[str, str] | None = None
+    reconciled_mud_for_afe = Decimal("0.00")
+    if mud_resolved is not None and mud_resolved.available:
+        if entry.afe_id in mud_resolved.afe_reconciled_mud or len(mud_resolved.afe_reconciled_mud) > 1:
+            reconciled_mud_for_afe = _money(mud_resolved.afe_reconciled_mud.get(entry.afe_id, Decimal("0")))
+            reconciled_mud_today_for_afe = _money(
+                mud_resolved.afe_day_reconciled_mud.get((entry.afe_id, as_of), Decimal("0"))
+            )
+        else:
+            reconciled_mud_for_afe = _money(mud_resolved.reconciled_mud_cost)
+            reconciled_mud_today_for_afe = _money(mud_resolved.day_reconciled_cost.get(as_of, Decimal("0")))
+        planned_mud_pair = ("Consumables", "consumable_category:Mud Chemicals")
+        mud_reconciled_key = (
+            planned_mud_pair
+            if planned_mud_pair in planned_keys
+            else ("Consumables", "unplanned:consumable_category:Mud Chemicals")
+        )
+        if mud_reconciled_key not in planned_keys:
+            unplanned_meta[mud_reconciled_key] = ("BULK-MUD-CHEMICALS", "Mud Chemicals", "")
+        # Fold any unreconciled mud actuals recorded under unplanned into the single mud row.
+        if (
+            mud_reconciled_key == planned_mud_pair
+            and ("Consumables", "unplanned:consumable_category:Mud Chemicals") in actual_by_key
+        ):
+            extra_unplanned_key = ("Consumables", "unplanned:consumable_category:Mud Chemicals")
+            actual_by_key[mud_reconciled_key] += actual_by_key.pop(extra_unplanned_key)
+            actual_by_key_today[mud_reconciled_key] += actual_by_key_today.pop(extra_unplanned_key, Decimal("0"))
+            for cls_name in ("Planned", "UPA", "NPT"):
+                actual_by_class[(mud_reconciled_key[0], mud_reconciled_key[1], cls_name)] += actual_by_class.pop(
+                    (extra_unplanned_key[0], extra_unplanned_key[1], cls_name), Decimal("0")
+                )
+        actual_by_group["Consumables"] += reconciled_mud_for_afe
+        actual_by_group_class[("Consumables", "Planned")] += reconciled_mud_for_afe
+        actual_by_group_today["Consumables"] += reconciled_mud_today_for_afe
+        actual_by_key[mud_reconciled_key] += reconciled_mud_for_afe
+        actual_by_class[(mud_reconciled_key[0], mud_reconciled_key[1], "Planned")] += reconciled_mud_for_afe
+        actual_by_key_today[mud_reconciled_key] += reconciled_mud_today_for_afe
+
     comparison_lines: list[DailyCostBudgetComparison] = []
     section_labels, phase_labels = _scope_labels(entry.baseline)
     keys = set(planned_keys) | set(actual_by_key)
+    if mud_reconciled_key is not None:
+        keys.add(mud_reconciled_key)
     unplanned_live_groups = _live_unplanned_service_groups(
         db, entry.organization_id, (key for _, key in unplanned_meta)
     )
@@ -3241,7 +3690,8 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
                 (group, key), ("", "Unbudgeted actual", "")
             )
             service_group = unplanned_live_groups.get(key, fallback_group)
-            kind = key.split(":", 1)[0]
+            kind = "consumable_category" if key.endswith("consumable_category:Mud Chemicals") else key.split(":", 1)[0]
+        is_mud_row = mud_reconciled_key == (group, key)
         comparison_lines.append(
             DailyCostBudgetComparison(
                 budget_key=key,
@@ -3264,6 +3714,8 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
                 section_label=section_labels.get(metadata.section_id or "", "") if metadata else "",
                 phase_id=metadata.phase_id if metadata else None,
                 phase_label=phase_labels.get((metadata.section_id or "", metadata.phase_id or ""), "") if metadata else "",
+                is_mud_reconciled=is_mud_row,
+                raw_actual_to_date=_money(raw_mud_for_afe) if is_mud_row else None,
             )
         )
 
@@ -3287,6 +3739,12 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
     other_expenses_to_date = actual_by_group["Other Expenses"]
     planned_total = _money(sum(planned_by_group.values(), Decimal("0")))
     actual_to_date = _money(tracked_actual_to_date + other_expenses_to_date)
+    raw_actual_to_date = _money(actual_to_date - reconciled_mud_for_afe + covered_raw_mud_for_afe)
+    comparison_mud_for_afe = (
+        _money(actual_by_key[mud_reconciled_key])
+        if mud_reconciled_key is not None
+        else _money(raw_mud_for_afe)
+    )
     # ---- LIH Cost Register ---------------------------------------------------
     # The register is manual and lives outside the daily cost groups. Its cost is
     # added to the actual cost and deducted from the AFE amount explicitly, so
@@ -3327,6 +3785,12 @@ def _comparison(db: Session, entry: DailyCostEntry, effective_on: date | None = 
             _money(adjusted_total - lih_to_date - actual_to_date) if adjusted_total is not None else None
         ),
         has_adjustment=adjusted_total is not None,
+        has_mud_reconciliation=mud_reconciled_key is not None,
+        raw_actual_to_date=raw_actual_to_date,
+        actual_mud_chemicals=_money(raw_mud_for_afe),
+        reconciled_mud_cost=reconciled_mud_for_afe,
+        comparison_mud_cost=comparison_mud_for_afe,
+        mud_cost_adjustment=_money(comparison_mud_for_afe - raw_mud_for_afe),
     )
 
 
@@ -3727,10 +4191,136 @@ def _cumulative_cost_index(db: Session, organization_id: str) -> dict[tuple[str,
     ).all()
     running: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal("0"))
     index: dict[tuple[str, str, date], Decimal] = {}
+    max_date_by_well: dict[str, date] = {}
+    afes_by_well: dict[str, set[str]] = defaultdict(set)
+    dates_by_well_afe: dict[tuple[str, str], list[date]] = defaultdict(list)
     for well_id, afe_id, cost_date, total in totals:
-        key = (str(well_id), str(afe_id))
+        w_id, a_id = str(well_id), str(afe_id)
+        key = (w_id, a_id)
         running[key] += Decimal(total or 0)
-        index[(key[0], key[1], cost_date)] = _money(running[key])
+        index[(w_id, a_id, cost_date)] = _money(running[key])
+        if w_id not in max_date_by_well or cost_date > max_date_by_well[w_id]:
+            max_date_by_well[w_id] = cost_date
+        afes_by_well[w_id].add(a_id)
+        dates_by_well_afe[key].append(cost_date)
+
+    if not max_date_by_well:
+        return index
+
+    mud_well_ids = set(
+        str(row_id)
+        for row_id in db.scalars(
+            select(MudCostEntry.well_id)
+            .where(
+                MudCostEntry.organization_id == organization_id,
+                MudCostEntry.well_id.in_(list(max_date_by_well.keys())),
+                MudCostEntry.is_deleted.is_(False),
+            )
+            .distinct()
+        ).all()
+    )
+    if not mud_well_ids:
+        return index
+
+    wells_by_id = {
+        row.id: row
+        for row in db.scalars(
+            select(Well).where(Well.organization_id == organization_id, Well.id.in_(list(mud_well_ids)))
+        ).all()
+    }
+    afe_meta = {
+        row.id: (str(row.configuration_scope or "drilling").lower(), str(row.standard_currency))
+        for row in db.scalars(
+            select(Afe).where(
+                Afe.organization_id == organization_id,
+                Afe.id.in_([aid for wid in mud_well_ids for aid in afes_by_well[wid]]),
+            )
+        ).all()
+    }
+    first_mud_date_rows = db.execute(
+        select(
+            MudCostEntry.well_id,
+            MudCostEntry.section_scope,
+            MudCostEntry.section_id,
+            func.min(MudCostEntry.entry_date),
+        )
+        .where(
+            MudCostEntry.organization_id == organization_id,
+            MudCostEntry.well_id.in_(list(mud_well_ids)),
+            MudCostEntry.is_deleted.is_(False),
+        )
+        .group_by(MudCostEntry.well_id, MudCostEntry.section_scope, MudCostEntry.section_id)
+    ).all()
+    first_mud_date: dict[tuple[str, str, str], date] = {
+        (str(w), str(sc).lower(), str(sid)): min_d
+        for w, sc, sid, min_d in first_mud_date_rows
+        if min_d is not None
+    }
+
+    for w_id in mud_well_ids:
+        well_obj = wells_by_id.get(w_id)
+        if well_obj is None:
+            continue
+        scope_to_afes: dict[str, list[str]] = defaultdict(list)
+        for a_id in sorted(afes_by_well[w_id]):
+            sc, _cur = afe_meta.get(a_id, ("drilling", ""))
+            scope_to_afes[sc].append(a_id)
+        for sc, scope_afes in scope_to_afes.items():
+            if len(scope_afes) == 1:
+                a_id = scope_afes[0]
+                _, afe_cur = afe_meta.get(a_id, (sc, ""))
+                try:
+                    recon = mud_cost_service.reconcile_well(
+                        db,
+                        organization_id,
+                        well_obj,
+                        date_to=max_date_by_well[w_id],
+                        include_draft=True,
+                        scope=sc,
+                    )
+                except HTTPException:
+                    continue
+                if recon.currency != afe_cur or not recon.rows:
+                    continue
+                rows_by_sec: dict[str, list[Any]] = defaultdict(list)
+                for r in recon.rows:
+                    rows_by_sec[str(r.section_id)].append(r)
+                for sec_rows in rows_by_sec.values():
+                    sec_rows.sort(key=lambda item: item.cost_date)
+                for d in dates_by_well_afe[(w_id, a_id)]:
+                    adj_d = Decimal("0")
+                    for sec_id, sec_rows in rows_by_sec.items():
+                        min_entry_d = first_mud_date.get((w_id, sc, sec_id))
+                        if min_entry_d is not None and d < min_entry_d:
+                            continue
+                        latest_r = None
+                        for r in sec_rows:
+                            if r.cost_date <= d:
+                                latest_r = r
+                            else:
+                                break
+                        if latest_r is not None and latest_r.cumulative_reconciled_cost is not None:
+                            adj_d += Decimal(latest_r.cumulative_reconciled_cost) - Decimal(latest_r.cumulative_actual_cost)
+                    if adj_d != 0:
+                        index[(w_id, a_id, d)] = _money(index[(w_id, a_id, d)] + adj_d)
+            else:
+                for a_id in scope_afes:
+                    _, afe_cur = afe_meta.get(a_id, (sc, ""))
+                    for d in dates_by_well_afe[(w_id, a_id)]:
+                        resolved = _resolve_well_mud_reconciliation(
+                            db,
+                            organization_id,
+                            well_obj,
+                            currency=afe_cur,
+                            date_to=d,
+                            include_draft=True,
+                            scope=sc,
+                            skip_if_no_mud_entries=True,
+                        )
+                        if resolved.available:
+                            adj_d = resolved.afe_adjustment.get(a_id, Decimal("0"))
+                            if adj_d != 0:
+                                index[(w_id, a_id, d)] = _money(index[(w_id, a_id, d)] + adj_d)
     return index
 
 
@@ -4161,6 +4751,7 @@ def overview(db: Session, organization_id: str, user: User) -> DailyCostOverview
         # Other expenses are never budgeted in an AFE: planned stays at zero so the
         # group balance is the amount taken off the AFE total.
     actual_by_baseline: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    baseline_by_afe: dict[str, str] = {row.afe_id: row.id for row in baselines}
     for row in active:
         currency = row.standard_currency
         amount = Decimal(row.total_cost)
@@ -4170,6 +4761,59 @@ def overview(db: Session, organization_id: str, user: User) -> DailyCostOverview
         group_actual[(currency, "Consumables")] += Decimal(row.consumables_total)
         group_actual[(currency, "Tangibles")] += Decimal(row.tangibles_total)
         group_actual[(currency, "Other Expenses")] += Decimal(row.other_expenses_total)
+
+    today = date.today()
+    start = today - timedelta(days=29)
+    trend_mud_deltas: dict[tuple[date, str], Decimal] = defaultdict(lambda: Decimal("0"))
+    tracked_well_ids = sorted({row.well_id for row in active})
+    if tracked_well_ids:
+        mud_wells = list(
+            db.scalars(
+                select(Well).where(
+                    Well.organization_id == organization_id,
+                    Well.id.in_(tracked_well_ids),
+                    select(MudCostEntry.id)
+                    .where(
+                        MudCostEntry.organization_id == organization_id,
+                        MudCostEntry.well_id == Well.id,
+                        MudCostEntry.is_deleted.is_(False),
+                    )
+                    .exists(),
+                )
+            ).all()
+        )
+        max_date_by_well: dict[str, date] = {}
+        currency_by_well: dict[str, str] = {}
+        for row in active:
+            if row.well_id not in max_date_by_well or row.cost_date > max_date_by_well[row.well_id]:
+                max_date_by_well[row.well_id] = row.cost_date
+            currency_by_well.setdefault(row.well_id, row.standard_currency)
+        for well_obj in mud_wells:
+            w_cur = currency_by_well.get(well_obj.id)
+            w_to = max_date_by_well.get(well_obj.id)
+            if not w_cur or w_to is None:
+                continue
+            resolved = _resolve_well_mud_reconciliation(
+                db,
+                organization_id,
+                well_obj,
+                currency=w_cur,
+                date_to=w_to,
+                include_draft=True,
+                skip_if_no_mud_entries=True,
+            )
+            if not resolved.available:
+                continue
+            actual[w_cur] += resolved.adjustment
+            group_actual[(w_cur, "Consumables")] += resolved.adjustment
+            for aid, afe_adj in resolved.afe_adjustment.items():
+                b_id = baseline_by_afe.get(aid)
+                if b_id:
+                    actual_by_baseline[b_id] += afe_adj
+            for d, d_adj in resolved.day_adjustment.items():
+                if d >= start and d_adj != 0:
+                    trend_mud_deltas[(d, w_cur)] += d_adj
+
     currencies = sorted(set(planned) | set(actual))
     planned_out = {code: _money(planned[code]) for code in currencies}
     actual_out = {code: _money(actual[code]) for code in currencies}
@@ -4191,8 +4835,6 @@ def overview(db: Session, organization_id: str, user: User) -> DailyCostOverview
         for currency in currencies for group in ALL_COST_GROUPS
     ]
     over_budget = sum(1 for baseline_id, amount in actual_by_baseline.items() if amount > planned_by_baseline.get(baseline_id, Decimal("0")))
-    today = date.today()
-    start = today - timedelta(days=29)
     trend_rows = db.execute(
         select(
             DailyCostEntry.cost_date, DailyCostEntry.standard_currency,
@@ -4203,9 +4845,23 @@ def overview(db: Session, organization_id: str, user: User) -> DailyCostOverview
         ).group_by(DailyCostEntry.cost_date, DailyCostEntry.standard_currency)
         .order_by(DailyCostEntry.cost_date, DailyCostEntry.standard_currency)
     ).all()
-    trend = [DailyCostTrendPoint(
-        cost_date=row[0], currency=row[1], actual=_money(row[2] or 0), upa=_money(row[3] or 0), npt=_money(row[4] or 0)
-    ) for row in trend_rows]
+    trend_map: dict[tuple[date, str], tuple[Decimal, Decimal, Decimal]] = {
+        (row[0], str(row[1])): (Decimal(row[2] or 0), Decimal(row[3] or 0), Decimal(row[4] or 0))
+        for row in trend_rows
+    }
+    for key_dc, d_adj in trend_mud_deltas.items():
+        cur_act, cur_upa, cur_npt = trend_map.get(key_dc, (Decimal("0"), Decimal("0"), Decimal("0")))
+        trend_map[key_dc] = (cur_act + d_adj, cur_upa, cur_npt)
+    trend = [
+        DailyCostTrendPoint(
+            cost_date=d_val,
+            currency=c_val,
+            actual=_money(vals[0]),
+            upa=_money(vals[1]),
+            npt=_money(vals[2]),
+        )
+        for (d_val, c_val), vals in sorted(trend_map.items())
+    ]
     recent = []
     if _has_audit_access(user):
         rows = db.scalars(select(AuditLog).where(
@@ -4262,6 +4918,7 @@ RATE_SOURCE_LABELS = {
     "catalogue_baseline": "Locked catalogue rate",
     "daily_override": "Daily override (justified)",
     "manual_unplanned": "Manual rate (unplanned)",
+    "mud_reconciled": "Mud Cost Reconciliation",
     OTHER_EXPENSE_RATE_SOURCE: "Other expense (entered rate)",
     "": "Unrated",
 }
@@ -4278,6 +4935,8 @@ def _line_union(
     date_to: date | None,
     include_draft: bool,
     scope: str | None = None,
+    exclude_mud_sections: set[tuple[str, str]] | None = None,
+    extra_mud_rows: Sequence[dict[str, Any]] | None = None,
 ) -> Any:
     """A reporting row per priced component, with legacy-line fallback."""
     parts = []
@@ -4352,10 +5011,30 @@ def _line_union(
                 DailyCostEntry.well_id == well_id,
                 DailyCostEntry.is_deleted.is_(False),
             )
+        afe_joined = False
         if scope in ("drilling", "completion"):
             statement = statement.join(Afe, DailyCostEntry.afe_id == Afe.id).where(Afe.configuration_scope == scope)
+            afe_joined = True
             if component_statement is not None:
                 component_statement = component_statement.join(Afe, DailyCostEntry.afe_id == Afe.id).where(Afe.configuration_scope == scope)
+        if model is DailyCostConsumableLine and exclude_mud_sections:
+            if not afe_joined:
+                statement = statement.outerjoin(Afe, DailyCostEntry.afe_id == Afe.id)
+            mud_clauses = [
+                and_(
+                    func.coalesce(Afe.configuration_scope, "drilling") == sec_scope,
+                    DailyCostConsumableLine.hole_section_id == hole_id,
+                )
+                for sec_scope, hole_id in sorted(exclude_mud_sections)
+            ]
+            statement = statement.where(
+                not_(
+                    and_(
+                        DailyCostConsumableLine.category == "Mud Chemicals",
+                        or_(*mud_clauses),
+                    )
+                )
+            )
         if not include_draft:
             statement = statement.where(DailyCostEntry.status == "submitted")
             if component_statement is not None:
@@ -4371,6 +5050,39 @@ def _line_union(
         parts.append(statement)
         if component_statement is not None:
             parts.append(component_statement)
+    if extra_mud_rows:
+        num_type = Numeric(28, DECIMAL_PLACES)
+        for mrow in extra_mud_rows:
+            parts.append(
+                select(
+                    literal(str(mrow["cost_group"]), type_=String).label("cost_group"),
+                    literal(str(mrow["item_code"]), type_=String).label("item_code"),
+                    literal(str(mrow["item_name"]), type_=String).label("item_name"),
+                    literal(mrow["cost_date"], type_=Date).label("cost_date"),
+                    literal(str(mrow["entry_status"]), type_=String).label("entry_status"),
+                    literal(str(mrow["section_code"]), type_=String).label("section_code"),
+                    literal(str(mrow["section_name"]), type_=String).label("section_name"),
+                    literal(str(mrow["phase_code"]), type_=String).label("phase_code"),
+                    literal(str(mrow["phase_name"]), type_=String).label("phase_name"),
+                    literal(str(mrow["activity_code"]), type_=String).label("activity_code"),
+                    literal(str(mrow["activity_name"]), type_=String).label("activity_name"),
+                    literal(str(mrow["sub_activity_code"]), type_=String).label("sub_activity_code"),
+                    literal(str(mrow["sub_activity_name"]), type_=String).label("sub_activity_name"),
+                    literal(str(mrow["sub_activity_party"]), type_=String).label("sub_activity_party"),
+                    literal(str(mrow["vendor_code"]), type_=String).label("vendor_code"),
+                    literal(str(mrow["vendor_name"]), type_=String).label("vendor_name"),
+                    literal(str(mrow["party_name"]), type_=String).label("party_name"),
+                    literal(str(mrow["classification"]), type_=String).label("classification"),
+                    literal(str(mrow["service_group"]), type_=String).label("service_group"),
+                    literal(str(mrow["rate_source"]), type_=String).label("rate_source"),
+                    literal(str(mrow["currency"]), type_=String).label("currency"),
+                    literal(Decimal(mrow["exchange_rate"]), type_=num_type).label("exchange_rate"),
+                    literal(str(mrow["budget_key"]), type_=String).label("budget_key"),
+                    literal(Decimal(mrow["quantity"]), type_=num_type).label("quantity"),
+                    literal(Decimal(mrow["amount"]), type_=num_type).label("amount"),
+                    literal(Decimal(mrow["standard_amount"]), type_=num_type).label("standard_amount"),
+                )
+            )
     return union_all(*parts).subquery("daily_cost_lines")
 
 
@@ -5362,19 +6074,24 @@ def well_cost_summary(
         if adjustment is not None and str(adjustment.standard_currency) == option.standard_currency:
             adjusted_by_afe[option.id] = _money(Decimal(adjustment.adjusted_total))
 
-    lines = _line_union(
+    raw_lines = _line_union(
         organization_id, well_id, date_from=date_from, date_to=date_to, include_draft=include_draft, scope=selected_scope
     )
-    totals_by_group = {
+    raw_line_count = int(db.execute(select(func.count()).select_from(raw_lines)).scalar() or 0)
+    raw_totals_by_group = {
         str(row[0] or ""): Decimal(row[1] or 0)
         for row in db.execute(
-            select(lines.c.cost_group, func.sum(lines.c.standard_amount)).select_from(lines).group_by(lines.c.cost_group)
+            select(raw_lines.c.cost_group, func.sum(raw_lines.c.standard_amount))
+            .select_from(raw_lines)
+            .group_by(raw_lines.c.cost_group)
         ).all()
     }
-    services = totals_by_group.get("Services", Decimal("0"))
-    consumables = totals_by_group.get("Consumables", Decimal("0"))
-    tangibles = totals_by_group.get("Tangibles", Decimal("0"))
-    other_expenses = totals_by_group.get("Other Expenses", Decimal("0"))
+    services = raw_totals_by_group.get("Services", Decimal("0"))
+    raw_consumables = raw_totals_by_group.get("Consumables", Decimal("0"))
+    consumables = raw_consumables
+    tangibles = raw_totals_by_group.get("Tangibles", Decimal("0"))
+    other_expenses = raw_totals_by_group.get("Other Expenses", Decimal("0"))
+    raw_actual_total = _money(services + raw_consumables + tangibles + other_expenses)
     # ---- LIH Cost Register ---------------------------------------------------
     # The manual LIH register is read as its own block. Only entries recorded in
     # this well's comparison currency are added, so unlike currencies are never
@@ -5395,30 +6112,6 @@ def well_cost_summary(
         code or "Currency not specified": _money(amount)
         for code, amount in lih_by_currency.items() if code != currency and amount
     }
-    # Services split by the activity classification of each daily line. The cost
-    # report prints actual under Planned, UPA and NPT beside the whole group.
-    classification_by_group: dict[tuple[str, str], Decimal] = {}
-    for row in db.execute(
-        select(lines.c.cost_group, lines.c.classification, func.sum(lines.c.standard_amount))
-        .select_from(lines).group_by(lines.c.cost_group, lines.c.classification)
-    ).all():
-        classification_by_group[(str(row[0] or ""), str(row[1] or ""))] = Decimal(row[2] or 0)
-    services_actual_planned = classification_by_group.get(("Services", "Planned"), Decimal("0"))
-    services_actual_upa = classification_by_group.get(("Services", "UPA"), Decimal("0"))
-    services_actual_npt = classification_by_group.get(("Services", "NPT"), Decimal("0"))
-    # Other expenses have no planned counterpart, so they only ever widen the gap
-    # between the AFE total and what has actually been spent.
-    actual_total = _money(services + consumables + tangibles + other_expenses)
-    upa = _money(sum((
-        Decimal(row[0] or 0) for row in db.execute(
-            select(func.sum(lines.c.standard_amount)).select_from(lines).where(lines.c.classification == "UPA")
-        ).all()
-    ), Decimal("0")))
-    npt = _money(sum((
-        Decimal(row[0] or 0) for row in db.execute(
-            select(func.sum(lines.c.standard_amount)).select_from(lines).where(lines.c.classification == "NPT")
-        ).all()
-    ), Decimal("0")))
 
     # Other expenses start at zero rather than being absent, so the cost-group cut
     # shows an explicit "nothing was budgeted, this was deducted" balance.
@@ -5462,76 +6155,50 @@ def well_cost_summary(
         adjusted_planned_days = _rate(adjusted_days)
 
     # ---- mud chemicals reconciliation ---------------------------------------
-    # Mud Cost Analysis reconciles each section independently. The final AFE
-    # comparison uses the reconciled mud chemicals amount, while the recorded
-    # actual stays available here and in the daily ledger. Sections that cannot
-    # be reconciled keep their actual cost so nothing is silently dropped.
+    # Mud Cost Analysis reconciles each section independently. Whenever a
+    # reconciled mud cost exists for a section, it replaces the raw daily Mud
+    # Chemicals spend across Consumables, Total Actual, AFE Balance, % Used,
+    # run-sheet days, factor breakdowns and budget reconciliation. Sections
+    # that cannot be reconciled keep their recorded actual cost.
     mud_window_to = date_to or (max((row.cost_date for row in windowed), default=date.today()))
-    mud_statement = select(
-        func.coalesce(func.sum(DailyCostConsumableLine.standard_amount), 0)
-    ).join(
-        DailyCostEntry, DailyCostEntry.id == DailyCostConsumableLine.entry_id,
-    ).where(
-        DailyCostConsumableLine.organization_id == organization_id,
-        DailyCostEntry.organization_id == organization_id,
-        DailyCostEntry.well_id == well_id,
-        DailyCostEntry.is_deleted.is_(False),
-        DailyCostConsumableLine.category == "Mud Chemicals",
-        DailyCostEntry.cost_date <= mud_window_to,
-    )
-    if date_from is not None:
-        mud_statement = mud_statement.where(DailyCostEntry.cost_date >= date_from)
-    if selected_scope is not None:
-        mud_statement = mud_statement.join(Afe, DailyCostEntry.afe_id == Afe.id).where(Afe.configuration_scope == selected_scope)
-    if not include_draft:
-        mud_statement = mud_statement.where(DailyCostEntry.status == "submitted")
-    actual_mud_chemicals = _money(Decimal(db.scalar(mud_statement) or 0))
+    mud_resolved: _ResolvedMudReconciliation | None = None
     mud_warnings: list[DailyCostWarnings] = []
     mud_reconciliation: DailyCostMudReconciliation | None = None
-    comparison_mud_cost = actual_mud_chemicals
+    actual_mud_chemicals = Decimal("0.00")
     reconciled_mud_cost = Decimal("0.00")
+    comparison_mud_cost = Decimal("0.00")
     if entries:
-        try:
-            reconciliation = mud_cost_service.reconcile_well(
-                db, organization_id, well,
-                date_from=date_from, date_to=mud_window_to, include_draft=include_draft,
-            )
-        except HTTPException as error:
-            mud_warnings.append(DailyCostWarnings(
-                code="mud-reconciliation-unavailable", severity="warning",
-                message=f"Mud cost reconciliation is unavailable: {error.detail}",
-            ))
-            reconciliation = None
+        mud_resolved = _resolve_well_mud_reconciliation(
+            db,
+            organization_id,
+            well,
+            currency=currency,
+            date_from=date_from,
+            date_to=mud_window_to,
+            include_draft=include_draft,
+            scope=selected_scope,
+        )
+        actual_mud_chemicals = mud_resolved.actual_mud_chemicals
+        reconciled_mud_cost = mud_resolved.reconciled_mud_cost
+        comparison_mud_cost = mud_resolved.comparison_mud_cost
+        mud_warnings.extend(mud_resolved.warnings)
+        reconciliation = mud_resolved.reconciliation
         if reconciliation is not None:
-            covered_actual = sum(
-                (row.actual_cost for row in reconciliation.sections
-                 if row.reconciled_cost is not None),
-                Decimal("0"),
-            )
-            reconciled_mud_cost = _money(sum(
-                (row.reconciled_cost for row in reconciliation.sections
-                 if row.reconciled_cost is not None),
-                Decimal("0"),
-            ))
-            unreconciled_actual = _money(max(actual_mud_chemicals - covered_actual, Decimal("0")))
-            comparison_mud_cost = _money(reconciled_mud_cost + unreconciled_actual)
             notes: list[str] = []
-            if any(row.reconciled_cost is not None for row in reconciliation.sections):
+            if mud_resolved.available:
                 notes.append("The final comparison uses the reconciled mud chemicals cost; the recorded actual remains visible.")
             if reconciliation.unconfigured_section_count:
                 notes.append(
                     f"{reconciliation.unconfigured_section_count} section(s) have no mud configuration and remain at actual cost."
                 )
             mud_reconciliation = DailyCostMudReconciliation(
-                available=bool(reconciliation.sections) and any(
-                    row.reconciled_cost is not None for row in reconciliation.sections
-                ),
+                available=mud_resolved.available,
                 currency=currency,
                 actual_cost=actual_mud_chemicals,
                 reconciled_cost=reconciled_mud_cost,
-                unreconciled_actual_cost=unreconciled_actual,
+                unreconciled_actual_cost=mud_resolved.unreconciled_actual_cost,
                 comparison_cost=comparison_mud_cost,
-                adjustment=_money(comparison_mud_cost - actual_mud_chemicals),
+                adjustment=mud_resolved.adjustment,
                 planned_cost=reconciliation.total_planned_cost,
                 latest_cost_per_bbl=reconciliation.latest_cost_per_bbl,
                 latest_cost_per_bbl_section=reconciliation.latest_cost_per_bbl_section,
@@ -5579,9 +6246,68 @@ def well_cost_summary(
                         f"adjustment {currency} {mud_reconciliation.adjustment:,.3f})."
                     ),
                 ))
-    comparison_actual = _money(actual_total - actual_mud_chemicals + comparison_mud_cost)
-    comparison_consumables = _money(consumables - actual_mud_chemicals + comparison_mud_cost)
+
+    has_mud_reconciliation = bool(mud_resolved is not None and mud_resolved.available)
+    if has_mud_reconciliation and mud_resolved is not None:
+        lines = _line_union(
+            organization_id,
+            well_id,
+            date_from=date_from,
+            date_to=date_to,
+            include_draft=include_draft,
+            scope=selected_scope,
+            exclude_mud_sections=mud_resolved.reconciled_section_keys,
+        )
+        factor_lines = _line_union(
+            organization_id,
+            well_id,
+            date_from=date_from,
+            date_to=date_to,
+            include_draft=include_draft,
+            scope=selected_scope,
+            exclude_mud_sections=mud_resolved.reconciled_section_keys,
+            extra_mud_rows=mud_resolved.factor_mud_rows,
+        )
+    else:
+        lines = raw_lines
+        factor_lines = raw_lines
+
+    # Services split by the activity classification of each daily line. The cost
+    # report prints actual under Planned, UPA and NPT beside the whole group.
+    classification_by_group: dict[tuple[str, str], Decimal] = {}
+    for row in db.execute(
+        select(factor_lines.c.cost_group, factor_lines.c.classification, func.sum(factor_lines.c.standard_amount))
+        .select_from(factor_lines).group_by(factor_lines.c.cost_group, factor_lines.c.classification)
+    ).all():
+        classification_by_group[(str(row[0] or ""), str(row[1] or ""))] = Decimal(row[2] or 0)
+    services_actual_planned = classification_by_group.get(("Services", "Planned"), Decimal("0"))
+    services_actual_upa = classification_by_group.get(("Services", "UPA"), Decimal("0"))
+    services_actual_npt = classification_by_group.get(("Services", "NPT"), Decimal("0"))
+    upa = _money(sum((
+        Decimal(row[0] or 0) for row in db.execute(
+            select(func.sum(factor_lines.c.standard_amount))
+            .select_from(factor_lines)
+            .where(factor_lines.c.classification == "UPA")
+        ).all()
+    ), Decimal("0")))
+    npt = _money(sum((
+        Decimal(row[0] or 0) for row in db.execute(
+            select(func.sum(factor_lines.c.standard_amount))
+            .select_from(factor_lines)
+            .where(factor_lines.c.classification == "NPT")
+        ).all()
+    ), Decimal("0")))
+
+    comparison_consumables = _money(raw_consumables - actual_mud_chemicals + comparison_mud_cost)
+    comparison_actual = _money(raw_actual_total - actual_mud_chemicals + comparison_mud_cost)
+    if has_mud_reconciliation:
+        consumables = comparison_consumables
+        actual_total = comparison_actual
+    else:
+        actual_total = raw_actual_total
+
     # LIH is added to the actual cost and deducted from the AFE amount explicitly.
+    raw_actual_including_lih = _money(raw_actual_total + lih_total)
     actual_including_lih = _money(actual_total + lih_total)
     comparison_actual_including_lih = _money(comparison_actual + lih_total)
     comparison_balance = _money(planned_total - comparison_actual)
@@ -5610,7 +6336,7 @@ def well_cost_summary(
         day = per_day.setdefault(row[0], {
             "Services": Decimal("0"), "Consumables": Decimal("0"), "Tangibles": Decimal("0"),
             "Other Expenses": Decimal("0"),
-            "UPA": Decimal("0"), "NPT": Decimal("0"), "sheets": set(), "statuses": set(),
+            "UPA": Decimal("0"), "NPT": Decimal("0"), "usd_total": Decimal("0"), "sheets": set(), "statuses": set(),
         })
         day[row[1]] = Decimal(row[2] or 0)
     for row in db.execute(
@@ -5628,6 +6354,27 @@ def well_cost_summary(
         day["usd_total"] = Decimal(day.get("usd_total", Decimal("0"))) + Decimal(entry.total_cost_usd)
         day["sheets"].add(entry.id)
         day["statuses"].add(entry.status)
+    if has_mud_reconciliation and mud_resolved is not None:
+        for d_key, recon_day_val in mud_resolved.day_reconciled_cost.items():
+            if recon_day_val == 0 and d_key not in per_day:
+                continue
+            day = per_day.setdefault(d_key, {
+                "Services": Decimal("0"), "Consumables": Decimal("0"), "Tangibles": Decimal("0"),
+                "Other Expenses": Decimal("0"),
+                "UPA": Decimal("0"), "NPT": Decimal("0"), "usd_total": Decimal("0"),
+                "sheets": set(), "statuses": {"submitted"},
+            })
+            day["Consumables"] = Decimal(day["Consumables"]) + recon_day_val
+        for d_key, usd_adj_val in mud_resolved.day_adjustment_usd.items():
+            if usd_adj_val == 0 and d_key not in per_day:
+                continue
+            day = per_day.setdefault(d_key, {
+                "Services": Decimal("0"), "Consumables": Decimal("0"), "Tangibles": Decimal("0"),
+                "Other Expenses": Decimal("0"),
+                "UPA": Decimal("0"), "NPT": Decimal("0"), "usd_total": Decimal("0"),
+                "sheets": set(), "statuses": {"submitted"},
+            })
+            day["usd_total"] = Decimal(day.get("usd_total", Decimal("0"))) + usd_adj_val
     _, summary_day_depths, _ = resolve_actual_depths(
         db,
         organization_id,
@@ -5677,7 +6424,14 @@ def well_cost_summary(
         for baseline in baselines:
             if baseline.afe_id == option.id:
                 planned += Decimal(baseline.total_amount)
-        actual = _money(sum((Decimal(row.total_cost) for row in entry_rows), Decimal("0")))
+        raw_afe_actual = _money(sum((Decimal(row.total_cost) for row in entry_rows), Decimal("0")))
+        afe_mud_adj = Decimal("0")
+        if has_mud_reconciliation and mud_resolved is not None:
+            if len(afe_options) == 1:
+                afe_mud_adj = mud_resolved.adjustment
+            else:
+                afe_mud_adj = mud_resolved.afe_adjustment.get(option.id, Decimal("0"))
+        actual = _money(raw_afe_actual + afe_mud_adj)
         # total_cost already contains the other expenses, so the balance below is the
         # AFE total net of those deductions; the split is reported alongside it.
         other_for_afe = _money(sum((Decimal(row.other_expenses_total) for row in entry_rows), Decimal("0")))
@@ -5724,49 +6478,49 @@ def well_cost_summary(
     factors = [
         DailyCostFactorGroup(
             dimension="cost_group", label=FACTOR_LABELS["cost_group"], currency=currency, total=planned_total,
-            rows=_factor_rows(db, lines, "cost_group", currency=currency, total=actual_total,
+            rows=_factor_rows(db, factor_lines, "cost_group", currency=currency, total=actual_total,
                               planned_lookup=planned_by_group_lookup),
         ),
         DailyCostFactorGroup(
             dimension="classification", label=FACTOR_LABELS["classification"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "classification", currency=currency, total=actual_total),
+            rows=_factor_rows(db, factor_lines, "classification", currency=currency, total=actual_total),
         ),
         DailyCostFactorGroup(
             dimension="section", label=FACTOR_LABELS["section"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "section", currency=currency, total=actual_total,
+            rows=_factor_rows(db, factor_lines, "section", currency=currency, total=actual_total,
                               planned_lookup=planned_by_section_lookup),
         ),
         DailyCostFactorGroup(
             dimension="phase", label=FACTOR_LABELS["phase"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "phase", currency=currency, total=actual_total),
+            rows=_factor_rows(db, factor_lines, "phase", currency=currency, total=actual_total),
         ),
         DailyCostFactorGroup(
             dimension="activity", label=FACTOR_LABELS["activity"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "activity", currency=currency, total=actual_total),
+            rows=_factor_rows(db, factor_lines, "activity", currency=currency, total=actual_total),
         ),
         DailyCostFactorGroup(
             dimension="sub_activity", label=FACTOR_LABELS["sub_activity"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "sub_activity", currency=currency, total=actual_total),
+            rows=_factor_rows(db, factor_lines, "sub_activity", currency=currency, total=actual_total),
         ),
         DailyCostFactorGroup(
             dimension="party", label=FACTOR_LABELS["party"], currency=currency, total=actual_total,
             rows=_party_factor_rows(
-                db, organization_id, well_id, lines,
+                db, organization_id, well_id, factor_lines,
                 currency=currency, total=actual_total,
                 date_from=date_from, date_to=date_to, include_draft=include_draft,
             ),
         ),
         DailyCostFactorGroup(
             dimension="rate_source", label=FACTOR_LABELS["rate_source"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "rate_source", currency=currency, total=actual_total),
+            rows=_factor_rows(db, factor_lines, "rate_source", currency=currency, total=actual_total),
         ),
         DailyCostFactorGroup(
             dimension="item", label=FACTOR_LABELS["item"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "item", currency=currency, total=actual_total),
+            rows=_factor_rows(db, factor_lines, "item", currency=currency, total=actual_total),
         ),
         DailyCostFactorGroup(
             dimension="currency", label=FACTOR_LABELS["currency"], currency=currency, total=actual_total,
-            rows=_factor_rows(db, lines, "currency", currency=currency, total=actual_total, native=True),
+            rows=_factor_rows(db, factor_lines, "currency", currency=currency, total=actual_total, native=True),
         ),
     ]
 
@@ -5806,7 +6560,7 @@ def well_cost_summary(
     actual_by_key = {str(row[0] or ""): Decimal(row[2] or 0) for row in budget_rows}
     # Cost recorded on the last report day, split out of the cumulative column so
     # the printed report shows "up to last day", "this day" and the total.
-    report_day = max((row.cost_date for row in windowed), default=None)
+    report_day = max(list(per_day.keys()), default=max((row.cost_date for row in windowed), default=None))
     today_rows = db.execute(
         select(lines.c.budget_key, func.sum(lines.c.standard_amount))
         .select_from(lines)
@@ -5864,11 +6618,51 @@ def well_cost_summary(
             or f"Unbudgeted {row[0].lower()} — {row[4] or row[5] or UNASSIGNED}"
         )
         unplanned_groups[group_key] = str(row[6] or "")
+
+    summary_mud_key: str | None = None
+    if has_mud_reconciliation and mud_resolved is not None:
+        summary_mud_key = (
+            "consumable_category:Mud Chemicals"
+            if "consumable_category:Mud Chemicals" in planned_by_key
+            else "unplanned:consumable_category:Mud Chemicals"
+        )
+        if (
+            summary_mud_key == "consumable_category:Mud Chemicals"
+            and "unplanned:consumable_category:Mud Chemicals" in actual_by_key
+        ):
+            extra_unplanned_mud = "unplanned:consumable_category:Mud Chemicals"
+            actual_by_key[summary_mud_key] = actual_by_key.get(summary_mud_key, Decimal("0")) + actual_by_key.pop(
+                extra_unplanned_mud
+            )
+            actual_today_by_key[summary_mud_key] = _money(
+                actual_today_by_key.get(summary_mud_key, Decimal("0"))
+                + actual_today_by_key.pop(extra_unplanned_mud, Decimal("0"))
+            )
+            ex_p, ex_u, ex_n = class_by_key.pop(extra_unplanned_mud, (Decimal("0"),) * 3)
+            cur_p, cur_u, cur_n = class_by_key.get(summary_mud_key, (Decimal("0"),) * 3)
+            class_by_key[summary_mud_key] = (cur_p + ex_p, cur_u + ex_u, cur_n + ex_n)
+        actual_by_key[summary_mud_key] = actual_by_key.get(summary_mud_key, Decimal("0")) + reconciled_mud_cost
+        today_mud_val = (
+            mud_resolved.day_reconciled_cost.get(report_day, Decimal("0")) if report_day is not None else Decimal("0")
+        )
+        actual_today_by_key[summary_mud_key] = _money(
+            actual_today_by_key.get(summary_mud_key, Decimal("0")) + today_mud_val
+        )
+        cur_p, cur_u, cur_n = class_by_key.get(summary_mud_key, (Decimal("0"),) * 3)
+        class_by_key[summary_mud_key] = (cur_p + reconciled_mud_cost, cur_u, cur_n)
+        group_by_key[summary_mud_key] = "Consumables"
+        if summary_mud_key not in planned_by_key:
+            unplanned_codes[("Consumables", summary_mud_key)] = "BULK-MUD-CHEMICALS"
+            unplanned_names[("Consumables", summary_mud_key)] = "Mud Chemicals"
+
     unplanned_live_groups = _live_unplanned_service_groups(
         db, organization_id, (key for _, key in unplanned_groups)
     )
     budget_lines: list[DailyCostBudgetComparison] = []
-    for key in sorted(set(planned_by_key) | set(actual_by_key), key=lambda value: -abs(actual_by_key.get(value, Decimal("0")))):
+    all_summary_keys = set(planned_by_key) | set(actual_by_key)
+    if summary_mud_key is not None:
+        all_summary_keys.add(summary_mud_key)
+    for key in sorted(all_summary_keys, key=lambda value: -abs(actual_by_key.get(value, Decimal("0")))):
         budget_line = meta.get(key)
         if budget_line is not None:
             group = budget_line.cost_group
@@ -5876,13 +6670,14 @@ def well_cost_summary(
             service_group = report_groups.get(key, budget_line.service_group)
         else:
             group = group_by_key.get(key, "Services")
-            kind = key.split(":", 1)[0] if key else "unplanned"
+            kind = "consumable_category" if key.endswith("consumable_category:Mud Chemicals") else (key.split(":", 1)[0] if key else "unplanned")
             code = unplanned_codes.get((str(group), key), "" if key.startswith("unplanned:") else key.split(":", 1)[-1][:50])
             name = unplanned_names.get((str(group), key), f"Unbudgeted {str(group).lower()}")
             service_group = unplanned_live_groups.get(key) or unplanned_groups.get((str(group), key), "")
         planned_value = planned_by_key.get(key)
         actual_value = _money(actual_by_key.get(key, Decimal("0")))
         split_planned, split_upa, split_npt = class_by_key.get(key, (Decimal("0"),) * 3)
+        is_mud_row = summary_mud_key == key
         budget_lines.append(DailyCostBudgetComparison(
             budget_key=key, cost_group=group, budget_kind=kind, item_code=code, item_name=name,
             service_group=service_group,
@@ -5896,6 +6691,8 @@ def well_cost_summary(
             actual_planned=_money(split_planned),
             actual_upa=_money(split_upa),
             actual_npt=_money(split_npt),
+            is_mud_reconciled=is_mud_row,
+            raw_actual_to_date=actual_mud_chemicals if is_mud_row else None,
         ))
 
     # ---- warnings and totals -------------------------------------------------
@@ -6002,7 +6799,7 @@ def well_cost_summary(
         sheets=len(windowed),
         draft_sheets=sum(1 for row in windowed if row.status == "draft"),
         submitted_sheets=sum(1 for row in windowed if row.status == "submitted"),
-        lines=int(db.execute(select(func.count()).select_from(lines)).scalar() or 0),
+        lines=raw_line_count,
         adjusted_planned=adjusted_planned,
         adjusted_balance=adjusted_balance,
         adjusted_used_percent=adjusted_used,
@@ -6012,6 +6809,9 @@ def well_cost_summary(
         actual_days_basis="spud" if spudded_rows else "recorded",
         spud_actual_days=spud_actual_days if spudded_rows else None,
         spud_days_variance=spud_days_variance if spudded_rows else None,
+        raw_actual=raw_actual_total,
+        raw_consumables=_money(raw_consumables),
+        raw_actual_including_lih=raw_actual_including_lih,
         actual_mud_chemicals=actual_mud_chemicals,
         reconciled_mud_cost=_money(reconciled_mud_cost),
         comparison_mud_cost=_money(comparison_mud_cost),
@@ -6164,20 +6964,20 @@ def well_cost_summary(
 
     criteria_rows = db.execute(
         select(
-            lines.c.section_code, lines.c.section_name,
-            lines.c.phase_code, lines.c.phase_name,
-            lines.c.activity_code, lines.c.activity_name,
-            lines.c.classification,
-            func.sum(lines.c.standard_amount),
+            factor_lines.c.section_code, factor_lines.c.section_name,
+            factor_lines.c.phase_code, factor_lines.c.phase_name,
+            factor_lines.c.activity_code, factor_lines.c.activity_name,
+            factor_lines.c.classification,
+            func.sum(factor_lines.c.standard_amount),
         )
-        .select_from(lines)
+        .select_from(factor_lines)
         .group_by(
-            lines.c.section_code, lines.c.section_name,
-            lines.c.phase_code, lines.c.phase_name,
-            lines.c.activity_code, lines.c.activity_name,
-            lines.c.classification,
+            factor_lines.c.section_code, factor_lines.c.section_name,
+            factor_lines.c.phase_code, factor_lines.c.phase_name,
+            factor_lines.c.activity_code, factor_lines.c.activity_name,
+            factor_lines.c.classification,
         )
-        .order_by(func.sum(lines.c.standard_amount).desc())
+        .order_by(func.sum(factor_lines.c.standard_amount).desc())
     ).all()
     criteria: list[DailyCostCriteriaRow] = []
     for section_code, section_name, phase_code, phase_name, activity_code, activity_name, classification, amount in criteria_rows:
@@ -6596,3 +7396,87 @@ def record_export(db: Session, user: User, data: DailyCostExportAudit, request: 
         request=request,
     )
     _commit(db)
+
+
+def mud_reconciliation_overview(
+    db: Session,
+    organization_id: str,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    include_draft: bool = True,
+) -> list[DailyCostWellMudOverviewItem]:
+    """Per-well mud reconciliation adjustments across tracked wells in one call."""
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="The start date must not be after the end date")
+    entry_stmt = select(
+        DailyCostEntry.well_id,
+        DailyCostEntry.standard_currency,
+        func.max(DailyCostEntry.cost_date),
+    ).where(
+        DailyCostEntry.organization_id == organization_id,
+        DailyCostEntry.is_deleted.is_(False),
+    )
+    if not include_draft:
+        entry_stmt = entry_stmt.where(DailyCostEntry.status == "submitted")
+    if date_from is not None:
+        entry_stmt = entry_stmt.where(DailyCostEntry.cost_date >= date_from)
+    if date_to is not None:
+        entry_stmt = entry_stmt.where(DailyCostEntry.cost_date <= date_to)
+    entry_rows = db.execute(entry_stmt.group_by(DailyCostEntry.well_id, DailyCostEntry.standard_currency)).all()
+    if not entry_rows:
+        return []
+    currencies_by_well: dict[str, set[str]] = defaultdict(set)
+    max_date_by_well: dict[str, date] = {}
+    for w_id, cur, max_d in entry_rows:
+        wid = str(w_id)
+        currencies_by_well[wid].add(str(cur))
+        if max_d is not None and (wid not in max_date_by_well or max_d > max_date_by_well[wid]):
+            max_date_by_well[wid] = max_d
+    single_currency_wells = {wid: next(iter(curs)) for wid, curs in currencies_by_well.items() if len(curs) == 1}
+    if not single_currency_wells:
+        return []
+    mud_wells = list(
+        db.scalars(
+            select(Well).where(
+                Well.organization_id == organization_id,
+                Well.is_deleted.is_(False),
+                Well.id.in_(list(single_currency_wells.keys())),
+                select(MudCostEntry.id)
+                .where(
+                    MudCostEntry.organization_id == organization_id,
+                    MudCostEntry.well_id == Well.id,
+                    MudCostEntry.is_deleted.is_(False),
+                )
+                .exists(),
+            )
+        ).all()
+    )
+    out: list[DailyCostWellMudOverviewItem] = []
+    for well_obj in sorted(mud_wells, key=lambda w: w.well_code):
+        w_cur = single_currency_wells[well_obj.id]
+        eff_to = date_to or max_date_by_well.get(well_obj.id, date.today())
+        resolved = _resolve_well_mud_reconciliation(
+            db,
+            organization_id,
+            well_obj,
+            currency=w_cur,
+            date_from=date_from,
+            date_to=eff_to,
+            include_draft=include_draft,
+            skip_if_no_mud_entries=True,
+        )
+        if not resolved.available:
+            continue
+        out.append(DailyCostWellMudOverviewItem(
+            well_id=well_obj.id,
+            currency=w_cur,
+            has_mud_reconciliation=True,
+            actual_mud_chemicals=resolved.actual_mud_chemicals,
+            reconciled_mud_cost=resolved.reconciled_mud_cost,
+            comparison_mud_cost=resolved.comparison_mud_cost,
+            mud_cost_adjustment=resolved.adjustment,
+            mud_cost_adjustment_usd=resolved.adjustment_usd,
+        ))
+    return out
+

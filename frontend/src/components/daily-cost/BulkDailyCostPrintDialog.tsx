@@ -57,11 +57,13 @@ export function BulkDailyCostPrintDialog({ open, onClose, entries, wells }: {
   const loadContext = async (entry: DailyCostEntry, rigId: string, scope?: NdtScope) => {
     const ndtParams = new URLSearchParams({ well_id: entry.well_id })
     if (scope) ndtParams.set('scope', scope)
+    const mudParams = new URLSearchParams({
+      rig_id: rigId, well_id: entry.well_id, to: entry.cost_date, include_draft: 'true',
+    })
+    if (scope) mudParams.set('scope', scope)
     const [mudReconciliation, mudBalance, lihReport, ndtInspections] = await Promise.all([
       rigId
-        ? api<MudCostReconciliation>(`/mud-cost/reconciliation?${new URLSearchParams({
-          rig_id: rigId, well_id: entry.well_id, to: entry.cost_date, include_draft: 'true',
-        })}`, { silent: true }).catch(() => null)
+        ? api<MudCostReconciliation>(`/mud-cost/reconciliation?${mudParams}`, { silent: true }).catch(() => null)
         : Promise.resolve(null),
       rigId
         ? api<MudCostMaterialBalance>(`/mud-cost/material-balance?${new URLSearchParams({
