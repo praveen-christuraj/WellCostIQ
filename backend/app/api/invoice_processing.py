@@ -24,6 +24,7 @@ from app.schemas.invoice_processing import (
     InvoiceIDs,
     InvoiceImportOut,
     InvoiceImportRequest,
+    InvoiceOrderLineItemOption,
     InvoicePaymentIn,
     InvoicePaymentTermIn,
     InvoicePaymentTermOut,
@@ -44,6 +45,15 @@ router = APIRouter(prefix="/invoice-processing", tags=["Invoice Processing"])
 @router.get("/reference", response_model=InvoiceReference, dependencies=[Depends(require("invoice-processing:read"))])
 def reference(db: Db, user: Current):
     return service.reference_data(db, user.organization_id)
+
+
+@router.get(
+    "/orders/{order_id}/line-items",
+    response_model=list[InvoiceOrderLineItemOption],
+    dependencies=[Depends(require("invoice-processing:read"))],
+)
+def order_line_items(order_id: str, db: Db, user: Current):
+    return service.order_line_items_for_invoice(db, user.organization_id, order_id)
 
 
 @router.get("/configuration", response_model=InvoiceConfiguration, dependencies=[Depends(require("invoice-processing:configure"))])

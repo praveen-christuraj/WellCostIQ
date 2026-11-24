@@ -10,9 +10,12 @@ Attachments are kept in the workspace database (``po_so_documents.content``)
 because the deployed API filesystem is ephemeral; metadata stays column-wise.
 """
 
+import csv
 import hashlib
+import io
 import re
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Iterable
 from urllib.parse import quote
 
@@ -25,7 +28,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import Current, Db, require
 from app.core.config import get_settings
+from app.core.precision import DECIMAL_QUANT
+from app.core.spreadsheets import safe_csv_cell
 from app.models import AuditLog
+from app.models.master_data import Currency
 from app.models.service_master import Service
 from app.models.vendor_master import (
     DOCUMENT_KINDS,
@@ -34,6 +40,8 @@ from app.models.vendor_master import (
     VENDOR_STATUSES,
     OrderDocument,
     PurchaseOrder,
+    PurchaseOrderLineItem,
+    PurchaseOrderLineItemRevision,
     Vendor,
 )
 from app.schemas.master_data import (
@@ -48,8 +56,17 @@ from app.schemas.vendor_master import (
     DocumentUpdate,
     DocumentUploadItem,
     DocumentUploadResult,
+    MAX_RATE,
     OrderAmendmentCreate,
     OrderCreate,
+    OrderLineItemAmend,
+    OrderLineItemBulkReviseRequest,
+    OrderLineItemBulkReviseResponse,
+    OrderLineItemCreate,
+    OrderLineItemImportResponse,
+    OrderLineItemOut,
+    OrderLineItemRevisionOut,
+    OrderLineItemUpdate,
     OrderOut,
     OrderRevisionOut,
     OrderUpdate,
@@ -69,11 +86,13 @@ router = APIRouter(prefix="/master-data", tags=["Vendors & PO/SO Orders"])
 VENDOR_LABEL = "Vendors"
 ORDER_LABEL = "PO/SO Orders"
 DOCUMENT_LABEL = "PO/SO Documents"
+LINE_ITEM_LABEL = "PO/SO Line Items"
 
 VENDOR_ENTITY = "vendor"
 ORDER_ENTITY = "po_so_order"
 DOCUMENT_ENTITY = "po_so_document"
-AUDIT_ENTITY_TYPES = (VENDOR_ENTITY, ORDER_ENTITY, DOCUMENT_ENTITY)
+LINE_ITEM_ENTITY = "po_so_line_item"
+AUDIT_ENTITY_TYPES = (VENDOR_ENTITY, ORDER_ENTITY, DOCUMENT_ENTITY, LINE_ITEM_ENTITY)
 
 # Documents are the payload of this module, so the accepted families are explicit.
 ALLOWED_DOCUMENT_EXTENSIONS = (
@@ -114,6 +133,21 @@ ORDER_IMPORT_ALIASES = {
     "expiry_date": ("expiry_date", "valid_until", "validity_date", "end_date"),
     "status": ("status", "order_status"),
     "description": ("description", "remarks", "notes", "scope", "desc"),
+}
+
+LINE_ITEM_IMPORT_ALIASES = {
+    "order_number": ("order_number", "po_so_number", "po_number", "so_number", "order", "po"),
+    "order_revision": ("order_revision", "revision_number", "po_revision", "order_rev", "rev"),
+    "line_item_code": ("line_item_code", "line_code", "item_code", "code", "line_no", "line_number", "schedule_code"),
+    "vendor_code": ("vendor_code", "vendor_item_code", "supplier_item_code", "catalog_code", "catalogue_code", "part_code"),
+    "description": ("description", "item_description", "line_description", "scope", "particulars", "desc"),
+    "unit_rate": ("unit_rate", "new_unit_rate", "rate", "unit_price", "price", "new_rate", "current_unit_rate"),
+    "new_unit_rate": ("new_unit_rate", "revised_unit_rate", "new_rate", "revised_rate"),
+    "currency": ("currency", "currency_code", "ccy", "curr"),
+    "new_currency": ("new_currency", "revised_currency"),
+    "effective_date": ("effective_date", "valid_from", "rate_date", "date"),
+    "reason": ("reason", "amendment_reason", "revision_note", "notes", "remarks"),
+    "sort_order": ("sort_order", "line_order", "sequence", "sl_no"),
 }
 
 # Spreadsheet-friendly aliases, so an ERP dump imports without hand editing.
@@ -296,6 +330,41 @@ def _document_counts(db: Session, organization_id: str, order_ids: Iterable[str]
     return {order_id: count for order_id, count in rows}
 
 
+def _line_item_or_404(
+    db: Session,
+    line_item_id: str,
+    organization_id: str,
+    *,
+    include_deleted: bool = True,
+) -> PurchaseOrderLineItem:
+    statement = select(PurchaseOrderLineItem).where(
+        PurchaseOrderLineItem.id == line_item_id,
+        PurchaseOrderLineItem.organization_id == organization_id,
+    )
+    if not include_deleted:
+        statement = statement.where(PurchaseOrderLineItem.is_deleted.is_(False))
+    item = db.scalar(statement)
+    if item is None:
+        raise HTTPException(status_code=404, detail="PO/SO line item not found in this workspace")
+    return item
+
+
+def _line_item_counts(db: Session, organization_id: str, order_ids: Iterable[str]) -> dict[str, int]:
+    ids = [order_id for order_id in order_ids]
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(PurchaseOrderLineItem.order_id, func.count(PurchaseOrderLineItem.id))
+        .where(
+            PurchaseOrderLineItem.organization_id == organization_id,
+            PurchaseOrderLineItem.is_deleted.is_(False),
+            PurchaseOrderLineItem.order_id.in_(ids),
+        )
+        .group_by(PurchaseOrderLineItem.order_id)
+    ).all()
+    return {order_id: count for order_id, count in rows}
+
+
 def _revision_counts(db: Session, organization_id: str, order_numbers: Iterable[str]) -> dict[str, int]:
     numbers = list({number for number in order_numbers if number})
     if not numbers:
@@ -396,6 +465,7 @@ def _order_out(
     order: PurchaseOrder,
     *,
     document_count: int = 0,
+    line_item_count: int = 0,
     revision_count: int = 1,
 ) -> OrderOut:
     expiry = order.expiry_date
@@ -416,12 +486,65 @@ def _order_out(
         status=order.status,
         description=order.description or "",
         document_count=document_count,
+        line_item_count=line_item_count,
         revision_count=revision_count,
         is_expired=bool(expiry and expiry < _today()),
         is_deleted=order.is_deleted,
         deleted_at=order.deleted_at,
         created_at=order.created_at,
         updated_at=order.updated_at,
+    )
+
+
+def _line_item_out(item: PurchaseOrderLineItem, order: PurchaseOrder | None = None) -> OrderLineItemOut:
+    order = order or item.order
+    vendor = order.vendor if order else None
+    return OrderLineItemOut(
+        id=item.id,
+        order_id=item.order_id,
+        order_number=order.order_number if order else "",
+        order_type=order.order_type if order else "PO",
+        order_revision_number=order.revision_number if order else 0,
+        order_is_current=bool(order.is_current) if order else False,
+        order_vendor_id=order.vendor_id if order else "",
+        order_vendor_code=vendor.vendor_code if vendor else "",
+        order_vendor_name=vendor.vendor_name if vendor else "",
+        parent_line_item_id=item.parent_line_item_id,
+        line_item_code=item.line_item_code,
+        vendor_code=item.vendor_code or "",
+        description=item.description or "",
+        unit_rate=item.unit_rate,
+        currency=item.currency,
+        effective_date=item.effective_date,
+        current_revision_number=item.current_revision_number,
+        added_in_order_revision=item.added_in_order_revision,
+        sort_order=item.sort_order,
+        is_deleted=item.is_deleted,
+        deleted_at=item.deleted_at,
+        created_by=item.created_by or "",
+        updated_by=item.updated_by or "",
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+def _line_item_revision_out(revision: PurchaseOrderLineItemRevision) -> OrderLineItemRevisionOut:
+    return OrderLineItemRevisionOut(
+        id=revision.id,
+        line_item_id=revision.line_item_id,
+        revision_number=revision.revision_number,
+        change_type=revision.change_type,  # type: ignore[arg-type]
+        unit_rate=revision.unit_rate,
+        previous_unit_rate=revision.previous_unit_rate,
+        currency=revision.currency,
+        previous_currency=revision.previous_currency,
+        vendor_code=revision.vendor_code or "",
+        description=revision.description or "",
+        previous_description=revision.previous_description or "",
+        effective_date=revision.effective_date,
+        reason=revision.reason or "",
+        recorded_by=revision.recorded_by or "",
+        created_at=revision.created_at,
     )
 
 
@@ -688,6 +811,26 @@ def vendor_po_overview(db: Db, user: Current) -> VendorPoOverview:
             VendorPoCount(key=status, label=status.title(), count=order_count(status=status))
             for status in ORDER_STATUSES
         ],
+        line_items_active=db.scalar(
+            select(func.count(PurchaseOrderLineItem.id))
+            .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLineItem.order_id)
+            .where(
+                PurchaseOrderLineItem.organization_id == organization_id,
+                PurchaseOrderLineItem.is_deleted.is_(False),
+                PurchaseOrder.is_deleted.is_(False),
+                PurchaseOrder.is_current.is_(True),
+            )
+        ) or 0,
+        orders_with_line_items=db.scalar(
+            select(func.count(func.distinct(PurchaseOrderLineItem.order_id)))
+            .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLineItem.order_id)
+            .where(
+                PurchaseOrderLineItem.organization_id == organization_id,
+                PurchaseOrderLineItem.is_deleted.is_(False),
+                PurchaseOrder.is_deleted.is_(False),
+                PurchaseOrder.is_current.is_(True),
+            )
+        ) or 0,
         documents_active=db.scalar(
             select(func.count(OrderDocument.id)).where(
                 OrderDocument.organization_id == organization_id,
@@ -1351,12 +1494,15 @@ def list_deleted_orders(db: Db, user: Current) -> list[OrderOut]:
         )
         .order_by(PurchaseOrder.deleted_at.desc(), PurchaseOrder.order_number)
     ).all()
-    documents = _document_counts(db, user.organization_id, [order.id for order in orders])
+    order_ids = [order.id for order in orders]
+    documents = _document_counts(db, user.organization_id, order_ids)
+    line_items = _line_item_counts(db, user.organization_id, order_ids)
     revisions = _revision_counts(db, user.organization_id, [order.order_number for order in orders])
     return [
         _order_out(
             order,
             document_count=documents.get(order.id, 0),
+            line_item_count=line_items.get(order.id, 0),
             revision_count=revisions.get(order.order_number, 0),
         )
         for order in orders
@@ -1369,7 +1515,7 @@ def list_deleted_orders(db: Db, user: Current) -> list[OrderOut]:
     dependencies=[Depends(require("master-data:read"))],
 )
 def list_orders(db: Db, user: Current) -> list[OrderOut]:
-    """Every active PO/SO revision in the workspace, with vendor and file counts."""
+    """Every active PO/SO revision in the workspace, with vendor, line-item and file counts."""
     orders = db.scalars(
         select(PurchaseOrder)
         .where(
@@ -1378,12 +1524,15 @@ def list_orders(db: Db, user: Current) -> list[OrderOut]:
         )
         .order_by(PurchaseOrder.order_number, PurchaseOrder.revision_number)
     ).all()
-    documents = _document_counts(db, user.organization_id, [order.id for order in orders])
+    order_ids = [order.id for order in orders]
+    documents = _document_counts(db, user.organization_id, order_ids)
+    line_items = _line_item_counts(db, user.organization_id, order_ids)
     revisions = _revision_counts(db, user.organization_id, [order.order_number for order in orders])
     return [
         _order_out(
             order,
             document_count=documents.get(order.id, 0),
+            line_item_count=line_items.get(order.id, 0),
             revision_count=revisions.get(order.order_number, 1),
         )
         for order in orders
@@ -1406,7 +1555,9 @@ def list_order_revisions(order_id: str, db: Db, user: Current) -> list[OrderRevi
         )
         .order_by(PurchaseOrder.revision_number)
     ).all()
-    documents = _document_counts(db, user.organization_id, [row.id for row in family])
+    family_ids = [row.id for row in family]
+    documents = _document_counts(db, user.organization_id, family_ids)
+    line_items = _line_item_counts(db, user.organization_id, family_ids)
     return [
         OrderRevisionOut(
             id=row.id,
@@ -1416,6 +1567,7 @@ def list_order_revisions(order_id: str, db: Db, user: Current) -> list[OrderRevi
             issue_date=row.issue_date,
             status=row.status,
             document_count=documents.get(row.id, 0),
+            line_item_count=line_items.get(row.id, 0),
             created_at=row.created_at,
             updated_at=row.updated_at,
             is_deleted=row.is_deleted,
@@ -1745,6 +1897,58 @@ def create_amendment(
             )
             copied += 1
 
+    copied_items = 0
+    if data.copy_line_items:
+        actor = (user.full_name or user.email or "")[:255]
+        effective_default = amendment.issue_date or _today()
+        carry_reason = f"Carried forward to order Rev {amendment.revision_number}: {amendment.revision_note}"[:500]
+        for source_item in db.scalars(
+            select(PurchaseOrderLineItem)
+            .where(
+                PurchaseOrderLineItem.order_id == source.id,
+                PurchaseOrderLineItem.organization_id == user.organization_id,
+                PurchaseOrderLineItem.is_deleted.is_(False),
+            )
+            .order_by(PurchaseOrderLineItem.sort_order, PurchaseOrderLineItem.line_item_code)
+        ).all():
+            cloned = PurchaseOrderLineItem(
+                organization_id=user.organization_id,
+                order_id=amendment.id,
+                parent_line_item_id=source_item.id,
+                line_item_code=source_item.line_item_code,
+                vendor_code=source_item.vendor_code or "",
+                description=source_item.description,
+                unit_rate=source_item.unit_rate,
+                currency=source_item.currency,
+                effective_date=source_item.effective_date or effective_default,
+                current_revision_number=1,
+                added_in_order_revision=source_item.added_in_order_revision,
+                sort_order=source_item.sort_order,
+                created_by=actor,
+                updated_by=actor,
+            )
+            db.add(cloned)
+            db.flush()
+            db.add(
+                PurchaseOrderLineItemRevision(
+                    organization_id=user.organization_id,
+                    line_item_id=cloned.id,
+                    revision_number=1,
+                    change_type="order_amendment_copy",
+                    unit_rate=source_item.unit_rate,
+                    previous_unit_rate=source_item.unit_rate,
+                    currency=source_item.currency,
+                    previous_currency=source_item.currency,
+                    vendor_code=source_item.vendor_code or "",
+                    description=source_item.description,
+                    previous_description=source_item.description,
+                    effective_date=cloned.effective_date or effective_default,
+                    reason=carry_reason,
+                    recorded_by=actor,
+                )
+            )
+            copied_items += 1
+
     _audit(
         db,
         user=user,
@@ -1769,12 +1973,25 @@ def create_amendment(
             summary=f"Carried {copied} file(s) forward from revision {source.revision_number} of {amendment.order_number}",
             request=request,
         )
+    if copied_items:
+        _audit(
+            db,
+            user=user,
+            action=MasterDataAction.AMEND,
+            entity_type=LINE_ITEM_ENTITY,
+            entity_id=amendment.id,
+            entity_label=_order_label(amendment),
+            summary=f"Carried {copied_items} line item(s) forward from revision {source.revision_number} of {amendment.order_number}",
+            request=request,
+        )
     _commit(db)
     db.refresh(amendment)
     documents = _document_counts(db, user.organization_id, [amendment.id])
+    line_items = _line_item_counts(db, user.organization_id, [amendment.id])
     return _order_out(
         amendment,
         document_count=documents.get(amendment.id, 0),
+        line_item_count=line_items.get(amendment.id, 0),
         revision_count=next_revision + 1,
     )
 
@@ -1868,10 +2085,12 @@ def update_order(
         _commit(db)
         db.refresh(order)
     documents = _document_counts(db, user.organization_id, [order.id])
+    line_items = _line_item_counts(db, user.organization_id, [order.id])
     revisions = _revision_counts(db, user.organization_id, [order.order_number])
     return _order_out(
         order,
         document_count=documents.get(order.id, 0),
+        line_item_count=line_items.get(order.id, 0),
         revision_count=revisions.get(order.order_number, 1),
     )
 
@@ -1898,7 +2117,8 @@ def soft_delete_order(order_id: str, request: Request, db: Db, user: Current) ->
     )
     _commit(db)
     db.refresh(order)
-    return _order_out(order)
+    line_items = _line_item_counts(db, user.organization_id, [order.id])
+    return _order_out(order, line_item_count=line_items.get(order.id, 0))
 
 
 @router.post(
@@ -1945,12 +2165,30 @@ def restore_order(order_id: str, request: Request, db: Db, user: Current) -> Ord
     _commit(db)
     db.refresh(order)
     documents = _document_counts(db, user.organization_id, [order.id])
+    line_items = _line_item_counts(db, user.organization_id, [order.id])
     revisions = _revision_counts(db, user.organization_id, [order.order_number])
     return _order_out(
         order,
         document_count=documents.get(order.id, 0),
+        line_item_count=line_items.get(order.id, 0),
         revision_count=revisions.get(order.order_number, 1),
     )
+
+
+def _assert_order_purgeable(db: Session, order: PurchaseOrder, organization_id: str) -> None:
+    assert_no_dependencies(db, order, organization_id, entity_label=_order_label(order))
+    for item in db.scalars(
+        select(PurchaseOrderLineItem).where(
+            PurchaseOrderLineItem.order_id == order.id,
+            PurchaseOrderLineItem.organization_id == organization_id,
+        )
+    ).all():
+        assert_no_dependencies(
+            db,
+            item,
+            organization_id,
+            entity_label=f"{LINE_ITEM_LABEL} · {item.line_item_code} ({order.order_number})",
+        )
 
 
 @router.delete(
@@ -1962,9 +2200,18 @@ def permanently_delete_order(order_id: str, request: Request, db: Db, user: Curr
     order = _order_or_404(db, order_id, user.organization_id)
     if not order.is_deleted:
         raise HTTPException(status_code=409, detail="Only a deleted PO/SO order can be permanently deleted")
+    _assert_order_purgeable(db, order, user.organization_id)
     document_total = db.scalar(
         select(func.count(OrderDocument.id)).where(OrderDocument.order_id == order.id)
     ) or 0
+    line_total = db.scalar(
+        select(func.count(PurchaseOrderLineItem.id)).where(PurchaseOrderLineItem.order_id == order.id)
+    ) or 0
+    details: list[str] = []
+    if line_total:
+        details.append(f"{line_total} line item(s)")
+    if document_total:
+        details.append(f"{document_total} attached file(s)")
     _audit(
         db,
         user=user,
@@ -1974,7 +2221,7 @@ def permanently_delete_order(order_id: str, request: Request, db: Db, user: Curr
         entity_label=_order_label(order),
         summary=(
             f"Permanently deleted {order.order_type} {order.order_number} (Rev {order.revision_number})"
-            + (f" with {document_total} attached file(s)" if document_total else "")
+            + (f" with {' and '.join(details)}" if details else "")
         ),
         request=request,
     )
@@ -2068,6 +2315,8 @@ def bulk_permanent_delete_orders(
 ) -> MasterDataBulkActionResponse:
     orders = _orders_for_ids(db, data.ids, user.organization_id, deleted=True)
     for order in orders:
+        _assert_order_purgeable(db, order, user.organization_id)
+    for order in orders:
         _audit(
             db,
             user=user,
@@ -2081,6 +2330,1204 @@ def bulk_permanent_delete_orders(
         db.delete(order)
     _commit(db)
     return MasterDataBulkActionResponse(affected_count=len(orders))
+
+
+# --------------------------------------------------------------------------- #
+# PO/SO Schedule Line Items & Rate Amendments
+# --------------------------------------------------------------------------- #
+
+
+def _actor_name(user: Any) -> str:
+    return (getattr(user, "full_name", "") or getattr(user, "email", "") or "")[:255]
+
+
+def _line_item_entity_label(item: PurchaseOrderLineItem, order: PurchaseOrder | None = None) -> str:
+    order = order or item.order
+    prefix = f"{order.order_number} (Rev {order.revision_number})" if order else item.order_id
+    return f"{LINE_ITEM_LABEL} · {prefix} · {item.line_item_code}"
+
+
+def _active_currency_map(db: Session, organization_id: str) -> dict[str, str]:
+    rows = db.scalars(
+        select(Currency).where(
+            Currency.organization_id == organization_id,
+            Currency.is_deleted.is_(False),
+        )
+    ).all()
+    return {row.currency_code.upper(): row.currency_code for row in rows}
+
+
+def _default_currency_code(db: Session, organization_id: str) -> str:
+    default_code = db.scalar(
+        select(Currency.currency_code).where(
+            Currency.organization_id == organization_id,
+            Currency.is_deleted.is_(False),
+            Currency.is_default.is_(True),
+        )
+    )
+    if default_code:
+        return default_code
+    any_code = db.scalar(
+        select(Currency.currency_code)
+        .where(Currency.organization_id == organization_id, Currency.is_deleted.is_(False))
+        .order_by(Currency.currency_code)
+    )
+    return any_code or "USD"
+
+
+def _resolve_currency(raw: Any, currencies: dict[str, str], *, fallback: str = "") -> str:
+    text = str(raw or fallback or "").strip().upper()
+    if not text:
+        raise ValueError("Currency is required")
+    if currencies:
+        matched = currencies.get(text)
+        if not matched:
+            raise ValueError(f"Currency '{text}' is not in Currency master data")
+        return matched
+    if not re.fullmatch(r"[A-Z]{2,10}", text):
+        raise ValueError(f"Currency '{text}' is invalid")
+    return text
+
+
+def _parse_rate_decimal(raw: Any, label: str = "Unit rate") -> Decimal:
+    if raw in (None, ""):
+        raise ValueError(f"{label} is required")
+    text = str(raw).strip().replace(",", "")
+    try:
+        dec = Decimal(text)
+    except (InvalidOperation, ValueError) as error:
+        raise ValueError(f"{label} '{raw}' is not a valid number") from error
+    if not dec.is_finite():
+        raise ValueError(f"{label} must be a finite number")
+    quantized = dec.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+    if quantized < Decimal("0") or quantized > MAX_RATE:
+        raise ValueError(f"{label} must be between 0 and {MAX_RATE}")
+    return quantized
+
+
+def _next_line_sort_order(db: Session, order_id: str) -> int:
+    highest = db.scalar(
+        select(func.max(PurchaseOrderLineItem.sort_order)).where(
+            PurchaseOrderLineItem.order_id == order_id,
+        )
+    )
+    return (highest or 0) + 1
+
+
+def _resolve_order_from_row(
+    normalized: dict[str, Any],
+    by_number: dict[str, list[PurchaseOrder]],
+    fixed_order: PurchaseOrder | None,
+) -> PurchaseOrder:
+    if fixed_order is not None:
+        raw_num = str(normalized.get("order_number") or "").strip().upper()
+        if raw_num and raw_num != fixed_order.order_number.upper():
+            raise ValueError(
+                f"PO/SO number '{raw_num}' does not match selected order '{fixed_order.order_number}'"
+            )
+        return fixed_order
+    raw_num = str(normalized.get("order_number") or "").strip().upper()
+    if not raw_num:
+        raise ValueError("PO/SO number is required for cross-order schedule import")
+    family = by_number.get(raw_num)
+    if not family:
+        raise ValueError(f"PO/SO order '{raw_num}' is not an active order in this workspace")
+    rev_raw = normalized.get("order_revision")
+    if rev_raw not in (None, ""):
+        rev_digits = re.sub(r"[^0-9]", "", str(rev_raw))
+        if rev_digits == "":
+            raise ValueError(f"Order revision '{rev_raw}' is not a valid revision number")
+        rev_no = int(rev_digits)
+        matched = next((row for row in family if row.revision_number == rev_no), None)
+        if matched is None:
+            raise ValueError(f"PO/SO '{raw_num}' has no active revision {rev_no}")
+        return matched
+    return next((row for row in family if row.is_current), None) or family[-1]
+
+
+def _import_order_line_items(
+    db: Session,
+    *,
+    user: Any,
+    request: Request,
+    rows: list[dict[str, Any]],
+    fixed_order: PurchaseOrder | None = None,
+) -> OrderLineItemImportResponse:
+    organization_id = user.organization_id
+    currencies = _active_currency_map(db, organization_id)
+    default_currency = _default_currency_code(db, organization_id)
+    actor = _actor_name(user)
+
+    orders = (
+        [fixed_order]
+        if fixed_order is not None
+        else list(
+            db.scalars(
+                select(PurchaseOrder).where(
+                    PurchaseOrder.organization_id == organization_id,
+                    PurchaseOrder.is_deleted.is_(False),
+                )
+            ).all()
+        )
+    )
+    by_number: dict[str, list[PurchaseOrder]] = {}
+    for order in orders:
+        by_number.setdefault(order.order_number.upper(), []).append(order)
+
+    created_count = 0
+    revised_count = 0
+    unchanged_count = 0
+    errors: list[str] = []
+    seen_keys: set[tuple[str, str]] = set()
+    next_sort_by_order: dict[str, int] = {}
+
+    for row_number, raw_row in enumerate(rows, start=1):
+        normalized = _normalize_import_row(raw_row, LINE_ITEM_IMPORT_ALIASES)
+        if not normalized:
+            continue
+        try:
+            target_order = _resolve_order_from_row(normalized, by_number, fixed_order)
+            code = str(normalized.get("line_item_code") or "").strip().upper()
+            if not code:
+                raise ValueError("Line item code is required")
+            if len(code) > 80:
+                raise ValueError("Line item code must be at most 80 characters")
+            vendor_code = str(normalized.get("vendor_code") or "").strip()[:80]
+            description = str(normalized.get("description") or "").strip()
+            if not description:
+                raise ValueError("Description is required")
+            if len(description) > 2000:
+                raise ValueError("Description must be at most 2000 characters")
+            raw_rate = (
+                normalized.get("new_unit_rate")
+                if normalized.get("new_unit_rate") not in (None, "")
+                else normalized.get("unit_rate")
+            )
+            unit_rate = _parse_rate_decimal(raw_rate, "Unit rate")
+            raw_ccy = (
+                normalized.get("new_currency")
+                if normalized.get("new_currency") not in (None, "")
+                else normalized.get("currency")
+            )
+            currency = _resolve_currency(raw_ccy, currencies, fallback=default_currency)
+            effective_date = _parse_import_date(normalized.get("effective_date")) or target_order.issue_date or _today()
+            reason = str(normalized.get("reason") or "").strip()[:500]
+            sort_raw = normalized.get("sort_order")
+            sort_order: int | None = None
+            if sort_raw not in (None, ""):
+                digits = re.sub(r"[^0-9]", "", str(sort_raw))
+                if digits:
+                    sort_order = max(1, min(100_000, int(digits)))
+        except ValueError as error:
+            errors.append(f"Row {row_number}: {error}")
+            continue
+
+        dedup_key = (target_order.id, code)
+        if dedup_key in seen_keys:
+            errors.append(
+                f"Row {row_number} ({target_order.order_number} · {code}): duplicate line item code in this import file"
+            )
+            continue
+        seen_keys.add(dedup_key)
+
+        existing = db.scalar(
+            select(PurchaseOrderLineItem).where(
+                PurchaseOrderLineItem.organization_id == organization_id,
+                PurchaseOrderLineItem.order_id == target_order.id,
+                func.upper(PurchaseOrderLineItem.line_item_code) == code,
+            )
+        )
+        if existing is None:
+            if sort_order is None:
+                current_next = next_sort_by_order.get(target_order.id)
+                if current_next is None:
+                    current_next = _next_line_sort_order(db, target_order.id)
+                sort_order = current_next
+                next_sort_by_order[target_order.id] = current_next + 1
+            item = PurchaseOrderLineItem(
+                organization_id=organization_id,
+                order_id=target_order.id,
+                line_item_code=code,
+                vendor_code=vendor_code,
+                description=description,
+                unit_rate=unit_rate,
+                currency=currency,
+                effective_date=effective_date,
+                current_revision_number=1,
+                added_in_order_revision=target_order.revision_number,
+                sort_order=sort_order,
+                created_by=actor,
+                updated_by=actor,
+            )
+            db.add(item)
+            db.flush()
+            db.add(
+                PurchaseOrderLineItemRevision(
+                    organization_id=organization_id,
+                    line_item_id=item.id,
+                    revision_number=1,
+                    change_type="initial",
+                    unit_rate=unit_rate,
+                    previous_unit_rate=unit_rate,
+                    currency=currency,
+                    previous_currency=currency,
+                    vendor_code=vendor_code,
+                    description=description,
+                    previous_description=description,
+                    effective_date=effective_date,
+                    reason=reason or "Imported PO/SO schedule",
+                    recorded_by=actor,
+                )
+            )
+            _audit(
+                db,
+                user=user,
+                action=MasterDataAction.CREATE,
+                entity_type=LINE_ITEM_ENTITY,
+                entity_id=item.id,
+                entity_label=_line_item_entity_label(item, target_order),
+                summary=f"Created line item {code} ({currency} {unit_rate}) on {target_order.order_number} from import",
+                request=request,
+            )
+            created_count += 1
+        else:
+            was_deleted = existing.is_deleted
+            price_changed = existing.unit_rate != unit_rate or existing.currency != currency
+            detail_changed = (existing.description or "") != description or (existing.vendor_code or "") != vendor_code
+            if was_deleted:
+                existing.is_deleted = False
+                existing.deleted_at = None
+            if sort_order is not None:
+                existing.sort_order = sort_order
+            if price_changed or detail_changed:
+                prev_rate = existing.unit_rate
+                prev_ccy = existing.currency
+                prev_desc = existing.description or ""
+                next_rev = existing.current_revision_number + 1
+                existing.unit_rate = unit_rate
+                existing.currency = currency
+                existing.vendor_code = vendor_code
+                existing.description = description
+                existing.effective_date = effective_date
+                existing.current_revision_number = next_rev
+                existing.updated_by = actor
+                db.add(
+                    PurchaseOrderLineItemRevision(
+                        organization_id=organization_id,
+                        line_item_id=existing.id,
+                        revision_number=next_rev,
+                        change_type="price_revision" if price_changed else "detail_amendment",
+                        unit_rate=unit_rate,
+                        previous_unit_rate=prev_rate,
+                        currency=currency,
+                        previous_currency=prev_ccy,
+                        vendor_code=vendor_code,
+                        description=description,
+                        previous_description=prev_desc,
+                        effective_date=effective_date,
+                        reason=reason or "Amended via spreadsheet schedule import",
+                        recorded_by=actor,
+                    )
+                )
+                _audit(
+                    db,
+                    user=user,
+                    action=MasterDataAction.AMEND,
+                    entity_type=LINE_ITEM_ENTITY,
+                    entity_id=existing.id,
+                    entity_label=_line_item_entity_label(existing, target_order),
+                    summary=(
+                        f"Amended line item {code} on {target_order.order_number} from import "
+                        f"(Rev {next_rev}: {prev_ccy} {prev_rate} -> {currency} {unit_rate})"
+                    ),
+                    request=request,
+                )
+                revised_count += 1
+            elif was_deleted:
+                existing.updated_by = actor
+                _audit(
+                    db,
+                    user=user,
+                    action=MasterDataAction.RESTORE,
+                    entity_type=LINE_ITEM_ENTITY,
+                    entity_id=existing.id,
+                    entity_label=_line_item_entity_label(existing, target_order),
+                    summary=f"Restored line item {code} on {target_order.order_number} from import",
+                    request=request,
+                )
+                revised_count += 1
+            else:
+                unchanged_count += 1
+
+    imported_total = created_count + revised_count
+    scope_label = _order_label(fixed_order) if fixed_order else LINE_ITEM_LABEL
+    _audit(
+        db,
+        user=user,
+        action=MasterDataAction.IMPORT,
+        entity_type=LINE_ITEM_ENTITY,
+        entity_id=fixed_order.id if fixed_order else None,
+        entity_label=scope_label,
+        summary=(
+            f"Imported PO/SO line items ({created_count} created, {revised_count} amended, "
+            f"{unchanged_count} unchanged, {len(errors)} errors)"
+        ),
+        request=request,
+    )
+    _commit(db)
+    return OrderLineItemImportResponse(
+        imported_count=imported_total,
+        created_count=created_count,
+        revised_count=revised_count,
+        unchanged_count=unchanged_count,
+        error_count=len(errors),
+        errors=errors[:100],
+        success=not errors,
+    )
+
+
+def _bulk_revise_order_line_items(
+    db: Session,
+    *,
+    user: Any,
+    request: Request,
+    data: OrderLineItemBulkReviseRequest,
+    fixed_order: PurchaseOrder | None = None,
+) -> OrderLineItemBulkReviseResponse:
+    """Atomic all-or-nothing bulk rate/schedule amendment across one or many PO/SO orders."""
+    organization_id = user.organization_id
+    currencies = _active_currency_map(db, organization_id)
+    default_currency = _default_currency_code(db, organization_id)
+    default_effective = data.effective_date or _today()
+    actor = _actor_name(user)
+
+    orders = (
+        [fixed_order]
+        if fixed_order is not None
+        else list(
+            db.scalars(
+                select(PurchaseOrder).where(
+                    PurchaseOrder.organization_id == organization_id,
+                    PurchaseOrder.is_deleted.is_(False),
+                )
+            ).all()
+        )
+    )
+    by_number: dict[str, list[PurchaseOrder]] = {}
+    for order in orders:
+        by_number.setdefault(order.order_number.upper(), []).append(order)
+
+    order_ids = [order.id for order in orders]
+    existing_items = (
+        list(
+            db.scalars(
+                select(PurchaseOrderLineItem).where(
+                    PurchaseOrderLineItem.organization_id == organization_id,
+                    PurchaseOrderLineItem.order_id.in_(order_ids),
+                    PurchaseOrderLineItem.is_deleted.is_(False),
+                )
+            ).all()
+        )
+        if order_ids
+        else []
+    )
+    items_by_key = {(item.order_id, item.line_item_code.upper()): item for item in existing_items}
+
+    staged: list[dict[str, Any]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+    seen_keys: set[tuple[str, str]] = set()
+    skipped_count = 0
+
+    for row_number, raw_row in enumerate(data.rows, start=2):
+        normalized = _normalize_import_row(raw_row, LINE_ITEM_IMPORT_ALIASES)
+        if not normalized:
+            skipped_count += 1
+            continue
+        # If a template row left new_unit_rate blank, skip it cleanly (matches catalogue bulk revise).
+        has_explicit_new = "new_unit_rate" in normalized
+        raw_rate = normalized.get("new_unit_rate") if has_explicit_new else normalized.get("unit_rate")
+        if raw_rate in (None, ""):
+            skipped_count += 1
+            continue
+        try:
+            target_order = _resolve_order_from_row(normalized, by_number, fixed_order)
+            code = str(normalized.get("line_item_code") or "").strip().upper()
+            if not code:
+                raise ValueError("Line item code is required")
+            key = (target_order.id, code)
+            if key in seen_keys:
+                raise ValueError(f"Duplicate line item '{code}' for {target_order.order_number} in this file")
+            seen_keys.add(key)
+
+            existing = items_by_key.get(key)
+            if existing is None and not data.allow_new_items:
+                raise ValueError(
+                    f"Line item '{code}' was not found on {target_order.order_number} (Rev {target_order.revision_number})"
+                )
+
+            unit_rate = _parse_rate_decimal(raw_rate, "New unit rate")
+            raw_ccy = normalized.get("new_currency") or normalized.get("currency")
+            fallback_ccy = existing.currency if existing is not None else default_currency
+            currency = _resolve_currency(raw_ccy, currencies, fallback=fallback_ccy)
+            effective_date = _parse_import_date(normalized.get("effective_date")) or default_effective
+            row_reason = str(normalized.get("reason") or "").strip()[:500] or data.reason
+            description = str(normalized.get("description") or "").strip()
+            vendor_code_supplied = "vendor_code" in normalized
+            vendor_code = str(normalized.get("vendor_code") or "").strip()[:80]
+            if existing is None and not description:
+                raise ValueError(f"Description is required when adding new line item '{code}'")
+        except ValueError as error:
+            errors.append(f"Row {row_number}: {error}")
+            continue
+
+        staged.append(
+            {
+                "order": target_order,
+                "existing": existing,
+                "code": code,
+                "unit_rate": unit_rate,
+                "currency": currency,
+                "effective_date": effective_date,
+                "reason": row_reason,
+                "description": description,
+                "vendor_code_supplied": vendor_code_supplied,
+                "vendor_code": vendor_code,
+            }
+        )
+
+    if errors:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": f"Bulk rate revision rejected: {len(errors)} validation error(s); no line items were changed.",
+                "errors": errors[:100],
+                "warnings": warnings[:50],
+            },
+        )
+
+    revised_count = 0
+    added_count = 0
+    unchanged_count = 0
+    next_sort_by_order: dict[str, int] = {}
+
+    for entry in staged:
+        target_order = entry["order"]
+        existing = entry["existing"]
+        code = entry["code"]
+        unit_rate = entry["unit_rate"]
+        currency = entry["currency"]
+        effective_date = entry["effective_date"]
+        row_reason = entry["reason"]
+
+        if existing is None:
+            current_next = next_sort_by_order.get(target_order.id)
+            if current_next is None:
+                current_next = _next_line_sort_order(db, target_order.id)
+            next_sort_by_order[target_order.id] = current_next + 1
+            item = PurchaseOrderLineItem(
+                organization_id=organization_id,
+                order_id=target_order.id,
+                line_item_code=code,
+                vendor_code=entry["vendor_code"],
+                description=entry["description"],
+                unit_rate=unit_rate,
+                currency=currency,
+                effective_date=effective_date,
+                current_revision_number=1,
+                added_in_order_revision=target_order.revision_number,
+                sort_order=current_next,
+                created_by=actor,
+                updated_by=actor,
+            )
+            db.add(item)
+            db.flush()
+            db.add(
+                PurchaseOrderLineItemRevision(
+                    organization_id=organization_id,
+                    line_item_id=item.id,
+                    revision_number=1,
+                    change_type="initial",
+                    unit_rate=unit_rate,
+                    previous_unit_rate=unit_rate,
+                    currency=currency,
+                    previous_currency=currency,
+                    vendor_code=item.vendor_code,
+                    description=item.description,
+                    previous_description=item.description,
+                    effective_date=effective_date,
+                    reason=row_reason,
+                    recorded_by=actor,
+                )
+            )
+            added_count += 1
+            continue
+
+        new_desc = entry["description"] or existing.description
+        new_vendor_code = entry["vendor_code"] if entry["vendor_code_supplied"] else (existing.vendor_code or "")
+        price_changed = existing.unit_rate != unit_rate or existing.currency != currency
+        detail_changed = (existing.description or "") != new_desc or (existing.vendor_code or "") != new_vendor_code
+        if not price_changed and not detail_changed:
+            unchanged_count += 1
+            continue
+
+        prev_rate = existing.unit_rate
+        prev_ccy = existing.currency
+        prev_desc = existing.description or ""
+        next_rev = existing.current_revision_number + 1
+        existing.unit_rate = unit_rate
+        existing.currency = currency
+        existing.description = new_desc
+        existing.vendor_code = new_vendor_code
+        existing.effective_date = effective_date
+        existing.current_revision_number = next_rev
+        existing.updated_by = actor
+        db.add(
+            PurchaseOrderLineItemRevision(
+                organization_id=organization_id,
+                line_item_id=existing.id,
+                revision_number=next_rev,
+                change_type="price_revision" if price_changed else "detail_amendment",
+                unit_rate=unit_rate,
+                previous_unit_rate=prev_rate,
+                currency=currency,
+                previous_currency=prev_ccy,
+                vendor_code=new_vendor_code,
+                description=new_desc,
+                previous_description=prev_desc,
+                effective_date=effective_date,
+                reason=row_reason,
+                recorded_by=actor,
+            )
+        )
+        revised_count += 1
+
+    scope_label = _order_label(fixed_order) if fixed_order else LINE_ITEM_LABEL
+    _audit(
+        db,
+        user=user,
+        action=MasterDataAction.AMEND,
+        entity_type=LINE_ITEM_ENTITY,
+        entity_id=fixed_order.id if fixed_order else None,
+        entity_label=scope_label,
+        summary=(
+            f"Bulk revised PO/SO schedule ({revised_count} revised, {added_count} added, "
+            f"{unchanged_count} unchanged): {data.reason}"
+        ),
+        request=request,
+    )
+    _commit(db)
+    return OrderLineItemBulkReviseResponse(
+        revised_count=revised_count,
+        added_count=added_count,
+        unchanged_count=unchanged_count,
+        skipped_count=skipped_count,
+        error_count=0,
+        effective_date=default_effective,
+        errors=[],
+        warnings=warnings,
+    )
+
+
+@router.get(
+    "/po-so-orders/line-items",
+    response_model=list[OrderLineItemOut],
+    dependencies=[Depends(require("master-data:read"))],
+)
+def list_all_order_line_items(
+    db: Db,
+    user: Current,
+    order_id: str | None = None,
+    vendor_id: str | None = None,
+    current_orders_only: bool = True,
+    include_deleted: bool = False,
+) -> list[OrderLineItemOut]:
+    """List PO/SO schedule line items across one or all orders for export and audit."""
+    statement = (
+        select(PurchaseOrderLineItem)
+        .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLineItem.order_id)
+        .where(
+            PurchaseOrderLineItem.organization_id == user.organization_id,
+            PurchaseOrder.organization_id == user.organization_id,
+            PurchaseOrder.is_deleted.is_(False),
+        )
+    )
+    if order_id:
+        statement = statement.where(PurchaseOrderLineItem.order_id == order_id)
+    elif current_orders_only:
+        statement = statement.where(PurchaseOrder.is_current.is_(True))
+    if vendor_id:
+        statement = statement.where(PurchaseOrder.vendor_id == vendor_id)
+    if not include_deleted:
+        statement = statement.where(PurchaseOrderLineItem.is_deleted.is_(False))
+
+    items = db.scalars(
+        statement.order_by(
+            PurchaseOrder.order_number,
+            PurchaseOrder.revision_number.desc(),
+            PurchaseOrderLineItem.sort_order,
+            PurchaseOrderLineItem.line_item_code,
+        )
+    ).all()
+    return [_line_item_out(item, item.order) for item in items]
+
+
+@router.get(
+    "/po-so-orders/line-items/price-revision-template",
+    dependencies=[Depends(require("master-data:read"))],
+)
+def download_line_item_price_revision_template(
+    db: Db,
+    user: Current,
+    order_id: str | None = None,
+    current_orders_only: bool = True,
+) -> Response:
+    """Download a pre-populated CSV template for bulk PO/SO schedule price revisions."""
+    statement = (
+        select(PurchaseOrderLineItem)
+        .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLineItem.order_id)
+        .where(
+            PurchaseOrderLineItem.organization_id == user.organization_id,
+            PurchaseOrderLineItem.is_deleted.is_(False),
+            PurchaseOrder.is_deleted.is_(False),
+        )
+    )
+    target_order: PurchaseOrder | None = None
+    if order_id:
+        target_order = _order_or_404(db, order_id, user.organization_id, include_deleted=False)
+        statement = statement.where(PurchaseOrderLineItem.order_id == target_order.id)
+    elif current_orders_only:
+        statement = statement.where(PurchaseOrder.is_current.is_(True))
+
+    items = db.scalars(
+        statement.order_by(
+            PurchaseOrder.order_number,
+            PurchaseOrderLineItem.sort_order,
+            PurchaseOrderLineItem.line_item_code,
+        )
+    ).all()
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "order_number",
+            "order_revision",
+            "order_vendor_code",
+            "line_item_code",
+            "vendor_code",
+            "description",
+            "current_unit_rate",
+            "currency",
+            "new_unit_rate",
+            "new_currency",
+            "effective_date",
+            "reason",
+        ]
+    )
+    if items:
+        for item in items:
+            order = item.order
+            vendor = order.vendor if order else None
+            writer.writerow(
+                [
+                    safe_csv_cell(order.order_number if order else ""),
+                    order.revision_number if order else 0,
+                    safe_csv_cell(vendor.vendor_code if vendor else ""),
+                    safe_csv_cell(item.line_item_code),
+                    safe_csv_cell(item.vendor_code or ""),
+                    safe_csv_cell(item.description or ""),
+                    f"{item.unit_rate:.3f}",
+                    safe_csv_cell(item.currency),
+                    "",
+                    "",
+                    _today().isoformat(),
+                    "",
+                ]
+            )
+    elif target_order is not None:
+        vendor = target_order.vendor
+        ccy = _default_currency_code(db, user.organization_id)
+        writer.writerow(
+            [
+                safe_csv_cell(target_order.order_number),
+                target_order.revision_number,
+                safe_csv_cell(vendor.vendor_code if vendor else ""),
+                "LINE-001",
+                "",
+                "Sample PO/SO schedule item description",
+                "0.000",
+                ccy,
+                "100.000",
+                ccy,
+                _today().isoformat(),
+                "Initial schedule rate",
+            ]
+        )
+
+    filename = (
+        f"{target_order.order_number}_Rev{target_order.revision_number}_schedule_rates.csv"
+        if target_order is not None
+        else "po_so_line_items_price_revision_template.csv"
+    )
+    return Response(
+        content=buffer.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": _content_disposition("attachment", filename),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post(
+    "/po-so-orders/line-items/import",
+    response_model=OrderLineItemImportResponse,
+    dependencies=[Depends(require("master-data:import"))],
+)
+def import_all_order_line_items(
+    data: MasterDataImportRequest,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemImportResponse:
+    return _import_order_line_items(db, user=user, request=request, rows=data.rows, fixed_order=None)
+
+
+@router.post(
+    "/po-so-orders/line-items/bulk-revise",
+    response_model=OrderLineItemBulkReviseResponse,
+    dependencies=[Depends(require("master-data:import"))],
+)
+def bulk_revise_all_order_line_items(
+    data: OrderLineItemBulkReviseRequest,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemBulkReviseResponse:
+    return _bulk_revise_order_line_items(db, user=user, request=request, data=data, fixed_order=None)
+
+
+@router.get(
+    "/po-so-orders/{order_id}/line-items",
+    response_model=list[OrderLineItemOut],
+    dependencies=[Depends(require("master-data:read"))],
+)
+def list_order_line_items(
+    order_id: str,
+    db: Db,
+    user: Current,
+    include_deleted: bool = False,
+) -> list[OrderLineItemOut]:
+    order = _order_or_404(db, order_id, user.organization_id)
+    statement = select(PurchaseOrderLineItem).where(
+        PurchaseOrderLineItem.order_id == order.id,
+        PurchaseOrderLineItem.organization_id == user.organization_id,
+    )
+    if not include_deleted:
+        statement = statement.where(PurchaseOrderLineItem.is_deleted.is_(False))
+    items = db.scalars(
+        statement.order_by(PurchaseOrderLineItem.sort_order, PurchaseOrderLineItem.line_item_code)
+    ).all()
+    return [_line_item_out(item, order) for item in items]
+
+
+@router.post(
+    "/po-so-orders/{order_id}/line-items",
+    response_model=OrderLineItemOut,
+    status_code=201,
+    dependencies=[Depends(require("master-data:create"))],
+)
+def create_order_line_item(
+    order_id: str,
+    data: OrderLineItemCreate,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemOut:
+    order = _order_or_404(db, order_id, user.organization_id, include_deleted=False)
+    currencies = _active_currency_map(db, user.organization_id)
+    code = data.line_item_code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=422, detail="Line item code is required")
+    try:
+        currency = _resolve_currency(data.currency, currencies)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    duplicate = db.scalar(
+        select(PurchaseOrderLineItem).where(
+            PurchaseOrderLineItem.organization_id == user.organization_id,
+            PurchaseOrderLineItem.order_id == order.id,
+            func.upper(PurchaseOrderLineItem.line_item_code) == code,
+        )
+    )
+    if duplicate is not None:
+        detail = (
+            f"Line item code '{code}' already exists on {order.order_number} (Rev {order.revision_number})."
+            if not duplicate.is_deleted
+            else f"A removed line item '{code}' exists on {order.order_number}; restore it first."
+        )
+        raise HTTPException(status_code=409, detail=detail)
+
+    actor = _actor_name(user)
+    effective = data.effective_date or order.issue_date or _today()
+    sort_order = data.sort_order if data.sort_order is not None else _next_line_sort_order(db, order.id)
+    item = PurchaseOrderLineItem(
+        organization_id=user.organization_id,
+        order_id=order.id,
+        line_item_code=code,
+        vendor_code=data.vendor_code or "",
+        description=data.description,
+        unit_rate=data.unit_rate,
+        currency=currency,
+        effective_date=effective,
+        current_revision_number=1,
+        added_in_order_revision=order.revision_number,
+        sort_order=sort_order,
+        created_by=actor,
+        updated_by=actor,
+    )
+    db.add(item)
+    try:
+        db.flush()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Line item code '{code}' already exists on this order") from error
+
+    db.add(
+        PurchaseOrderLineItemRevision(
+            organization_id=user.organization_id,
+            line_item_id=item.id,
+            revision_number=1,
+            change_type="initial",
+            unit_rate=item.unit_rate,
+            previous_unit_rate=item.unit_rate,
+            currency=item.currency,
+            previous_currency=item.currency,
+            vendor_code=item.vendor_code,
+            description=item.description,
+            previous_description=item.description,
+            effective_date=effective,
+            reason="Initial PO/SO schedule rate",
+            recorded_by=actor,
+        )
+    )
+    _audit(
+        db,
+        user=user,
+        action=MasterDataAction.CREATE,
+        entity_type=LINE_ITEM_ENTITY,
+        entity_id=item.id,
+        entity_label=_line_item_entity_label(item, order),
+        summary=f"Added line item {item.line_item_code} ({item.currency} {item.unit_rate}) to {order.order_number} (Rev {order.revision_number})",
+        request=request,
+    )
+    _commit(db)
+    db.refresh(item)
+    return _line_item_out(item, order)
+
+
+@router.post(
+    "/po-so-orders/{order_id}/line-items/import",
+    response_model=OrderLineItemImportResponse,
+    dependencies=[Depends(require("master-data:import"))],
+)
+def import_single_order_line_items(
+    order_id: str,
+    data: MasterDataImportRequest,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemImportResponse:
+    order = _order_or_404(db, order_id, user.organization_id, include_deleted=False)
+    return _import_order_line_items(db, user=user, request=request, rows=data.rows, fixed_order=order)
+
+
+@router.post(
+    "/po-so-orders/{order_id}/line-items/bulk-revise",
+    response_model=OrderLineItemBulkReviseResponse,
+    dependencies=[Depends(require("master-data:import"))],
+)
+def bulk_revise_single_order_line_items(
+    order_id: str,
+    data: OrderLineItemBulkReviseRequest,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemBulkReviseResponse:
+    order = _order_or_404(db, order_id, user.organization_id, include_deleted=False)
+    return _bulk_revise_order_line_items(db, user=user, request=request, data=data, fixed_order=order)
+
+
+@router.patch(
+    "/po-so-orders/line-items/{line_item_id}",
+    response_model=OrderLineItemOut,
+    dependencies=[Depends(require("master-data:update"))],
+)
+def update_order_line_item(
+    line_item_id: str,
+    data: OrderLineItemUpdate,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemOut:
+    item = _line_item_or_404(db, line_item_id, user.organization_id, include_deleted=False)
+    order = item.order
+    supplied = data.model_dump(exclude_unset=True)
+    if not supplied:
+        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+
+    changed: list[str] = []
+    if "line_item_code" in supplied and supplied["line_item_code"] is not None:
+        new_code = supplied["line_item_code"].strip().upper()
+        if not new_code:
+            raise HTTPException(status_code=422, detail="Line item code cannot be blank")
+        if new_code != item.line_item_code:
+            clash = db.scalar(
+                select(PurchaseOrderLineItem).where(
+                    PurchaseOrderLineItem.organization_id == user.organization_id,
+                    PurchaseOrderLineItem.order_id == item.order_id,
+                    func.upper(PurchaseOrderLineItem.line_item_code) == new_code,
+                    PurchaseOrderLineItem.id != item.id,
+                )
+            )
+            if clash is not None:
+                raise HTTPException(status_code=409, detail=f"Line item code '{new_code}' already exists on this order")
+            item.line_item_code = new_code
+            changed.append("line_item_code")
+    if "vendor_code" in supplied and supplied["vendor_code"] is not None:
+        clean_vc = supplied["vendor_code"].strip()
+        if clean_vc != (item.vendor_code or ""):
+            item.vendor_code = clean_vc
+            changed.append("vendor_code")
+    if "description" in supplied and supplied["description"] is not None:
+        clean_desc = supplied["description"].strip()
+        if not clean_desc:
+            raise HTTPException(status_code=422, detail="Description cannot be blank")
+        if clean_desc != (item.description or ""):
+            item.description = clean_desc
+            changed.append("description")
+    if "sort_order" in supplied and supplied["sort_order"] is not None:
+        if supplied["sort_order"] != item.sort_order:
+            item.sort_order = supplied["sort_order"]
+            changed.append("sort_order")
+
+    if changed:
+        item.updated_by = _actor_name(user)
+        _audit(
+            db,
+            user=user,
+            action=MasterDataAction.UPDATE,
+            entity_type=LINE_ITEM_ENTITY,
+            entity_id=item.id,
+            entity_label=_line_item_entity_label(item, order),
+            summary=f"Updated line item {item.line_item_code} on {order.order_number}: {', '.join(sorted(changed))}",
+            request=request,
+        )
+        _commit(db)
+        db.refresh(item)
+    return _line_item_out(item, order)
+
+
+@router.post(
+    "/po-so-orders/line-items/{line_item_id}/amend",
+    response_model=OrderLineItemOut,
+    dependencies=[Depends(require("master-data:update"))],
+)
+def amend_order_line_item(
+    line_item_id: str,
+    data: OrderLineItemAmend,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemOut:
+    """Record an audited rate, currency or schedule amendment on a PO/SO line item."""
+    item = _line_item_or_404(db, line_item_id, user.organization_id, include_deleted=False)
+    order = item.order
+    currencies = _active_currency_map(db, user.organization_id)
+    try:
+        currency = _resolve_currency(data.currency, currencies)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    new_desc = data.description.strip() if data.description is not None else item.description
+    new_vendor_code = data.vendor_code.strip() if data.vendor_code is not None else (item.vendor_code or "")
+    price_changed = item.unit_rate != data.unit_rate or item.currency != currency
+    detail_changed = (item.description or "") != new_desc or (item.vendor_code or "") != new_vendor_code
+    if not price_changed and not detail_changed:
+        raise HTTPException(
+            status_code=422,
+            detail="No change detected in unit rate, currency, vendor code or description",
+        )
+
+    actor = _actor_name(user)
+    prev_rate = item.unit_rate
+    prev_ccy = item.currency
+    prev_desc = item.description or ""
+    effective = data.effective_date or _today()
+    next_rev = item.current_revision_number + 1
+
+    item.unit_rate = data.unit_rate
+    item.currency = currency
+    item.description = new_desc
+    item.vendor_code = new_vendor_code
+    item.effective_date = effective
+    item.current_revision_number = next_rev
+    item.updated_by = actor
+
+    db.add(
+        PurchaseOrderLineItemRevision(
+            organization_id=user.organization_id,
+            line_item_id=item.id,
+            revision_number=next_rev,
+            change_type="price_revision" if price_changed else "detail_amendment",
+            unit_rate=item.unit_rate,
+            previous_unit_rate=prev_rate,
+            currency=item.currency,
+            previous_currency=prev_ccy,
+            vendor_code=item.vendor_code,
+            description=item.description,
+            previous_description=prev_desc,
+            effective_date=effective,
+            reason=data.reason,
+            recorded_by=actor,
+        )
+    )
+    _audit(
+        db,
+        user=user,
+        action=MasterDataAction.AMEND,
+        entity_type=LINE_ITEM_ENTITY,
+        entity_id=item.id,
+        entity_label=_line_item_entity_label(item, order),
+        summary=(
+            f"Amended line item {item.line_item_code} on {order.order_number} "
+            f"(Rev {next_rev}: {prev_ccy} {prev_rate} -> {item.currency} {item.unit_rate}; {data.reason})"
+        ),
+        request=request,
+    )
+    _commit(db)
+    db.refresh(item)
+    return _line_item_out(item, order)
+
+
+@router.get(
+    "/po-so-orders/line-items/{line_item_id}/revisions",
+    response_model=list[OrderLineItemRevisionOut],
+    dependencies=[Depends(require("master-data:read"))],
+)
+def list_order_line_item_revisions(
+    line_item_id: str,
+    db: Db,
+    user: Current,
+) -> list[OrderLineItemRevisionOut]:
+    item = _line_item_or_404(db, line_item_id, user.organization_id)
+    revisions = db.scalars(
+        select(PurchaseOrderLineItemRevision)
+        .where(
+            PurchaseOrderLineItemRevision.line_item_id == item.id,
+            PurchaseOrderLineItemRevision.organization_id == user.organization_id,
+        )
+        .order_by(PurchaseOrderLineItemRevision.revision_number.desc())
+    ).all()
+    return [_line_item_revision_out(row) for row in revisions]
+
+
+@router.delete(
+    "/po-so-orders/line-items/{line_item_id}",
+    response_model=OrderLineItemOut,
+    dependencies=[Depends(require("master-data:delete"))],
+)
+def soft_delete_order_line_item(
+    line_item_id: str,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemOut:
+    item = _line_item_or_404(db, line_item_id, user.organization_id, include_deleted=False)
+    order = item.order
+    item.is_deleted = True
+    item.deleted_at = datetime.now(timezone.utc)
+    item.updated_by = _actor_name(user)
+    _audit(
+        db,
+        user=user,
+        action=MasterDataAction.SOFT_DELETE,
+        entity_type=LINE_ITEM_ENTITY,
+        entity_id=item.id,
+        entity_label=_line_item_entity_label(item, order),
+        summary=f"Removed line item {item.line_item_code} from {order.order_number} (Rev {order.revision_number})",
+        request=request,
+    )
+    _commit(db)
+    db.refresh(item)
+    return _line_item_out(item, order)
+
+
+@router.post(
+    "/po-so-orders/line-items/{line_item_id}/restore",
+    response_model=OrderLineItemOut,
+    dependencies=[Depends(require("master-data:restore"))],
+)
+def restore_order_line_item(
+    line_item_id: str,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> OrderLineItemOut:
+    item = _line_item_or_404(db, line_item_id, user.organization_id)
+    if not item.is_deleted:
+        raise HTTPException(status_code=409, detail="Only a removed PO/SO line item can be restored")
+    order = item.order
+    item.is_deleted = False
+    item.deleted_at = None
+    item.updated_by = _actor_name(user)
+    _audit(
+        db,
+        user=user,
+        action=MasterDataAction.RESTORE,
+        entity_type=LINE_ITEM_ENTITY,
+        entity_id=item.id,
+        entity_label=_line_item_entity_label(item, order),
+        summary=f"Restored line item {item.line_item_code} to {order.order_number} (Rev {order.revision_number})",
+        request=request,
+    )
+    _commit(db)
+    db.refresh(item)
+    return _line_item_out(item, order)
+
+
+@router.delete(
+    "/po-so-orders/line-items/{line_item_id}/permanent",
+    status_code=204,
+    dependencies=[Depends(require("master-data:permanent-delete"))],
+)
+def permanently_delete_order_line_item(
+    line_item_id: str,
+    request: Request,
+    db: Db,
+    user: Current,
+) -> None:
+    item = _line_item_or_404(db, line_item_id, user.organization_id)
+    if not item.is_deleted:
+        raise HTTPException(status_code=409, detail="Only a removed PO/SO line item can be permanently deleted")
+    order = item.order
+    label = _line_item_entity_label(item, order)
+    assert_no_dependencies(db, item, user.organization_id, entity_label=label)
+    _audit(
+        db,
+        user=user,
+        action=MasterDataAction.PERMANENT_DELETE,
+        entity_type=LINE_ITEM_ENTITY,
+        entity_id=item.id,
+        entity_label=label,
+        summary=f"Permanently deleted line item {item.line_item_code} from {order.order_number} (Rev {order.revision_number})",
+        request=request,
+    )
+    db.delete(item)
+    _commit(db)
+    return None
 
 
 # --------------------------------------------------------------------------- #

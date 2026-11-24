@@ -121,6 +121,7 @@ AUDIT_ENTITY_TYPES = (
     "vendor",
     "po_so_order",
     "po_so_document",
+    "po_so_line_item",
     "tangible",
     "drill_bit",
     "mud_chemical",

@@ -41,7 +41,7 @@ export function OrderFormDialog({ open, mode, order, vendors, form, setForm, bus
     title={mode === 'create' ? 'Add PO/SO order' : mode === 'edit' ? `Edit ${order?.order_number ?? ''} (Rev ${order?.revision_number ?? 0})` : `Amend ${order?.order_number ?? ''}`}
     subtitle={mode === 'amend'
       ? `Raises revision ${nextRevision} of this order and marks it as the one to quote.`
-      : 'Attach the scanned PO/SO copy after saving; no prices or values are stored here.'}
+      : 'Manage schedule line items and attach scanned PO/SO copies from the order register.'}
     onClose={onClose}
     onSubmit={submit}
     busy={busy}
@@ -51,6 +51,7 @@ export function OrderFormDialog({ open, mode, order, vendors, form, setForm, bus
     <Box display="grid" gap={2} pt={.5}>
       {mode === 'amend' && order && <Alert severity="info" icon={false} sx={{ fontSize: 12.5 }}>
         Source: <strong>{order.order_type} {order.order_number}</strong> · revision {order.revision_number} · {order.vendor_code} — {order.vendor_name}
+        {order.line_item_count ? ` · ${order.line_item_count} line item(s)` : ''}
         {order.document_count ? ` · ${order.document_count} file(s) attached` : ''}
       </Alert>}
 
@@ -113,8 +114,12 @@ export function OrderFormDialog({ open, mode, order, vendors, form, setForm, bus
           inputProps={{ maxLength: 500 }}
         />
         <FormControlLabel
+          control={<Checkbox checked={form.copy_line_items} onChange={event => setForm({ copy_line_items: event.target.checked })}/>}
+          label={<Typography fontSize={13}>Carry schedule line items ({order?.line_item_count ?? 0}) from revision {order?.revision_number ?? 0} into this amendment</Typography>}
+        />
+        <FormControlLabel
           control={<Checkbox checked={form.copy_documents} onChange={event => setForm({ copy_documents: event.target.checked })}/>}
-          label={<Typography fontSize={13}>Carry the files from revision {order?.revision_number ?? 0} into this amendment</Typography>}
+          label={<Typography fontSize={13}>Carry the files ({order?.document_count ?? 0}) from revision {order?.revision_number ?? 0} into this amendment</Typography>}
         />
       </>}
       <ErrorMessage message={error}/>

@@ -267,7 +267,22 @@ class InvoiceOrderOption(_Strict):
     vendor_id: str
     order_number: str
     order_type: str
+    revision_number: int = 0
     status: str
+    line_item_count: int = 0
+    label: str
+
+
+class InvoiceOrderLineItemOption(_Strict):
+    id: str
+    order_id: str
+    line_item_code: str
+    vendor_code: str
+    description: str
+    unit_rate: Decimal
+    currency: str
+    current_revision_number: int
+    sort_order: int
     label: str
 
 
@@ -306,6 +321,7 @@ class InvoiceWellOption(_Strict):
 class InvoiceReference(_Strict):
     vendors: list[InvoiceVendorOption]
     orders: list[InvoiceOrderOption]
+    order_line_items: list[InvoiceOrderLineItemOption] = Field(default_factory=list)
     currencies: list[InvoiceCurrencyOption]
     rigs: list[InvoiceRigOption]
     blocks: list[InvoiceBlockOption]
@@ -333,6 +349,7 @@ class InvoiceConfiguration(_Strict):
 
 
 class InvoiceLineIn(_Strict):
+    po_line_item_id: str | None = Field(default=None, max_length=36)
     description: str = Field(min_length=1, max_length=2000)
     invoice_quantity: Decimal3 = Field(gt=0, le=MAX_MONEY)
     # Days are used only when the IDVS enables the day count; otherwise they are stored as 1.
@@ -342,6 +359,12 @@ class InvoiceLineIn(_Strict):
     verified_days: Decimal3Days | None = Field(default=None, ge=0, le=MAX_DAYS)
     verified_unit_price: Decimal3 | None = Field(default=None, ge=0, le=MAX_MONEY)
     remarks: str = Field(default="", max_length=1000)
+
+    @field_validator("po_line_item_id", mode="before")
+    @classmethod
+    def clean_po_line_id(cls, value: Any) -> Any:
+        text = _trim(value)
+        return text or None
 
     @field_validator("description", "remarks", mode="before")
     @classmethod
@@ -479,6 +502,11 @@ class InvoiceSignatureOut(_Strict):
 
 class InvoiceLineOut(_Strict):
     id: str
+    po_line_item_id: str | None = None
+    po_line_code_snapshot: str = ""
+    po_vendor_code_snapshot: str = ""
+    po_unit_rate_snapshot: Decimal | None = None
+    po_currency_snapshot: str = ""
     description: str
     invoice_quantity: Decimal
     invoice_days: Decimal
@@ -595,6 +623,12 @@ class InvoiceSummaryOut(_Strict):
     invoice_total: Decimal
     verified_total: Decimal
     adjusted_verified_amount: Decimal
+    tax_additions_amount: Decimal = Decimal("0")
+    tax_deductions_amount: Decimal = Decimal("0")
+    additions_amount: Decimal = Decimal("0")
+    deductions_amount: Decimal = Decimal("0")
+    additions_breakdown: str = ""
+    deductions_breakdown: str = ""
     net_payable_amount: Decimal
     difference_amount: Decimal
     status: str
@@ -652,10 +686,11 @@ class InvoiceImportRow(_Strict):
     payment_tenure_days: Any = None
     disallowed_amount: Any = 0
     advance_amount: Any = 0
-    description: str = Field(min_length=1, max_length=2000)
+    po_line_item_code: str = Field(default="", max_length=80)
+    description: str = Field(default="", max_length=2000)
     invoice_quantity: Any
     invoice_days: Any = None
-    invoice_unit_price: Any
+    invoice_unit_price: Any = None
     verified_quantity: Any = None
     verified_days: Any = None
     verified_unit_price: Any = None
@@ -665,7 +700,7 @@ class InvoiceImportRow(_Strict):
     @field_validator(
         "idvs_number", "vendor_code", "order_number", "invoice_number", "block_code", "rig_code",
         "well_code", "location", "description_category", "service_description", "detailed_description",
-        "concerned_person", "field_name", "phase", "payment_term_code", "description", "line_remarks",
+        "concerned_person", "field_name", "phase", "payment_term_code", "po_line_item_code", "description", "line_remarks",
         "remarks", mode="before",
     )
     @classmethod

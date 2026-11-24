@@ -415,6 +415,13 @@ class InvoiceLine(Base):
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     invoice_id: Mapped[str] = mapped_column(ForeignKey("invoice_idvs.id", ondelete="CASCADE"), nullable=False)
+    po_line_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("po_so_line_items.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    po_line_code_snapshot: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    po_vendor_code_snapshot: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    po_unit_rate_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=True)
+    po_currency_snapshot: Mapped[str] = mapped_column(String(10), default="", server_default="", nullable=False)
     description: Mapped[str] = mapped_column(String(2000), nullable=False)
     invoice_quantity: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
     invoice_days: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), default=Decimal("1"), server_default="1", nullable=False)

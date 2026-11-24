@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router-dom'
-import { AddRounded, AttachFileRounded, DeleteOutlineRounded, EditOutlined, HistoryOutlined, StorefrontOutlined } from '@mui/icons-material'
-import { Alert, Box, Button, Checkbox, Chip, CircularProgress, FormControlLabel, MenuItem, Paper, TextField, Typography } from '@mui/material'
+import {
+  AddRounded,
+  AttachFileRounded,
+  DeleteOutlineRounded,
+  EditOutlined,
+  FileDownloadOutlined,
+  FileUploadOutlined,
+  FormatListNumberedRounded,
+  HistoryOutlined,
+  PriceChangeOutlined,
+  StorefrontOutlined,
+} from '@mui/icons-material'
+import { Alert, Box, Button, Checkbox, Chip, CircularProgress, FormControlLabel, Menu, MenuItem, Paper, TextField, Typography } from '@mui/material'
 import type { ColDef } from 'ag-grid-community'
 import { DataTable } from '../components/DataTable'
 import { ErrorMessage, FormDialog, PageHeading } from '../components/Common'
@@ -9,12 +20,15 @@ import { ImportDialog } from '../components/ImportDialog'
 import { MasterDataTabs } from '../components/MasterDataTabs'
 import { OrderDocumentsDialog } from '../components/OrderDocumentsDialog'
 import { OrderFormDialog } from '../components/OrderFormDialog'
+import { BulkOrderScheduleReviseDialog, OrderLineItemsDialog } from '../components/OrderLineItemsDialog'
 import { VendorPoKpis } from '../components/VendorPoKpis'
 import { useAuth } from '../context/AuthContext'
 import { api, body } from '../lib/api'
-import type { ImportRow } from '../lib/export'
+import { exportCsv, exportPdf, exportXlsx, type ImportRow } from '../lib/export'
 import {
   ORDER_IMPORT_HEADERS,
+  ORDER_LINE_ITEM_EXPORT_COLUMNS,
+  ORDER_LINE_ITEM_IMPORT_HEADERS,
   ORDER_STATUSES,
   ORDER_TYPES,
   emptyOrderForm,
@@ -23,11 +37,13 @@ import {
   revisionLabel,
   type AmendmentPayload,
   type OrderFormState,
+  type OrderLineItem,
+  type OrderLineItemImportResult,
   type OrderPayload,
   type PoSoOrder,
   type VendorOption,
 } from '../lib/vendorMaster'
-import { formatWatDate } from '../lib/time'
+import { formatWatDate, watTodayIso } from '../lib/time'
 
 export default function PoSoOrders() {
   const { can } = useAuth()
@@ -48,11 +64,15 @@ export default function PoSoOrders() {
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [documentsFor, setDocumentsFor] = useState<PoSoOrder | null>(null)
+  const [lineItemsFor, setLineItemsFor] = useState<PoSoOrder | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteRecord, setDeleteRecord] = useState<PoSoOrder | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [lineImportOpen, setLineImportOpen] = useState(false)
+  const [bulkReviseOpen, setBulkReviseOpen] = useState(false)
+  const [scheduleExportAnchor, setScheduleExportAnchor] = useState<HTMLElement | null>(null)
 
   const setForm = useCallback((patch: Partial<OrderFormState>) => {
     setFormState(current => ({ ...current, ...patch }))
@@ -103,7 +123,7 @@ export default function PoSoOrders() {
 
   const openAmend = (order: PoSoOrder) => {
     setFormRecord(order)
-    setFormState({ ...orderToForm(order), revision_note: '', copy_documents: true })
+    setFormState({ ...orderToForm(order), revision_note: '', copy_documents: true, copy_line_items: true })
     setFormError('')
     setFormMode('amend')
   }
@@ -114,13 +134,20 @@ export default function PoSoOrders() {
     try {
       if (formMode === 'amend' && formRecord) {
         const created = await api<PoSoOrder>(`/master-data/po-so-orders/${formRecord.id}/amendment`, { method: 'POST', body: body(payload) })
-        setNotice(`Revision ${created.revision_number} of ${created.order_number} created${'copy_documents' in payload && payload.copy_documents ? ' with the previous files carried over' : ''}.`)
+        const carriedParts = [
+          'copy_line_items' in payload && payload.copy_line_items ? 'line items' : '',
+          'copy_documents' in payload && payload.copy_documents ? 'files' : '',
+        ].filter(Boolean)
+        setNotice(
+          `Revision ${created.revision_number} of ${created.order_number} created` +
+          (carriedParts.length ? ` with previous ${carriedParts.join(' and ')} carried over.` : '.'),
+        )
       } else if (formMode === 'edit' && formRecord) {
         await api(`/master-data/po-so-orders/${formRecord.id}`, { method: 'PATCH', body: body(payload) })
         setNotice(`${formRecord.order_number} (Rev ${formRecord.revision_number}) updated.`)
       } else if (formMode === 'create') {
         const created = await api<PoSoOrder>('/master-data/po-so-orders', { method: 'POST', body: body(payload) })
-        setNotice(`${created.order_type} ${created.order_number} created. Attach the scanned copy from the Files action.`)
+        setNotice(`${created.order_type} ${created.order_number} created. Add schedule line items or attach scanned copies from its row actions.`)
       }
       setFormMode(null)
       await load()
@@ -169,6 +196,45 @@ export default function PoSoOrders() {
     return [`Imported ${result.imported_count} of ${importedRows.length} rows. Resolve the row issues below and re-import the failed rows.`, ...result.errors]
   }
 
+  const importLineItemRows = async (importedRows: ImportRow[]): Promise<string[]> => {
+    const result = await api<OrderLineItemImportResult>(
+      '/master-data/po-so-orders/line-items/import',
+      { method: 'POST', body: body({ rows: importedRows }) },
+    )
+    await load()
+    if (result.imported_count || result.unchanged_count) {
+      setNotice(
+        `Schedule import finished: ${result.created_count} created, ${result.revised_count} amended, ${result.unchanged_count} unchanged.`,
+      )
+    }
+    if (!result.error_count) return []
+    return [
+      `Processed ${result.imported_count} of ${importedRows.length} rows. Resolve the issues below and re-import failed rows.`,
+      ...result.errors,
+    ]
+  }
+
+  const exportScheduleLineItems = async (format: 'csv' | 'xlsx' | 'pdf') => {
+    setScheduleExportAnchor(null)
+    setError('')
+    try {
+      const selectedVendorObj = vendors.find(v => v.vendor_code === vendorFilter)
+      const params = new URLSearchParams()
+      params.set('current_orders_only', currentOnly ? 'true' : 'false')
+      if (selectedVendorObj) params.set('vendor_id', selectedVendorObj.id)
+      const items = await api<OrderLineItem[]>(`/master-data/po-so-orders/line-items?${params.toString()}`)
+      const stem = vendorFilter ? `po-so-line-items-${vendorFilter.toLowerCase()}` : 'po-so-line-items'
+      const title = vendorFilter ? `PO/SO Schedule Line Items (${vendorFilter})` : 'PO/SO Schedule Line Items'
+      if (format === 'csv') exportCsv(`${stem}.csv`, items, ORDER_LINE_ITEM_EXPORT_COLUMNS)
+      else if (format === 'xlsx') await exportXlsx(`${stem}.xlsx`, items, ORDER_LINE_ITEM_EXPORT_COLUMNS)
+      else await exportPdf(`${stem}.pdf`, title, items, ORDER_LINE_ITEM_EXPORT_COLUMNS)
+      await logExport(format, items.length)
+      setNotice(`Exported ${items.length} PO/SO schedule line item${items.length === 1 ? '' : 's'}.`)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not export PO/SO schedule line items')
+    }
+  }
+
   const logExport = async (format: 'csv' | 'xlsx' | 'pdf', recordCount: number) => {
     await api('/master-data/export-audit', {
       method: 'POST',
@@ -185,12 +251,29 @@ export default function PoSoOrders() {
     { headerName: 'ISSUE DATE', field: 'issue_date', minWidth: 120, valueFormatter: params => params.value ? new Date(params.value).toLocaleDateString() : '—' },
     { headerName: 'VALID UNTIL', field: 'expiry_date', minWidth: 130, valueFormatter: params => params.value ? `${new Date(params.value).toLocaleDateString()}${params.data?.is_expired ? ' (expired)' : ''}` : '—' },
     { headerName: 'STATUS', field: 'status', minWidth: 105, maxWidth: 130, valueFormatter: params => orderStatusLabel(params.value) },
-    { headerName: 'FILES', field: 'document_count', minWidth: 80, maxWidth: 105 },
+    {
+      headerName: 'LINE ITEMS',
+      field: 'line_item_count',
+      minWidth: 105,
+      maxWidth: 120,
+      cellRenderer: ({ data }: { data: PoSoOrder }) => (
+        <Chip
+          size="small"
+          label={data.line_item_count ?? 0}
+          color={(data.line_item_count ?? 0) > 0 ? 'primary' : 'default'}
+          variant="outlined"
+          onClick={() => setLineItemsFor(data)}
+          sx={{ height: 22, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontVariantNumeric: 'tabular-nums' }}
+        />
+      ),
+    },
+    { headerName: 'FILES', field: 'document_count', minWidth: 80, maxWidth: 100 },
     { headerName: 'SCOPE', field: 'description', minWidth: 180, flex: 1.1, valueFormatter: params => params.value || '—' },
     { headerName: 'UPDATED', field: 'updated_at', minWidth: 120, valueFormatter: params => params.value ? formatWatDate(params.value) : '' },
     {
-      headerName: 'ACTIONS', width: 300, minWidth: 300, maxWidth: 300, flex: 0, sortable: false,
+      headerName: 'ACTIONS', width: 375, minWidth: 375, maxWidth: 375, flex: 0, sortable: false,
       cellRenderer: ({ data }: { data: PoSoOrder }) => <Box display="flex" alignItems="center" height="100%" gap={.1}>
+        <Button size="small" onClick={() => setLineItemsFor(data)} aria-label={`Line items of ${data.order_number}`} startIcon={<FormatListNumberedRounded sx={{ fontSize: 15 }}/>}>Items</Button>
         <Button size="small" onClick={() => setDocumentsFor(data)} aria-label={`Files of ${data.order_number}`} startIcon={<AttachFileRounded sx={{ fontSize: 15 }}/>}>Files</Button>
         {can('master-data:create') && <Button size="small" color="inherit" onClick={() => openAmend(data)} aria-label={`Amend ${data.order_number}`} startIcon={<HistoryOutlined sx={{ fontSize: 15 }}/>}>Amend</Button>}
         {can('master-data:update') && <Button size="small" onClick={() => openEdit(data)} aria-label={`Edit ${data.order_number}`} startIcon={<EditOutlined sx={{ fontSize: 15 }}/>}>Edit</Button>}
@@ -212,13 +295,23 @@ export default function PoSoOrders() {
     <PageHeading
       eyebrow="MASTER DATA MANAGEMENT / PO-SO ORDERS"
       title="PO/SO Orders"
-      subtitle="File every purchase and service order against its vendor, keep each amendment as a revision, and attach the scanned copies for reference."
+      subtitle="File every purchase and service order against its vendor, maintain contracted schedule line items and rate amendments, and attach scanned copies."
       action={<Box display="flex" gap={1} flexWrap="wrap">
         <Button component={RouterLink} to="/master-data/vendors" variant="outlined" startIcon={<StorefrontOutlined/>}>Vendors</Button>
         <Button component={RouterLink} to="/master-data/deleted" variant="outlined" startIcon={<DeleteOutlineRounded/>}>Deleted entries</Button>
+        {can('master-data:export') && <Button variant="outlined" startIcon={<FileDownloadOutlined/>} disabled={!rows.length} onClick={event => setScheduleExportAnchor(event.currentTarget)}>Export line items</Button>}
+        {can('master-data:import') && <>
+          <Button variant="outlined" startIcon={<FileUploadOutlined/>} disabled={!rows.length} onClick={() => setLineImportOpen(true)}>Import line items</Button>
+          <Button variant="outlined" startIcon={<PriceChangeOutlined/>} disabled={!rows.length} onClick={() => setBulkReviseOpen(true)}>Bulk revise rates</Button>
+        </>}
         {can('master-data:create') && <Button variant="contained" startIcon={<AddRounded/>} disabled={!vendors.length} onClick={openCreate}>Add PO/SO order</Button>}
       </Box>}
     />
+    <Menu anchorEl={scheduleExportAnchor} open={Boolean(scheduleExportAnchor)} onClose={() => setScheduleExportAnchor(null)}>
+      <MenuItem onClick={() => void exportScheduleLineItems('xlsx')}>Excel (.xlsx)</MenuItem>
+      <MenuItem onClick={() => void exportScheduleLineItems('csv')}>CSV (.csv)</MenuItem>
+      <MenuItem onClick={() => void exportScheduleLineItems('pdf')}>PDF (.pdf)</MenuItem>
+    </Menu>
 
     <VendorPoKpis active="orders"/>
 
@@ -293,6 +386,13 @@ export default function PoSoOrders() {
       onChanged={() => { void load() }}
     />
 
+    <OrderLineItemsDialog
+      open={!!lineItemsFor}
+      order={lineItemsFor}
+      onClose={() => setLineItemsFor(null)}
+      onChanged={() => { void load() }}
+    />
+
     <FormDialog
       open={deleteOpen}
       title="Move orders to deleted entries?"
@@ -325,6 +425,36 @@ export default function PoSoOrders() {
       }}
       templateName="po-so-orders-template.csv"
       onRows={importRows}
+    />
+
+    <ImportDialog
+      open={lineImportOpen}
+      onClose={() => setLineImportOpen(false)}
+      title="Import PO/SO schedule line items"
+      subtitle="Bulk import line items and unit rates across active PO/SO orders. Existing line item codes on the matched order are updated with an audited revision."
+      headers={ORDER_LINE_ITEM_IMPORT_HEADERS}
+      sample={{
+        order_number: rows[0]?.order_number || 'PO-2026-001',
+        line_item_code: 'ITEM-001',
+        vendor_code: 'CAT-9001',
+        description: '9-5/8 in. Rental Packer Assembly — Daily Operating Rate',
+        unit_rate: '1250.000',
+        currency: 'USD',
+        effective_date: watTodayIso(),
+        reason: 'Contract schedule import',
+      }}
+      templateName="po-so-line-items-template.csv"
+      onRows={importLineItemRows}
+    />
+
+    <BulkOrderScheduleReviseDialog
+      open={bulkReviseOpen}
+      order={null}
+      onClose={() => setBulkReviseOpen(false)}
+      onCompleted={msg => {
+        setNotice(msg)
+        void load()
+      }}
     />
   </>
 }

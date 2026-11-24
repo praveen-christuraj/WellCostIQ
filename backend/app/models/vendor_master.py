@@ -10,21 +10,27 @@ payload column), the shared ``MasterDataRecord`` lifecycle columns, per
 workspace uniqueness, and soft deletion with restore/purge.
 """
 
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
+    DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
+    Numeric,
     String,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.master_data import MasterDataRecord
+from app.core.database import Base
+from app.core.precision import DECIMAL_PLACES
+from app.models.master_data import MasterDataRecord, now, uid
 
 VENDOR_STATUSES = ("active", "inactive", "blocked")
 ORDER_TYPES = ("PO", "SO", "Callout", "Others")
@@ -119,6 +125,11 @@ class PurchaseOrder(MasterDataRecord):
     documents: Mapped[list["OrderDocument"]] = relationship(
         back_populates="order", cascade="all, delete-orphan"
     )
+    line_items: Mapped[list["PurchaseOrderLineItem"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="PurchaseOrderLineItem.sort_order, PurchaseOrderLineItem.line_item_code",
+    )
 
 
 class OrderDocument(MasterDataRecord):
@@ -149,3 +160,113 @@ class OrderDocument(MasterDataRecord):
     uploaded_by_name: Mapped[str] = mapped_column(String(160), default="", server_default="")
 
     order: Mapped[PurchaseOrder] = relationship(back_populates="documents")
+
+
+PO_LINE_CHANGE_TYPES = (
+    "initial",
+    "price_revision",
+    "detail_amendment",
+    "order_amendment_copy",
+)
+
+
+class PurchaseOrderLineItem(Base):
+    """One priced schedule row under a PO/SO revision.
+
+    ``vendor_code`` holds the optional vendor-side catalog, part or service code
+    when the supplier provides one; ``description`` matches IDVS line capacity
+    (2,000 chars) so extracting a PO line item into an IDVS never truncates.
+    """
+
+    __tablename__ = "po_so_line_items"
+    __table_args__ = (
+        UniqueConstraint("order_id", "line_item_code", name="uq_po_so_line_items_order_code"),
+        CheckConstraint("unit_rate >= 0", name="ck_po_so_line_items_rate_non_negative"),
+        CheckConstraint("current_revision_number >= 1", name="ck_po_so_line_items_rev_positive"),
+        Index("ix_po_so_line_items_org_order", "organization_id", "order_id", "is_deleted"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    order_id: Mapped[str] = mapped_column(
+        ForeignKey("po_so_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_line_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("po_so_line_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    line_item_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    vendor_code: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    description: Mapped[str] = mapped_column(String(2000), nullable=False)
+    unit_rate: Mapped[Decimal] = mapped_column(
+        Numeric(28, DECIMAL_PLACES), default=Decimal("0"), server_default="0", nullable=False
+    )
+    currency: Mapped[str] = mapped_column(String(10), nullable=False)
+    effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    current_revision_number: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
+    added_in_order_revision: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, onupdate=now, nullable=False
+    )
+
+    order: Mapped[PurchaseOrder] = relationship(back_populates="line_items")
+    revisions: Mapped[list["PurchaseOrderLineItemRevision"]] = relationship(
+        back_populates="line_item",
+        cascade="all, delete-orphan",
+        order_by="PurchaseOrderLineItemRevision.revision_number.desc()",
+    )
+
+
+class PurchaseOrderLineItemRevision(Base):
+    """Append-only rate and detail amendment history for one PO/SO line item."""
+
+    __tablename__ = "po_so_line_item_revisions"
+    __table_args__ = (
+        UniqueConstraint("line_item_id", "revision_number", name="uq_po_so_line_item_rev_number"),
+        CheckConstraint(
+            "unit_rate >= 0 AND previous_unit_rate >= 0",
+            name="ck_po_so_line_item_rev_rates",
+        ),
+        CheckConstraint(
+            "change_type IN ('initial', 'price_revision', 'detail_amendment', 'order_amendment_copy')",
+            name="ck_po_so_line_item_rev_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    line_item_id: Mapped[str] = mapped_column(
+        ForeignKey("po_so_line_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    change_type: Mapped[str] = mapped_column(
+        String(24), default="initial", server_default="initial", nullable=False
+    )
+    unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    previous_unit_rate: Mapped[Decimal] = mapped_column(Numeric(28, DECIMAL_PLACES), nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False)
+    previous_currency: Mapped[str] = mapped_column(String(10), nullable=False)
+    vendor_code: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    description: Mapped[str] = mapped_column(String(2000), nullable=False)
+    previous_description: Mapped[str] = mapped_column(
+        String(2000), default="", server_default="", nullable=False
+    )
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
+    recorded_by: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+    line_item: Mapped[PurchaseOrderLineItem] = relationship(back_populates="revisions")

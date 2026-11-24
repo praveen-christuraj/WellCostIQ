@@ -10,6 +10,8 @@ import { COMMON_SCOPE_LABEL, SIGNATURE_LABELS, SIGNATURE_ROLES, SIGNATURE_SPACE,
  * Three print rules live here so the screen, PDF and XLSX cannot disagree:
  * * only report-visible taxes appear in the subtotal/tax block and in the total — a
  *   register-only tax is stored on the IDVS but never printed;
+ * * payment splits on the IDVS report are always presented in USD as a reference
+ *   breakdown for Accounts (who apply their own treasury exchange rate);
  * * an IDVS without a Block, Rig or Well reports "Common for All Blocks";
  * * a configurable blank signing space separates the sign-off role row from its
  *   name and designation rows, so the copy can be signed by hand.
@@ -169,14 +171,24 @@ export function buildIdvsSheet(invoice: InvoiceDetail): IdvsSheet {
     summaryRow('total', `Total (${currency})`, numeric(invoice.invoice_total), numeric(invoice.verified_total), numeric(invoice.difference_amount), true),
     ...(numeric(invoice.disallowed_amount) ? [summaryRow('summary', 'Less: Disallowed amount', null, -numeric(invoice.disallowed_amount), null)] : []),
     ...(numeric(invoice.advance_amount) ? [summaryRow('summary', 'Less: Advance amount', null, -numeric(invoice.advance_amount), null)] : []),
-    ...invoice.payment_splits.map(split => {
-      const rate = numeric(split.exchange_rate)
-      const share = numeric(split.percentage) / 100
-      const label = `${numeric(split.percentage).toLocaleString(undefined, { maximumFractionDigits: 3 })}% ${split.currency_code}${split.currency_code !== currency ? ` (FX ${rate.toLocaleString(undefined, { maximumFractionDigits: 3 })})` : ''}`
-      const invoiceAmount = numeric(invoice.invoice_total) * share * rate
-      const verifiedAmount = numeric(split.amount)
-      return summaryRow('summary', label, invoiceAmount, verifiedAmount, invoiceAmount - verifiedAmount)
-    }),
+    ...(() => {
+      // On the IDVS report, every payment split portion (e.g. both 60% USD and 40% selected currency)
+      // is shown in USD only as a reference breakdown for Accounts, who apply their own exchange rate.
+      const usdSplit = invoice.payment_splits.find(item => item.currency_code === 'USD')
+      const reportInUsd = currency === 'USD' || Boolean(usdSplit && numeric(usdSplit.exchange_rate) > 0)
+      const usdFactor = currency === 'USD' ? 1 : reportInUsd ? numeric(usdSplit!.exchange_rate) : 1
+      const splitReportCcy = reportInUsd ? 'USD' : currency
+      return invoice.payment_splits.map(split => {
+        const share = numeric(split.percentage) / 100
+        const pct = numeric(split.percentage).toLocaleString(undefined, { maximumFractionDigits: 3 })
+        const label = split.currency_code === splitReportCcy
+          ? `${pct}% ${splitReportCcy}`
+          : `${pct}% ${split.currency_code} (in ${splitReportCcy})`
+        const invoiceAmount = numeric(invoice.invoice_total) * share * usdFactor
+        const verifiedAmount = numeric(invoice.adjusted_verified_amount) * share * usdFactor
+        return summaryRow('summary', label, invoiceAmount, verifiedAmount, invoiceAmount - verifiedAmount)
+      })
+    })(),
   ]
 
   // Sign-off blocks span the same groups as the reference: Prepared (S.No.+Description), Checked (invoice),
