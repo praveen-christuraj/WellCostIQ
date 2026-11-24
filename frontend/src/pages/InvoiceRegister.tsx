@@ -121,6 +121,40 @@ export default function InvoiceRegister({ deletedView = false }: { deletedView?:
     { headerName: 'INVOICE TOTAL', field: 'invoice_total', minWidth: 135, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },
     { headerName: 'VERIFIED TOTAL', field: 'verified_total', minWidth: 140, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },
     { headerName: 'DIFFERENCE', field: 'difference_amount', minWidth: 120, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },
+    {
+      headerName: 'ADDITIONS',
+      field: 'additions_amount',
+      minWidth: 130,
+      type: 'rightAligned',
+      valueFormatter: p => (numeric(p.value) > 0 ? formatAmount(p.value) : '—'),
+      cellRenderer: (p: ICellRendererParams<Invoice>) => {
+        const val = numeric(p.value)
+        if (val <= 0) return <Typography fontSize={12} color="text.disabled">—</Typography>
+        const node = (
+          <Typography fontSize={12} fontWeight={600} color="success.main" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            +{formatAmount(val)}
+          </Typography>
+        )
+        return p.data?.additions_breakdown ? <Tooltip title={p.data.additions_breakdown}>{node}</Tooltip> : node
+      },
+    },
+    {
+      headerName: 'DEDUCTIONS',
+      field: 'deductions_amount',
+      minWidth: 135,
+      type: 'rightAligned',
+      valueFormatter: p => (numeric(p.value) > 0 ? formatAmount(p.value) : '—'),
+      cellRenderer: (p: ICellRendererParams<Invoice>) => {
+        const val = numeric(p.value)
+        if (val <= 0) return <Typography fontSize={12} color="text.disabled">—</Typography>
+        const node = (
+          <Typography fontSize={12} fontWeight={600} color="warning.main" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            -{formatAmount(val)}
+          </Typography>
+        )
+        return p.data?.deductions_breakdown ? <Tooltip title={p.data.deductions_breakdown}>{node}</Tooltip> : node
+      },
+    },
     // The register keeps two amounts: the verified payable on the IDVS and the
     // net payable after every net-payable tax, including register-only ones.
     { headerName: 'IDVS AMOUNT', field: 'adjusted_verified_amount', minWidth: 145, type: 'rightAligned', valueFormatter: p => formatAmount(p.value) },

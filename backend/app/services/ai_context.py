@@ -25,7 +25,7 @@ from app.models.catalogue import CementAdditive, DrillBit, FuelType, MudChemical
 from app.models.master_data import Currency
 from app.models.ndt_inspection import NdtInspection
 from app.models.service_master import Service
-from app.models.vendor_master import PurchaseOrder, Vendor
+from app.models.vendor_master import PurchaseOrder, PurchaseOrderLineItem, Vendor
 from app.schemas.assistant import AssistantFact, AssistantSource, AssistantTable
 from app.schemas.daily_cost import DailyCostWellSummary
 from app.services import (
@@ -726,11 +726,22 @@ def _catalogue_section(db: Session, organization_id: str, question: str) -> str:
             PurchaseOrder.is_current.is_(True),
         )
     ) or 0
+    po_line_count = db.scalar(
+        select(func.count(PurchaseOrderLineItem.id))
+        .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLineItem.order_id)
+        .where(
+            PurchaseOrderLineItem.organization_id == organization_id,
+            PurchaseOrderLineItem.is_deleted.is_(False),
+            PurchaseOrder.is_deleted.is_(False),
+            PurchaseOrder.is_current.is_(True),
+        )
+    ) or 0
     svc_count = db.scalar(
         select(func.count(Service.id)).where(Service.organization_id == organization_id, Service.is_deleted.is_(False))
     ) or 0
     lines.append(
-        f"Master data overview: default currency={default_cur}, active vendors={vendor_count}, current PO/SO orders={po_count}, active services={svc_count}."
+        f"Master data overview: default currency={default_cur}, active vendors={vendor_count}, "
+        f"current PO/SO orders={po_count} ({po_line_count} schedule line items), active services={svc_count}."
     )
 
     if tokens:

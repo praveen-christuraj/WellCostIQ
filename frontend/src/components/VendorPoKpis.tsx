@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Box, CircularProgress, Paper, Typography } from '@mui/material'
-import { AttachFileRounded, BlockRounded, DescriptionOutlined, HistoryOutlined, StorefrontOutlined } from '@mui/icons-material'
+import { AttachFileRounded, BlockRounded, DescriptionOutlined, FormatListNumberedRounded, HistoryOutlined, StorefrontOutlined } from '@mui/icons-material'
 import { api } from '../lib/api'
 import { formatBytes, type VendorPoOverview } from '../lib/vendorMaster'
 import { ErrorMessage } from './Common'
@@ -29,9 +29,9 @@ export function VendorPoKpis({ active }: { active: 'vendors' | 'orders' }) {
     ]
     : [
       { icon: <DescriptionOutlined sx={{ fontSize: 20 }}/>, value: String(data.orders_active), label: 'PO/SO orders', hint: data.orders_by_type.map(type => `${type.key} ${type.count}`).join(' · ') },
+      { icon: <FormatListNumberedRounded sx={{ fontSize: 20 }}/>, value: String(data.line_items_active ?? 0), label: 'Schedule line items', hint: `${data.orders_with_line_items ?? 0} order(s) with schedule rates` },
       { icon: <HistoryOutlined sx={{ fontSize: 20 }}/>, value: String(data.orders_amendments), label: 'Amendments raised', hint: 'Latest revision is the one to quote' },
       { icon: <AttachFileRounded sx={{ fontSize: 20 }}/>, value: String(data.documents_active), label: 'Files attached', hint: `${formatBytes(data.storage_bytes)} stored` },
-      { icon: <StorefrontOutlined sx={{ fontSize: 20 }}/>, value: String(data.vendors_active), label: 'Active vendors', hint: `${data.vendors_blocked} blocked` },
       { icon: <BlockRounded sx={{ fontSize: 20 }}/>, value: String(data.orders_deleted + data.documents_deleted), label: 'Deleted entries', hint: 'Orders and files, recoverable' },
     ]
 

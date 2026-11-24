@@ -2,16 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AgGridReact } from 'ag-grid-react'
 import { AllCommunityModule, ModuleRegistry, themeQuartz, type ColDef, type CellValueChangedEvent, type ICellRendererParams } from 'ag-grid-community'
-import { Add, ArrowBack, ContentCopy, DeleteOutline, InfoOutlined, RestartAlt, SaveOutlined, SettingsOutlined } from '@mui/icons-material'
-import { Alert, Autocomplete, Box, Button, Chip, FormControlLabel, IconButton, MenuItem, Paper, Stack, Switch, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
-import { PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
+import { Add, ArrowBack, ContentCopy, DeleteOutline, InfoOutlined, PlaylistAdd, RestartAlt, SaveOutlined, SettingsOutlined } from '@mui/icons-material'
+import { Alert, Autocomplete, Box, Button, Checkbox, Chip, FormControlLabel, IconButton, MenuItem, Paper, Stack, Switch, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
+import { FormDialog, PageHeading, Tag, useUnsavedChangesGuard } from '../components/Common'
 import { SectionCard } from '../components/ui/SectionCard'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../context/ThemeContext'
 import { gridThemeParams } from '../designSystem'
 import { api, body } from '../lib/api'
 import { addDays, calculateDraft, formatAmount, lineDayFactors, numeric, resolveExchangeRate } from '../lib/invoiceCalculations'
-import { MAX_ATTACHMENT_BYTES, SIGNATURE_LABELS, SIGNATURE_ROLES, SIGNATURE_SPACE, type InvoiceSignature, type SignatureRole, type ConfigItem, type InvoiceDetail, type InvoiceLine, type InvoicePaymentSplit, type InvoiceReference, type InvoiceSaveInput, type InvoiceTax, type PaymentTerm, type TaxDirection, type VendorOption } from '../lib/invoiceProcessing'
+import { MAX_ATTACHMENT_BYTES, SIGNATURE_LABELS, SIGNATURE_ROLES, SIGNATURE_SPACE, type InvoiceSignature, type SignatureRole, type ConfigItem, type InvoiceDetail, type InvoiceLine, type InvoicePaymentSplit, type InvoiceReference, type InvoiceSaveInput, type InvoiceTax, type OrderLineItemOption, type OrderOption, type PaymentTerm, type TaxDirection, type VendorOption } from '../lib/invoiceProcessing'
 import { watTodayIso } from '../lib/time'
 
 ModuleRegistry.registerModules([AllCommunityModule])
@@ -79,6 +79,10 @@ export default function InvoiceEditor() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [signatureSnapshots, setSignatureSnapshots] = useState<InvoiceSignature[]>([])
+  const [extraOrderLines, setExtraOrderLines] = useState<OrderLineItemOption[]>([])
+  const [poPickerOpen, setPoPickerOpen] = useState(false)
+  const [poPickerSearch, setPoPickerSearch] = useState('')
+  const [poSelectedIds, setPoSelectedIds] = useState<string[]>([])
   const editing = Boolean(id)
 
   const makeSplits = useCallback((term: PaymentTerm | undefined, currency: string, refs: InvoiceReference): EditorSplit[] => {
@@ -135,9 +139,24 @@ export default function InvoiceEditor() {
   const chooseVendor = (vendor: VendorOption | null) => {
     if (!reference) return
     setForm(current => ({ ...current, vendor_id: vendor?.id ?? '', order_id: '', payment_term_id: vendor?.payment_term_id ?? '' }))
+    setLines(current => current.map(line => (line.po_line_item_id ? { ...line, po_line_item_id: null } : line)))
     setTaxes(autoTaxes(reference, vendor?.id ?? ''))
     const term = reference.payment_terms.find(item => item.id === vendor?.payment_term_id)
     setSplits(makeSplits(term, form.currency_code, reference)); setCustomSplits(false); setDirty(true)
+  }
+  const chooseOrder = (order: OrderOption | null) => {
+    const nextOrderId = order?.id ?? ''
+    patch('order_id', nextOrderId)
+    const allowedIds = new Set(
+      (reference?.order_line_items ?? []).filter(item => item.order_id === nextOrderId).map(item => item.id),
+    )
+    setLines(current =>
+      current.map(line =>
+        line.po_line_item_id && !allowedIds.has(line.po_line_item_id)
+          ? { ...line, po_line_item_id: null }
+          : line,
+      ),
+    )
   }
   const chooseTerm = (termId: string) => {
     if (!reference) return
@@ -158,6 +177,102 @@ export default function InvoiceEditor() {
   const selectedVendor = reference?.vendors.find(item => item.id === form.vendor_id) ?? null
   const selectedOrder = reference?.orders.find(item => item.id === form.order_id) ?? null
   const availableOrders = reference?.orders.filter(item => item.vendor_id === form.vendor_id) ?? []
+
+  useEffect(() => {
+    if (!form.order_id) {
+      setExtraOrderLines([])
+      return
+    }
+    const inRef = reference?.orders.some(item => item.id === form.order_id)
+    if (inRef) {
+      setExtraOrderLines([])
+      return
+    }
+    let cancelled = false
+    api<OrderLineItemOption[]>(`/invoice-processing/orders/${form.order_id}/line-items`, { silent: true })
+      .then(rows => { if (!cancelled) setExtraOrderLines(rows) })
+      .catch(() => { if (!cancelled) setExtraOrderLines([]) })
+    return () => { cancelled = true }
+  }, [form.order_id, reference])
+
+  const poLineOptions = useMemo(() => {
+    if (!form.order_id) return []
+    const fromRef = (reference?.order_line_items ?? []).filter(item => item.order_id === form.order_id)
+    return fromRef.length ? fromRef : extraOrderLines
+  }, [form.order_id, reference, extraOrderLines])
+
+  const applyPoLineToRow = useCallback((rowKey: string, poLineId: string) => {
+    if (!poLineId) {
+      setLines(current => current.map(line => line.key === rowKey ? { ...line, po_line_item_id: null, po_line_code_snapshot: '' } : line))
+      setDirty(true)
+      return
+    }
+    const chosen = poLineOptions.find(item => item.id === poLineId)
+    if (!chosen) return
+    const formattedRate = Number(chosen.unit_rate || 0).toFixed(3)
+    setLines(current =>
+      current.map(line =>
+        line.key === rowKey
+          ? {
+              ...line,
+              po_line_item_id: chosen.id,
+              po_line_code_snapshot: chosen.line_item_code,
+              po_vendor_code_snapshot: chosen.vendor_code,
+              description: chosen.description,
+              invoice_unit_price: formattedRate,
+              verified_unit_price: formattedRate,
+            }
+          : line,
+      ),
+    )
+    setDirty(true)
+    if (form.currency_code && chosen.currency !== form.currency_code) {
+      setNotice(
+        `PO line item ${chosen.line_item_code} is priced in ${chosen.currency} while this IDVS currency is ${form.currency_code}. Verify the unit price or switch invoice currency if needed.`,
+      )
+    }
+  }, [poLineOptions, form.currency_code])
+
+  const insertSelectedPoLines = () => {
+    const selectedItems = poLineOptions.filter(item => poSelectedIds.includes(item.id))
+    if (!selectedItems.length) {
+      setPoPickerOpen(false)
+      return
+    }
+    const addedRows: EditorLine[] = selectedItems.map(item => {
+      const rate = Number(item.unit_rate || 0).toFixed(3)
+      return {
+        key: newKey(),
+        po_line_item_id: item.id,
+        po_line_code_snapshot: item.line_item_code,
+        po_vendor_code_snapshot: item.vendor_code,
+        description: item.description,
+        invoice_quantity: '1',
+        invoice_days: '1',
+        invoice_unit_price: rate,
+        verified_quantity: '1',
+        verified_days: '',
+        verified_unit_price: rate,
+        remarks: '',
+      }
+    })
+    setLines(current => {
+      const isSingleBlank = current.length === 1 && !current[0].description.trim() && numeric(current[0].invoice_unit_price) === 0
+      return isSingleBlank ? addedRows : [...current, ...addedRows]
+    })
+    setDirty(true)
+    const mismatched = selectedItems.find(item => form.currency_code && item.currency !== form.currency_code)
+    if (mismatched) {
+      setNotice(
+        `Added ${addedRows.length} PO schedule line(s). Note: ${mismatched.line_item_code} is priced in ${mismatched.currency} while this IDVS uses ${form.currency_code}.`,
+      )
+    } else {
+      setNotice(`Added ${addedRows.length} schedule line item(s) from ${selectedOrder?.order_number ?? 'selected PO/SO'}.`)
+    }
+    setPoPickerOpen(false)
+    setPoSelectedIds([])
+    setPoPickerSearch('')
+  }
   const availableWells = reference?.wells.filter(item => (!form.rig_id || item.rig_id === form.rig_id) && (!form.block_id || item.block_id === form.block_id)) ?? []
   const selectedTerm = reference?.payment_terms.find(item => item.id === form.payment_term_id)
   const tenure = form.payment_tenure_days === '' ? selectedTerm?.payment_days ?? 0 : numeric(form.payment_tenure_days)
@@ -168,10 +283,53 @@ export default function InvoiceEditor() {
     const field = event.colDef.field as keyof InvoiceLine | undefined
     if (field && event.data) updateLine(event.data.key, field, String(event.newValue ?? ''))
   }
+  const showPoLineColumn = Boolean(form.order_id && (poLineOptions.length > 0 || lines.some(line => line.po_line_item_id)))
   const lineColumns = useMemo<ColDef<EditorLine>[]>(() => {
     const dayCount = form.day_count_enabled
     return [
       { headerName: '#', valueGetter: params => (params.node?.rowIndex ?? 0) + 1, width: 48, maxWidth: 48, editable: false, suppressMovable: true },
+      ...(showPoLineColumn ? [{
+        headerName: 'PO SCHEDULE ITEM (OPTIONAL)',
+        colId: 'po_line_picker',
+        minWidth: 215,
+        maxWidth: 260,
+        editable: false,
+        cellRenderer: (params: ICellRendererParams<EditorLine>) => {
+          if (!params.data) return null
+          const currentId = params.data.po_line_item_id ?? ''
+          return (
+            <Box display="flex" alignItems="center" height="100%" width="100%">
+              <select
+                aria-label="Select optional PO schedule line item"
+                value={currentId}
+                onChange={event => applyPoLineToRow(params.data!.key, event.target.value)}
+                style={{
+                  width: '100%',
+                  height: 28,
+                  fontSize: 12,
+                  borderRadius: 4,
+                  border: '1px solid rgba(128,128,128,0.35)',
+                  background: 'transparent',
+                  color: 'inherit',
+                  padding: '0 6px',
+                }}
+              >
+                <option value="">Manual entry</option>
+                {currentId && !poLineOptions.some(opt => opt.id === currentId) && (
+                  <option value={currentId}>
+                    {params.data.po_line_code_snapshot || 'Linked PO item'}
+                  </option>
+                )}
+                {poLineOptions.map(opt => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.line_item_code}{opt.vendor_code ? ` [${opt.vendor_code}]` : ''} · {opt.currency} {Number(opt.unit_rate).toFixed(3)} — {opt.description.slice(0, 48)}
+                  </option>
+                ))}
+              </select>
+            </Box>
+          )
+        },
+      } as ColDef<EditorLine>] : []),
       { headerName: 'LINE DESCRIPTION', field: 'description', minWidth: 270, flex: 1.5, editable: true, cellEditor: 'agTextCellEditor' },
       { headerName: 'INVOICE QTY', field: 'invoice_quantity', minWidth: 120, editable: true, type: 'rightAligned' },
       ...(dayCount ? [{ headerName: 'INVOICE DAYS', field: 'invoice_days', minWidth: 110, editable: true, type: 'rightAligned' } as ColDef<EditorLine>] : []),
@@ -185,7 +343,7 @@ export default function InvoiceEditor() {
       { headerName: 'LINE REMARKS', field: 'remarks', minWidth: 190, flex: 1, editable: true },
     { headerName: '', field: 'key', width: 88, maxWidth: 88, editable: false, sortable: false, cellRenderer: (params: ICellRendererParams<EditorLine>) => params.data ? <Stack direction="row" height="100%" alignItems="center" spacing={-1}><Tooltip title="Duplicate line"><IconButton size="small" onClick={() => { const copy = { ...params.data!, key: newKey(), id: undefined }; setLines(current => [...current.slice(0, (params.node?.rowIndex ?? 0) + 1), copy, ...current.slice((params.node?.rowIndex ?? 0) + 1)]); setDirty(true) }}><ContentCopy fontSize="small"/></IconButton></Tooltip><Tooltip title="Remove line"><span><IconButton size="small" disabled={lines.length === 1} onClick={() => { setLines(current => current.filter(line => line.key !== params.data!.key)); setDirty(true) }}><DeleteOutline fontSize="small"/></IconButton></span></Tooltip></Stack> : null },
     ]
-  }, [lines.length, form.day_count_enabled])
+  }, [lines.length, form.day_count_enabled, showPoLineColumn, poLineOptions, applyPoLineToRow])
   const gridTheme = useMemo(() => themeQuartz.withParams(gridThemeParams(mode)), [mode])
   const pasteLines = (event: React.ClipboardEvent<HTMLDivElement>) => {
     const text = event.clipboardData.getData('text/plain')
@@ -231,7 +389,7 @@ export default function InvoiceEditor() {
     service_from: form.service_from || null, service_to: form.service_to || null, currency_code: form.currency_code,
     payment_term_id: form.payment_term_id || null, payment_tenure_days: form.payment_tenure_days === '' ? null : Number(form.payment_tenure_days),
     disallowed_amount: form.disallowed_amount || '0', advance_amount: form.advance_amount || '0', remarks: form.remarks, day_count_enabled: form.day_count_enabled,
-    lines: lines.map(line => ({ description: line.description.trim(), invoice_quantity: line.invoice_quantity, invoice_days: blankToNull(line.invoice_days), invoice_unit_price: line.invoice_unit_price, verified_quantity: line.verified_quantity, verified_days: blankToNull(line.verified_days), verified_unit_price: line.verified_unit_price, remarks: line.remarks })),
+    lines: lines.map(line => ({ po_line_item_id: line.po_line_item_id || null, description: line.description.trim(), invoice_quantity: line.invoice_quantity, invoice_days: blankToNull(line.invoice_days), invoice_unit_price: line.invoice_unit_price, verified_quantity: line.verified_quantity, verified_days: blankToNull(line.verified_days), verified_unit_price: line.verified_unit_price, remarks: line.remarks })),
     taxes: taxes.map(tax => ({ tax_configuration_id: tax.tax_configuration_id, tax_name: tax.tax_name, rate_percent: tax.rate_percent, direction: tax.direction, is_report_visible: tax.is_report_visible, is_net_payable: tax.is_net_payable })),
     payment_splits: splits.map(split => ({ currency_code: split.currency_code, percentage: split.percentage, exchange_rate: split.exchange_rate || null })),
     signatures: signaturesPayload(),
@@ -272,7 +430,7 @@ export default function InvoiceEditor() {
         <SectionCard title="Invoice & vendor" subtitle="Choose the vendor first; only its related Master Data PO/SO orders remain available.">
           <Box display="grid" gridTemplateColumns="repeat(auto-fit,minmax(190px,1fr))" gap={1.5}>
             <Autocomplete options={reference?.vendors ?? []} value={selectedVendor} getOptionLabel={option => option.label} onChange={(_event, value) => chooseVendor(value)} renderInput={params => <TextField {...params} required label="Vendor" placeholder="Search code or name"/>} isOptionEqualToValue={(a, b) => a.id === b.id}/>
-            <Autocomplete options={availableOrders} value={selectedOrder} getOptionLabel={option => `${option.order_type} · ${option.order_number}`} onChange={(_event, value) => { patch('order_id', value?.id ?? '') }} renderInput={params => <TextField {...params} label="Related PO / SO (optional)"/>} isOptionEqualToValue={(a, b) => a.id === b.id} disabled={!form.vendor_id} noOptionsText="No order for this vendor"/>
+            <Autocomplete options={availableOrders} value={selectedOrder} getOptionLabel={option => option.label || `${option.order_type} · ${option.order_number}`} onChange={(_event, value) => chooseOrder(value)} renderInput={params => <TextField {...params} label="Related PO / SO (optional)" helperText={form.order_id ? (poLineOptions.length ? `${poLineOptions.length} schedule line item(s) available below (optional)` : 'No schedule line items configured; enter lines manually') : undefined}/>} isOptionEqualToValue={(a, b) => a.id === b.id} disabled={!form.vendor_id} noOptionsText="No order for this vendor"/>
             <TextField required label="Invoice number" value={form.invoice_number} onChange={e => patch('invoice_number', e.target.value)} inputProps={{ maxLength: 120 }}/>
             <TextField required type="date" label="Invoice date" value={form.invoice_date} onChange={e => patch('invoice_date', e.target.value)} InputLabelProps={{ shrink: true }}/>
             <TextField required type="date" label="Invoice received" value={form.invoice_received_date} onChange={e => patch('invoice_received_date', e.target.value)} InputLabelProps={{ shrink: true }}/>
@@ -297,7 +455,7 @@ export default function InvoiceEditor() {
             <TextField label="Detailed description" multiline minRows={2} value={form.detailed_description} onChange={e => patch('detailed_description', e.target.value)} sx={{ gridColumn: 'span 2' }} inputProps={{ maxLength: 2000 }}/>
           </Box>
         </SectionCard>
-        <SectionCard title="IDVS worksheet" subtitle="Click a cell and type, Tab across the row, or paste Excel cells into the focused cell. Calculated columns update immediately." action={<Stack direction="row" gap={1}><Button size="small" startIcon={<RestartAlt/>} onClick={() => { setLines(current => current.map(line => ({ ...line, verified_quantity: line.invoice_quantity, verified_days: line.invoice_days, verified_unit_price: line.invoice_unit_price }))); setDirty(true) }}>Copy invoice to verified</Button><Button size="small" startIcon={<Add/>} onClick={() => { setLines(current => [...current, blankLine()]); setDirty(true) }}>Add line</Button></Stack>}>
+        <SectionCard title="IDVS worksheet" subtitle="Click a cell and type, Tab across the row, paste Excel cells, or optionally pull description and unit rate from PO/SO schedule items." action={<Stack direction="row" gap={1} flexWrap="wrap">{poLineOptions.length > 0 && <Button size="small" variant="outlined" startIcon={<PlaylistAdd/>} onClick={() => { setPoSelectedIds([]); setPoPickerSearch(''); setPoPickerOpen(true) }}>Add from PO ({poLineOptions.length})</Button>}<Button size="small" startIcon={<RestartAlt/>} onClick={() => { setLines(current => current.map(line => ({ ...line, verified_quantity: line.invoice_quantity, verified_days: line.invoice_days, verified_unit_price: line.invoice_unit_price }))); setDirty(true) }}>Copy invoice to verified</Button><Button size="small" startIcon={<Add/>} onClick={() => { setLines(current => [...current, blankLine()]); setDirty(true) }}>Add line</Button></Stack>}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1} mb={1}>
             <FormControlLabel control={<Switch checked={form.day_count_enabled} onChange={e => patch('day_count_enabled', e.target.checked)}/>} label="Day count (qty × days × unit price)"/>
             <Typography variant="caption" color="text.secondary">{form.day_count_enabled ? 'Blank invoice days count as 1; blank verified days follow the invoice days.' : 'Off: each line is qty × unit price and days are stored as 1.'}</Typography>
@@ -326,7 +484,7 @@ export default function InvoiceEditor() {
           <TableContainer component={Paper} variant="outlined"><Table size="small"><TableHead><TableRow><TableCell>Payment currency</TableCell><TableCell align="right">Percentage</TableCell><TableCell align="right">FX from {form.currency_code || 'invoice'}</TableCell><TableCell align="right">Calculated split amount</TableCell><TableCell width={50}/></TableRow></TableHead><TableBody>
             {splits.map((split, index) => <TableRow key={split.key}><TableCell><TextField select size="small" value={split.currency_code} onChange={e => { setSplits(current => current.map(item => item.key === split.key ? { ...item, currency_code: e.target.value, exchange_rate: String(resolveExchangeRate(e.target.value, form.currency_code, reference?.exchange_rates ?? []) ?? '') } : item)); setCustomSplits(true); setDirty(true) }}>{reference?.currencies.map(item => <MenuItem key={item.currency_code} value={item.currency_code}>{item.currency_code}</MenuItem>)}</TextField></TableCell><TableCell align="right"><TextField size="small" type="number" value={split.percentage} inputProps={{ min: 0, max: 100, step: 0.001 }} onChange={e => { setSplits(current => current.map(item => item.key === split.key ? { ...item, percentage: e.target.value } : item)); setCustomSplits(true); setDirty(true) }}/></TableCell><TableCell align="right"><TextField size="small" type="number" value={split.exchange_rate} error={!split.exchange_rate} helperText={!split.exchange_rate ? 'Configure FX' : ''} inputProps={{ min: 0, step: 0.001 }} onChange={e => { setSplits(current => current.map(item => item.key === split.key ? { ...item, exchange_rate: e.target.value } : item)); setCustomSplits(true); setDirty(true) }}/></TableCell><TableCell align="right"><Typography fontWeight={700}>{split.currency_code} {formatAmount(totals.splitAmounts[index] ?? 0)}</Typography></TableCell><TableCell><IconButton size="small" disabled={splits.length === 1} onClick={() => { setSplits(current => current.filter(item => item.key !== split.key)); setCustomSplits(true); setDirty(true) }}><DeleteOutline/></IconButton></TableCell></TableRow>)}
           </TableBody></Table></TableContainer>
-          <Stack direction="row" alignItems="center" gap={1} mt={1.5}><Button size="small" startIcon={<Add/>} onClick={() => { setSplits(current => [...current, { key: newKey(), currency_code: form.currency_code, percentage: '0', exchange_rate: '1' }]); setCustomSplits(true); setDirty(true) }}>Add split currency</Button><Tag tone={Math.abs(totals.splitPercentage - 100) < .000001 ? 'success' : 'error'}>Total {totals.splitPercentage}%</Tag><Typography variant="caption" color="text.secondary">A missing cross-currency rate is never silently treated as 1.</Typography></Stack>
+          <Stack direction="row" alignItems="center" gap={1} mt={1.5} flexWrap="wrap"><Button size="small" startIcon={<Add/>} onClick={() => { setSplits(current => [...current, { key: newKey(), currency_code: form.currency_code, percentage: '0', exchange_rate: '1' }]); setCustomSplits(true); setDirty(true) }}>Add split currency</Button><Tag tone={Math.abs(totals.splitPercentage - 100) < .000001 ? 'success' : 'error'}>Total {totals.splitPercentage}%</Tag><Typography variant="caption" color="text.secondary">A missing cross-currency rate is never silently treated as 1. On the generated IDVS report, all split portions are shown in USD as a reference for Accounts.</Typography></Stack>
         </SectionCard>
         <SectionCard title="Sign-off" subtitle="Each role stores a snapshot of the signatory's name and designation when this IDVS is saved. Later changes to signatories do not alter it. The signing space is the blank gap printed between the role row and the names on the IDVS sheet.">
           {!reference?.signatories.length && <Alert severity="info" sx={{ mb: 1.5 }}>No active signatories are configured yet. Add them under Invoice Configuration → Signatories.</Alert>}
@@ -362,6 +520,86 @@ export default function InvoiceEditor() {
         <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>Submit from the saved IDVS or tracking register. Supporting documents up to {Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB each can be added after saving.</Typography>
       </Paper>
     </Box>
+    <FormDialog
+      open={poPickerOpen}
+      title={`Add lines from ${selectedOrder ? `${selectedOrder.order_type} ${selectedOrder.order_number}` : 'PO/SO schedule'}`}
+      subtitle="Select one or more contracted PO/SO line items to populate description and unit price on this IDVS. Selection is optional and any populated line can still be edited afterwards."
+      onClose={() => setPoPickerOpen(false)}
+      onSubmit={insertSelectedPoLines}
+      dirty={poSelectedIds.length > 0}
+      maxWidth="md"
+      submitLabel={`Add ${poSelectedIds.length || ''} line item${poSelectedIds.length === 1 ? '' : 's'}`}
+    >
+      <Stack gap={1.5} pt={0.5}>
+        <TextField
+          size="small"
+          placeholder="Search PO line code, vendor code or description…"
+          value={poPickerSearch}
+          onChange={event => setPoPickerSearch(event.target.value)}
+        />
+        <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 360 }}>
+          <Table stickyHeader size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    size="small"
+                    checked={poLineOptions.length > 0 && poSelectedIds.length === poLineOptions.length}
+                    indeterminate={poSelectedIds.length > 0 && poSelectedIds.length < poLineOptions.length}
+                    onChange={event =>
+                      setPoSelectedIds(event.target.checked ? poLineOptions.map(item => item.id) : [])
+                    }
+                  />
+                </TableCell>
+                <TableCell>Line Code</TableCell>
+                <TableCell>Vendor Code</TableCell>
+                <TableCell>Description</TableCell>
+                <TableCell align="right">Contract Rate</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {poLineOptions
+                .filter(item => {
+                  const q = poPickerSearch.trim().toLowerCase()
+                  if (!q) return true
+                  return (
+                    item.line_item_code.toLowerCase().includes(q) ||
+                    item.vendor_code.toLowerCase().includes(q) ||
+                    item.description.toLowerCase().includes(q)
+                  )
+                })
+                .map(item => {
+                  const checked = poSelectedIds.includes(item.id)
+                  return (
+                    <TableRow
+                      key={item.id}
+                      hover
+                      sx={{ cursor: 'pointer' }}
+                      onClick={() =>
+                        setPoSelectedIds(curr =>
+                          curr.includes(item.id) ? curr.filter(x => x !== item.id) : [...curr, item.id],
+                        )
+                      }
+                    >
+                      <TableCell padding="checkbox">
+                        <Checkbox size="small" checked={checked} />
+                      </TableCell>
+                      <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12.5 }}>
+                        {item.line_item_code}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 12.5 }}>{item.vendor_code || '—'}</TableCell>
+                      <TableCell sx={{ fontSize: 12.5 }}>{item.description}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 12.5 }}>
+                        {item.currency} {Number(item.unit_rate || 0).toFixed(3)}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Stack>
+    </FormDialog>
     {guard}
   </Box>
 }

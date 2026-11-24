@@ -1,14 +1,20 @@
 """Typed API contracts for Vendors and PO/SO Orders (Master Data Management)."""
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.core.precision import Decimal3
+
+MAX_RATE = Decimal("999999999999.999")
 
 VendorType = Literal["Inhouse", "Third party"]
 VendorStatus = Literal["active", "inactive", "blocked"]
 OrderType = Literal["PO", "SO", "Callout", "Others"]
 OrderStatus = Literal["open", "closed", "cancelled"]
+LineChangeType = Literal["initial", "price_revision", "detail_amendment", "order_amendment_copy"]
 DocumentKind = Literal[
     "po_copy", "signed_copy", "amendment_copy", "specification", "correspondence", "other"
 ]
@@ -153,6 +159,7 @@ class OrderAmendmentCreate(BaseModel):
     status: OrderStatus | None = None
     description: str | None = Field(default=None, max_length=500)
     copy_documents: bool = True
+    copy_line_items: bool = True
 
     model_config = ConfigDict(extra="forbid")
 
@@ -179,6 +186,7 @@ class OrderOut(BaseModel):
     status: OrderStatus
     description: str
     document_count: int = 0
+    line_item_count: int = 0
     revision_count: int = 1
     is_expired: bool = False
     is_deleted: bool
@@ -195,9 +203,146 @@ class OrderRevisionOut(BaseModel):
     issue_date: date | None = None
     status: OrderStatus
     document_count: int = 0
+    line_item_count: int = 0
     created_at: datetime
     updated_at: datetime
     is_deleted: bool
+
+
+class OrderLineItemCreate(BaseModel):
+    line_item_code: str = Field(min_length=1, max_length=80)
+    vendor_code: str = Field(default="", max_length=80)
+    description: str = Field(min_length=1, max_length=2000)
+    unit_rate: Decimal3 = Field(ge=0, le=MAX_RATE)
+    currency: str = Field(min_length=2, max_length=10)
+    effective_date: date | None = None
+    sort_order: int | None = Field(default=None, ge=1, le=100_000)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("line_item_code", "vendor_code", "description", "currency", mode="before")
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OrderLineItemUpdate(BaseModel):
+    """Non-price metadata correction on a PO/SO line item.
+
+    Rate and currency revisions go through ``OrderLineItemAmend`` so every price
+    movement keeps its previous value, effective date and reason.
+    """
+
+    line_item_code: str | None = Field(default=None, min_length=1, max_length=80)
+    vendor_code: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, min_length=1, max_length=2000)
+    sort_order: int | None = Field(default=None, ge=1, le=100_000)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("line_item_code", "vendor_code", "description", mode="before")
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OrderLineItemAmend(BaseModel):
+    """Audited amendment of a PO/SO line item's rate, currency or schedule details."""
+
+    unit_rate: Decimal3 = Field(ge=0, le=MAX_RATE)
+    currency: str = Field(min_length=2, max_length=10)
+    vendor_code: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, min_length=1, max_length=2000)
+    effective_date: date | None = None
+    reason: str = Field(min_length=3, max_length=500)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("currency", "vendor_code", "description", "reason", mode="before")
+    @classmethod
+    def trim_text(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OrderLineItemOut(BaseModel):
+    id: str
+    order_id: str
+    order_number: str
+    order_type: OrderType
+    order_revision_number: int
+    order_is_current: bool
+    order_vendor_id: str
+    order_vendor_code: str
+    order_vendor_name: str
+    parent_line_item_id: str | None = None
+    line_item_code: str
+    vendor_code: str
+    description: str
+    unit_rate: Decimal
+    currency: str
+    effective_date: date | None = None
+    current_revision_number: int
+    added_in_order_revision: int
+    sort_order: int
+    is_deleted: bool
+    deleted_at: datetime | None = None
+    created_by: str
+    updated_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrderLineItemRevisionOut(BaseModel):
+    id: str
+    line_item_id: str
+    revision_number: int
+    change_type: LineChangeType
+    unit_rate: Decimal
+    previous_unit_rate: Decimal
+    currency: str
+    previous_currency: str
+    vendor_code: str
+    description: str
+    previous_description: str
+    effective_date: date
+    reason: str
+    recorded_by: str
+    created_at: datetime
+
+
+class OrderLineItemImportResponse(BaseModel):
+    imported_count: int
+    created_count: int = 0
+    revised_count: int = 0
+    unchanged_count: int = 0
+    error_count: int
+    errors: list[str]
+    success: bool
+
+
+class OrderLineItemBulkReviseRequest(BaseModel):
+    rows: list[dict[str, Any]] = Field(min_length=1, max_length=10_000)
+    reason: str = Field(min_length=3, max_length=500)
+    effective_date: date | None = None
+    allow_new_items: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def trim_reason(cls, value: Any) -> Any:
+        return _trim(value)
+
+
+class OrderLineItemBulkReviseResponse(BaseModel):
+    revised_count: int
+    added_count: int = 0
+    unchanged_count: int
+    skipped_count: int = 0
+    error_count: int = 0
+    effective_date: date | None = None
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DocumentUpdate(BaseModel):
@@ -271,6 +416,8 @@ class VendorPoOverview(BaseModel):
     orders_deleted: int
     orders_by_type: list[VendorPoCount]
     orders_by_status: list[VendorPoCount]
+    line_items_active: int = 0
+    orders_with_line_items: int = 0
     documents_active: int
     documents_deleted: int
     storage_bytes: int

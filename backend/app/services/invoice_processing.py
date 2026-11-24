@@ -24,6 +24,7 @@ from app.models import (
     Block,
     Currency,
     PurchaseOrder,
+    PurchaseOrderLineItem,
     Rig,
     User,
     Vendor,
@@ -75,6 +76,7 @@ from app.schemas.invoice_processing import (
     InvoiceImportRow,
     InvoiceLineIn,
     InvoiceLineOut,
+    InvoiceOrderLineItemOption,
     InvoiceOrderOption,
     InvoicePaymentIn,
     InvoicePaymentSplitIn,
@@ -247,6 +249,41 @@ def _signatory_option(row: InvoiceSignatory) -> InvoiceSignatoryOption:
     )
 
 
+def _order_line_option(item: PurchaseOrderLineItem) -> InvoiceOrderLineItemOption:
+    vc = f" [{item.vendor_code}]" if item.vendor_code else ""
+    short_desc = item.description if len(item.description) <= 72 else f"{item.description[:69]}..."
+    return InvoiceOrderLineItemOption(
+        id=item.id,
+        order_id=item.order_id,
+        line_item_code=item.line_item_code,
+        vendor_code=item.vendor_code or "",
+        description=item.description or "",
+        unit_rate=item.unit_rate,
+        currency=item.currency,
+        current_revision_number=item.current_revision_number,
+        sort_order=item.sort_order,
+        label=f"{item.line_item_code}{vc} — {short_desc} ({item.currency} {item.unit_rate:.3f})",
+    )
+
+
+def order_line_items_for_invoice(
+    db: Session,
+    organization_id: str,
+    order_id: str,
+) -> list[InvoiceOrderLineItemOption]:
+    order = _active(db, PurchaseOrder, order_id, organization_id, "PO/SO order")
+    items = db.scalars(
+        select(PurchaseOrderLineItem)
+        .where(
+            PurchaseOrderLineItem.organization_id == organization_id,
+            PurchaseOrderLineItem.order_id == order.id,
+            PurchaseOrderLineItem.is_deleted.is_(False),
+        )
+        .order_by(PurchaseOrderLineItem.sort_order, PurchaseOrderLineItem.line_item_code)
+    ).all()
+    return [_order_line_option(item) for item in items]
+
+
 def reference_data(db: Session, organization_id: str) -> InvoiceReference:
     vendors = db.scalars(
         select(Vendor).where(Vendor.organization_id == organization_id, Vendor.is_deleted.is_(False))
@@ -259,6 +296,23 @@ def reference_data(db: Session, organization_id: str) -> InvoiceReference:
             PurchaseOrder.is_current.is_(True),
         ).order_by(PurchaseOrder.order_number)
     ).all()
+    order_ids = [o.id for o in orders]
+    po_line_items = (
+        db.scalars(
+            select(PurchaseOrderLineItem)
+            .where(
+                PurchaseOrderLineItem.organization_id == organization_id,
+                PurchaseOrderLineItem.order_id.in_(order_ids),
+                PurchaseOrderLineItem.is_deleted.is_(False),
+            )
+            .order_by(PurchaseOrderLineItem.sort_order, PurchaseOrderLineItem.line_item_code)
+        ).all()
+        if order_ids
+        else []
+    )
+    line_count_by_order: dict[str, int] = {}
+    for li in po_line_items:
+        line_count_by_order[li.order_id] = line_count_by_order.get(li.order_id, 0) + 1
     currencies = db.scalars(
         select(Currency).where(Currency.organization_id == organization_id, Currency.is_deleted.is_(False))
         .order_by(Currency.is_default.desc(), Currency.currency_code)
@@ -325,8 +379,14 @@ def reference_data(db: Session, organization_id: str) -> InvoiceReference:
         ) for v in vendors],
         orders=[InvoiceOrderOption(
             id=o.id, vendor_id=o.vendor_id, order_number=o.order_number, order_type=o.order_type,
-            status=o.status, label=f"{o.order_type} · {o.order_number}",
+            revision_number=o.revision_number, status=o.status,
+            line_item_count=line_count_by_order.get(o.id, 0),
+            label=(
+                f"{o.order_type} · {o.order_number}"
+                + (f" (Rev {o.revision_number})" if o.revision_number > 0 else "")
+            ),
         ) for o in orders],
+        order_line_items=[_order_line_option(item) for item in po_line_items],
         currencies=[InvoiceCurrencyOption(
             currency_code=c.currency_code, currency_name=c.currency_name,
             currency_symbol=c.currency_symbol, is_default=c.is_default,
@@ -773,6 +833,34 @@ def _attachment_out(row: InvoiceAttachment) -> InvoiceAttachmentOut:
 
 def _summary_out(row: Invoice) -> InvoiceSummaryOut:
     display_status = "paid" if row.paid_date else row.status
+    tax_additions = [
+        tax for tax in row.taxes
+        if tax.direction == "addition" and tax.is_net_payable and tax.verified_amount > Decimal("0")
+    ]
+    tax_deductions = [
+        tax for tax in row.taxes
+        if tax.direction == "deduction" and tax.is_net_payable and tax.verified_amount > Decimal("0")
+    ]
+    tax_additions_amount = money(sum((tax.verified_amount for tax in tax_additions), Decimal("0")))
+    tax_deductions_amount = money(sum((tax.verified_amount for tax in tax_deductions), Decimal("0")))
+    disallowed = row.disallowed_amount or Decimal("0")
+    advance = row.advance_amount or Decimal("0")
+    additions_amount = tax_additions_amount
+    deductions_amount = money(tax_deductions_amount + disallowed + advance)
+
+    additions_parts = [
+        f"{tax.tax_name} ({tax.rate_percent:g}%): {tax.verified_amount:.3f}"
+        for tax in tax_additions
+    ]
+    deductions_parts = [
+        f"{tax.tax_name} ({tax.rate_percent:g}%): {tax.verified_amount:.3f}"
+        for tax in tax_deductions
+    ]
+    if disallowed > Decimal("0"):
+        deductions_parts.append(f"Disallowed: {disallowed:.3f}")
+    if advance > Decimal("0"):
+        deductions_parts.append(f"Advance: {advance:.3f}")
+
     return InvoiceSummaryOut(
         id=row.id, idvs_number=row.idvs_number, idvs_date=row.idvs_date, revision=row.revision,
         invoice_number=row.invoice_number, invoice_date=row.invoice_date,
@@ -796,6 +884,12 @@ def _summary_out(row: Invoice) -> InvoiceSummaryOut:
         invoice_tax_total=row.invoice_tax_total, verified_tax_total=row.verified_tax_total,
         invoice_total=row.invoice_total, verified_total=row.verified_total,
         adjusted_verified_amount=row.adjusted_verified_amount,
+        tax_additions_amount=tax_additions_amount,
+        tax_deductions_amount=tax_deductions_amount,
+        additions_amount=additions_amount,
+        deductions_amount=deductions_amount,
+        additions_breakdown="; ".join(additions_parts),
+        deductions_breakdown="; ".join(deductions_parts),
         net_payable_amount=row.net_payable_amount, difference_amount=row.difference_amount,
         status=row.status, display_status=display_status,
         is_overdue=not row.paid_date and row.due_date < _today(),
@@ -814,7 +908,13 @@ def _detail_out(row: Invoice) -> InvoiceDetailOut:
     return InvoiceDetailOut(
         **values,
         lines=[InvoiceLineOut(
-            id=line.id, description=line.description, invoice_quantity=line.invoice_quantity,
+            id=line.id,
+            po_line_item_id=line.po_line_item_id,
+            po_line_code_snapshot=line.po_line_code_snapshot or "",
+            po_vendor_code_snapshot=line.po_vendor_code_snapshot or "",
+            po_unit_rate_snapshot=line.po_unit_rate_snapshot,
+            po_currency_snapshot=line.po_currency_snapshot or "",
+            description=line.description, invoice_quantity=line.invoice_quantity,
             invoice_days=line.invoice_days, invoice_unit_price=line.invoice_unit_price, invoice_total=line.invoice_total,
             verified_quantity=line.verified_quantity, verified_days=line.verified_days,
             verified_unit_price=line.verified_unit_price,
@@ -1033,7 +1133,11 @@ def _write_invoice(
     for field, value in scalar_values.items():
         setattr(row, field, value)
 
+    existing_po_line_ids: set[str] = set()
     if not creating:
+        existing_po_line_ids = {
+            line.po_line_item_id for line in row.lines if line.po_line_item_id
+        }
         row.lines.clear()
         row.taxes.clear()
         row.payment_splits.clear()
@@ -1043,11 +1147,40 @@ def _write_invoice(
         # are inserted. History and attachments are deliberately not replaced.
         db.flush()
 
+    requested_po_line_ids = {item.po_line_item_id for item in data.lines if item.po_line_item_id}
+    po_items_by_id: dict[str, PurchaseOrderLineItem] = {}
+    if requested_po_line_ids:
+        if order is None:
+            raise HTTPException(422, "Select a PO/SO order before linking PO schedule line items")
+        fetched_po_items = db.scalars(
+            select(PurchaseOrderLineItem).where(
+                PurchaseOrderLineItem.organization_id == organization_id,
+                PurchaseOrderLineItem.id.in_(requested_po_line_ids),
+            )
+        ).all()
+        po_items_by_id = {po_item.id: po_item for po_item in fetched_po_items}
+
     new_lines: list[InvoiceLine] = []
     for index, item in enumerate(data.lines):
+        po_item: PurchaseOrderLineItem | None = None
+        if item.po_line_item_id:
+            po_item = po_items_by_id.get(item.po_line_item_id)
+            if po_item is None or (po_item.is_deleted and po_item.id not in existing_po_line_ids):
+                raise HTTPException(422, "A selected PO/SO line item is not available in this workspace")
+            if po_item.order_id != order.id:  # type: ignore[union-attr]
+                raise HTTPException(
+                    422,
+                    f"PO/SO line item '{po_item.line_item_code}' does not belong to {order.order_number}",  # type: ignore[union-attr]
+                )
         invoice_days, verified_days = _line_days(item, data.day_count_enabled)
         new_lines.append(InvoiceLine(
-            organization_id=organization_id, description=item.description,
+            organization_id=organization_id,
+            po_line_item_id=po_item.id if po_item else None,
+            po_line_code_snapshot=po_item.line_item_code if po_item else "",
+            po_vendor_code_snapshot=(po_item.vendor_code or "") if po_item else "",
+            po_unit_rate_snapshot=po_item.unit_rate if po_item else None,
+            po_currency_snapshot=po_item.currency if po_item else "",
+            description=item.description,
             invoice_quantity=item.invoice_quantity, invoice_days=invoice_days,
             invoice_unit_price=item.invoice_unit_price,
             verified_quantity=item.invoice_quantity if item.verified_quantity is None else item.verified_quantity,
@@ -1347,6 +1480,10 @@ def _import_payloads(db: Session, organization_id: str, rows: list[InvoiceImport
     blocks = {item.block_code.lower(): item for item in reference.blocks}
     wells = {item.well_code.lower(): item for item in reference.wells}
     currencies = {item.currency_code for item in reference.currencies}
+    po_lines = {
+        (item.order_id, item.line_item_code.lower()): item
+        for item in reference.order_line_items
+    }
     prepared: list[tuple[int, InvoiceSave]] = []
     errors: list[str] = []
     for number, item in enumerate(rows, 2):
@@ -1357,6 +1494,13 @@ def _import_payloads(db: Session, organization_id: str, rows: list[InvoiceImport
             order = next((option for option in reference.orders if option.vendor_id == vendor.id and option.order_number.lower() == item.order_number.lower()), None) if item.order_number else None
             if item.order_number and not order:
                 raise ValueError(f"PO/SO '{item.order_number}' was not found for {vendor.vendor_code}")
+            po_line = None
+            if item.po_line_item_code:
+                if not order:
+                    raise ValueError(f"PO/SO number is required when PO line item '{item.po_line_item_code}' is specified")
+                po_line = po_lines.get((order.id, item.po_line_item_code.lower()))
+                if not po_line:
+                    raise ValueError(f"PO line item '{item.po_line_item_code}' was not found on {order.order_number}")
             location = locations.get(item.location.lower())
             if not location:
                 raise ValueError(f"Invoice location '{item.location}' was not found in Invoice Configuration")
@@ -1384,9 +1528,15 @@ def _import_payloads(db: Session, organization_id: str, rows: list[InvoiceImport
                 raise ValueError("IDVS Date, Invoice Date and Invoice Received Date are required")
             tenure = None if item.payment_tenure_days in (None, "") else int(item.payment_tenure_days)
             line = InvoiceLineIn(
-                description=item.description, invoice_quantity=item.invoice_quantity,
+                po_line_item_id=po_line.id if po_line else None,
+                description=item.description or (po_line.description if po_line else ""),
+                invoice_quantity=item.invoice_quantity,
                 invoice_days=None if item.invoice_days in (None, "") else item.invoice_days,
-                invoice_unit_price=item.invoice_unit_price,
+                invoice_unit_price=(
+                    po_line.unit_rate
+                    if po_line and item.invoice_unit_price in (None, "")
+                    else item.invoice_unit_price
+                ),
                 verified_quantity=None if item.verified_quantity in (None, "") else item.verified_quantity,
                 verified_days=None if item.verified_days in (None, "") else item.verified_days,
                 verified_unit_price=None if item.verified_unit_price in (None, "") else item.verified_unit_price,

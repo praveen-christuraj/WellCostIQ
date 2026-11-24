@@ -333,7 +333,7 @@ export function OrderDocumentsDialog({ open, order, onClose, onChanged }: {
             <Box flex={1} minWidth={0}>
               <Typography fontSize={12} fontWeight={700} noWrap>{revision.revision_note || (revision.revision_number === 0 ? 'Original issue' : 'Amendment')}</Typography>
               <Typography fontSize={11} color="text.secondary">
-                {revision.issue_date ? new Date(revision.issue_date).toLocaleDateString() : 'No issue date'} · {orderStatusLabel(revision.status)} · {revision.document_count} file(s)
+                {revision.issue_date ? new Date(revision.issue_date).toLocaleDateString() : 'No issue date'} · {orderStatusLabel(revision.status)} · {revision.line_item_count ?? 0} line item(s) · {revision.document_count} file(s)
                 {revision.is_deleted ? ' · in deleted entries' : ''}
               </Typography>
             </Box>

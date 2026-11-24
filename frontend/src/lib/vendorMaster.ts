@@ -1,3 +1,5 @@
+import type { ExportColumn } from './export'
+
 // Typed contracts and labels for the Vendors and PO/SO Orders tabs.
 // Shapes mirror backend/app/schemas/vendor_master.py.
 
@@ -61,6 +63,7 @@ export type PoSoOrder = {
   status: OrderStatus
   description: string
   document_count: number
+  line_item_count: number
   revision_count: number
   is_expired: boolean
   is_deleted: boolean
@@ -77,9 +80,79 @@ export type OrderRevision = {
   issue_date: string | null
   status: OrderStatus
   document_count: number
+  line_item_count: number
   created_at: string
   updated_at: string
   is_deleted: boolean
+}
+
+export type LineChangeType = 'initial' | 'price_revision' | 'detail_amendment' | 'order_amendment_copy'
+
+export type OrderLineItem = {
+  id: string
+  order_id: string
+  order_number: string
+  order_type: OrderType
+  order_revision_number: number
+  order_is_current: boolean
+  order_vendor_id: string
+  order_vendor_code: string
+  order_vendor_name: string
+  parent_line_item_id: string | null
+  line_item_code: string
+  vendor_code: string
+  description: string
+  unit_rate: string
+  currency: string
+  effective_date: string | null
+  current_revision_number: number
+  added_in_order_revision: number
+  sort_order: number
+  is_deleted: boolean
+  deleted_at: string | null
+  created_by: string
+  updated_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type OrderLineItemRevision = {
+  id: string
+  line_item_id: string
+  revision_number: number
+  change_type: LineChangeType
+  unit_rate: string
+  previous_unit_rate: string
+  currency: string
+  previous_currency: string
+  vendor_code: string
+  description: string
+  previous_description: string
+  effective_date: string
+  reason: string
+  recorded_by: string
+  created_at: string
+}
+
+export type OrderLineItemImportResult = {
+  imported_count: number
+  created_count: number
+  revised_count: number
+  unchanged_count: number
+  error_count: number
+  errors: string[]
+  success: boolean
+}
+
+export type OrderLineItemBulkReviseResult = {
+  revised_count: number
+  added_count: number
+  unchanged_count: number
+  skipped_count: number
+  error_count: number
+  effective_date: string | null
+  errors: string[]
+  warnings: string[]
 }
 
 export type OrderDocument = {
@@ -128,6 +201,8 @@ export type VendorPoOverview = {
   orders_deleted: number
   orders_by_type: VendorPoCount[]
   orders_by_status: VendorPoCount[]
+  line_items_active: number
+  orders_with_line_items: number
   documents_active: number
   documents_deleted: number
   storage_bytes: number
@@ -175,6 +250,21 @@ export const VENDOR_IMPORT_HEADERS = [
 export const ORDER_IMPORT_HEADERS = [
   'order_number', 'order_type', 'vendor_code', 'issue_date', 'expiry_date', 'status', 'description',
 ]
+
+export const ORDER_LINE_ITEM_IMPORT_HEADERS = [
+  'order_number', 'line_item_code', 'vendor_code', 'description', 'unit_rate', 'currency', 'effective_date', 'reason',
+]
+
+export const SINGLE_ORDER_LINE_ITEM_IMPORT_HEADERS = [
+  'line_item_code', 'vendor_code', 'description', 'unit_rate', 'currency', 'effective_date', 'reason',
+]
+
+export const LINE_CHANGE_LABELS: Record<LineChangeType, string> = {
+  initial: 'Initial rate',
+  price_revision: 'Rate amendment',
+  detail_amendment: 'Detail amendment',
+  order_amendment_copy: 'Order amendment copy',
+}
 
 export const vendorStatusLabel = (status: VendorStatus) =>
   VENDOR_STATUSES.find(item => item.value === status)?.label ?? status
@@ -254,6 +344,7 @@ export const emptyOrderForm = {
   description: '',
   revision_note: '',
   copy_documents: true,
+  copy_line_items: true,
 }
 
 export type OrderFormState = typeof emptyOrderForm
@@ -268,6 +359,7 @@ export const orderToForm = (order: PoSoOrder): OrderFormState => ({
   description: order.description,
   revision_note: '',
   copy_documents: true,
+  copy_line_items: true,
 })
 
 export type OrderPayload = {
@@ -298,6 +390,7 @@ export type AmendmentPayload = {
   status: OrderStatus
   description: string
   copy_documents: boolean
+  copy_line_items: boolean
 }
 
 export const orderFormToAmendment = (form: OrderFormState): AmendmentPayload => ({
@@ -308,4 +401,22 @@ export const orderFormToAmendment = (form: OrderFormState): AmendmentPayload => 
   status: form.status,
   description: form.description.trim(),
   copy_documents: form.copy_documents,
+  copy_line_items: form.copy_line_items,
 })
+
+export const ORDER_LINE_ITEM_EXPORT_COLUMNS: ExportColumn<OrderLineItem>[] = [
+  { header: 'Order Number', value: row => row.order_number },
+  { header: 'Order Type', value: row => row.order_type },
+  { header: 'Order Revision', value: row => String(row.order_revision_number) },
+  { header: 'Current Order', value: row => (row.order_is_current ? 'Yes' : 'No') },
+  { header: 'Order Vendor Code', value: row => row.order_vendor_code },
+  { header: 'Order Vendor Name', value: row => row.order_vendor_name },
+  { header: 'Line Item Code', value: row => row.line_item_code },
+  { header: 'Vendor Code', value: row => row.vendor_code },
+  { header: 'Description', value: row => row.description },
+  { header: 'Unit Rate', value: row => Number(row.unit_rate || 0).toFixed(3) },
+  { header: 'Currency', value: row => row.currency },
+  { header: 'Rate Revision', value: row => String(row.current_revision_number) },
+  { header: 'Effective Date', value: row => row.effective_date ?? '' },
+  { header: 'Updated By', value: row => row.updated_by },
+]

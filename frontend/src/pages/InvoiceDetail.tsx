@@ -4,7 +4,7 @@ import { ArrowBack, ArrowForward, AttachFile, DeleteOutline, Download, EditOutli
 import { Alert, Box, Button, Chip, IconButton, LinearProgress, Menu, MenuItem, Paper, Stack, Step, StepLabel, Stepper, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, TextField, Tooltip, Typography } from '@mui/material'
 import { FormDialog, PageHeading, Tag } from '../components/Common'
 import { IdvsSheet } from '../components/invoice/IdvsSheet'
-import { formatAmount, formatDate, formatPrecise } from '../lib/invoiceCalculations'
+import { formatAmount, formatDate, formatPrecise, numeric } from '../lib/invoiceCalculations'
 import { SectionCard } from '../components/ui/SectionCard'
 import { useAuth } from '../context/AuthContext'
 import { api, body, downloadFile, previewFile, uploadFiles } from '../lib/api'
@@ -101,12 +101,59 @@ export default function InvoiceDetailPage() {
       {/* The register keeps both amounts; the sheet above deliberately prints only the IDVS report total. */}
       <Paper variant="outlined" sx={{ p: 1.5 }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} gap={2} alignItems={{ sm: 'center' }} justifyContent="space-between" flexWrap="wrap">
-          <Box><Typography className="eyebrow">Register amounts · {invoice.currency_code}</Typography><Typography variant="caption" color="text.secondary">The IDVS report prints its own total. Register-only taxes are recorded here and change only the Net payable amount.</Typography></Box>
+          <Box>
+            <Typography className="eyebrow">Register amounts · {invoice.currency_code}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              The IDVS report prints its own total and displays payment split portions in USD as a reference for Accounts.
+            </Typography>
+          </Box>
           <Stack direction="row" gap={3} flexWrap="wrap">
-            <Box><Typography fontSize={11} color="text.secondary">IDVS amount</Typography><Typography fontWeight={750} fontSize={18}>{invoice.currency_code} {formatAmount(invoice.adjusted_verified_amount)}</Typography></Box>
-            <Box><Typography fontSize={11} color="text.secondary">Net payable</Typography><Typography fontWeight={750} fontSize={18} color="primary.main">{invoice.currency_code} {formatAmount(invoice.net_payable_amount)}</Typography></Box>
+            {numeric(invoice.additions_amount) > 0 && (
+              <Tooltip title={invoice.additions_breakdown || ''}>
+                <Box>
+                  <Typography fontSize={11} color="text.secondary">Additions</Typography>
+                  <Typography fontWeight={700} fontSize={16} color="success.main" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                    +{invoice.currency_code} {formatAmount(invoice.additions_amount)}
+                  </Typography>
+                </Box>
+              </Tooltip>
+            )}
+            {numeric(invoice.deductions_amount) > 0 && (
+              <Tooltip title={invoice.deductions_breakdown || ''}>
+                <Box>
+                  <Typography fontSize={11} color="text.secondary">Deductions</Typography>
+                  <Typography fontWeight={700} fontSize={16} color="warning.main" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                    -{invoice.currency_code} {formatAmount(invoice.deductions_amount)}
+                  </Typography>
+                </Box>
+              </Tooltip>
+            )}
+            <Box><Typography fontSize={11} color="text.secondary">IDVS amount</Typography><Typography fontWeight={750} fontSize={18} sx={{ fontVariantNumeric: 'tabular-nums' }}>{invoice.currency_code} {formatAmount(invoice.adjusted_verified_amount)}</Typography></Box>
+            <Box><Typography fontSize={11} color="text.secondary">Net payable</Typography><Typography fontWeight={750} fontSize={18} color="primary.main" sx={{ fontVariantNumeric: 'tabular-nums' }}>{invoice.currency_code} {formatAmount(invoice.net_payable_amount)}</Typography></Box>
           </Stack>
         </Stack>
+        {invoice.payment_splits.length > 0 && (
+          <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" mt={1.25}>
+            <Typography variant="caption" color="text.secondary" fontWeight={700}>Configured payment splits:</Typography>
+            {invoice.payment_splits.map(split => (
+              <Tag key={split.id ?? split.currency_code} tone="neutral">
+                {formatPrecise(split.percentage)}% {split.currency_code} · {formatAmount(split.amount)}
+              </Tag>
+            ))}
+          </Stack>
+        )}
+        {invoice.lines.some(line => line.po_line_code_snapshot) && (
+          <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" mt={1}>
+            <Typography variant="caption" color="text.secondary" fontWeight={700}>PO schedule references:</Typography>
+            {invoice.lines
+              .filter(line => line.po_line_code_snapshot)
+              .map((line, idx) => (
+                <Tag key={`${line.id ?? idx}-${line.po_line_code_snapshot}`} tone="info">
+                  {line.po_line_code_snapshot}{line.po_vendor_code_snapshot ? ` [${line.po_vendor_code_snapshot}]` : ''}
+                </Tag>
+              ))}
+          </Stack>
+        )}
         {invoice.taxes.some(tax => !tax.is_report_visible) && <Box mt={1.5} display="grid" gap={.5}>{invoice.taxes.filter(tax => !tax.is_report_visible).map(tax => <Stack key={tax.id ?? tax.tax_name} direction="row" gap={1} alignItems="center" flexWrap="wrap"><Tag tone="warning">Register only</Tag><Typography fontSize={12} fontWeight={700}>{tax.tax_name} @ {formatPrecise(tax.rate_percent)}%</Typography><Typography fontSize={12} color="text.secondary">{tax.direction === 'addition' ? 'adds' : 'deducts'} {formatAmount(tax.verified_amount)} · {tax.is_net_payable ? 'included in net payable' : 'recorded only, no amount change'}</Typography></Stack>)}</Box>}
         {invoice.signature_space_mm !== SIGNATURE_SPACE.default && <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>Signing space on the printed sheet: {invoice.signature_space_mm} mm.</Typography>}
       </Paper>
